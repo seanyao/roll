@@ -884,13 +884,22 @@ interface SessionUsage {
   duration_ms: number | null;
 }
 
+/**
+ * FIX-1262 — the `~/.claude/projects/<enc>` dir a cycle's stream-json session
+ * lands in, derived from sharedRoot() (ROLL_SHARED_ROOT or ~/.shared/roll) and
+ * homedir(). NEVER a hardcoded owner username ('seanyao') nor an absolute
+ * /Users/... path — those made the backfill silently miss every machine whose
+ * owner ≠ seanyao / whose home ≠ /Users/<owner>. Exported for tests.
+ */
+export function sessionBackfillProjDir(slug: string, label: string): string {
+  const worktreePath = join(sharedRoot(), "worktrees", `${slug}-cycle-${label}`);
+  const projName = "-" + worktreePath.replaceAll("/", "-").replaceAll(".", "-").replace(/^-+/, "");
+  return join(homedir(), ".claude", "projects", projName);
+}
+
 function loadStreamJsonSessionUsage(label: string, slug: string, agent: string): SessionUsage | null {
   if (getAgentSpec(agent)?.usage.sessionBackfill !== "claude-projects") return null;
-  const user = process.env["USER"] ?? "seanyao";
-  const worktreePath = `/Users/${user}/.shared/roll/worktrees/${slug}-cycle-${label}`;
-  const projName =
-    "-" + worktreePath.replaceAll("/", "-").replaceAll(".", "-").replace(/^-+/, "");
-  const projDir = join(homedir(), ".claude", "projects", projName);
+  const projDir = sessionBackfillProjDir(slug, label);
   if (!existsSync(projDir)) return null;
   let entries: string[];
   try {

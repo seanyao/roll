@@ -184,7 +184,12 @@ export function writeEvaluatorArtifact(
     storyId,
     cycleId: ctx.cycleId ?? "",
     role: "evaluator",
-    rig: { agent: (scoreEntry?.scoredBy ?? "reasonix") } as Rig,
+    // FIX-1262: the evaluator's rig.agent is the agent that ACTUALLY produced
+    // the score (scoredBy) — never a fabricated 'reasonix'. When the score
+    // entry carries no scorer, leave agent undefined so validateEvaluatorArtifact
+    // fails loud ("manifest.rig.agent missing") instead of the artifact silently
+    // claiming an independent evaluation by an agent that never ran.
+    rig: { agent: scoreEntry?.scoredBy } as Rig,
     sessionId: scoreEntry?.sessionId ?? "",
     worktreeCwd: ports.paths.worktreePath,
     scoreRepoCwd: ports.repoCwd,

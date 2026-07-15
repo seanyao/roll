@@ -683,7 +683,16 @@ describe("supervisorCommand", () => {
     const cwd = project(BACKLOG, {
       events: collabStreamEvents(),
     });
-    const r = run(cwd, ["live", "--collab", "--once", "--no-color"]);
+    // FIX-1262: supervisor identity is config-driven (roles.supervise), no
+    // source-baked 'codex'. The fixture project has no agents.yaml, so pin the
+    // identity through the documented operator override for a stable stream.
+    process.env["ROLL_SUPERVISOR_AGENT"] = "codex";
+    let r: { code: number; out: string };
+    try {
+      r = run(cwd, ["live", "--collab", "--once", "--no-color"]);
+    } finally {
+      delete process.env["ROLL_SUPERVISOR_AGENT"];
+    }
     const text = stripAnsi(r.out);
     expect(r.code).toBe(0);
     expect(text).toContain("Collab stream — goal: live non-Hold FIX/US/REFACTOR");

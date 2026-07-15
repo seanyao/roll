@@ -224,19 +224,30 @@ function tailNonEmptyLines(text: string, limit: number): string[] {
  *  log continuously, so 5 minutes of silence means it is not live. */
 const LIVE_FEED_FRESH_SEC = 300;
 
+/**
+ * FIX-1262 — parse the working agent from a live.log cycle banner
+ * (`── cycle <id> · <story> · agent <name> · build-session … ──`). The runner
+ * writes this banner at builder spawn, so it is the ONLY honest source of the
+ * agent during dossier generation. The old `ROLL_LOOP_AGENT ?? 'claude'` knob
+ * is never set on the index-gen path — it fabricated 'claude' on every
+ * observation panel regardless of the agent that actually ran. Returns
+ * undefined when no banner is present (caller falls back to honest empty).
+ */
+export function parseLiveFeedAgent(raw: string): string | undefined {
+  const m = /^──\s*cycle\s+\S+\s+·\s+\S+\s+·\s+agent\s+(\S+)/m.exec(raw);
+  return m?.[1];
+}
+
 export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()): LoopLiveFeedVM {
   const livePath = join(runtimeDir(projectPath), "live.log");
-  const agent = (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude";
+  const relativeHref = "../loop/live.log";
   const generatedAt = iso(nowSec);
-  const base = {
-    sourcePath: livePath,
-    relativeHref: "../loop/live.log",
-    agent,
-    generatedAt,
-  };
   if (!existsSync(livePath)) {
     return {
-      ...base,
+      sourcePath: livePath,
+      relativeHref,
+      agent: "",
+      generatedAt,
       status: "idle",
       rawLineCount: 0,
       renderedLines: [],
@@ -253,13 +264,26 @@ export function collectLoopLiveFeed(projectPath: string, nowSec = renderNowSec()
     mtimeMs = st.mtimeMs;
   } catch {
     return {
-      ...base,
+      sourcePath: livePath,
+      relativeHref,
+      agent: "",
+      generatedAt,
       status: "paused",
       rawLineCount: 0,
       renderedLines: [],
       note: "live.log exists but could not be read",
     };
   }
+  // FIX-1262: honest agent from the banner the runner wrote — never the dead
+  // ROLL_LOOP_AGENT knob. Absent banner ⇒ empty (formatStream uses the generic
+  // normalizer for an unknown agent).
+  const agent = parseLiveFeedAgent(raw) ?? "";
+  const base = {
+    sourcePath: livePath,
+    relativeHref,
+    agent,
+    generatedAt,
+  };
   const rawLines = tailNonEmptyLines(raw, 200);
   const prevColor = renderState.useColor;
   renderState.useColor = false;
@@ -345,10 +369,20 @@ function emptyGitHooksPanel(cwd: string): GitHooksVM {
 
 function pausedLiveFeed(cwd: string, nowSec: number): LoopLiveFeedVM {
   const generatedAt = iso(nowSec);
+  const livePath = join(runtimeDir(cwd), "live.log");
+  // FIX-1262: even on the collector-failed placeholder, source the agent from
+  // the live.log banner when it is readable — never fabricate via the dead
+  // ROLL_LOOP_AGENT ?? 'claude' knob. Unreadable/absent ⇒ honest empty.
+  let agent = "";
+  try {
+    if (existsSync(livePath)) agent = parseLiveFeedAgent(readFileSync(livePath, "utf8")) ?? "";
+  } catch {
+    /* unreadable → honest empty, not a fabricated agent */
+  }
   return {
-    sourcePath: join(runtimeDir(cwd), "live.log"),
+    sourcePath: livePath,
     relativeHref: "../loop/live.log",
-    agent: (process.env["ROLL_LOOP_AGENT"] ?? "claude").trim() || "claude",
+    agent,
     status: "paused",
     generatedAt,
     rawLineCount: 0,

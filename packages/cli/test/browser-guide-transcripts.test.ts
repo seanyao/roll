@@ -33,6 +33,9 @@ describe("US-BROW-021 browser guide transcripts", () => {
       // `browser.managed.lane` was never a key any loader read; the real opt-in
       // is the browser_operations block with managed.enabled + allowed_origins.
       expect(text).not.toContain("browser.managed.lane");
+      // Nor the same retired key spelled as a YAML block (`lane: enabled/disabled`)
+      // — the second evaluator round found it lingering in troubleshooting.
+      expect(text).not.toMatch(/lane:\s*(enabled|disabled)/);
       expect(text).toContain("browser_operations:");
       expect(text).toContain("allowed_origins");
     });

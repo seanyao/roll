@@ -545,14 +545,18 @@ degraded 诊断，而非 pass。若某行时间线意外为空或降级，请按
   `roll browser update --check` 对比。
 - Chrome 未安装或不在 PATH 中。
 
-### `roll browser run` 提示 "managed lane is disabled by project policy"
+### `roll browser run` 提示 "Browser operations are disabled in project policy"
 
-项目 `.roll/policy.yaml` 未启用受管通道。添加：
+项目 `.roll/policy.yaml` 未启用受管通道。添加 `browser_operations` 开闸块
+（与上文「运行受管操作」一节相同的 schema）：
 
 ```yaml
-browser:
+browser_operations:
+  enabled: true
   managed:
-    lane: enabled
+    enabled: true
+    allowed_origins: [https://example.com]
+    allowed_actions: [navigate, snapshot, console, network, screenshot]
 ```
 
 然后重跑 `roll browser doctor --probe` 验证通道就绪。

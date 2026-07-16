@@ -610,14 +610,19 @@ The real MCP sidecar could not initialize. Common causes:
   installed version. Run `roll browser update --check` to compare.
 - Chrome is not installed or not on PATH.
 
-### `roll browser run` says "managed lane is disabled by project policy"
+### `roll browser run` says "Browser operations are disabled in project policy"
 
-The project's `.roll/policy.yaml` does not enable the managed lane. Add:
+The project's `.roll/policy.yaml` does not enable the managed lane. Add the
+`browser_operations` opt-in block (the same schema shown in
+[Running a Managed Operation](#running-a-managed-operation-real-mcp-lane)):
 
 ```yaml
-browser:
+browser_operations:
+  enabled: true
   managed:
-    lane: enabled
+    enabled: true
+    allowed_origins: [https://example.com]
+    allowed_actions: [navigate, snapshot, console, network, screenshot]
 ```
 
 Then re-run `roll browser doctor --probe` to verify the lane is ready.

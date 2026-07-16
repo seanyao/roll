@@ -26,6 +26,7 @@
  */
 import { type FileStore, nodeFileStore } from "../backlog/infra-default.js";
 import { AGENTS, canonicalAgentIdentityName, getAgentIdentitySpec } from "./specs.js";
+import type { AgentName } from "@roll/spec";
 
 // ── Identity / canonicalization (pure) ───────────────────────────────────────
 
@@ -433,6 +434,142 @@ export function readAgentsYamlAllowedAgents(text: string): string[] {
     }
   }
   return AGENT_REGISTRY_NAMES.filter((a) => configured.has(a as string));
+}
+
+/**
+ * US-AGENT-050 — read the disabled flag for an agent from agents.yaml text.
+ * Returns `{ disabled: true }` when the agent has `disabled: true` in its
+ * block; otherwise `{ disabled: false }`. Pure (text → result).
+ */
+export function readAgentDisabledFromText(text: string, agent: AgentName): { disabled: boolean } {
+  if (text === "") return { disabled: false };
+  let inAgents = false;
+  let inAgent = false;
+  let indent = 0;
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trimStart();
+    if (trimmed === "") continue;
+    const depth = line.length - trimmed.length;
+    if (!inAgents) {
+      if (trimmed === "agents:" || trimmed.startsWith("agents:")) {
+        inAgents = true;
+      }
+      continue;
+    }
+    if (depth === 0 && trimmed !== "" && !trimmed.startsWith("agents:")) {
+      // Left the agents block
+      break;
+    }
+    if (!inAgent) {
+      // Look for agent entry
+      if (depth === 2 && (trimmed === `${agent}:` || trimmed.startsWith(`${agent}:`))) {
+        inAgent = true;
+        indent = depth;
+        // Check inline: `  kimi: { adapter: kimi, disabled: true }`
+        if (trimmed.includes("disabled: true") || trimmed.includes("disabled:true")) return { disabled: true };
+      }
+      continue;
+    }
+    // Inside target agent block
+    if (depth <= indent) {
+      // End of agent block
+      break;
+    }
+    if (depth === indent + 2 && (trimmed === "disabled: true" || trimmed === "disabled:true")) {
+      return { disabled: true };
+    }
+  }
+  return { disabled: false };
+}
+
+/**
+ * US-AGENT-050 — set the disabled flag for an agent in agents.yaml text.
+ * Adds or removes `disabled: true` within the agent's block. Pure (text →
+ * new text). Returns the original text unchanged when the agent is not found.
+ */
+export function setAgentDisabledInText(text: string, agent: AgentName, disabled: boolean): string {
+  if (text === "") return text;
+  const hadTrailingNewline = text.endsWith("\n");
+  const lines = text.split("\n");
+  if (hadTrailingNewline) lines.pop();
+
+  let inAgents = false;
+  let inAgent = false;
+  let agentDepth = 0;
+  let agentIndex = -1;
+  let disabledIndex = -1;
+  let blockEndIndex = -1;
+
+  // First pass: locate the agent block
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trimStart();
+    if (trimmed === "") continue;
+    const depth = line.length - trimmed.length;
+
+    if (!inAgents) {
+      if (trimmed === "agents:" || trimmed.startsWith("agents:")) {
+        inAgents = true;
+      }
+      continue;
+    }
+    if (depth === 0 && trimmed !== "" && !trimmed.startsWith("agents:")) {
+      break;
+    }
+    if (!inAgent) {
+      if (depth === 2 && (trimmed === `${agent}:` || trimmed.startsWith(`${agent}:`))) {
+        inAgent = true;
+        agentDepth = depth;
+        agentIndex = i;
+        // Check inline: `  kimi: { ..., disabled: true }` → inline disable is handled separately
+        if (trimmed.includes("{")) {
+          // Inline flow form — handle differently
+          if (disabled) {
+            if (!trimmed.includes("disabled:")) {
+              const bracketIdx = trimmed.lastIndexOf("}");
+              if (bracketIdx >= 0) {
+                lines[i] = trimmed.slice(0, bracketIdx) + ", disabled: true" + trimmed.slice(bracketIdx);
+              }
+            }
+          } else {
+            lines[i] = trimmed
+              .replace(/,?\s*disabled:\s*true\s*,?/g, (m) => (m.includes(",") ? "," : ""))
+              .replace(/,\s*}/g, " }");
+          }
+          return lines.join("\n") + (hadTrailingNewline ? "\n" : "");
+        }
+      }
+      continue;
+    }
+    // Inside agent block
+    if (depth <= agentDepth) {
+      blockEndIndex = i;
+      break;
+    }
+    if (depth === agentDepth + 2 && (trimmed === "disabled: true" || trimmed === "disabled:true")) {
+      disabledIndex = i;
+    }
+  }
+
+  if (!inAgent) return hadTrailingNewline ? lines.join("\n") + "\n" : lines.join("\n");
+
+  if (disabled) {
+    // Add disabled: true if not already present
+    if (disabledIndex < 0) {
+      // Insert after the agent header line
+      const insertAt = blockEndIndex < 0 ? lines.length : blockEndIndex;
+      const baseIndent = " ".repeat(agentDepth + 2);
+      lines.splice(insertAt, 0, `${baseIndent}disabled: true`);
+    }
+  } else {
+    // Remove disabled: true if present
+    if (disabledIndex >= 0) {
+      lines.splice(disabledIndex, 1);
+    }
+  }
+
+  return lines.join("\n") + (hadTrailingNewline ? "\n" : "");
 }
 
 /**

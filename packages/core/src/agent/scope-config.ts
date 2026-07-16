@@ -167,6 +167,7 @@ function parseAgents(node: YamlValue | undefined, errors: string[]): Partial<Rec
       ...(stringValue(m["convention"]) !== undefined ? { convention: stringValue(m["convention"]) as string } : {}),
       capabilities: parseRoleList(m["capabilities"], `agents.${rawId}.capabilities`, errors),
       ...(asStringList(m["models"]).length > 0 ? { models: asStringList(m["models"]) } : {}),
+      ...(m["disabled"] === true ? { disabled: true } : {}),
     };
   }
   return agents;

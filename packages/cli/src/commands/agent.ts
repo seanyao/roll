@@ -5,10 +5,12 @@ import {
   normalizeAgentScopeConfig,
   normalizeAgentConfig,
   planAgentScopeMigration,
+  readAgentDisabledFromText,
+  setAgentDisabledInText,
   type AgentEnv,
   type FileStore,
 } from "@roll/core";
-import type { AgentScopeConfig } from "@roll/spec";
+import type { AgentName, AgentScopeConfig, AgentScopeRole, AgentScopeRoleBinding } from "@roll/spec";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { t, v2Catalog, v3Catalog } from "@roll/spec";
@@ -311,16 +313,191 @@ function readinessCommand(args: string[], deps: AgentCommandDeps): number {
   return 1;
 }
 
+/**
+ * US-AGENT-050 — check if disabling `agentName` would empty any role's pool
+ * across the given scope layers. Returns the first role that would become
+ * empty, or `null` if all roles still have at least one available agent.
+ */
+function wouldEmptyPool(
+  targetPath: string,
+  targetText: string,
+  agentName: AgentName,
+  d: ReturnType<typeof depsWithDefaults>,
+): string | null {
+  // Parse the target file's config for role bindings
+  const targetParsed = normalizeAgentScopeConfig(targetText);
+  if (targetParsed.config === null) return null;
+
+  // Collect all disabled agents from target config (including the one being disabled)
+  const disabledAgents = new Set<AgentName>();
+  for (const [name, spec] of Object.entries(targetParsed.config.agents) as [AgentName, NonNullable<AgentScopeConfig["agents"][AgentName]>][]) {
+    if (spec.disabled === true || name === agentName) disabledAgents.add(name);
+  }
+  disabledAgents.add(agentName);
+
+  // Check roles in the target config
+  for (const [role, binding] of Object.entries(targetParsed.config.roles) as [AgentScopeRole, AgentScopeRoleBinding][]) {
+    if (wouldRoleBeEmpty(role, binding, targetParsed.config.agents, disabledAgents)) {
+      return role;
+    }
+  }
+  return null;
+}
+
+function wouldRoleBeEmpty(
+  role: AgentScopeRole,
+  binding: AgentScopeRoleBinding,
+  agents: NonNullable<AgentScopeConfig["agents"]>,
+  disabledAgents: ReadonlySet<AgentName>,
+): boolean {
+  if (binding.kind === "inherit") return false;
+  if (binding.kind === "fixed") {
+    return disabledAgents.has(binding.agent);
+  }
+  // select binding
+  const candidates = binding.from !== undefined && binding.from.length > 0
+    ? binding.from
+    : (Object.keys(agents) as AgentName[]);
+  return candidates.every((a) => disabledAgents.has(a));
+}
+
+/**
+ * US-AGENT-050 — `roll agent disable <name> [--machine] [--force]`.
+ * Writes `disabled: true` in the agent's block in agents.yaml. Project scope
+ * by default; `--machine` targets ~/.roll/agents.yaml.
+ */
+function disableCommand(args: string[], deps: AgentCommandDeps): number {
+  const d = depsWithDefaults(deps);
+  const machine = args.includes("--machine");
+  const force = args.includes("--force");
+  const rest = args.filter((a) => a !== "--machine" && a !== "--force");
+  const rawName = (rest[0] ?? "").trim();
+  if (rawName === "") {
+    err("agent disable: missing agent name");
+    return 1;
+  }
+  const agent = canonicalAgentName(rawName) as AgentName;
+  if (!AGENT_REGISTRY_NAMES.includes(agent as string)) {
+    err(`agent disable: unknown agent '${rawName}'`);
+    return 1;
+  }
+
+  const rollHome = process.env["ROLL_HOME"] ?? join(d.env.home, ".roll");
+  const targetPath = machine ? join(rollHome, "agents.yaml") : ".roll/agents.yaml";
+
+  if (!d.fileExists(targetPath)) {
+    err(`agent disable: ${targetPath} not found — agent '${agent}' is not configured in this scope`);
+    return 1;
+  }
+
+  let text = d.readText(targetPath);
+  const current = readAgentDisabledFromText(text, agent);
+
+  // Check agent exists in the config
+  if (!text.includes(`roll-agents/v1`)) {
+    err(`agent disable: ${targetPath} is not a roll-agents/v1 file`);
+    return 1;
+  }
+
+  // Verify agent is declared in the agents block
+  const parsed = normalizeAgentScopeConfig(text);
+  if (parsed.config === null || parsed.config.agents[agent] === undefined) {
+    err(`agent disable: agent '${agent}' is not declared in ${targetPath}`);
+    return 1;
+  }
+
+  if (current.disabled) {
+    process.stdout.write(`  agent '${agent}' is already disabled in ${targetPath}\n`);
+    return 0;
+  }
+
+  if (!force) {
+    const emptyRole = wouldEmptyPool(targetPath, text, agent, d);
+    if (emptyRole !== null) {
+      err(`agent disable: disabling '${agent}' would leave role '${emptyRole}' with no available agents`);
+      err("  use --force to override this protection");
+      return 1;
+    }
+  }
+
+  const newText = setAgentDisabledInText(text, agent, true);
+  try {
+    d.mkdirp(dirname(targetPath));
+    d.writeFileAtomic(targetPath, newText);
+  } catch (e) {
+    err(`agent disable: failed to write ${targetPath}: ${String(e)}`);
+    return 1;
+  }
+  process.stdout.write(`  agent '${agent}' disabled in ${targetPath}\n`);
+  return 0;
+}
+
+/**
+ * US-AGENT-050 — `roll agent enable <name> [--machine]`.
+ * Removes `disabled: true` from the agent's block in agents.yaml. Project
+ * scope by default; `--machine` targets ~/.roll/agents.yaml.
+ */
+function enableCommand(args: string[], deps: AgentCommandDeps): number {
+  const d = depsWithDefaults(deps);
+  const machine = args.includes("--machine");
+  const rest = args.filter((a) => a !== "--machine");
+  const rawName = (rest[0] ?? "").trim();
+  if (rawName === "") {
+    err("agent enable: missing agent name");
+    return 1;
+  }
+  const agent = canonicalAgentName(rawName) as AgentName;
+  if (!AGENT_REGISTRY_NAMES.includes(agent as string)) {
+    err(`agent enable: unknown agent '${rawName}'`);
+    return 1;
+  }
+
+  const rollHome = process.env["ROLL_HOME"] ?? join(d.env.home, ".roll");
+  const targetPath = machine ? join(rollHome, "agents.yaml") : ".roll/agents.yaml";
+
+  if (!d.fileExists(targetPath)) {
+    process.stdout.write(`  agent '${agent}' is not disabled in ${targetPath} (file not found)\n`);
+    return 0;
+  }
+
+  const text = d.readText(targetPath);
+  const current = readAgentDisabledFromText(text, agent);
+
+  if (!current.disabled) {
+    process.stdout.write(`  agent '${agent}' is already enabled in ${targetPath}\n`);
+    return 0;
+  }
+
+  // Verify agent is declared
+  const parsed = normalizeAgentScopeConfig(text);
+  if (parsed.config === null || parsed.config.agents[agent] === undefined) {
+    err(`agent enable: agent '${agent}' is not declared in ${targetPath}`);
+    return 1;
+  }
+
+  const newText = setAgentDisabledInText(text, agent, false);
+  try {
+    d.writeFileAtomic(targetPath, newText);
+  } catch (e) {
+    err(`agent enable: failed to write ${targetPath}: ${String(e)}`);
+    return 1;
+  }
+  process.stdout.write(`  agent '${agent}' enabled in ${targetPath}\n`);
+  return 0;
+}
+
 export function agentCommand(args: string[], deps: AgentCommandDeps = {}): number {
   const [sub, ...rest] = args;
   if (sub === "list") return (deps.listCommand ?? agentListCommand)(rest);
   if (sub === "readiness") return readinessCommand(rest, deps);
+  if (sub === "disable") return disableCommand(rest, deps);
+  if (sub === "enable") return enableCommand(rest, deps);
   if (sub === "default") return defaultCommand(rest, deps);
   if (sub === "set") return setCommand(rest, deps);
   if (sub === "migrate") return migrateCommand(rest, deps);
   if (sub === "use") return useCommand(rest, deps); // retired — fails loud with migration guidance
   if (sub === undefined || sub === "") return viewCommand(deps);
   err(`Unknown subcommand: ${sub}`);
-  process.stdout.write("Usage: roll agent [migrate [--dry-run]|list|readiness [agent]]\n");
+  process.stdout.write("Usage: roll agent [migrate [--dry-run]|list|readiness [agent]|disable <name> [--machine] [--force]|enable <name> [--machine]]\n");
   return 1;
 }

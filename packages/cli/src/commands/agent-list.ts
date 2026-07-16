@@ -13,9 +13,10 @@ import {
   agentInstalledByName as coreAgentInstalledByName,
   canonicalAgentName,
   normalizeAgentScopeConfig,
+  readAgentDisabledFromText,
   type AgentEnv,
 } from "@roll/core";
-import { resolveLang, t, v2Catalog, type Lang } from "@roll/spec";
+import { resolveLang, t, v2Catalog, type AgentName, type Lang } from "@roll/spec";
 
 // ── i18n (mirrors bash msg/_i18n_resolve_lang inputs) ───────────────────────
 function configLang(): string | undefined {
@@ -134,20 +135,52 @@ export function agentListCommand(_args: string[]): number {
   const noColor = (process.env["NO_COLOR"] ?? "") !== "";
   const GREEN = noColor ? "" : "\x1b[0;32m";
   const YELLOW = noColor ? "" : "\x1b[0;33m";
+  const RED = noColor ? "" : "\x1b[0;31m";
   const NC = noColor ? "" : "\x1b[0m";
   const lang = currentLang();
+
+  // US-AGENT-050 — read disabled status from both scopes
+  const rollHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const machineDisabled = new Set<string>();
+  const projectDisabled = new Set<string>();
+  try {
+    const machineText = readFileSync(join(rollHome, "agents.yaml"), "utf8");
+    if (machineText.includes("roll-agents/v1")) {
+      for (const a of AGENT_REGISTRY_NAMES) {
+        if (readAgentDisabledFromText(machineText, a as AgentName).disabled) {
+          machineDisabled.add(a);
+        }
+      }
+    }
+  } catch { /* file missing is fine */ }
+  try {
+    const projectText = readFileSync(".roll/agents.yaml", "utf8");
+    if (projectText.includes("roll-agents/v1")) {
+      for (const a of AGENT_REGISTRY_NAMES) {
+        if (readAgentDisabledFromText(projectText, a as AgentName).disabled) {
+          projectDisabled.add(a);
+        }
+      }
+    }
+  } catch { /* file missing is fine */ }
 
   const out: string[] = [];
   out.push("", `  ${t(v2Catalog, lang, "agent.available_agents")}`, "");
   const current = canonicalAgentName(projectAgent());
   for (const a of AGENT_ORDER) {
     const disp = agentDisplayName(a);
+    const disabledSource = projectDisabled.has(a) ? "project" : machineDisabled.has(a) ? "machine" : null;
     if (agentInstalledByName(a)) {
-      out.push(
-        a === current
-          ? `    ${GREEN}✓ ${disp}${NC}  (current)`
-          : `    ${GREEN}✓ ${disp}${NC}`,
-      );
+      const currentTag = a === current ? "  (current)" : "";
+      if (disabledSource !== null) {
+        out.push(`    ${RED}⊘ ${disp}${NC}  (disabled · ${disabledSource})${currentTag}`);
+      } else {
+        out.push(
+          a === current
+            ? `    ${GREEN}✓ ${disp}${NC}  (current)`
+            : `    ${GREEN}✓ ${disp}${NC}`,
+        );
+      }
     } else {
       out.push(`    ${YELLOW}✗ ${disp}${NC}  (not installed)`);
     }

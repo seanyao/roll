@@ -292,6 +292,11 @@ export interface AgentScopeAgent {
   readonly convention?: string;
   readonly capabilities: readonly AgentScopeRole[];
   readonly models?: readonly ModelId[];
+  /** US-AGENT-050 — owner-controlled availability toggle. When `true` the agent
+   *  is excluded from ALL pools (builder picker, rotation, peer/evaluator, rig
+   *  routing). Persisted in agents.yaml; takes effect immediately without a
+   *  loop restart. Defaults to `false` when absent. */
+  readonly disabled?: boolean;
 }
 
 export interface AgentScopeModel {

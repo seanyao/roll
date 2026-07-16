@@ -19,6 +19,11 @@
 - `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
 - 托管与可选浏览器能力的使用文档齐备(setup/doctor/run/性能/设备仿真) (US-BROW-007/015) `[docs]`
 - 托管通道现在为每次运行启动一个固定版本的 `chrome-devtools-mcp` stdio 会话:完成 MCP initialize/tools-list、校验最小工具清单后才允许执行浏览器动作,任何初始化失败/清单不匹配/进程崩溃都会 fail-loud;生产默认依赖已切到 MCP,原始 WebSocket/CDP 传输不再出现在 CLI/运行时 wiring 中 (US-BROW-016) `[core+infra]`
+- 将受管诊断通过 MCP facade 暴露为有界、类型安全的浏览器操作:诊断动作经 MCP typed facade 归一化,原始 CDP 调用面不外露 (US-BROW-017) `[core]`
+- `roll browser run` 生产路径走真实、策略控制的 MCP 通道:每次运行启动固定版本 `chrome-devtools-mcp` stdio 会话、完成 MCP initialize/tools-list/清单验证后才执行动作;策略禁用则运行前即拒绝;`--story`/`--url` 为必填参数,记入 ledger 备审计;`--fixture` 降级为明确标为仅测试的假目标路径 (US-BROW-018) `[core+cli]`
+- `roll browser doctor --probe` 运行实时 MCP 通道探测:启动临时 `chrome-devtools-mcp` 会话、验证 initialize+tools/list+最小工具清单后清理,只有探测通过才将受管通道标为 ready;`roll browser update --apply --confirm` 在冒烟检查后增加 MCP 探测闸,探测失败则中止更新并保留原版本 (US-BROW-019) `[cli+infra]`
+- 受管通道的真实本地 Chrome DevTools MCP 集成覆盖闸落地:`.github/workflows/browser-live-gate.yml` CI 通道装配真实 Chrome 跑 `pnpm test:browser-live`,导航/DOM/console/network/截图/profile/redirect 拒绝/超时/崩溃/协议错误/脱敏失败 12 场景全绿;默认 `roll test` 永不运行实况闸(需 Chrome);实况闸 fail-loud 绝不静默 skip,fixture 来源报告永远无法获得 verified (US-BROW-020) `[infra+gate]`
+- 浏览器操作文档修正(fixture 降级为仅测试、真实 MCP 通道成为主文档路径、doctor --probe 探测生命周期完整记录、隐私/安全边界前置突出、阻塞/不可用实录、失败模式与修复表、更新 MCP 探测闸文档化);CHANGELOG 补全 US-BROW-017/018/019/020 条目 (US-BROW-021) `[docs]`
 
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`

@@ -238,8 +238,7 @@ export async function executeSetupCommand(
       // AFTER pick_story with the real story id and re-points this worktree onto a
       // resumable un-merged branch when one exists. Keying purely on the runs
       // ledger + git keeps it uniform for every agent (normalize-agents thesis).
-      // E1: the fresh-context base is the project's configured integration branch
-      // (default origin/main → unchanged behaviour when unset).
+      // E1: base = configured integration branch (default origin/main → unchanged).
       const base = resolveIntegrationBranch(ports.repoCwd);
       const r = await ports.git.worktreeAdd(
         ports.repoCwd,
@@ -607,12 +606,10 @@ export async function executeSetupCommand(
     // worktree carries the resume tree by the time the agent spawns. Best-effort: a
     // reset failure leaves the worktree on origin/main rather than topple the cycle.
     case "resume_worktree": {
-      // E1: the fresh-context base is the configured integration branch (default
-      // origin/main). resolveResumeBase returns it verbatim when there is no
-      // resumable prior branch → that is the no-op (worktree already on it).
-      const integrationBranch = resolveIntegrationBranch(ports.repoCwd);
+      // E1: resolveResumeBase returns the configured integration branch verbatim
+      // when there is no resumable prior branch → that equality is the no-op.
       const base = await resolveResumeBase(ports, cmd.storyId);
-      if (base === integrationBranch || base.trim() === "") return {};
+      if (base === resolveIntegrationBranch(ports.repoCwd) || base.trim() === "") return {};
       // `origin/<branch>` → derive the bare branch name for the worktree-local
       // fetch (the resume probes fetched it into the MAIN tree, not this worktree).
       const branch = base.startsWith("origin/") ? base.slice("origin/".length) : undefined;

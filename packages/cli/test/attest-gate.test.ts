@@ -1800,6 +1800,16 @@ describe("FIX-339 — multi-surface deliverables (web list + deliverable_cmd) + 
       expect(allowedDeliverableCmd("")).toBe(false);
     });
 
+    it("allowedDeliverableCmd: roll agent list is read-only — allowed", () => {
+      expect(allowedDeliverableCmd("roll agent list")).toBe(true);
+      expect(allowedDeliverableCmd("node ./bin/roll.js agent list")).toBe(true);
+    });
+
+    it("allowedDeliverableCmd: roll agent disable/enable are write — rejected", () => {
+      expect(allowedDeliverableCmd("roll agent disable kimi")).toBe(false);
+      expect(allowedDeliverableCmd("roll agent enable kimi")).toBe(false);
+    });
+
     it("allowedDeliverableCmd: state-changing / releasing roll subcommands are rejected", () => {
       for (const sub of ["release", "loop on", "loop off", "loop go", "story add", "idea", "agent use", "pair init", "attest US-1", "build", "design", "fix", "propose"]) {
         expect(allowedDeliverableCmd(`roll ${sub}`)).toBe(false);

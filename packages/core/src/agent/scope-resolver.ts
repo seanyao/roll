@@ -98,6 +98,17 @@ function agentDeclarations(layers: readonly AgentScopeResolveLayer[]): Map<Agent
   return out;
 }
 
+/** US-AGENT-050 — check whether an agent is disabled in ANY config layer.
+ *  Project-layer disable overrides machine-layer enable (project is more
+ *  specific). An agent not declared anywhere is treated as not disabled. */
+function isAgentDisabled(layers: readonly AgentScopeResolveLayer[], agent: AgentName): boolean {
+  for (const layer of [...layers].reverse()) {
+    const spec = layer.config.agents[agent];
+    if (spec?.disabled === true) return true;
+  }
+  return false;
+}
+
 function declaredAgents(layers: readonly AgentScopeResolveLayer[]): AgentName[] {
   const out: AgentName[] = [];
   for (const layer of layers) {
@@ -198,6 +209,16 @@ function failure(input: ResolveAgentScopeRoleInput, fields: Omit<AgentScopeResol
 function resolveFixed(input: ResolveAgentScopeRoleInput, candidate: BindingCandidate, trace: readonly AgentScopeResolutionTrace[]): AgentScopeRoleResolution {
   const binding = candidate.binding;
   if (binding.kind !== "fixed") throw new Error("resolveFixed called with non-fixed binding");
+  // US-AGENT-050 — a disabled agent cannot be resolved even for fixed bindings.
+  if (isAgentDisabled(input.layers, binding.agent)) {
+    return failure(input, {
+      source: candidate.source,
+      errors: [`${candidate.source}: fixed agent '${binding.agent}' is disabled`],
+      candidates: [binding.agent],
+      skipped: [{ agent: binding.agent, reason: "disabled" }],
+      trace: [...trace, { source: candidate.source, bindingKind: "fixed", action: "fail" }],
+    });
+  }
   const unavailable = unavailableReason(input, binding.agent);
   if (unavailable !== null) {
     return failure(input, {
@@ -231,6 +252,8 @@ function skipForAgent(
   declarations: ReadonlyMap<AgentName, readonly AgentScopeRole[]>,
   input: ResolveAgentScopeRoleInput,
 ): string | null {
+  // US-AGENT-050 — owner-disabled agents are hard-excluded from ALL pools.
+  if (isAgentDisabled(input.layers, agent)) return "disabled";
   // FIX-1267 — the no-consecutive-repeat rotation exclusion is a hard skip,
   // reported first so the audit trail names it explicitly (a previous builder is
   // excluded because it just built, not because it lacks a capability).

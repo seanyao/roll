@@ -2149,6 +2149,27 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("routes a US builder to the roll-build skill instead of the loop scheduler skill", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-execution-skill-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, "skills", "roll-build"), { recursive: true });
+    writeFileSync(join(repo, "skills", "roll-build", "SKILL.md"), "---\nname: roll-build\n---\nBUILD THIS STORY\n");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: join(repo, "worktree") },
+      skillBody: "# Roll Loop\n\nSchedule work.",
+    });
+    mkdirSync(ports.paths.worktreePath, { recursive: true });
+
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ skillBody: "BUILD THIS STORY" }),
+    );
+  });
+
   it("FIX-1037: checkMainDirty ignores .roll metadata dirt but reports product checkout dirt", async () => {
     const repo = initCleanGitRepo("roll-main-dirty-probe-");
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });

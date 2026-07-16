@@ -10,6 +10,7 @@ import {
   buildHasOpenPr,
   openPrBlockReason,
   parseDependsOn,
+  parseTargetSubmodule,
   pickStory,
   prTitleReferences,
   shouldSuppressDormancy,
@@ -33,6 +34,25 @@ describe("parseDependsOn", () => {
   });
   it("captures lettered sub-story ids (FIX-167)", () => {
     expect(parseDependsOn("depends-on:US-LOOP-062c")).toEqual(["US-LOOP-062c"]);
+  });
+});
+
+describe("parseTargetSubmodule — E2 per-story submodule tag", () => {
+  it("returns undefined when no tag is present", () => {
+    expect(parseTargetSubmodule("a plain description")).toBeUndefined();
+  });
+  it("extracts the submodule path from a target-submodule: tag", () => {
+    expect(parseTargetSubmodule("ship it `target-submodule:dukang-service-online`")).toBe(
+      "dukang-service-online",
+    );
+  });
+  it("coexists with a depends-on tag (independent extraction)", () => {
+    const desc = "work `depends-on:US-A` `target-submodule:dukang-service-online`";
+    expect(parseDependsOn(desc)).toEqual(["US-A"]);
+    expect(parseTargetSubmodule(desc)).toBe("dukang-service-online");
+  });
+  it("takes the first occurrence only", () => {
+    expect(parseTargetSubmodule("target-submodule:one target-submodule:two")).toBe("one");
   });
 });
 

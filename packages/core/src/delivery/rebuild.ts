@@ -82,6 +82,24 @@ export interface MergeFact {
    * keep their current behavior.
    */
   touchesProductCode?: boolean;
+  /**
+   * Whether the commit subject is a NON-delivery conventional-commit type
+   * (`docs:` / `chore:`) — FIX-1270.
+   *
+   * A CHANGELOG sweep such as
+   * `docs: CHANGELOG sweep — FIX-1259..1267, US-LOOP-107..109 (#1398)` is a
+   * squash merge: it is PR-linked (`(#1398)`) and touches product code
+   * (`CHANGELOG.md` lives outside `.roll/`, so the FIX-1208 gate misses it),
+   * yet the card-ids in its subject are *mentions*, not deliveries. The real
+   * delivery PRs are elsewhere (US-LOOP-107 shipped as 107a/#1388, 107b/#1390).
+   * A `nonDelivery` merge must never be a subject-based attribution source,
+   * otherwise it steals a card's delivery projection from its real PR and
+   * desyncs the backlog PR refs from `queryStoryDelivery` (the 2026-07-16
+   * truth-live gate red).
+   *
+   * Omitted / `false` = a normal delivery commit (backwards compatible).
+   */
+  nonDelivery?: boolean;
 }
 
 /**
@@ -151,6 +169,7 @@ export function unattributedSubjectOnlyMerges(merges: MergeFact[]): Unattributed
   for (const m of merges) {
     if (mergeProvenance(m) !== "subject_only") continue;
     if (m.touchesProductCode === false) continue;
+    if (m.nonDelivery === true) continue; // FIX-1270: docs/chore ≠ candidate delivery
     for (const sid of m.storyIds) {
       const key = `${sid}\t${m.mergeCommit}`;
       if (seen.has(key)) continue;
@@ -198,6 +217,29 @@ function failureClassFromRow(row: RunRow): FailureClass | undefined {
  * single trailing lowercase letter (the shorthand-suffix form, e.g. `FIX-389a`).
  */
 const STORY_ID_RE = /\b(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\d+[a-z]?\b/g;
+
+/**
+ * Conventional-commit types that denote a NON-delivery change (FIX-1270):
+ * `docs:` / `chore:`, with an optional scope (`docs(loop):`) and optional
+ * breaking-change `!` (`chore!:`). Case-insensitive.
+ *
+ * These commits (CHANGELOG sweeps, housekeeping) may list many card-ids in the
+ * subject, but those are mentions — not deliveries. See {@link MergeFact.nonDelivery}.
+ */
+const NON_DELIVERY_SUBJECT_RE = /^(?:docs|chore)(?:\([^)]*\))?!?:/i;
+
+/**
+ * `true` when a commit subject is a `docs:`/`chore:` conventional-commit type
+ * (FIX-1270). Such a subject must not drive subject-based delivery attribution.
+ *
+ * Detection is on the subject line only, matching Roll's squash-merge flow
+ * where the PR title (with its type prefix) becomes the commit subject. A
+ * GitHub merge-button commit (`Merge pull request #N …`) carries the title in
+ * its body and is intentionally not matched here — Roll merges with `--squash`.
+ */
+export function isNonDeliverySubject(subject: string): boolean {
+  return NON_DELIVERY_SUBJECT_RE.test(subject.trim());
+}
 
 /**
  * Extract story-ids from a merge-commit subject, expanding `/`-joined
@@ -345,7 +387,11 @@ function mergeFactFromCommitMessage(
   if (prNum !== undefined && (!Number.isFinite(prNum) || prNum <= 0)) return null;
   if (prNum === undefined && storyIds.length === 0) return null;
 
-  return { prNumber: prNum ?? 0, mergeCommit: sha, mergedAt, storyIds };
+  // FIX-1270: flag `docs:`/`chore:` subjects so subject-based attribution can
+  // skip them (a CHANGELOG sweep mentions cards it did not deliver).
+  const fact: MergeFact = { prNumber: prNum ?? 0, mergeCommit: sha, mergedAt, storyIds };
+  if (isNonDeliverySubject(subject)) fact.nonDelivery = true;
+  return fact;
 }
 
 /**
@@ -475,12 +521,21 @@ export function rebuildDeliveriesFromFacts(
   // subject-only path that FIX-1208 left open (it only excluded `.roll`-only
   // commits). Genuinely manual direct-main deliveries take the documented
   // repair path (record a run/ledger fact) — see unattributedSubjectOnlyMerges.
+  //
+  // FIX-1270: a `docs:`/`chore:` subject (`nonDelivery === true`) is excluded
+  // too. A CHANGELOG sweep is PR-linked and touches product code (CHANGELOG.md
+  // is outside `.roll/`), so neither the subject_only nor the touchesProductCode
+  // gate catches it; its subject merely *mentions* cards delivered elsewhere.
+  // The run/PR-correlation path below is untouched, so a genuine doc-update
+  // *story* (delivered by a loop cycle that recorded its PR) still attributes
+  // through its run — only the subject-mention fallback is denied.
   const mergeByStoryId = new Map<string, MergeFact>();
   for (const m of merges) {
     mergeByPr.set(m.prNumber, m);
     mergeBySha.set(m.mergeCommit, m);
     if (m.touchesProductCode === false) continue;
     if (mergeProvenance(m) === "subject_only") continue;
+    if (m.nonDelivery === true) continue;
     for (const sid of m.storyIds) {
       mergeByStoryId.set(sid, m); // overwrite: oldest wins (reverse-chrono input)
     }

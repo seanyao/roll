@@ -18,6 +18,7 @@ import {
   ensureDeliveriesFresh,
   mergeProvenance,
   unattributedSubjectOnlyMerges,
+  isNonDeliverySubject,
   type RunFact,
   type MergeFact,
   type FreshnessPort,
@@ -1312,6 +1313,118 @@ describe("rebuildDeliveriesFromFacts — FIX-1266: subject-only cannot complete 
     const records = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
     const truth = queryStoryDelivery("FIX-1266", records);
     expect(truth.delivered).toBe(true);
+  });
+});
+
+// ── FIX-1270: docs/chore PR title-mention is not a delivery ──────────────────
+
+describe("isNonDeliverySubject (FIX-1270)", () => {
+  it("flags docs: and chore: subjects", () => {
+    expect(isNonDeliverySubject("docs: CHANGELOG sweep — FIX-1259..1267 (#1398)")).toBe(true);
+    expect(isNonDeliverySubject("chore: bump deps (#12)")).toBe(true);
+    expect(isNonDeliverySubject("docs(loop): tidy runbook")).toBe(true);
+    expect(isNonDeliverySubject("chore!: drop legacy path")).toBe(true);
+    expect(isNonDeliverySubject("  DOCS: leading space, upper")).toBe(true);
+  });
+
+  it("does NOT flag delivery-type subjects", () => {
+    expect(isNonDeliverySubject("Fix: FIX-1270 real delivery (#1400)")).toBe(false);
+    expect(isNonDeliverySubject("Story 7: US-LOOP-107 (#1388)")).toBe(false);
+    expect(isNonDeliverySubject("tcr: US-X wire it (#9)")).toBe(false);
+    expect(isNonDeliverySubject("US-LOOP-107a: split child (#1388)")).toBe(false);
+    // "documentation" is not the docs: type prefix
+    expect(isNonDeliverySubject("Refactor: documentation helper (#3)")).toBe(false);
+  });
+});
+
+describe("rebuildDeliveriesFromFacts — FIX-1270: sweep-PR misattribution", () => {
+  // The exact 2026-07-16 signature: a squash-merged CHANGELOG sweep whose
+  // title lists many card-ids. It is PR-linked (#1398) and touches product
+  // code (CHANGELOG.md), so neither the subject_only nor the FIX-1208 gate
+  // catches it.
+  const SWEEP_LOG = [
+    "\x1e",
+    "b1cbd4ef00000000000000000000000000000000",
+    "\x1f",
+    "1784178000",
+    "\x1f",
+    "docs: CHANGELOG sweep — FIX-1259..1267, US-LOOP-107..109, US-BROW-017..023 (#1398)",
+  ].join("");
+
+  it("a docs sweep PR does not write ANY card's delivery projection", () => {
+    const merges = parseMergeCommitLog(SWEEP_LOG);
+    // Sanity: the parser recognises it as a non-delivery merge.
+    expect(merges).toHaveLength(1);
+    expect(merges[0].nonDelivery).toBe(true);
+    expect(merges[0].prNumber).toBe(1398);
+
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    // None of the mentioned cards become a delivery on the sweep's account.
+    expect(result).toHaveLength(0);
+    for (const id of ["US-LOOP-107", "FIX-1259", "US-BROW-017"]) {
+      expect(queryStoryDelivery(id, result).delivered).toBe(false);
+    }
+  });
+
+  it("sweep PR does not override the card's real (older) delivery PR", () => {
+    // US-LOOP-107 really shipped via a split child's code PR; the later docs
+    // sweep merely mentions the parent id. The real code PR must remain the
+    // attribution and the sweep must not add a phantom parent record.
+    const merges = parseMergeCommitMessages([
+      // newer: the docs sweep (reverse-chronological input → first)
+      "b1cbd4ef000 1784178000 docs: CHANGELOG sweep — US-LOOP-107..109 (#1398)",
+      // older: the genuine code delivery for the parent id
+      "codesha00000 1784100000 Story: US-LOOP-107 core change (#1388)",
+    ]);
+    const result = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-LOOP-107");
+    expect(result[0].prNumber).toEqual({ present: true, value: 1388 });
+    expect(result[0].mergeCommit).toEqual({ present: true, value: "codesha00000" });
+  });
+
+  it("a genuine doc-update STORY still attributes through its run (run-path untouched)", () => {
+    // A closing doc-update story delivered by a loop cycle records its PR in a
+    // run. That run/PR-correlation — not subject attribution — authorises done,
+    // so the docs: prefix does not suppress a real doc-story delivery.
+    const runs = [makeRun({
+      storyId: "US-DOC-1",
+      outcome: "published_pending_merge",
+      prNumber: 1500,
+      recordedAt: 100,
+    })];
+    const merges = parseMergeCommitMessages([
+      "docstorysha0 1784178000 docs: US-DOC-1 refresh guide (#1500)",
+    ]);
+    const result = rebuildDeliveriesFromFacts(runs, merges, "seanyao/roll");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("US-DOC-1");
+    expect(result[0].lifecycleState).toBe("done");
+    expect(result[0].prNumber).toEqual({ present: true, value: 1500 });
+  });
+
+  it("sanctioned correction path: rebuild recomputes a polluted projection clean", () => {
+    // deliveries.jsonl is a rebuildable cache; `roll loop reconcile` overwrites
+    // it via ensureDeliveriesFresh → rebuildDeliveriesFromFacts. Simulate a
+    // previously-polluted world (before the fix a sweep produced a phantom
+    // US-LOOP-107 record) by rebuilding from the corrected facts: the phantom
+    // is gone, and replay is idempotent.
+    const merges = parseMergeCommitLog(SWEEP_LOG);
+    const r1 = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    const r2 = rebuildDeliveriesFromFacts([], merges, "seanyao/roll");
+    expect(r1).toEqual(r2);
+    expect(r1.some((d) => d.storyId === "US-LOOP-107")).toBe(false);
+  });
+
+  it("docs sweep is excluded from unattributed diagnostics too", () => {
+    const merges = [makeMerge({
+      prNumber: 0,
+      mergeCommit: "sweepsubjectonly",
+      storyIds: ["US-LOOP-107"],
+      touchesProductCode: true,
+      nonDelivery: true,
+    })];
+    expect(unattributedSubjectOnlyMerges(merges)).toEqual([]);
   });
 });
 

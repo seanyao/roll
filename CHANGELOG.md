@@ -7,6 +7,12 @@
   <!-- evidence: packages/core/test/fixtures/outward-verification/report.html -->
 - 外部 smoke 在隔离的临时 `HOME`/`PREFIX`/工作目录里运行,只执行 spec 里显式声明的命令模板;产物记录 exit code、版本和脱敏摘要,凭据从不落盘。任何真实发布或账号操作永不自动执行,没有声明的授权就不会跑;用 `ROLL_SMOKE_ENV=release`(或 `ci`/`nightly`)指向对应环境,环境不匹配报 `unverified` 而非静默跳过 (US-ATTEST-015/016/017) `[docs]`
 
+### 调度器故障自愈(新能力:launchd 挂了 loop 不再瘫痪)
+- macOS launchd 调度器起不来时,loop 现在有一条 owner 确认的进程级后备通道:`roll loop on` 检测到 launchd bootstrap 失败会如实报告,并给出启动 fallback 的明确指引;fallback 用租约+心跳保证同一时刻只有一个 runner 在跑,启动/停止/异常退出五种路径都会干净收尾,不留孤儿进程 (US-LOOP-107) `[loop]`
+- `roll loop status/on/off` 现在直接呈现 launchd 的失败状态并控制 fallback 调度器的开关——不需要 owner 自己去翻 launchctl (US-LOOP-108) `[cli]`
+- launchd 故障→fallback 接管→launchd 恢复的完整恢复路径已实测验证并写入文档,含用 `launchctl list` 找到当前活跃 loop label 的排查姿势 (US-LOOP-109) `[docs]`
+  <!-- evidence: .roll/features/loop-engine/US-LOOP-109/latest/US-LOOP-109-report.html -->
+
 ### 浏览器操作(新能力:托管 Chrome DevTools)
 - Roll 现在能自己开一个隔离的 Chrome 去访问页面、做检查、收集诊断——用的是临时浏览器档案,碰不到你本人的登录态和 cookie,跑完即删。支持导航、DOM 断言、控制台/网络摘要和诊断截图,失败(超时/崩溃)会如实报告,绝不冒充测试通过 (US-BROW-001/002/004) `[cli]`
 - `roll browser setup --dry-run` 先看会装什么、`--confirm` 才真写配置;`roll browser doctor` 分三条通道(托管/交互/截图)报告就绪度,缺什么、怎么补,一目了然 (US-BROW-003) `[cli]`
@@ -19,12 +25,16 @@
 - `roll browser update --check` 报告当前 DevTools 传输包版本与可用候选版本（只读，不下载、不安装、不改配置）；`roll browser update --apply --confirm` 经显式确认后执行原子更新，更新前运行冒烟检查，失败则保留原版本 (US-BROW-010) `[cli]`
 - 托管与可选浏览器能力的使用文档齐备(setup/doctor/run/性能/设备仿真) (US-BROW-007/015) `[docs]`
 - 托管通道现在为每次运行启动一个固定版本的 `chrome-devtools-mcp` stdio 会话:完成 MCP initialize/tools-list、校验最小工具清单后才允许执行浏览器动作,任何初始化失败/清单不匹配/进程崩溃都会 fail-loud;生产默认依赖已切到 MCP,原始 WebSocket/CDP 传输不再出现在 CLI/运行时 wiring 中 (US-BROW-016) `[core+infra]`
-- 将受管诊断通过 MCP facade 暴露为有界、类型安全的浏览器操作:诊断动作经 MCP typed facade 归一化,原始 CDP 调用面不外露 (US-BROW-017) `[core]`
-- `roll browser run` 生产路径走真实、策略控制的 MCP 通道:每次运行启动固定版本 `chrome-devtools-mcp` stdio 会话、完成 MCP initialize/tools-list/清单验证后才执行动作;策略禁用则运行前即拒绝;`--story`/`--url` 为必填参数,记入 ledger 备审计;`--fixture` 降级为明确标为仅测试的假目标路径 (US-BROW-018) `[core+cli]`
-- `roll browser doctor --probe` 运行实时 MCP 通道探测:启动临时 `chrome-devtools-mcp` 会话、验证 initialize+tools/list+最小工具清单后清理,只有探测通过才将受管通道标为 ready;`roll browser update --apply --confirm` 在冒烟检查后增加 MCP 探测闸,探测失败则中止更新并保留原版本 (US-BROW-019) `[cli+infra]`
-- 受管通道的真实本地 Chrome DevTools MCP 集成覆盖闸落地:`.github/workflows/browser-live-gate.yml` CI 通道装配真实 Chrome 跑 `pnpm test:browser-live`,导航/DOM/console/network/截图/profile/redirect 拒绝/超时/崩溃/协议错误/脱敏失败 12 场景全绿;默认 `roll test` 永不运行实况闸(需 Chrome);实况闸 fail-loud 绝不静默 skip,fixture 来源报告永远无法获得 verified (US-BROW-020) `[infra+gate]`
-- 浏览器操作文档修正(fixture 降级为仅测试、真实 MCP 通道成为主文档路径、doctor --probe 探测生命周期完整记录、隐私/安全边界前置突出、阻塞/不可用实录、失败模式与修复表、更新 MCP 探测闸文档化);CHANGELOG 补全 US-BROW-017/018/019/020 条目 (US-BROW-021) `[docs]`
-
+- 浏览器动作是一个封闭词表(导航/快照/控制台/网络/截图/点击/填表/按键),每个动作只能映射到清单里批准的那一个 MCP 工具——调用方没有任何办法自己点名工具或下发任意浏览器指令,词表之外一律拒绝并如实报因 (US-BROW-017) `[core]`
+- `roll browser run` 的托管诊断现在真正走上面这条带政策闸的 MCP 通道跑(不再是绕开闸的直连):`--story`/`--url` 必填并记入 ledger 备审计,策略禁用则运行前即拒绝,`--fixture` 降级为明确标注仅测试的假目标接缝 (US-BROW-018) `[core+cli]`
+- 新增 `roll browser doctor --probe`:起一个真实的 chrome-devtools-mcp 进程做活体探测(initialize + tools/list + 清单校验),用临时档案、跑完即清,只有探测通过才把受管通道标为 ready;`roll browser update --apply` 也加了同样的探测闸,探测失败中止更新保留原版本。这个真探针立刻抓出两个假测试掩盖的 bug——通信分帧用错了方言(真服务器是一行一条 JSON,不是 Content-Length 头),以及清单里要求了一个真服务器根本没有的工具;两处都已修正,探针现在对真服务器全绿 (US-BROW-019) `[cli+infra]`
+  <!-- evidence: .roll/features/browser-automation/US-BROW-019/latest/US-BROW-019-report.html -->
+- 新增真实浏览器回归闸:`pnpm test:browser-live`(设 `ROLL_BROWSER_LIVE=1` 启用)起一个本地 HTTP 目标 + 真 chrome-devtools-mcp + 真临时 Chrome,把导航/快照/控制台/网络/截图/重定向拒绝/超时清理等 12 个场景全跑一遍,只有真进程真验证才算 verified——fixture 报告永远不能通过这道闸,环境不具备时大声报 unavailable 而不是静默跳过;CI 配了专门的 Chrome-capable lane 每晚跑 (US-BROW-020) `[cli+infra]`
+  <!-- evidence: .roll/features/browser-automation/US-BROW-020/latest/US-BROW-020-report.html -->
+- 这道闸首跑就抓出四个假测试互相掩护的真 bug 并全部修复:policy 文件的 managed 通道配置从来没被真正读进去(缩进/snake_case/数组全解析错,写了 enabled: true 也永远 lane_disabled)、真服务器的截图字节被丢弃、真服务器的散文体回复(不是 JSON)不被理解、快照/点击的参数名不符 (US-BROW-020) `[cli+infra]`
+- 浏览器操作文档与命令帮助全面对齐真实 MCP 通道:说清固定版本 sidecar 的生命周期、静态检查与 `doctor --probe` 活体探测的区别、policy 开闸姿势、live gate 前置条件与全部失败排查路径;删除一切把 fixture 当真实运行的表述,附真实运行与被拒两份逐字 transcript(2026-07-16 实录),并加锁测试防止文档再漂移 (US-BROW-021) `[docs]`
+- 交互通道(owner Chrome)的租约与操作现在真的写进台账:谁批准的租约、到期/取消、执行了什么动作都有记录,`roll browser doctor` 和档案页里的 interactive 一栏不再永远显示 unknown (US-BROW-022) `[loop]`
+- 截图证据的"物理 vs 诊断"裁决现在真正生效:Roll Capture 的物理截图经 CaptureBridge 落盘并进验收链路,DevTools 截图只算诊断参考——想拿 DevTools 截图冒充视觉验收会被分类器拦下 (US-BROW-023) `[loop]`
 ### 稳定性
 - 无验收清单的卡不再被误拦导致无法 publish；缺少验收证据时循环会把工作明确挂起待人复评，不再静默丢弃 (FIX-1256) `[loop]`
   <!-- evidence: .roll/features/loop-engine/FIX-1256/latest/FIX-1256-report.html -->
@@ -42,6 +52,14 @@
   <!-- evidence: .roll/features/loop-engine/FIX-1264/latest/FIX-1264-report.html -->
 - `roll north` 自主运行时长现在按 14 天窗口累计合格每日时长，不再把最近一段未中断时长误当成总值 (FIX-1265) `[loop]`
   <!-- evidence: .roll/features/loop-observability/FIX-1265/latest/FIX-1265-report.html -->
+- 账本和 `roll loop cycles` 里 reasonix 跑的活不再显示错的 model:usage 数据缺 model 字段时回填本 cycle 实际派出的那个,不再被解析器硬编码的旧默认值覆盖;历史错账已一并修正 (FIX-1259) `[loop]`
+- "CI 绿 + 独立 evaluator 认可"的挂起 PR 现在自动补验收件→转正→合并,不再等人手工跑三条命令;证据存疑的仍留在挂起通道并发告警,绝不静默转正 (FIX-1260) `[loop]`
+- cycle 失败不再一律坍缩成看不懂的 `unknown_failure`:验收命令被白名单拒绝、约定界面没被截到、验收证据无法合并三类失败现在给出确定性归因和修复指引;熔断器也不再把已修好的卡的历史失败信号反复算进当前窗口——守夜期间一夜误停 5+ 次的总根因 (FIX-1261) `[loop]`
+- 五处"配置该管的事源码写死"清扫:评审报告不再回填假 model、evaluator 名单不再伪造 reasonix 身份、dashboard 不再硬编码 owner 的机器路径、死配置旋钮移除、supervisor 身份改为配置驱动 (FIX-1262) `[loop]`
+- 浏览器真相采集器现在吃统一注入的时钟(消除 collectedAt 竞态),physical_terminal 声明写错类型会大声报错而不是被静默当成"没有" (FIX-1263) `[loop]`
+- 提交主题里光写一个卡号不再算交付证据:判定一张卡"已交付"必须有 PR、CI run 或账本记录的实锤关联,防止误把提法当交付 (FIX-1266) `[loop]`
+- builder 硬轮换上线:任意连续两个 cycle 不会派同一个 builder(评估 harness 对不同 agent 的归一化能力);轮换把候选池排空时会大声报错而不是静默复用,可用 `loop_safety.builder_no_consecutive_repeat` 配置开关 (FIX-1267) `[loop]`
+  <!-- evidence: .roll/features/loop-engine/FIX-1267/latest/FIX-1267-report.html -->
 
 ## v4.714.2 — 2026-07-14
 

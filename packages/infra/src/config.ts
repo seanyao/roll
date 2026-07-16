@@ -199,6 +199,13 @@ export interface ConfigKeyRecord {
    * validation used by {@link configValidate}.
    */
   type?: "int" | "string";
+  /**
+   * E3: a closed set of allowed values for a `"string"` key. When present,
+   * {@link configValidate} checks membership (case-sensitive) INSTEAD of the
+   * git-ref-safe charset check — the value must be exactly one of these tokens.
+   * Only meaningful for string keys (e.g. `publish_mode: remote|local`).
+   */
+  enum?: readonly string[];
   min: string;
   max: string;
   default: string;
@@ -221,6 +228,11 @@ export const CONFIG_KEYS: readonly ConfigKeyRecord[] = [
   // A string key (not integer): non-empty + git-ref-safe. Default preserves the
   // historical hardcoded `origin/main`, so unset = byte-identical prior behavior.
   { key: "integration_branch", scope: "project", store: "flat", type: "string", min: "", max: "", default: "origin/main" },
+  // E3: the delivery publish mode — `remote` (default: push→PR→CI→merge) or
+  // `local` (land the cycle on the LOCAL integration branch, no push/PR/CI). An
+  // enum string key: validation checks membership in remote|local. Default
+  // `remote` keeps every existing remote delivery path byte-identical.
+  { key: "publish_mode", scope: "project", store: "flat", type: "string", enum: ["remote", "local"], min: "", max: "", default: "remote" },
 ];
 
 /** Project-scope yaml file — mirrors `_config_key_file project` (5786). */
@@ -333,6 +345,20 @@ export function configValidate(key: string, value: string): { ok: true } | Confi
   // ref/refspec legitimately uses (`^[A-Za-z0-9/_.-]+$`) — this both rejects
   // empties and blocks shell-injection into the `git` argv the ref feeds.
   if (rec.type === "string") {
+    // E3: an enum string key validates membership in its closed value set
+    // (case-sensitive), INSTEAD of the empty/git-ref-safe checks. An empty
+    // value is simply "not a member", so it is rejected by this branch too.
+    if (rec.enum !== undefined) {
+      if (rec.enum.includes(value)) return { ok: true };
+      const allowed = rec.enum.join("|");
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' must be one of ${allowed}, got '${value}'`,
+          `config：'${key}' 取值须为 ${allowed}，收到 '${value}'`,
+        ],
+      };
+    }
     if (value === "") {
       return {
         ok: false,

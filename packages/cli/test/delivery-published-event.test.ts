@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { CycleContext } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
+import { landLocalDelivery } from "@roll/infra";
 import type { Ports } from "../src/runner/ports.js";
 import { executeCommand } from "../src/runner/executor.js";
 
@@ -94,6 +95,9 @@ function makePorts(runtimeDir: string, repoCwd: string, publishPlan: () => Promi
       branchMergedIntoMain: vi.fn(async () => false),
       branchCleanlyRebasesOntoMain: vi.fn(async () => true),
       resetWorktreeHard: vi.fn(async () => ({ code: 0 })),
+      // E3: the real infra landing over the real temp repo/worktree, wrapped in a
+      // spy so tests can assert it was (or was not) called.
+      landLocalDelivery: vi.fn(async (r: string, wt: string, ib?: string) => landLocalDelivery(r, wt, ib)),
     },
     events: {
       ensureEventFiles: vi.fn(),
@@ -168,6 +172,130 @@ describe("US-DELIV-001 — delivery:published emission", () => {
         const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
         expect(r.event).toMatchObject({ type: "published", result: { status: 1 } });
         expect(events.filter((e) => e.type === "delivery:published")).toHaveLength(0);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── E3: local-only delivery mode (publish_mode: local) ──────────────────────
+
+/** Set publish_mode in the repo's project config. */
+function setPublishMode(root: string, mode: string): void {
+  mkdirSync(join(root, ".roll"), { recursive: true });
+  writeFileSync(join(root, ".roll", "local.yaml"), `publish_mode: ${mode}\n`);
+}
+
+/** Create a REAL detached cycle worktree at <root>/wt with one cycle commit,
+ *  branched off main. Returns the cycle HEAD sha. */
+function makeCycleWorktree(root: string): string {
+  const wt = join(root, "wt");
+  git(root, "worktree", "add", "--detach", wt, "main");
+  writeFileSync(join(wt, "feature.txt"), "cycle work\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-m", "tcr: cycle work");
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" }).trim();
+}
+
+describe("US-E3 — local-only delivery (publish_mode: local)", () => {
+  it("gate passes → lands locally, emits delivery:reconciled{delivered_local}, NO push / NO gh, status 0", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        setPublishMode(root, "local");
+        const cycleSha = makeCycleWorktree(root);
+        const mainBefore = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: root, encoding: "utf8" }).trim();
+        expect(mainBefore).not.toBe(cycleSha);
+
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+
+        // cycle success
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+
+        // NO remote work
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(ports.github.runPublishPlan).not.toHaveBeenCalled();
+        expect(ports.github.repoSlug).not.toHaveBeenCalled();
+        // NO awaiting_merge (that is the REMOTE fact) — no PR was opened
+        expect(events.filter((e) => e.type === "delivery:published")).toHaveLength(0);
+
+        // the local integration branch now contains the cycle commit
+        const mainAfter = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: root, encoding: "utf8" }).trim();
+        expect(mainAfter).toBe(cycleSha);
+        expect(ports.git.landLocalDelivery).toHaveBeenCalledTimes(1);
+
+        // delivery:reconciled{delivered_local} with the landing sha
+        const reconciled = events.filter((e) => e.type === "delivery:reconciled");
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0]).toMatchObject({
+          type: "delivery:reconciled",
+          cycleId: "20260712-000000-1",
+          storyId: "US-DELIV-001",
+          state: "delivered_local",
+          mergedBy: "runner",
+          mergeCommit: cycleSha,
+        });
+
+        // the evidence gate STILL ran (earned)
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "earned" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("gate FAILS → blocked_no_evidence, NO push, NO local landing", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        setPublishMode(root, "local");
+        makeCycleWorktree(root);
+        // remove ALL acceptance evidence so the evidence gate blocks (report +
+        // ac-map both gone → attestReportPresent:false, acMapPresent:false).
+        // initRepoWithEvidence commits .roll, so the detached worktree carries a
+        // copy too — clear the card from BOTH evidence roots (worktree + repo).
+        for (const base of [root, join(root, "wt")]) {
+          rmSync(join(base, ".roll", "features", "delivery-reconciler", "US-DELIV-001"), { recursive: true, force: true });
+        }
+
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+
+        // blocked: status 1 + gateBlocked (same as remote gate-block)
+        expect(r.event).toMatchObject({ type: "published", result: { status: 1, gateBlocked: true } });
+        // no landing, no push, no reconciled credit
+        expect(ports.git.landLocalDelivery).not.toHaveBeenCalled();
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(events.filter((e) => e.type === "delivery:reconciled")).toHaveLength(0);
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "blocked" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("publish_mode remote (default) still opens a PR — zero regression", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        // no publish_mode config → default remote
+        const { ports, events } = makePorts(runtimeDir, root, async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true }));
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+        expect(ports.github.runPublishPlan).toHaveBeenCalledTimes(1);
+        expect(ports.git.landLocalDelivery).not.toHaveBeenCalled();
+        expect(events.filter((e) => e.type === "delivery:published")).toHaveLength(1);
+        expect(events.filter((e) => e.type === "delivery:reconciled")).toHaveLength(0);
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

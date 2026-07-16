@@ -33,6 +33,15 @@ import type { FactOr } from "./terminal.js";
  * is released to pick the next card; the state advances only when a later
  * `delivery:reconciled` / `delivery:merge_attempt` event lands — never by
  * blocking on the merge.
+ *
+ * `delivered_local` (E3, local-only delivery mode) is a TERMINAL success that
+ * NEVER passed through `awaiting_merge`: a `publish_mode: local` project lands
+ * the cycle onto its LOCAL integration branch and skips push→PR→CI→merge
+ * entirely. The evidence gate still runs (a gate-block still routes to
+ * `blocked_no_evidence`, exactly as remote); on success the cycle reconciles
+ * straight to `delivered_local` with the local landing commit SHA. It is
+ * sticky like the other delivered terminals — a later delivery event can never
+ * regress it.
  */
 export const DELIVERY_STATES = [
   "building",
@@ -41,6 +50,7 @@ export const DELIVERY_STATES = [
   "ci_failed",
   "delivered",
   "delivered_external",
+  "delivered_local",
   "superseded",
   "abandoned",
 ] as const;

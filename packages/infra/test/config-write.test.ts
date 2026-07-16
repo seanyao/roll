@@ -86,6 +86,29 @@ describe("configValidate — string keys (type: 'string')", () => {
   });
 });
 
+describe("configValidate — enum string keys (E3: publish_mode)", () => {
+  it("accepts the two allowed values", () => {
+    expect(configValidate("publish_mode", "remote")).toEqual({ ok: true });
+    expect(configValidate("publish_mode", "local")).toEqual({ ok: true });
+  });
+  it("rejects any other value with a bilingual allowed-values message", () => {
+    expect(configValidate("publish_mode", "offline")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'publish_mode' must be one of remote|local, got 'offline'",
+        "config：'publish_mode' 取值须为 remote|local，收到 'offline'",
+      ],
+    });
+  });
+  it("rejects an empty value (empty is not an allowed enum member)", () => {
+    expect(configValidate("publish_mode", "").ok).toBe(false);
+  });
+  it("is case-sensitive — 'Local' / 'REMOTE' are rejected", () => {
+    expect(configValidate("publish_mode", "Local").ok).toBe(false);
+    expect(configValidate("publish_mode", "REMOTE").ok).toBe(false);
+  });
+});
+
 describe("configKeyFile — scope → backing yaml file", () => {
   it("global → rollConfigPath", () => {
     expect(configKeyFile("global")).toBe(rollConfigPath());

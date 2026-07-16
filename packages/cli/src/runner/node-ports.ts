@@ -29,6 +29,7 @@ import {
   captureFromMarker,
   fetchRemoteBranch,
   ghRepoSlug,
+  landLocalDelivery,
   openEvidenceFrame,
   prListOpenTitles,
   prViewMergeInfo,
@@ -293,6 +294,9 @@ export function nodePorts(opts: {
       async resetWorktreeHard(worktreeCwd, ref, branch) {
         const r = await worktreeResetHard(worktreeCwd, ref, branch);
         return { code: r.code };
+      },
+      async landLocalDelivery(repoCwd, worktreeCwd, integrationBranch) {
+        return landLocalDelivery(repoCwd, worktreeCwd, integrationBranch);
       },
     },
     github: {

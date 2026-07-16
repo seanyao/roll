@@ -97,6 +97,9 @@ export const ABSENT_REASONS = [
   "killed_before_publish",
   "not_applicable",
   "not_recorded",
+  // E3: a local-only delivery has no PR by design — prNumber/prUrl are absent
+  // for this reason, not because a publish was attempted and failed.
+  "local_only",
 ] as const;
 export type AbsentReason = (typeof ABSENT_REASONS)[number];
 

@@ -20,10 +20,12 @@ import {
   currentBranch,
   fetchRemoteBranch,
   isAncestor,
+  landLocalDelivery,
   lsRemote,
   mergeBase,
   projectIdentity,
   resolveIntegrationBranch,
+  resolvePublishMode,
   worktreeAdd,
   worktreeRemove,
   worktreeResetHard,
@@ -298,6 +300,25 @@ describe("resolveIntegrationBranch", () => {
   });
 });
 
+describe("resolvePublishMode — E3", () => {
+  it("defaults to remote when no config file exists (zero regression)", () => {
+    const d = tmp("pm-default");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+  it("returns local when publish_mode: local is set", () => {
+    const d = tmp("pm-local");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "publish_mode: local\n", "utf8");
+    expect(resolvePublishMode(d)).toBe("local");
+  });
+  it("falls back to remote for any unrecognized value (never silently disables remote)", () => {
+    const d = tmp("pm-garbage");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "publish_mode: offline\n", "utf8");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+});
+
 describe("canonicalProjectPath", () => {
   it("resolves a worktree to its OWN toplevel (FIX-201; supersedes FIX-034)", async () => {
     // FIX-034's main-tree canonicalization hijacked sibling dev worktrees onto
@@ -342,5 +363,97 @@ describe("projectIdentity", () => {
       if (save === undefined) delete process.env["ROLL_MAIN_SLUG"];
       else process.env["ROLL_MAIN_SLUG"] = save;
     }
+  });
+});
+
+// ─── E3: landLocalDelivery — local-only landing onto the integration branch ───
+
+/** git helper for the tests (repo-local identity, no global config). */
+function g(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+function sha(cwd: string, ref = "HEAD"): string {
+  return g(cwd, "rev-parse", ref);
+}
+function branchSha(repo: string, branch: string): string {
+  return g(repo, "rev-parse", `refs/heads/${branch}`);
+}
+
+/**
+ * Build a repo with `main` + a DETACHED cycle worktree branched off it, then
+ * add a cycle commit in the worktree. Returns the repo + worktree paths and the
+ * base SHA of `main`.
+ */
+async function repoWithCycleWorktree(tag: string): Promise<{ repo: string; wt: string; baseSha: string }> {
+  const repo = initRepo(tag);
+  writeFileSync(join(repo, "README.md"), "# base\n");
+  g(repo, "add", "-A");
+  g(repo, "commit", "-q", "-m", "base");
+  const baseSha = sha(repo);
+  const wtParent = tmp(`${tag}-wtside`);
+  const wt = join(wtParent, "wt");
+  const add = await worktreeAdd(repo, wt, `loop/cycle-${tag}`, "main");
+  expect(add.code).toBe(0);
+  // one cycle commit in the (detached) worktree
+  writeFileSync(join(wt, "feature.txt"), "cycle work\n");
+  g(wt, "add", "-A");
+  g(wt, "commit", "-q", "-m", "tcr: cycle work");
+  return { repo, wt, baseSha };
+}
+
+describe("landLocalDelivery — E3 local-only landing", () => {
+  it("fast-forwards the LOCAL integration branch to the cycle HEAD (strips origin/)", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-ff");
+    const cycleSha = sha(wt);
+    // integration branch expressed as origin/main → local landing branch is `main`
+    const r = await landLocalDelivery(repo, wt, "origin/main");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("main");
+    expect(r.method).toBe("fast_forward");
+    expect(r.sha).toBe(cycleSha);
+    // the LOCAL main now points at the cycle commit — no push, ref moved locally
+    expect(branchSha(repo, "main")).toBe(cycleSha);
+  });
+
+  it("creates the local integration branch when it does not exist yet", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-create");
+    const cycleSha = sha(wt);
+    const r = await landLocalDelivery(repo, wt, "integration");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("integration");
+    expect(r.method).toBe("created");
+    expect(branchSha(repo, "integration")).toBe(cycleSha);
+  });
+
+  it("merges (merge commit) when the local integration branch has diverged", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-merge");
+    const cycleSha = sha(wt);
+    // advance LOCAL main independently so it is NOT an ancestor of the cycle HEAD
+    writeFileSync(join(repo, "other.txt"), "divergent main work\n");
+    g(repo, "add", "-A");
+    g(repo, "commit", "-q", "-m", "divergent main");
+    const mainBefore = branchSha(repo, "main");
+
+    const r = await landLocalDelivery(repo, wt, "origin/main");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("main");
+    expect(r.method).toBe("merge");
+    // a NEW merge commit whose parents include both the diverged main and the cycle HEAD
+    const mainAfter = branchSha(repo, "main");
+    expect(mainAfter).not.toBe(mainBefore);
+    expect(mainAfter).not.toBe(cycleSha);
+    const parents = g(repo, "rev-list", "--parents", "-n", "1", mainAfter).split(" ").slice(1);
+    expect(parents).toContain(mainBefore);
+    expect(parents).toContain(cycleSha);
+    // both the divergent main file and the cycle file are present in the merged tree
+    expect(g(repo, "cat-file", "-t", `${mainAfter}:other.txt`)).toBe("blob");
+    expect(g(repo, "cat-file", "-t", `${mainAfter}:feature.txt`)).toBe("blob");
+  });
+
+  it("reports a non-zero code when the worktree HEAD cannot be resolved", async () => {
+    const repo = initRepo("land-bad");
+    // point at a non-worktree dir → rev-parse HEAD fails
+    const r = await landLocalDelivery(repo, join(repo, "does-not-exist"), "origin/main");
+    expect(r.code).not.toBe(0);
   });
 });

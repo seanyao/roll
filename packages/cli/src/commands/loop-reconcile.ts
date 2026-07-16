@@ -255,7 +255,15 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
     const state = projectDeliveryState(events, cycleId);
     // Only reconcile non-terminal cycles. Retroactive heal covers
     // awaiting_merge, building, ci_failed — but NOT already delivered.
-    if (state === "delivered" || state === "delivered_external" || state === "superseded" || state === "abandoned") {
+    // E3: `delivered_local` is terminal too (local-only landing, no PR to
+    // reconcile) — skip it exactly like the other delivered terminals.
+    if (
+      state === "delivered" ||
+      state === "delivered_external" ||
+      state === "delivered_local" ||
+      state === "superseded" ||
+      state === "abandoned"
+    ) {
       continue;
     }
     const meta = cycleMeta.get(cycleId) ?? { storyId: "", branch: `loop/${cycleId}` };

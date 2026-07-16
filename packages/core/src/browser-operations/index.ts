@@ -10,3 +10,4 @@ export * from "./redaction.js";
 export * from "./run-service.js";
 export * from "./transport.js";
 export * from "./mcp-manifest.js";
+export * from "./live-gate.js";

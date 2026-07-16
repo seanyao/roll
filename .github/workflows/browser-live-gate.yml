@@ -1,0 +1,56 @@
+name: Browser Live Gate
+
+# US-BROW-020 — the real local Chrome + chrome-devtools-mcp regression gate.
+#
+# This is the DECLARED Chrome-capable CI lane. It runs the live managed-lane
+# suite against a hermetic local HTTP target through a real, exact-version
+# chrome-devtools-mcp process and real temporary Chrome — no external network.
+#
+# It is intentionally NOT part of the required `CI` workflow: the default
+# `roll test` / `pnpm -r test` suite must stay green with no Chrome. This lane
+# provisions Chrome, sets ROLL_BROWSER_LIVE=1, and fails LOUD if the managed
+# lane cannot be verified end-to-end. It must never be silently skipped while
+# the feature is reported as verified.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly regression against the real browser stack (07:17 UTC — off the hour).
+    - cron: "17 7 * * *"
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/**/browser-operations/**"
+      - "packages/cli/src/lib/browser-live-gate.ts"
+      - "packages/cli/src/lib/managed-browser-run.ts"
+      - "packages/cli/test/live/**"
+      - ".github/workflows/browser-live-gate.yml"
+
+jobs:
+  browser-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # ubuntu-latest ships a real Google Chrome; make it explicit and pinned so
+      # the lane is genuinely Chrome-capable rather than accidentally green.
+      - uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+        with:
+          chrome-version: stable
+      - run: pnpm install --frozen-lockfile
+      # Fail loud if Chrome is somehow absent — this lane declares capability.
+      - name: Verify Chrome capability
+        run: |
+          which google-chrome google-chrome-stable chromium 2>/dev/null || \
+            "${{ steps.setup-chrome.outputs.chrome-path }}" --version
+      - name: Run live managed-lane gate
+        env:
+          ROLL_BROWSER_LIVE: "1"
+        run: pnpm test:browser-live

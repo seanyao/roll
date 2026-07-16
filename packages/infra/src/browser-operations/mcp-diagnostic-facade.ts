@@ -76,7 +76,7 @@ export class McpDiagnosticFacade {
       };
     }
 
-    const finalUrl = isRecord(raw) && typeof raw["finalUrl"] === "string" ? raw["finalUrl"] : isRecord(raw) && typeof raw["url"] === "string" ? raw["url"] : undefined;
+    const finalUrl = extractFinalUrl(raw);
     const kind = ARTIFACT_KIND[approved.kind];
     if (kind === undefined) {
       return { status: "ok", diagnosticRefs: [], summary: `${approved.kind} completed`, ...(finalUrl === undefined ? {} : { finalUrl }) };
@@ -143,11 +143,13 @@ function toolInput(action: string, payload: Record<string, string | number | boo
     case "navigate":
       return { url: boundedString(payload["url"], 2_048) };
     case "snapshot":
-      return { selector: boundedString(payload["selector"], 512) };
+      // take_snapshot rejects unknown arguments ("selector" included) on the
+      // real server — it snapshots the whole page; callers filter afterwards.
+      return {};
     case "click":
-      return { selector: boundedString(payload["selector"], 512) };
+      return { uid: boundedString(payload["selector"], 512) };
     case "fill":
-      return { selector: boundedString(payload["selector"], 512), value: boundedString(payload["value"], 4_096) };
+      return { uid: boundedString(payload["selector"], 512), value: boundedString(payload["value"], 4_096) };
     case "press_key":
       return { key: boundedString(payload["key"], 64) };
     default:
@@ -157,6 +159,27 @@ function toolInput(action: string, payload: Record<string, string | number | boo
 
 function boundedString(value: string | number | boolean | undefined, maxLength: number): string | undefined {
   return typeof value === "string" ? value.slice(0, maxLength) : undefined;
+}
+
+/**
+ * Extract the final URL from a real chrome-devtools-mcp response.
+ *
+ * The real server (US-BROW-020, verified live) replies in PROSE, not JSON:
+ * navigate returns "Successfully navigated to <url>." plus a "## Pages" section
+ * whose selected entry carries the live URL — `1: title (<url>) [selected]`.
+ * Structured `finalUrl`/`url` fields are kept for the fixture seam.
+ */
+export function extractFinalUrl(raw: unknown): string | undefined {
+  if (isRecord(raw)) {
+    if (typeof raw["finalUrl"] === "string") return raw["finalUrl"];
+    if (typeof raw["url"] === "string") return raw["url"];
+  }
+  const text = typeof raw === "string" ? raw : isRecord(raw) && typeof raw["text"] === "string" ? raw["text"] : undefined;
+  if (text === undefined) return undefined;
+  const selected = /^\s*\d+:.*\((\S+?)\)\s*\[selected\]\s*$/m.exec(text);
+  if (selected?.[1] !== undefined) return selected[1];
+  const navigated = /Successfully navigated to (\S+?)\.?\s*$/m.exec(text);
+  return navigated?.[1];
 }
 
 function normalizeArtifactBytes(action: string, raw: unknown): Buffer | undefined {
@@ -174,7 +197,7 @@ function normalizeSnapshot(raw: unknown): { text: string } {
 }
 
 function normalizeConsole(raw: unknown): Array<{ level: string; message: string; source?: string }> {
-  return asList(raw).slice(0, 50).map((entry) => {
+  const structured = asList(raw).slice(0, 50).map((entry) => {
     const value = isRecord(entry) ? entry : {};
     const source = stringField(value, "source");
     return {
@@ -183,10 +206,17 @@ function normalizeConsole(raw: unknown): Array<{ level: string; message: string;
       ...(source === undefined ? {} : { source }),
     };
   });
+  if (structured.length > 0) return structured;
+  // Real chrome-devtools-mcp replies in prose: `msgid=1 [log] message (…)`.
+  return proseLines(raw)
+    .map((line) => /^msgid=\d+\s+\[(\w+)\]\s+(.*)$/.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .slice(0, 50)
+    .map((m) => ({ level: m[1] ?? "info", message: m[2] ?? "" }));
 }
 
 function normalizeNetwork(raw: unknown): Array<{ method: string; origin?: string; status?: number; duration?: number; failure?: string }> {
-  return asList(raw).slice(0, 50).map((entry) => {
+  const structured = asList(raw).slice(0, 50).map((entry) => {
     const value = isRecord(entry) ? entry : {};
     const url = stringField(value, "url");
     const status = numberField(value, "status");
@@ -200,6 +230,23 @@ function normalizeNetwork(raw: unknown): Array<{ method: string; origin?: string
       ...(failure === undefined ? {} : { failure }),
     };
   });
+  if (structured.length > 0) return structured;
+  // Real chrome-devtools-mcp replies in prose: `reqid=1 GET http://… [200]`.
+  return proseLines(raw)
+    .map((line) => /^reqid=\d+\s+(\w+)\s+(\S+)\s+\[(\d+)\]/.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .slice(0, 50)
+    .map((m) => ({
+      method: m[1] ?? "GET",
+      ...(m[2] === undefined ? {} : { origin: originOf(m[2]) }),
+      ...(m[3] === undefined ? {} : { status: Number(m[3]) }),
+    }));
+}
+
+/** Split a prose (text) MCP reply into trimmed lines; [] for non-text replies. */
+function proseLines(raw: unknown): string[] {
+  const text = typeof raw === "string" ? raw : isRecord(raw) && typeof raw["text"] === "string" ? raw["text"] : undefined;
+  return text === undefined ? [] : text.split("\n").map((line) => line.trim());
 }
 
 function asList(raw: unknown): unknown[] {

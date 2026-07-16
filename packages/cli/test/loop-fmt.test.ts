@@ -21,6 +21,16 @@ const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll
 
 renderState.useColor = false; // deterministic, plain-text assertions
 
+/** FIX-1269: poll for an observable condition instead of sleeping a guessed
+ *  wall-clock amount — fixed sleeps flake on loaded CI runners. */
+async function waitUntil(cond: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitUntil: condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 describe("renderSignal", () => {
   it("renders a tcr signal with category + summary + detail", () => {
     const s = renderSignal({ ts: 0, cycleId: "c", seg: "build", kind: "tcr", tier: "A", summary: "abc1234", detail: "add thing", result: "pass" });
@@ -69,7 +79,10 @@ describe("streamThroughRenderer — status heartbeat", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 45));
+    // FIX-1269: a fixed 45ms sleep assumed ≥3 interval ticks — loaded CI runners
+    // deliver fewer and the second heartbeat never rendered. Wait for the
+    // observable outcome instead of a wall-clock guess.
+    await waitUntil(() => chunks.join("").includes("quiet 6m"));
     input.end();
     await done;
 
@@ -106,7 +119,8 @@ describe("streamThroughRenderer — status heartbeat", () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 45));
+    // FIX-1269: wait for the transition block to render, not a fixed sleep.
+    await waitUntil(() => chunks.join("").includes("quiet <1m · FIX-1050"));
     input.end();
     await done;
 

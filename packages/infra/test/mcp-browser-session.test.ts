@@ -140,7 +140,13 @@ describe("US-BROW-016 McpBrowserSession", () => {
     await McpBrowserSession.open({ runId: "run-1", now, emit: () => undefined, spawn });
 
     expect(seenCommand).toBe("npx");
-    expect(seenArgs).toEqual(["-y", `chrome-devtools-mcp@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics"]);
+    expect(seenArgs).toEqual([
+      "-y",
+      `chrome-devtools-mcp@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`,
+      "--no-usage-statistics",
+      "--isolated",
+      "--headless",
+    ]);
   });
 
   it("emits started and initialized after successful initialize + manifest verification", async () => {

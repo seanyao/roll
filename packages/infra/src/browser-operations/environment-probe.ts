@@ -295,7 +295,7 @@ export function proposedBrowserOperationsConfig(): string {
   return [
     "devtools:",
     `  command: npx`,
-    `  args: ["-y", "${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}", "--no-usage-statistics"]`,
+    `  args: ["-y", "${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}", "--no-usage-statistics", "--isolated", "--headless"]`,
     `  package: ${MANAGED_DEVTOOLS_PACKAGE}`,
     `  package_version: ${MANAGED_DEVTOOLS_PACKAGE_VERSION}`,
     `  chrome_channel: stable`,

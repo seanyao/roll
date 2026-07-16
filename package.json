@@ -8,6 +8,7 @@
     "lint:story-ids": "node scripts/lint-story-ids.mjs",
     "lint:role-taxonomy": "node scripts/audit-role-taxonomy.mjs",
     "test:e2e": "pnpm -r build && pnpm --filter @roll/cli exec vitest run test/critical-flows.e2e.test.ts",
+    "test:browser-live": "pnpm -r build && ROLL_BROWSER_LIVE=1 pnpm --filter @roll/cli exec vitest run --config vitest.live.config.ts",
     "test:cov": "pnpm -r exec vitest run --coverage.enabled --coverage.provider=v8 --coverage.include='src/**' --coverage.reporter=text-summary --coverage.reporter=text",
     "bundle": "node scripts/bundle.mjs",
     "postinstall": "node scripts/postinstall-roll-capture.mjs",

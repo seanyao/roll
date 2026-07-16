@@ -15,7 +15,7 @@ describe("US-BROW-002 BrowserTransportRegistry", () => {
       transport: {
         logicalServer: "chrome-devtools",
         command: "npx",
-        args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics"],
+        args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics", "--isolated", "--headless"],
         remoteDebugging: { host: "127.0.0.1", port: 9222 },
       },
     });
@@ -45,7 +45,7 @@ describe("US-BROW-002 BrowserTransportRegistry", () => {
     expect(second).toMatchObject({
       kind: "resolved",
       transport: {
-        args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics"],
+        args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics", "--isolated", "--headless"],
         remoteDebugging: { host: "127.0.0.1", port: 9222 },
       },
     });

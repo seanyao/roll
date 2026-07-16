@@ -25,7 +25,9 @@ export type VersionSource = () => string | typeof NO_UPDATE_AVAILABLE;
 export interface BrowserTransport {
   logicalServer: typeof MANAGED_DEVTOOLS_SERVER;
   command: "npx";
-  args: readonly ["-y", string, "--no-usage-statistics"];
+  // --isolated: server-managed TEMPORARY Chrome profile, deleted on close.
+  // --headless: server-launched Chrome needs no display (CI lane has none).
+  args: readonly ["-y", string, "--no-usage-statistics", "--isolated", "--headless"];
   remoteDebugging: { host: "127.0.0.1"; port: 9222 };
 }
 
@@ -37,7 +39,7 @@ function managedTransport(): BrowserTransport {
   return {
     logicalServer: MANAGED_DEVTOOLS_SERVER,
     command: "npx",
-    args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics"],
+    args: ["-y", `${MANAGED_DEVTOOLS_PACKAGE}@${MANAGED_DEVTOOLS_PACKAGE_VERSION}`, "--no-usage-statistics", "--isolated", "--headless"],
     remoteDebugging: { host: "127.0.0.1", port: 9222 },
   };
 }

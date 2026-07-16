@@ -119,10 +119,17 @@ export class McpBrowserSession {
     const doSpawn = deps.spawn ?? defaultMcpSpawn;
 
     const command = "npx";
+    // US-BROW-020 (live-gate finding): --isolated gives the server a temporary
+    // Chrome profile that is deleted on close — without it the server reuses a
+    // PERSISTENT profile, breaking the managed lane's "temp profile, no state
+    // survives" promise. --headless lets the server-launched Chrome run on
+    // GUI-less machines (the Chrome-capable CI lane has no display).
     const args: readonly string[] = [
       "-y",
       `${MANAGED_DEVTOOLS_PACKAGE}@${manifest.version}`,
       "--no-usage-statistics",
+      "--isolated",
+      "--headless",
     ];
 
     let child: ChildProcessWithoutNullStreams;
@@ -368,6 +375,15 @@ function parseToolResult(raw: unknown): unknown {
     .filter((item): item is Record<string, unknown> => isRecord(item) && item["type"] === "text")
     .map((item) => item["text"])
     .find((value): value is string => typeof value === "string");
+  // US-BROW-020: the real server returns screenshots as a separate
+  // `{type:"image", data:<base64>}` content item next to the prose text item —
+  // text-only parsing dropped the bytes and every live screenshot failed.
+  const image = content.find(
+    (item): item is Record<string, unknown> => isRecord(item) && item["type"] === "image" && typeof item["data"] === "string",
+  );
+  if (image !== undefined) {
+    return { text: text ?? "", data: image["data"], mimeType: image["mimeType"] };
+  }
   if (text === undefined) return undefined;
   try {
     return JSON.parse(text) as unknown;

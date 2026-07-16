@@ -23,7 +23,7 @@ describe("US-BROW-002 ManagedDevToolsTransport", () => {
       {
         logicalServer: "chrome-devtools",
         command: "npx",
-        args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics"],
+        args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics", "--isolated", "--headless"],
         remoteDebugging: { host: "127.0.0.1", port: 9222 },
       },
     ]);
@@ -57,7 +57,7 @@ describe("US-BROW-002 ManagedDevToolsTransport", () => {
     })).resolves.toMatchObject({ kind: "connected" });
     expect(seen).toEqual([expect.objectContaining({
       command: "npx",
-      args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics"],
+      args: ["-y", "chrome-devtools-mcp@1.5.0", "--no-usage-statistics", "--isolated", "--headless"],
       remoteDebugging: { host: "127.0.0.1", port: 9222 },
     })]);
   });

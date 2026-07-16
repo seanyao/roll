@@ -119,10 +119,17 @@ export class McpBrowserSession {
     const doSpawn = deps.spawn ?? defaultMcpSpawn;
 
     const command = "npx";
+    // US-BROW-020 (live-gate finding): --isolated gives the server a temporary
+    // Chrome profile that is deleted on close — without it the server reuses a
+    // PERSISTENT profile, breaking the managed lane's "temp profile, no state
+    // survives" promise. --headless lets the server-launched Chrome run on
+    // GUI-less machines (the Chrome-capable CI lane has no display).
     const args: readonly string[] = [
       "-y",
       `${MANAGED_DEVTOOLS_PACKAGE}@${manifest.version}`,
       "--no-usage-statistics",
+      "--isolated",
+      "--headless",
     ];
 
     let child: ChildProcessWithoutNullStreams;

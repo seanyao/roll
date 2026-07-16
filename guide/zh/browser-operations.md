@@ -173,28 +173,43 @@ roll browser setup --confirm
 ### 运行受管操作（真实 MCP 通道）
 
 `roll browser run` 带 `--story` 和 `--url` 会经**真实、策略控制的 MCP 通道**
-执行。这是生产路径：
+执行。这是生产路径。项目须先在 `.roll/policy.yaml` 显式开闸（默认全部关闭）：
+
+```yaml
+browser_operations:
+  enabled: true
+  managed:
+    enabled: true
+    allowed_origins: [https://example.com]
+    allowed_actions: [navigate, snapshot, console, network, screenshot]
+    max_runs_per_cycle: 20
+    timeout_ms: 30000
+```
 
 ```bash
 roll browser run \
   --story US-BROW-021 \
-  --url https://example.test \
+  --url https://example.com \
   --action screenshot
 ```
 
-```
-Managed browser operation — real MCP lane
-受管浏览器操作 — 真实 MCP 通道
+真实运行逐字输出（2026-07-16 实录）：
 
-  lane / 通道:            managed (real MCP)
+```
+Managed browser operation — real MCP
+受管浏览器操作 — 真实 MCP
+
+  mcp package / MCP 包:  1.5.0
+  transport initialized / 传输初始化:  yes
+  manifest verified / 清单验证:  yes
+  lane / 通道:            managed
   action / 动作:          screenshot
-  target / 目标:          https://example.test
+  target / 目标:          https://example.com
   run state / 运行状态:   passed
   result / 结果:          pass (action: ok)
-  mcp session / MCP 会话:  initialized & validated (chrome-devtools-mcp 1.5.0, 8 tools)
   temp profile / 临时档案: removed (owner state never entered / 绝不进入 owner 状态)
   diagnostics / 诊断产物:  1 (diagnostic-only, NOT visual acceptance / 仅诊断，非视觉验收)
-  summary / 摘要:         diagnostic screenshot captured at https://example.test
+  summary / 摘要:         diagnostic screenshot recorded
 
   Diagnostic success is not visual acceptance evidence.
   诊断通过不等于视觉验收证据。
@@ -204,9 +219,9 @@ Managed browser operation — real MCP lane
 
 MCP 会话生命周期：
 
-1. **策略检查** —— 项目 `.roll/policy.yaml` 必须启用受管通道。若策略中
-   `browser.managed.lane: disabled`（无显式策略时的默认值），运行在启动任何
-   进程前即被**拒绝**。
+1. **策略检查** —— 项目 `.roll/policy.yaml` 必须启用受管通道
+   （`browser_operations.enabled: true` 加 `managed.enabled: true` 与 origin
+   白名单）。无显式策略时默认全部关闭，运行在启动任何进程前即被**拒绝**。
 2. **会话启动** —— 固定版本的 `chrome-devtools-mcp` 以全新临时 Chrome 档案
    启动。
 3. **MCP 握手** —— `initialize` → `tools/list` → 清单验证。任何一步失败即中止
@@ -219,22 +234,21 @@ MCP 会话生命周期：
 
 #### 阻塞/不可用实录
 
-受管通道不可用或被策略拒绝时，运行会大声失败：
+受管通道不可用或被策略拒绝时，运行会大声失败。无 `.roll/policy.yaml` 时的
+逐字输出（2026-07-16 实录）：
 
 ```
-Managed browser operation — real MCP lane
-受管浏览器操作 — 真实 MCP 通道
+Managed browser operation — real MCP
+受管浏览器操作 — 真实 MCP
 
-  lane / 通道:            managed (real MCP)
-  action / 动作:          screenshot
-  target / 目标:          https://example.test
-  run state / 运行状态:   denied
-  result / 结果:          blocked — managed lane is disabled by project policy
-  temp profile / 临时档案: none (no process spawned / 未启动进程)
+  denied / 已拒绝:       Browser operations are disabled in project policy
 
-  Resolve: add `browser.managed.lane: enabled` to .roll/policy.yaml, run
-  `roll browser doctor --probe` to verify, then retry.
+  Diagnostic success is not visual acceptance evidence.
+  诊断通过不等于视觉验收证据。
 ```
+
+修复：把上文的 `browser_operations:` 开闸块加进 `.roll/policy.yaml`，跑
+`roll browser doctor --probe` 验证后重试。
 
 失败模式与修复：
 
@@ -242,7 +256,7 @@ Managed browser operation — real MCP lane
 |------|------------|------|
 | `chrome-devtools-mcp` 未安装 | `managed: degraded — transport not found` | `npm i -g chrome-devtools-mcp@<version>` 或 `roll browser setup --confirm` |
 | Chrome 二进制未找到 | `managed: degraded — chrome not found` | 安装 Chrome（stable 渠道） |
-| 策略禁用受管通道 | run → `denied` | 在 `.roll/policy.yaml` 中设 `browser.managed.lane: enabled` |
+| 策略禁用受管通道 | run → `denied` | 在 `.roll/policy.yaml` 加 `browser_operations:` 开闸块（`enabled: true` + `managed.enabled: true` + origin 白名单） |
 | MCP 握手失败 | `doctor --probe` → `manifest` 失败 | 检查 `chrome-devtools-mcp` 版本；重跑 `roll browser update --check` |
 | MCP 进程运行中崩溃 | run → `devtools-error` | 重跑；持续崩溃 → `roll browser doctor --probe` |
 | 运行超时 | run → `timeout` | 目标可能较慢；档案无论如何都会清理 |

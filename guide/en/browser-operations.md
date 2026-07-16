@@ -197,28 +197,44 @@ nothing.
 ### Running a Managed Operation (Real MCP Lane)
 
 `roll browser run` with `--story` and `--url` executes through the **real,
-policy-gated MCP lane**. This is the production path:
+policy-gated MCP lane**. This is the production path. The project must first
+opt in via `.roll/policy.yaml` (everything is disabled by default):
+
+```yaml
+browser_operations:
+  enabled: true
+  managed:
+    enabled: true
+    allowed_origins: [https://example.com]
+    allowed_actions: [navigate, snapshot, console, network, screenshot]
+    max_runs_per_cycle: 20
+    timeout_ms: 30000
+```
 
 ```bash
 roll browser run \
   --story US-BROW-021 \
-  --url https://example.test \
+  --url https://example.com \
   --action screenshot
 ```
 
-```
-Managed browser operation — real MCP lane
-受管浏览器操作 — 真实 MCP 通道
+Verbatim output (captured from a real run, 2026-07-16):
 
-  lane / 通道:            managed (real MCP)
+```
+Managed browser operation — real MCP
+受管浏览器操作 — 真实 MCP
+
+  mcp package / MCP 包:  1.5.0
+  transport initialized / 传输初始化:  yes
+  manifest verified / 清单验证:  yes
+  lane / 通道:            managed
   action / 动作:          screenshot
-  target / 目标:          https://example.test
+  target / 目标:          https://example.com
   run state / 运行状态:   passed
   result / 结果:          pass (action: ok)
-  mcp session / MCP 会话:  initialized & validated (chrome-devtools-mcp 1.5.0, 8 tools)
   temp profile / 临时档案: removed (owner state never entered / 绝不进入 owner 状态)
   diagnostics / 诊断产物:  1 (diagnostic-only, NOT visual acceptance / 仅诊断，非视觉验收)
-  summary / 摘要:         diagnostic screenshot captured at https://example.test
+  summary / 摘要:         diagnostic screenshot recorded
 
   Diagnostic success is not visual acceptance evidence.
   诊断通过不等于视觉验收证据。
@@ -230,8 +246,9 @@ Supported actions: `navigate` (default), `snapshot`, `console`, `network`,
 The MCP session lifecycle is:
 
 1. **Policy check** — the project's `.roll/policy.yaml` must enable the managed
-   lane. If the policy has `browser.managed.lane: disabled` (the default when no
-   explicit policy exists), the run is **denied** before any process starts.
+   lane (`browser_operations.enabled: true` plus `managed.enabled: true` with an
+   origin allowlist). With no explicit policy everything is disabled, and the
+   run is **denied** before any process starts.
 2. **Session spawn** — the pinned `chrome-devtools-mcp` starts with a fresh
    temporary Chrome profile.
 3. **MCP handshake** — `initialize` → `tools/list` → manifest validation.
@@ -247,22 +264,21 @@ the real lane; it is recorded in the operation ledger for auditability.
 
 #### Blocked / Unavailable Transcript
 
-When the managed lane is unavailable or policy-denied, the run fails loud:
+When the managed lane is unavailable or policy-denied, the run fails loud.
+Verbatim output with no `.roll/policy.yaml` present (captured 2026-07-16):
 
 ```
-Managed browser operation — real MCP lane
-受管浏览器操作 — 真实 MCP 通道
+Managed browser operation — real MCP
+受管浏览器操作 — 真实 MCP
 
-  lane / 通道:            managed (real MCP)
-  action / 动作:          screenshot
-  target / 目标:          https://example.test
-  run state / 运行状态:   denied
-  result / 结果:          blocked — managed lane is disabled by project policy
-  temp profile / 临时档案: none (no process spawned / 未启动进程)
+  denied / 已拒绝:       Browser operations are disabled in project policy
 
-  Resolve: add `browser.managed.lane: enabled` to .roll/policy.yaml, run
-  `roll browser doctor --probe` to verify, then retry.
+  Diagnostic success is not visual acceptance evidence.
+  诊断通过不等于视觉验收证据。
 ```
+
+Resolve: add the `browser_operations:` opt-in block shown above to
+`.roll/policy.yaml`, run `roll browser doctor --probe` to verify, then retry.
 
 Failure modes and their remediation:
 
@@ -270,7 +286,7 @@ Failure modes and their remediation:
 |---------|--------------|-----|
 | `chrome-devtools-mcp` not installed | `managed: degraded — transport not found` | `npm i -g chrome-devtools-mcp@<version>` or `roll browser setup --confirm` |
 | Chrome binary not found | `managed: degraded — chrome not found` | Install Chrome (stable channel) |
-| Policy disables managed lane | run → `denied` | Set `browser.managed.lane: enabled` in `.roll/policy.yaml` |
+| Policy disables managed lane | run → `denied` | Add the `browser_operations:` opt-in block (`enabled: true` + `managed.enabled: true` + origin allowlist) to `.roll/policy.yaml` |
 | MCP handshake fails | `doctor --probe` → `manifest` failure | Check `chrome-devtools-mcp` version; re-run `roll browser update --check` |
 | MCP process crashes mid-run | run → `devtools-error` | Re-run; consistent crashes → `roll browser doctor --probe` |
 | Run timeout | run → `timeout` | Target may be slow; profile cleaned up regardless |

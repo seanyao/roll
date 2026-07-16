@@ -583,9 +583,13 @@ describe("US-DELIV-005 — all_leased dormancy policy", () => {
     expect(shouldSuppressDormancy("all_leased")).toBe(true);
   });
 
-  it("suppressed set is exactly { all_awaiting_merge, all_pending_publish, all_leased } (tripwire)", () => {
+  it("suppressed set includes screen_locked (FIX-1268)", () => {
+    expect(shouldSuppressDormancy("screen_locked")).toBe(true);
+  });
+
+  it("suppressed set is exactly { all_awaiting_merge, all_pending_publish, all_leased, screen_locked } (tripwire)", () => {
     // Adding a reason to DORMANCY_SUPPRESSED_REASONS changes dormancy policy
-    // and needs a story. US-DELIV-005 added all_leased.
+    // and needs a story. FIX-1268 added screen_locked.
     for (const reason of [
       "all_blocked_by_deps",
       "all_merged_pending",
@@ -600,5 +604,76 @@ describe("US-DELIV-005 — all_leased dormancy policy", () => {
     expect(shouldSuppressDormancy("all_awaiting_merge")).toBe(true);
     expect(shouldSuppressDormancy("all_pending_publish")).toBe(true);
     expect(shouldSuppressDormancy("all_leased")).toBe(true);
+    expect(shouldSuppressDormancy("screen_locked")).toBe(true);
+  });
+});
+
+describe("FIX-1268 — screen-lock physical-surface gate", () => {
+  it("skips physical-surface cards while screen is locked", () => {
+    const items = [
+      item("FIX-1", TODO), // physical surface
+      item("FIX-2", TODO), // no physical surface
+    ];
+    const requiresPhysicalSurface = (id: string): boolean => id === "FIX-1";
+    expect(
+      pickStory(items, { isScreenLocked: true, requiresPhysicalSurface })?.id,
+    ).toBe("FIX-2");
+  });
+
+  it("does not skip physical-surface cards when screen is unlocked", () => {
+    const items = [
+      item("FIX-1", TODO),
+      item("FIX-2", TODO),
+    ];
+    const requiresPhysicalSurface = (id: string): boolean => id === "FIX-1";
+    expect(
+      pickStory(items, { isScreenLocked: false, requiresPhysicalSurface })?.id,
+    ).toBe("FIX-1");
+  });
+
+  it("picks a non-physical card even when a physical one is earlier in file order", () => {
+    const items = [
+      item("US-1", TODO), // physical
+      item("FIX-1", TODO), // physical
+      item("US-2", TODO), // not physical
+    ];
+    const requiresPhysicalSurface = (id: string): boolean => id.startsWith("US-1") || id === "FIX-1";
+    expect(
+      pickStory(items, { isScreenLocked: true, requiresPhysicalSurface })?.id,
+    ).toBe("US-2");
+  });
+
+  it("assessBacklog reports screen_locked when all Todo cards are physical-surface", () => {
+    const items = [item("US-1", TODO), item("FIX-1", TODO)];
+    const requiresPhysicalSurface = (): boolean => true;
+    const assessment = assessBacklog(items, { isScreenLocked: true, requiresPhysicalSurface });
+    expect(assessment).toMatchObject({
+      hasWork: false,
+      reason: "screen_locked",
+      blockedCards: [
+        { id: "US-1", reason: "screen locked — physical surface unavailable" },
+        { id: "FIX-1", reason: "screen locked — physical surface unavailable" },
+      ],
+    });
+  });
+
+  it("screen lock does not block when at least one non-physical card is pickable", () => {
+    const items = [item("US-1", TODO), item("US-2", TODO)];
+    const requiresPhysicalSurface = (id: string): boolean => id === "US-1";
+    expect(pickStory(items, { isScreenLocked: true, requiresPhysicalSurface })?.id).toBe("US-2");
+    expect(assessBacklog(items, { isScreenLocked: true, requiresPhysicalSurface })).toMatchObject({
+      hasWork: true,
+      reason: "has_work",
+    });
+  });
+
+  it("physical-surface gate is checked after durable gates (lease > screen lock)", () => {
+    const items = [item("US-1", TODO)];
+    const assessment = assessBacklog(items, {
+      isScreenLocked: true,
+      requiresPhysicalSurface: () => true,
+      deliveryLeaseBlock: () => "in_flight",
+    });
+    expect(assessment.reason).toBe("all_leased");
   });
 });

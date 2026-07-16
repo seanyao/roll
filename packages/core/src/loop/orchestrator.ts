@@ -867,6 +867,10 @@ export interface CycleContext {
    *  terminal and stamped onto the runs row (`adversarial`). Absent ⇒ a standard
    *  (non-adversarial) cycle — the row omits the field. */
   adversarialRun?: AdversarialRunSummary;
+  /** FIX-1268: the cycle produced no_story because the screen was locked and
+   *  every remaining Todo card requires a physical surface. The driver uses this
+   *  to skip the idle counter / dormancy bootout while waiting for unlock. */
+  screenLocked?: boolean;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

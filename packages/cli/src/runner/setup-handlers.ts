@@ -24,9 +24,11 @@ import {
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
+import { isScreenLocked } from "@roll/infra";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
+import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -390,6 +392,39 @@ export async function executeSetupCommand(
           return claim !== undefined && isLeaseAlive(claim);
         },
       );
+      // FIX-1268: build a physical-surface predicate so the picker can hold
+      // physical_terminal cards while the console is locked.
+      const requiresPhysicalSurface = (id: string): boolean => {
+        const specPath = storySpecPath(ports.repoCwd, id);
+        if (specPath === null) return false;
+        try {
+          return physicalTerminalFromSpecText(readFileSync(specPath, "utf8")) !== null;
+        } catch {
+          return false;
+        }
+      };
+      const screenLocked = await isScreenLocked();
+      if (screenLocked) {
+        // Emit per-card skip facts for observability BEFORE the picker runs.
+        for (const item of items) {
+          if (classifyStatus(item.status) !== "todo") continue;
+          if (!requiresPhysicalSurface(item.id)) continue;
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "pick:skipped",
+            cycleId: ctx.cycleId,
+            storyId: item.id,
+            reason: "screen_locked",
+            ts: eventTs(ports),
+          });
+        }
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:screen_locked",
+          cycleId: ctx.cycleId,
+          locked: true,
+          reason: "console locked — physical-surface cards held",
+          ts: eventTs(ports),
+        });
+      }
       const eligibility: PickOptions = {
         hasOpenPr,
         hasMergedDelivery: (id) =>
@@ -398,6 +433,8 @@ export async function executeSetupCommand(
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
         deliveryLeaseBlock: (id) => leaseBlockReason(id, activeLeases, { race: raceMode }),
+        isScreenLocked: screenLocked,
+        requiresPhysicalSurface,
       };
       for (const item of items) {
         if (classifyStatus(item.status) !== "todo") continue;
@@ -413,7 +450,8 @@ export async function executeSetupCommand(
       }
       // FIX-1215: emit pick:blocked events for ALL eligible-but-skipped cards
       // so idle output shows WHICH cards are blocked and WHY (not just open PR).
-      const blockedCards = assessBacklog(items as BacklogItem[], eligibility).blockedCards;
+      const assessment = assessBacklog(items as BacklogItem[], eligibility);
+      const blockedCards = assessment.blockedCards;
       if (blockedCards !== undefined && blockedCards.length > 0) {
         for (const bc of blockedCards) {
           ports.events.appendEvent(ports.paths.eventsPath, {
@@ -441,7 +479,14 @@ export async function executeSetupCommand(
         ...eligibility,
         ranking: semanticRanking?.ranking,
       });
-      if (story === undefined) return { event: { type: "no_story" } };
+      if (story === undefined) {
+        // FIX-1268: when the only blocker is a locked screen holding physical-surface
+        // cards, tell the driver so it can avoid counting this as idle/dormant.
+        if (assessment.reason === "screen_locked") {
+          return { event: { type: "no_story" }, ctxPatch: { screenLocked: true } };
+        }
+        return { event: { type: "no_story" } };
+      }
       appendPickRankedEvent(ports, ctx, story.id, semanticRanking);
       // Hook 3 (pre-spawn spec-truth check): the picker only returns a card whose
       // backlog row is NOT ✅ Done and that has no open PR (so by construction it

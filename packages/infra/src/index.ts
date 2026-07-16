@@ -8,6 +8,7 @@ export * from "./schedule.js";
 export * from "./tmux.js";
 export * from "./evidence.js";
 export * from "./screenshot.js";
+export * from "./screen-lock.js";
 export * from "./redact.js";
 export * from "./roll-capture.js";
 export * from "./capture-privacy.js";

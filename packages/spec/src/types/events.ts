@@ -465,6 +465,11 @@ export type RollEvent =
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
+  // E2 (submodule-aware delivery): the picked story declared a target submodule
+  // and the cycle worktree was created INSIDE that submodule (on `base`, the
+  // submodule's integration branch). Observability of WHERE this cycle's work +
+  // delivery land — the superproject vs a named submodule.
+  | { type: "worktree:submodule"; cycleId: string; storyId: string; submodule: string; base: string; ts: number }
   // FIX-1058 — evidence-repair recovery for green PRs missing acceptance reports.
   // The repair is scoped: it only generates delivery evidence (ac-map + attest
   // report); it must not modify product code unless the evidence proves the

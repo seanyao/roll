@@ -9,6 +9,7 @@ import {
   latestDeliveringCycle,
   leaseBlockReason,
   openPrBlockReason,
+  parseTargetSubmodule,
   pickStory,
   projectDeliveryLeases,
   readLeases,
@@ -29,6 +30,7 @@ import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
+import { targetSubmoduleFromSpecText } from "../lib/target-submodule.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -55,6 +57,28 @@ type SetupCommand = Extract<CycleCommand, { kind:
 /** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
 function storyLeasePath(ports: Ports): string {
   return join(dirname(ports.paths.eventsPath), "story-leases.json");
+}
+
+/**
+ * E2 — resolve the picked story's target submodule, consulting BOTH declaration
+ * sites (either may be present):
+ *   1. the backlog row tag `target-submodule:<path>` (core `parseTargetSubmodule`);
+ *   2. the spec.md frontmatter `target_submodule: <path>` (read from DESIGN
+ *      TRUTH — `ports.repoCwd`, the persistent `.roll`, not the mutable worktree).
+ * The backlog tag wins when both are present (it is the pick-time source). Spec
+ * reads are best-effort: an unreadable/missing spec never fails the resolve — it
+ * just falls through to "no submodule".
+ */
+function resolveStoryTargetSubmodule(ports: Ports, story: { id: string; desc?: string }): string | undefined {
+  const fromTag = parseTargetSubmodule(story.desc ?? "");
+  if (fromTag !== undefined) return fromTag;
+  try {
+    const spec = storySpecPath(ports.repoCwd, story.id);
+    if (spec !== null) return targetSubmoduleFromSpecText(readFileSync(spec, "utf8"));
+  } catch {
+    /* best-effort: an unreadable spec is treated as "no submodule declared" */
+  }
+  return undefined;
 }
 
 /**
@@ -577,11 +601,47 @@ export async function executeSetupCommand(
         runDir: evidenceRunDir,
         ts: eventTs(ports),
       });
+      // E2 (submodule-aware delivery): resolve the picked story's target
+      // submodule (backlog tag `target-submodule:` OR spec frontmatter
+      // `target_submodule:`). This is the FIRST step that knows the picked story
+      // (the worktree was created pre-pick on the superproject), mirroring where
+      // resume_worktree makes its post-pick decision. When a target submodule is
+      // present, create the cycle worktree INSIDE that submodule (decision #1:
+      // shared object store) so its detached HEAD is where the cycle commits and
+      // the local-delivery landing lands. A creation FAILURE is fail-loud
+      // (worktree_failed) — never silently fall back to the superproject. Absent
+      // ⇒ no submodule work at all (the existing superproject path, unchanged).
+      const targetSubmodule = resolveStoryTargetSubmodule(ports, story);
+      if (targetSubmodule !== undefined) {
+        const base = resolveIntegrationBranch(join(ports.repoCwd, targetSubmodule));
+        const sub = await ports.git.worktreeAddInSubmodule(
+          ports.repoCwd,
+          targetSubmodule,
+          ports.paths.worktreePath,
+          base,
+        );
+        if (sub.code !== 0) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `E2: submodule worktree add FAILED for ${story.id} (submodule ${targetSubmodule}, cycle ${ctx.cycleId}) — ${sub.stderr.trim()} — cycle cannot deliver into the submodule`,
+          );
+          return { event: { type: "worktree_failed" } };
+        }
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "worktree:submodule",
+          cycleId: ctx.cycleId,
+          storyId: story.id,
+          submodule: targetSubmodule,
+          base,
+          ts: eventTs(ports),
+        });
+      }
       return {
         event: { type: "story_picked", storyId: story.id },
         ctxPatch: {
           evidenceRunDir,
           ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
+          ...(targetSubmodule !== undefined ? { targetSubmodule } : {}),
         },
       };
     }

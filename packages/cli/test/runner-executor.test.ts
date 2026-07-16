@@ -1022,6 +1022,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
     git: {
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
+      worktreeAddInSubmodule: vi.fn(async () => ({ code: 0, stderr: "" })),
       worktreeSubmoduleInit: vi.fn(async () => ({ code: 0 })),
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
@@ -1410,6 +1411,50 @@ describe("executeCommand — command → executor mapping", () => {
     const none = fakePorts({ backlog: { read: () => [] } });
     const r2 = await executeCommand({ kind: "pick_story" }, none.ports, CTX);
     expect(r2.event).toEqual({ type: "no_story" });
+  });
+
+  it("E2: a non-submodule story sets NO targetSubmodule and creates NO submodule worktree", async () => {
+    const { ports } = fakePorts();
+    const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+    expect(r.event).toEqual({ type: "story_picked", storyId: "US-RUN-001" });
+    expect(r.ctxPatch?.targetSubmodule).toBeUndefined();
+    expect(ports.git.worktreeAddInSubmodule).not.toHaveBeenCalled();
+  });
+
+  it("E2: a target-submodule story patches ctx.targetSubmodule and creates the submodule worktree", async () => {
+    const { ports } = fakePorts({
+      backlog: {
+        read: () => [
+          { id: "US-RUN-002", desc: "est_min:5 `target-submodule:dukang-service-online`", status: "📋 Todo" },
+        ],
+      },
+    });
+    const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+    expect(r.event).toEqual({ type: "story_picked", storyId: "US-RUN-002" });
+    // ctx is threaded to the later delivery via the merged liveCtx.
+    expect(r.ctxPatch?.targetSubmodule).toBe("dukang-service-online");
+    // the submodule worktree was created at the canonical cycle worktree path
+    // (superprojectCwd=repoCwd, base=integration branch default origin/main).
+    expect(ports.git.worktreeAddInSubmodule).toHaveBeenCalledWith(
+      "/repo",
+      "dukang-service-online",
+      "/rt/wt",
+      "origin/main",
+    );
+  });
+
+  it("E2: a submodule-worktree creation FAILURE fails the cycle honestly (worktree_failed)", async () => {
+    const { ports } = fakePorts({
+      backlog: {
+        read: () => [{ id: "US-RUN-002", desc: "`target-submodule:sub`", status: "📋 Todo" }],
+      },
+      git: {
+        ...fakePorts().ports.git,
+        worktreeAddInSubmodule: vi.fn(async () => ({ code: 1, stderr: "submodule 'sub' is not initialized" })),
+      },
+    });
+    const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+    expect(r.event).toEqual({ type: "worktree_failed" });
   });
 
   it("FIX-1205: loop-named pending-merge PR is skipped via body trailer and the next card is picked", async () => {

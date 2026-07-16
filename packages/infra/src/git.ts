@@ -318,13 +318,15 @@ export async function worktreeSubmoduleInit(worktreePath: string): Promise<GitRe
 // ─── E2: submodule-aware worktree (worktree OF a git submodule) ───────────────
 
 /**
- * E2 — the cycle worktree path for a submodule story. The runner hands the
- * worktree bootstrap ONE canonical path (`.roll/loop/<cycleId>`), but a
- * submodule cycle must check out INSIDE the submodule's own repo. This joins the
- * submodule name under that cycle path so the submodule worktree gets its own
- * stable subdirectory (`<cycleWorktreePath>/<submoduleName>`) that will never
- * collide with the superproject worktree, and the delivery path can re-derive it
- * deterministically from the same two inputs.
+ * E2 — the on-disk path of the submodule cycle worktree. The runner hands the
+ * worktree layer ONE canonical cycle path (`.roll/loop/cycle-<id>`); a submodule
+ * cycle checks the SUBMODULE out at `<cycleWorktreePath>/<submoduleName>`. Two
+ * consumers derive the SAME path from the SAME two inputs: `create_worktree`
+ * (which creates it) and the local-delivery landing (which reads its HEAD) — so
+ * the delivery never has to guess where the submodule worktree lives. Keeping it
+ * a subdirectory (never the bare cycle path) means the superproject-linked
+ * scaffolding (`.roll` symlink lives at the cycle path) and the submodule
+ * checkout never collide.
  */
 export function submoduleWorktreePath(cycleWorktreePath: string, submoduleName: string): string {
   return join(cycleWorktreePath, submoduleName);

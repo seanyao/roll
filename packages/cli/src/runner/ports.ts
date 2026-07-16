@@ -20,6 +20,19 @@ export interface GitPort {
   fetchOrigin(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** `_worktree_create` — STRICT add (exit code propagated). */
   worktreeAdd(repoCwd: string, path: string, branch: string, base: string): Promise<{ code: number }>;
+  /** E2: create the cycle worktree ON a git SUBMODULE of the superproject
+   *  (`git -C <super>/<sub> worktree add --detach <cycleWorktreePath>/<sub> <base>`)
+   *  so it shares the submodule's object store/refs. Validates the submodule is
+   *  declared in `.gitmodules` and initialized; STRICT — a non-zero `code` (with
+   *  a diagnostic `stderr`) fails the worktree setup honestly rather than falling
+   *  back to the superproject. Used only when the picked story has a
+   *  target_submodule; non-submodule stories never call it. */
+  worktreeAddInSubmodule(
+    superprojectCwd: string,
+    submoduleName: string,
+    cycleWorktreePath: string,
+    base: string,
+  ): Promise<{ code: number; stderr: string }>;
   /** FIX-302: `_worktree_submodule_init` — `git submodule update --init
    *  --recursive` in the worktree. A fresh git worktree carries NO submodule
    *  contents (notably `skills/` is empty), so the full test can never run.

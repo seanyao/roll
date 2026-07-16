@@ -39,9 +39,9 @@ import {
   type PidAlive,
 } from "@roll/infra";
 import { getAgentSpec } from "@roll/core";
-import { parseEventLine, type RollEvent } from "@roll/spec";
 import { computeListCost, currencyFor } from "./prices-cost.js";
 import { exemptionStats, renderExemptionSignal } from "../runner/exemption-stats.js";
+import { screenLockWaitReason } from "../runner/screen-lock-events.js";
 import { TRUTH_SCHEMA_EPOCH_SEC, cycleTruthFromRow, deliveryGateDiagnosticsFromRows, outcomeToPanel, type DeliveryGateDiagnostic } from "../lib/truth-adapter.js";
 import { collectToolEvidenceFromEventsPath, formatToolCostSummary } from "../lib/tool-display.js";
 import { deliveryMetrics } from "../lib/cycle-ledger.js";
@@ -131,25 +131,6 @@ function isDir(p: string): boolean {
     return statSync(p).isDirectory();
   } catch {
     return false;
-  }
-}
-
-/** FIX-1268: read the most recent `loop:screen_locked` event from the ledger. */
-function lastScreenLockedEvent(eventsPath: string): RollEvent & { type: "loop:screen_locked" } | null {
-  try {
-    if (!existsSync(eventsPath)) return null;
-    const lines = readFileSync(eventsPath, "utf8").split(/\r?\n/);
-    let best: (RollEvent & { type: "loop:screen_locked" }) | null = null;
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      const ev = parseEventLine(lines[i] ?? "");
-      if (ev?.type === "loop:screen_locked") {
-        best = ev as RollEvent & { type: "loop:screen_locked" };
-        break;
-      }
-    }
-    return best;
-  } catch {
-    return null;
   }
 }
 
@@ -1821,15 +1802,18 @@ function render(
         c("dim", " to repair");
       ebZh = c("dim", "  Plist 存在但未加载 · 运行 ") + c("fg", "roll loop on") + c("dim", " 修复");
     } else {
-      // FIX-1268: surface a screen-lock wait reason on the dashboard.
-      let waitReason = "";
+      // FIX-1268b: status reflects the latest durable lock state. An unlock
+      // event clears the wait copy, so stale lock events cannot lie forever.
+      let waitReasonEn = "";
+      let waitReasonZh = "";
       if (args.projectSlug !== null) {
         const proj = resolveProjectPath(args.projectSlug);
         if (proj !== null) {
-          const ev = lastScreenLockedEvent(join(proj, ".roll", "loop", "events.ndjson"));
-          if (ev !== null) {
-            waitReason = ` · ${ev.reason}`;
-          }
+          const eventsPath = join(proj, ".roll", "loop", "events.ndjson");
+          const en = screenLockWaitReason(eventsPath, "en");
+          const zh = screenLockWaitReason(eventsPath, "zh");
+          waitReasonEn = en === null ? "" : ` · ${en}`;
+          waitReasonZh = zh === null ? "" : ` · ${zh}`;
         }
       }
       ebL =
@@ -1837,8 +1821,8 @@ function render(
         c("muted", " · ") +
         c("dim", "enabled · next run ") +
         c("fg", nextLoopScheduleHint(false), { bold: true }) +
-        c("dim", waitReason);
-      ebZh = c("dim", `  已启用 · 闲置 · 距下一轮 ${nextLoopScheduleHint(true)}`);
+        c("dim", waitReasonEn);
+      ebZh = c("dim", `  已启用 · 闲置 · 距下一轮 ${nextLoopScheduleHint(true)}${waitReasonZh}`);
     }
   }
 

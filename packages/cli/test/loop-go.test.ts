@@ -908,6 +908,46 @@ updatedAt: 2026-06-11T12:00:00Z
 // (reset), appends a no-delivery row (increment → STOP at K), or appends no row
 // at all (the no-cycle-terminal backstop breaks). GOAL_NO_PROGRESS_STOP === 3.
 describe("US-GOAL-005 — dead-loop breaker is airtight (no spin-hole)", () => {
+  it("FIX-1268b: screen-locked wait cycles do not advance the no-progress breaker", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-LOCKED](.roll/features/goal-mode/US-LOCKED/spec.md) | physical evidence | 📋 Todo |",
+    ]);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_009_000 + calls,
+      nowIso: () => `2026-06-11T12:50:${String(calls).padStart(2, "0")}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath }) => {
+        calls += 1;
+        const cycleId = `locked-${calls}`;
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "events.ndjson"),
+          `${JSON.stringify({ type: "loop:screen_locked", cycleId, locked: true, reason: "console locked", ts: 1_780_009_000 + calls })}\n`,
+          { flag: "a" },
+        );
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "US-LOCKED", cycle_id: cycleId, status: "idle", tcr_count: 0 })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-LOCKED", "--max-cycles", "4"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(4);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.lastDecisionReason).toBe("max_cycles");
+    expect(goal.progress).toBeUndefined();
+    expect(readEvents(p).some((event) => event.type === "goal:gate_tripped" && event.reason === "no_progress_breaker")).toBe(false);
+  });
+
   // THE SPIN-HOLE REGRESSION: a row with NO tcr_count AND no delivery evidence
   // is `known:false`, so the per-card loop skips it — but cycles INCREASE (a row
   // was appended), so the no-cycle-terminal backstop does NOT fire. Before the

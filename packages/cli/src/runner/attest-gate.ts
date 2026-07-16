@@ -628,6 +628,10 @@ export function allowedDeliverableCmd(command: string): boolean {
   // (2) denylist — reject state-changing / releasing roll subcommands.
   const sub = (tokens[subIdx] ?? "").toLowerCase();
   if (sub === "") return true; // bare `roll` (prints help) — harmless read-only.
+  if (sub === "agent" && (tokens[subIdx + 1] ?? "").toLowerCase() === "list") {
+    // `roll agent list` is read-only — allowed for acceptance demos.
+    return true;
+  }
   if (sub === "init") {
     const tail = tokens.slice(subIdx + 1);
     if (tail.join(" ") === "--diagnose --fixture state-matrix") return true;
@@ -649,7 +653,7 @@ const DELIVERABLE_CMD_DENY_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "loop", // on/off/go/… — operate the loop
   "story",
   "idea",
-  "agent", // `roll agent use` re-points the shared runner
+  "agent", // write subcommands (disable/enable/use) are state-changing; `agent list` is exempt (read-only)
   "pair",
   "attest", // re-render evidence — never from within an attest demo
   "fix",

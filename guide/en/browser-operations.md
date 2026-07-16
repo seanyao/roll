@@ -255,8 +255,11 @@ The MCP session lifecycle is:
    Any failure here aborts the run (`devtools-error`).
 4. **Action execution** — the requested action runs against the allowlisted
    target.
-5. **Cleanup** — the MCP process is terminated; the temporary profile is
-   deleted (even on timeout or crash).
+5. **Cleanup** — the MCP process group is terminated, including the `npx`
+   wrapper and its DevTools server child; the temporary profile is deleted
+   (even on timeout or crash). If cleanup cannot be confirmed, the run fails
+   loudly and reports `MCP process cleanup failed`; it never claims a clean
+   session.
 
 A target outside the allowlist — including a redirect away from the requested
 origin — is **denied**, not followed. A `--story` identifier is **required** for

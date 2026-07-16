@@ -37,6 +37,7 @@ import {
   remoteUrl,
   runPublishPlan,
   systemClock,
+  resolveIntegrationBranch,
   worktreeAdd,
   worktreeFetchOrigin,
   worktreeRemove,
@@ -167,7 +168,7 @@ export function nodePorts(opts: {
   const deliveryTruth = (): Map<string, StoryDeliveryTruth> => {
     if (deliveryTruthCache === undefined) {
       try {
-        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort);
+        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort, resolveIntegrationBranch(opts.repoCwd));
         // Derive `delivered` per story via the single deterministic query so the
         // verdict matches `roll truth query` exactly (FIX-906: one truth, all
         // consumers). Group by storyId first to avoid re-querying the same id.

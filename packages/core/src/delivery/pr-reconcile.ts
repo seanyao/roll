@@ -54,7 +54,9 @@ export type PrCloudState =
 /** The next action the reconciler decides for one pending PR. */
 export type PendingPrReconcileDecision =
   | { action: "wait"; state: Extract<PrCloudState, { kind: "open" }>; nextPollAt: string }
-  | { action: "mark_delivered"; mergeCommit: string; mergedAt: string; fetchRef: "origin/main" }
+  // E1: `fetchRef` is the integration branch to fetch after the merge lands —
+  // configurable (default origin/main), so no longer a `"origin/main"` literal.
+  | { action: "mark_delivered"; mergeCommit: string; mergedAt: string; fetchRef: string }
   | { action: "mark_not_delivered"; reason: "closed_unmerged" | "ci_red" }
   | { action: "surface_unknown"; state: Extract<PrCloudState, { kind: "unreachable" }>; retryable: boolean };
 
@@ -81,6 +83,8 @@ export interface PrStatusProvider {
 
 /** Options controlling the bounded polling loop. */
 export interface PendingPrReconcileOptions {
+  /** E1: the integration branch fetched after a merge lands (default origin/main). */
+  integrationBranch?: string;
   /** Maximum number of polls to attempt before giving up (default 20). */
   maxPolls?: number;
   /** Seconds to wait between polls (default 30). */
@@ -105,10 +109,13 @@ export interface PendingPrReconcileOptions {
  */
 export function decidePendingPrReconcile(
   state: PrCloudState,
-  opts: { pollIntervalSec?: number; nowIso?: () => string } = {},
+  opts: { pollIntervalSec?: number; nowIso?: () => string; integrationBranch?: string } = {},
 ): PendingPrReconcileDecision {
   const now = opts.nowIso ?? defaultNowIso;
   const intervalSec = opts.pollIntervalSec ?? 30;
+  // E1: after a merge lands, the ref to fetch is the integration branch
+  // (default origin/main → unchanged when unset).
+  const fetchRef = opts.integrationBranch ?? "origin/main";
 
   switch (state.kind) {
     case "merged":
@@ -116,7 +123,7 @@ export function decidePendingPrReconcile(
         action: "mark_delivered",
         mergeCommit: state.mergeCommit,
         mergedAt: state.mergedAt,
-        fetchRef: "origin/main",
+        fetchRef,
       };
     case "closed_unmerged":
       return { action: "mark_not_delivered", reason: "closed_unmerged" };
@@ -175,7 +182,7 @@ export async function runPendingPrReconcile(
   while (polls < maxPolls) {
     polls += 1;
     const state = await provider.pollPrStatus(slug, prNumber);
-    const decision = decidePendingPrReconcile(state, { pollIntervalSec: intervalSec, nowIso });
+    const decision = decidePendingPrReconcile(state, { pollIntervalSec: intervalSec, nowIso, integrationBranch: opts.integrationBranch });
 
     if (decision.action !== "wait") {
       return { decision, polls, terminal: true };

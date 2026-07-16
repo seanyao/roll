@@ -24,7 +24,7 @@ import {
   EventBus,
   type PrStatusProvider,
 } from "@roll/core";
-import { GitHubPrStatusProvider } from "@roll/infra";
+import { GitHubPrStatusProvider, resolveIntegrationBranch } from "@roll/infra";
 import { markDoneGuarded } from "../runner/done-guard.js";
 
 export const RECONCILE_PENDING_USAGE =
@@ -184,11 +184,17 @@ export async function loopReconcilePendingCommand(
       const state = await provider.pollPrStatus(slug, prNumber);
 
       if (state.kind === "merged") {
-        // Fetch origin/main so future operations (e.g. cycles view rebuild)
-        // see the merge commit. We do NOT call ensureDeliveriesFresh here
-        // because it would rebuild the entire cache from runs+git facts,
+        // Fetch the integration branch so future operations (e.g. cycles view
+        // rebuild) see the merge commit. We do NOT call ensureDeliveriesFresh
+        // here because it would rebuild the entire cache from runs+git facts,
         // wiping the pending record before we can append the done record.
-        nodeExecPort.run("git", ["-C", cwd, "fetch", "origin", "main", "--quiet"]);
+        // E1: remote+branch derive from the configured integration branch
+        // (default origin/main → the fetch stays `fetch origin main`).
+        const integrationBranch = resolveIntegrationBranch(cwd);
+        const slash = integrationBranch.indexOf("/");
+        const fetchRemote = slash === -1 ? "origin" : integrationBranch.slice(0, slash);
+        const fetchBranch = slash === -1 ? integrationBranch : integrationBranch.slice(slash + 1);
+        nodeExecPort.run("git", ["-C", cwd, "fetch", fetchRemote, fetchBranch, "--quiet"]);
 
         const newRecord: DeliveryRecord = {
           storyId: record.storyId,

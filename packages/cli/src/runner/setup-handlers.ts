@@ -9,7 +9,6 @@ import {
   latestDeliveringCycle,
   leaseBlockReason,
   openPrBlockReason,
-  parseTargetSubmodule,
   pickStory,
   projectDeliveryLeases,
   readLeases,
@@ -30,7 +29,7 @@ import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
-import { targetSubmoduleFromSpecText } from "../lib/target-submodule.js";
+import { createSubmoduleWorktreeIfDeclared } from "./submodule-worktree.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -57,28 +56,6 @@ type SetupCommand = Extract<CycleCommand, { kind:
 /** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
 function storyLeasePath(ports: Ports): string {
   return join(dirname(ports.paths.eventsPath), "story-leases.json");
-}
-
-/**
- * E2 — resolve the picked story's target submodule, consulting BOTH declaration
- * sites (either may be present):
- *   1. the backlog row tag `target-submodule:<path>` (core `parseTargetSubmodule`);
- *   2. the spec.md frontmatter `target_submodule: <path>` (read from DESIGN
- *      TRUTH — `ports.repoCwd`, the persistent `.roll`, not the mutable worktree).
- * The backlog tag wins when both are present (it is the pick-time source). Spec
- * reads are best-effort: an unreadable/missing spec never fails the resolve — it
- * just falls through to "no submodule".
- */
-function resolveStoryTargetSubmodule(ports: Ports, story: { id: string; desc?: string }): string | undefined {
-  const fromTag = parseTargetSubmodule(story.desc ?? "");
-  if (fromTag !== undefined) return fromTag;
-  try {
-    const spec = storySpecPath(ports.repoCwd, story.id);
-    if (spec !== null) return targetSubmoduleFromSpecText(readFileSync(spec, "utf8"));
-  } catch {
-    /* best-effort: an unreadable spec is treated as "no submodule declared" */
-  }
-  return undefined;
 }
 
 /**
@@ -253,15 +230,10 @@ export async function executeSetupCommand(
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
     case "create_worktree": {
-      // Always base the cycle worktree on origin/main (the I12 fresh-context
-      // default). RESUME-PRIOR-WORK does NOT happen here: the picker reads the
-      // backlog INSIDE the worktree (FIX-198/FIX-204C), so the story id is still
-      // UNDEFINED at create_worktree time — resolveResumeBase would early-return
-      // origin/main with no alert and resume could never engage (the FIX-284
-      // bug). The resume decision is deferred to `resume_worktree`, which fires
-      // AFTER pick_story with the real story id and re-points this worktree onto a
-      // resumable un-merged branch when one exists. Keying purely on the runs
-      // ledger + git keeps it uniform for every agent (normalize-agents thesis).
+      // RESUME-PRIOR-WORK does NOT happen here: the story id is UNDEFINED at
+      // create_worktree (the picker reads the backlog INSIDE the worktree,
+      // FIX-198/FIX-204C), so resume/submodule decisions are deferred to the
+      // post-pick steps (resume_worktree + the E2 submodule worktree) — FIX-284.
       // E1: base = configured integration branch (default origin/main → unchanged).
       const base = resolveIntegrationBranch(ports.repoCwd);
       const r = await ports.git.worktreeAdd(
@@ -601,47 +573,15 @@ export async function executeSetupCommand(
         runDir: evidenceRunDir,
         ts: eventTs(ports),
       });
-      // E2 (submodule-aware delivery): resolve the picked story's target
-      // submodule (backlog tag `target-submodule:` OR spec frontmatter
-      // `target_submodule:`). This is the FIRST step that knows the picked story
-      // (the worktree was created pre-pick on the superproject), mirroring where
-      // resume_worktree makes its post-pick decision. When a target submodule is
-      // present, create the cycle worktree INSIDE that submodule (decision #1:
-      // shared object store) so its detached HEAD is where the cycle commits and
-      // the local-delivery landing lands. A creation FAILURE is fail-loud
-      // (worktree_failed) — never silently fall back to the superproject. Absent
-      // ⇒ no submodule work at all (the existing superproject path, unchanged).
-      const targetSubmodule = resolveStoryTargetSubmodule(ports, story);
-      if (targetSubmodule !== undefined) {
-        const base = resolveIntegrationBranch(join(ports.repoCwd, targetSubmodule));
-        const sub = await ports.git.worktreeAddInSubmodule(
-          ports.repoCwd,
-          targetSubmodule,
-          ports.paths.worktreePath,
-          base,
-        );
-        if (sub.code !== 0) {
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `E2: submodule worktree add FAILED for ${story.id} (submodule ${targetSubmodule}, cycle ${ctx.cycleId}) — ${sub.stderr.trim()} — cycle cannot deliver into the submodule`,
-          );
-          return { event: { type: "worktree_failed" } };
-        }
-        ports.events.appendEvent(ports.paths.eventsPath, {
-          type: "worktree:submodule",
-          cycleId: ctx.cycleId,
-          storyId: story.id,
-          submodule: targetSubmodule,
-          base,
-          ts: eventTs(ports),
-        });
-      }
+      // E2: post-pick submodule worktree (fail-loud) — see submodule-worktree.ts.
+      const sub = await createSubmoduleWorktreeIfDeclared(ports, ctx, story);
+      if (sub.failed) return { event: { type: "worktree_failed" } };
       return {
         event: { type: "story_picked", storyId: story.id },
         ctxPatch: {
           evidenceRunDir,
           ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
-          ...(targetSubmodule !== undefined ? { targetSubmodule } : {}),
+          ...(sub.targetSubmodule !== undefined ? { targetSubmodule: sub.targetSubmodule } : {}),
         },
       };
     }

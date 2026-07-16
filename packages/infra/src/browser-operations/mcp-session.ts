@@ -38,8 +38,18 @@ export type McpBrowserSessionEvent =
   | Extract<BrowserOperationEvent, { type: "browser:mcp-closed" }>
   | Extract<BrowserOperationEvent, { type: "browser:mcp-failed" }>;
 
+/** Process-group settings required for a managed MCP sidecar. */
+export interface McpSpawnOptions {
+  /** The npx wrapper must lead its own group so close can terminate its server child too. */
+  detached: true;
+}
+
 /** Injectable spawn seam. The default refuses every project override. */
-export type McpSpawn = (command: string, args: readonly string[]) => ChildProcessWithoutNullStreams;
+export type McpSpawn = (
+  command: string,
+  args: readonly string[],
+  options: McpSpawnOptions,
+) => ChildProcessWithoutNullStreams;
 
 /** Dependencies for {@link McpBrowserSession}. */
 export interface McpBrowserSessionDeps {
@@ -134,7 +144,7 @@ export class McpBrowserSession {
 
     let child: ChildProcessWithoutNullStreams;
     try {
-      child = doSpawn(command, args);
+      child = doSpawn(command, args, { detached: true });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       emit({ type: "browser:mcp-failed", runId, ts: now(), category: "crash", message: `spawn failed: ${message}` });
@@ -155,8 +165,11 @@ export class McpBrowserSession {
       const message = cause instanceof Error ? cause.message : String(cause);
       const category = failureCategory(cause);
       emit({ type: "browser:mcp-failed", runId, ts: now(), category, message });
-      // Best-effort cleanup so the child is never leaked.
-      await killQuietly(child);
+      try {
+        await terminateMcpProcessTree(child);
+      } catch (cleanupCause) {
+        emit({ type: "browser:mcp-failed", runId, ts: now(), category: "crash", message: cleanupFailureMessage(cleanupCause) });
+      }
       throw cause instanceof DevToolsProtocolError ? cause : new DevToolsProtocolError(message);
     }
   }
@@ -179,7 +192,13 @@ export class McpBrowserSession {
   async close(): Promise<void> {
     if (this.rpc.isClosed()) return;
     this.rpc.markClosed();
-    await killQuietly(this.child);
+    try {
+      await terminateMcpProcessTree(this.child);
+    } catch (cause) {
+      const message = cleanupFailureMessage(cause);
+      this.deps.emit({ type: "browser:mcp-failed", runId: this.deps.runId, ts: this.deps.now(), category: "crash", message });
+      throw new DevToolsProtocolError(message);
+    }
     this.deps.emit({ type: "browser:mcp-closed", runId: this.deps.runId, ts: this.deps.now() });
   }
 }
@@ -349,13 +368,18 @@ class McpJsonRpcClient {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function defaultMcpSpawn(command: string, args: readonly string[]): ChildProcessWithoutNullStreams {
+function defaultMcpSpawn(
+  command: string,
+  args: readonly string[],
+  options: McpSpawnOptions,
+): ChildProcessWithoutNullStreams {
   if (command.trim() === "") {
     throw Object.assign(new Error("empty MCP command"), { code: "ENOENT" });
   }
   return spawn(command, args, {
     stdio: "pipe",
     env: process.env,
+    detached: options.detached,
   }) as ChildProcessWithoutNullStreams;
 }
 
@@ -398,21 +422,81 @@ function failureCategory(cause: unknown): BrowserMcpFailureCategory {
   return "crash";
 }
 
-async function killQuietly(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.killed || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (!child.killed && child.exitCode === null) {
-        child.kill("SIGKILL");
-      }
-      resolve();
-    }, 5_000);
-    child.on("exit", () => {
+async function terminateMcpProcessTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+  const pid = child.pid;
+  if (pid !== undefined && process.platform !== "win32") {
+    await terminateProcessGroup(pid);
+    return;
+  }
+  await terminateChild(child);
+}
+
+async function terminateProcessGroup(pid: number): Promise<void> {
+  if (!processGroupExists(pid)) return;
+  signalProcessGroup(pid, "SIGTERM");
+  if (await waitForProcessGroupExit(pid, 250)) return;
+  signalProcessGroup(pid, "SIGKILL");
+  // A delivered SIGKILL is terminal for every live member. The process group
+  // may briefly retain zombies, for which `kill(-pgid, 0)` still succeeds even
+  // though no server is alive to leak.
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+}
+
+function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch (cause) {
+    if (hasCode(cause, "ESRCH")) return;
+    throw cause;
+  }
+}
+
+function processGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (cause) {
+    if (hasCode(cause, "ESRCH")) return false;
+    throw cause;
+  }
+}
+
+async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processGroupExists(pid)) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  return !processGroupExists(pid);
+}
+
+async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null) return;
+  if (!child.kill("SIGTERM")) throw new Error("SIGTERM was not delivered to MCP process");
+  if (await waitForChildExit(child)) return;
+  if (!child.kill("SIGKILL")) throw new Error("SIGKILL was not delivered to MCP process");
+  if (await waitForChildExit(child)) return;
+  throw new Error("MCP process survived SIGKILL");
+}
+
+async function waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<boolean> {
+  if (child.exitCode !== null) return true;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(child.exitCode !== null), 5_000);
+    child.once("exit", () => {
       clearTimeout(timer);
-      resolve();
+      resolve(true);
     });
   });
+}
+
+function cleanupFailureMessage(cause: unknown): string {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  return `MCP process cleanup failed: ${detail}`;
+}
+
+function hasCode(cause: unknown, code: string): boolean {
+  return typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

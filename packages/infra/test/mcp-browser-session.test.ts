@@ -1,9 +1,11 @@
 /**
  * US-BROW-016 — pinned Chrome DevTools MCP session contract tests.
  *
- * All tests use a fake stdio child process so they never spawn a real
- * chrome-devtools-mcp binary.
+ * Most tests use a fake stdio child process so they never spawn a real
+ * chrome-devtools-mcp binary. The cleanup regression test uses a local Node
+ * wrapper/server tree because only a real process group exposes this leak.
  */
+import { spawn as spawnChild } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -18,6 +20,49 @@ import {
 import { defaultManagedChromeAdapterDeps } from "../src/browser-operations/managed-chrome-adapter.js";
 
 const now = () => "2026-07-15T00:00:00.000Z";
+
+const PROCESS_TREE_WRAPPER = String.raw`
+  const { spawn } = require("node:child_process");
+  const server = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  process.stdout.write("SERVER_PID:" + server.pid + "\n");
+  let buffer = "";
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk.toString("utf8");
+    while (true) {
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line === "") continue;
+      const message = JSON.parse(line);
+      if (message.method === "initialize") {
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {} }) + "\n");
+      } else if (message.method === "tools/list") {
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { tools: ${JSON.stringify(MINIMUM_DEVTOOLS_MCP_MANIFEST.requiredTools.map((name) => ({ name })))} } }) + "\n");
+      }
+    }
+  });
+  process.on("SIGTERM", () => process.exit(0));
+`;
+
+function processIsLive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    if (typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ESRCH") return false;
+    throw cause;
+  }
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  return predicate();
+}
 
 class FakeMcpChild extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -131,9 +176,11 @@ describe("US-BROW-016 McpBrowserSession", () => {
     const child = defaultChild();
     let seenCommand = "";
     let seenArgs: string[] = [];
-    const spawn: McpSpawn = (command, args) => {
+    let detached = false;
+    const spawn: McpSpawn = (command, args, options) => {
       seenCommand = command;
       seenArgs = [...args];
+      detached = options.detached;
       return child as unknown as ChildProcessWithoutNullStreams;
     };
 
@@ -147,6 +194,7 @@ describe("US-BROW-016 McpBrowserSession", () => {
       "--isolated",
       "--headless",
     ]);
+    expect(detached).toBe(true);
   });
 
   it("emits started and initialized after successful initialize + manifest verification", async () => {
@@ -232,6 +280,64 @@ describe("US-BROW-016 McpBrowserSession", () => {
 
     expect(child.killed).toBe(true);
     expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
+  });
+
+  it("reports process cleanup failure instead of emitting a false closed event (FIX-1271)", async () => {
+    const { events, emit } = captureEvents();
+    const child = defaultChild();
+    child.kill = () => false;
+    const session = await McpBrowserSession.open({ runId: "run-cleanup-failure", now, emit, spawn: fakeSpawn(child) });
+
+    await expect(session.close()).rejects.toThrow("MCP process cleanup failed");
+
+    expect(events.some((event) => event.type === "browser:mcp-closed")).toBe(false);
+    expect(events).toContainEqual({
+      type: "browser:mcp-failed",
+      runId: "run-cleanup-failure",
+      ts: now(),
+      category: "crash",
+      message: "MCP process cleanup failed: SIGTERM was not delivered to MCP process",
+    });
+  });
+
+  it("terminates a real detached wrapper and its server child on close (FIX-1271)", async () => {
+    if (process.platform === "win32") return;
+
+    let wrapperPid: number | undefined;
+    let serverPid: number | undefined;
+    const spawn: McpSpawn = () => {
+      const child = spawnChild(process.execPath, ["--eval", PROCESS_TREE_WRAPPER], {
+        detached: true,
+        stdio: "pipe",
+      }) as ChildProcessWithoutNullStreams;
+      wrapperPid = child.pid;
+      child.stdout.on("data", (chunk: Buffer) => {
+        const match = /SERVER_PID:(\d+)/.exec(chunk.toString("utf8"));
+        if (match?.[1] !== undefined) serverPid = Number(match[1]);
+      });
+      return child;
+    };
+
+    const session = await McpBrowserSession.open({ runId: "run-process-tree", now, emit: () => undefined, spawn });
+    try {
+      expect(await waitUntil(() => serverPid !== undefined)).toBe(true);
+      expect(wrapperPid).toBeDefined();
+      expect(serverPid).toBeDefined();
+      expect(processIsLive(wrapperPid!)).toBe(true);
+      expect(processIsLive(serverPid!)).toBe(true);
+
+      await session.close();
+
+      expect(await waitUntil(() => !processIsLive(wrapperPid!) && !processIsLive(serverPid!))).toBe(true);
+    } finally {
+      if (wrapperPid !== undefined) {
+        try {
+          process.kill(-wrapperPid, "SIGKILL");
+        } catch (cause) {
+          if (!(typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ESRCH")) throw cause;
+        }
+      }
+    }
   });
 
   it("calls only a manifest-approved typed MCP tool", async () => {

@@ -570,8 +570,11 @@ function resolveEvidenceFile(
   siblingBases: readonly string[] = [],
 ): string | null {
   for (const base of [runDir, cardDir, ...siblingBases]) {
-    const p = join(base, ref);
-    if (existsSync(p)) return p;
+    const refs = /^\.\.\/(?:evidence|screenshots)\//.test(ref) ? [ref, ref.slice(3)] : [ref];
+    for (const candidateRef of refs) {
+      const p = join(base, candidateRef);
+      if (existsSync(p)) return p;
+    }
   }
   return null;
 }

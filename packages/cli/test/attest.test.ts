@@ -637,6 +637,33 @@ describe("attestCommand", () => {
     expect(html).not.toContain("Discrepancies"); // mapped evidence ⇒ no red-line downgrades
   });
 
+  it("renders legacy ../evidence text refs from the current run directory", async () => {
+    const proj = project();
+    const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");
+    const runDir = join(storyDir, "2026-06-06T01-02-03");
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    writeFileSync(join(runDir, "evidence", "vitest.txt"), "✓ current run passed\n");
+    mkdirSync(storyDir, { recursive: true });
+    writeFileSync(
+      join(storyDir, "ac-map.json"),
+      JSON.stringify([
+        {
+          ac: "FIX-300:AC1",
+          status: "pass",
+          evidence: [{ kind: "text", label: "vitest", textFile: "../evidence/vitest.txt" }],
+        },
+      ]),
+    );
+
+    await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
+    expect(html).toContain("✓ current run passed");
+    expect(html).not.toContain("Discrepancies");
+  });
+
   it("US-EVID-012 — ac-map can reference cast/video replay evidence", async () => {
     const proj = project();
     const storyDir = join(proj, ".roll", "features", "demo", "FIX-300");

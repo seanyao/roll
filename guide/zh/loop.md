@@ -639,6 +639,10 @@ Gate 或 owner 需要介入，因为普通接力没有干净完成。`terminus` 
 
 `roll loop status` 输出一个紧凑的仪表盘，包含每个 cycle 的行记录和每日汇总。
 
+当当前所有可派工卡都需要物理终端截图且 macOS 已锁屏时，状态行会显示“等待屏幕解锁”。
+这属于等待态，不是 idle 失败：下一次探测到解锁的 tick 会清除提示并正常派工，且不会消耗
+no-progress 熔断次数。
+
 ### Token 列
 
 每条 cycle 行的 token 用量以 4 分量格式显示：

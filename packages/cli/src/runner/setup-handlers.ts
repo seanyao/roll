@@ -42,6 +42,7 @@ import { bootstrapWorktreeDeps, bootstrapWorktreePrebuild, bootstrapWorktreeSkil
 import { planAdversarial, recordExecutionProfile, routerEstMin } from "./execution-profile.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
+import { latestScreenLockEvent } from "./screen-lock-events.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -417,13 +418,6 @@ export async function executeSetupCommand(
             ts: eventTs(ports),
           });
         }
-        ports.events.appendEvent(ports.paths.eventsPath, {
-          type: "loop:screen_locked",
-          cycleId: ctx.cycleId,
-          locked: true,
-          reason: "console locked — physical-surface cards held",
-          ts: eventTs(ports),
-        });
       }
       const eligibility: PickOptions = {
         hasOpenPr,
@@ -451,6 +445,27 @@ export async function executeSetupCommand(
       // FIX-1215: emit pick:blocked events for ALL eligible-but-skipped cards
       // so idle output shows WHICH cards are blocked and WHY (not just open PR).
       const assessment = assessBacklog(items as BacklogItem[], eligibility);
+      const wasWaitingForScreenUnlock = latestScreenLockEvent(ports.paths.eventsPath)?.locked === true;
+      if (assessment.reason === "screen_locked") {
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:screen_locked",
+          cycleId: ctx.cycleId,
+          locked: true,
+          reason: "console locked — physical-surface cards held",
+          ts: eventTs(ports),
+        });
+      } else if (wasWaitingForScreenUnlock) {
+        // FIX-1268b: the wait clears as soon as a later tick can dispatch.
+        // Usually that is an unlock, but a newly eligible non-physical card also
+        // means the scheduler is no longer waiting on the lock.
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "loop:screen_locked",
+          cycleId: ctx.cycleId,
+          locked: false,
+          reason: screenLocked ? "screen lock no longer blocks dispatch" : "console unlocked — physical-surface cards eligible",
+          ts: eventTs(ports),
+        });
+      }
       const blockedCards = assessment.blockedCards;
       if (blockedCards !== undefined && blockedCards.length > 0) {
         for (const bc of blockedCards) {

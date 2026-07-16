@@ -736,6 +736,11 @@ ending point. Use the Gate and attest result for pass/fail.
 
 `roll loop status` prints a compact dashboard with per-cycle rows and daily rollup totals.
 
+When every currently eligible card needs a physical terminal capture and macOS
+is locked, the status line says `waiting for screen unlock`. This is a wait
+state, not an idle failure: the next unlocked tick clears the message and
+dispatches normally, without consuming the no-progress breaker.
+
 ### Token column
 
 Each cycle row shows token usage in a 4-component format:

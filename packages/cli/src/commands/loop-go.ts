@@ -26,6 +26,7 @@ import { deliveryGateDiagnosticsFromRows, storyTruthFromBacklog, type DeliveryGa
 import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from "./peer.js";
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { loopControlRunnerReadout, rollBin, staleLoopRunnerMessage } from "./loop-runner-readout.js";
+import { screenLockedCycleIds } from "../runner/screen-lock-events.js";
 
 /**
  * FIX-906: node fs-backed {@link FreshnessPort} for `ensureDeliveriesFresh`.
@@ -1014,7 +1015,15 @@ function updateProgressFromRows(
   bus: EventBus,
 ): void {
   let delivered = false;
+  let accountableRows = 0;
+  const lockedCycleIds = screenLockedCycleIds(eventsPath(projectPath));
   for (const row of rows) {
+    const cycleId = typeof row["cycle_id"] === "string" ? row["cycle_id"] : typeof row["cycleId"] === "string" ? row["cycleId"] : undefined;
+    // FIX-1268b: a lock-screen wait is an externally imposed pause, not a
+    // failed attempt. Its event is durable and cycle-bound, so only that exact
+    // idle row is exempt; malformed or unrelated rows still fail loud.
+    if (cycleId !== undefined && lockedCycleIds.has(cycleId)) continue;
+    accountableRows += 1;
     const attempt = runAttemptFromRow(row);
     if (attempt === undefined || !attempt.known) continue;
     if (!attempt.zeroDelivery) {
@@ -1059,7 +1068,7 @@ function updateProgressFromRows(
   // row → delivers (reset) or doesn't (increment → breaker STOPS at K). No
   // infinite spin is possible regardless of row parseability.
   if (delivered) progress.noProgressCycles = 0;
-  else if (rows.length > 0) progress.noProgressCycles += 1;
+  else if (accountableRows > 0) progress.noProgressCycles += 1;
 }
 
 /**

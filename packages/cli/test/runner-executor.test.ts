@@ -1240,6 +1240,25 @@ describe("executeCommand — command → executor mapping", () => {
     expect(ports.git.resetWorktreeHard).not.toHaveBeenCalled();
   });
 
+  it("E1: create_worktree bases on the configured integration_branch from .roll/local.yaml", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-e1-intbranch-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "local.yaml"), "integration_branch: origin/dev\n", "utf8");
+    const base = fakePorts();
+    const { ports } = fakePorts({ repoCwd: repo, git: { ...base.ports.git } });
+    const r = await executeCommand({ kind: "create_worktree", branch: "loop/cycle-e1" }, ports, CTX);
+    expect(r.event).toEqual({ type: "worktree_created" });
+    // The worktree base is the configured integration branch; the story branch
+    // (loop/cycle-e1) is passed through verbatim as the 3rd arg, never rewritten.
+    expect(ports.git.worktreeAdd).toHaveBeenCalledWith(
+      repo,
+      ports.paths.worktreePath,
+      "loop/cycle-e1",
+      "origin/dev",
+    );
+  });
+
   it("resume: a card with a clean un-merged prior cycle branch RE-POINTS the worktree to that branch (resume engages)", async () => {
     delete process.env[RESUME_DISABLED_ENV];
     const { ports, calls } = resumePorts(); // defaults: not merged, clean rebase

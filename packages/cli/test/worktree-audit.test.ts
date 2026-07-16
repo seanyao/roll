@@ -384,6 +384,33 @@ describe("AC4: merge evidence", () => {
     const result = auditWorktrees(deps);
     expect(result.records[0].mergeEvidence.kind).toBe("none");
   });
+
+  it("E1: merge/ahead probes target the configured integration branch", () => {
+    const seen: string[][] = [];
+    const deps = makeDeps({
+      integrationBranch: "origin/release",
+      git: (args) => {
+        seen.push(args);
+        if (args[0] === "worktree" && args[1] === "list") {
+          return porcelain([
+            { path: "/fake/repo/.roll/loop/worktrees/cycle-10", head: "mno", branch: "refs/heads/loop/cycle-10" },
+          ]);
+        }
+        if (args[0] === "rev-parse" && args[1] === "HEAD") return "mno\n";
+        if (args[0] === "merge-base") return "mno\n";
+        return "";
+      },
+    });
+    const result = auditWorktrees(deps);
+    expect(result.records[0].mergeEvidence.kind).toBe("ancestor");
+    // The integration-branch reference is the configured one, never origin/main;
+    // the story branch (loop/cycle-10) must NOT be rewritten.
+    const mergeBase = seen.find((a) => a[0] === "merge-base");
+    expect(mergeBase).toContain("origin/release");
+    expect(mergeBase).not.toContain("origin/main");
+    const ahead = seen.find((a) => a[0] === "rev-list" && a.includes("--count"));
+    expect(ahead).toContain("^origin/release");
+  });
 });
 
 // ─── AC5: active cycle protection ─────────────────────────────────────────

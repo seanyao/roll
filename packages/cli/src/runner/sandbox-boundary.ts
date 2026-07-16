@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { CycleContext } from "@roll/core";
-import { quarantineBundlePath } from "@roll/infra";
+import { quarantineBundlePath, resolveIntegrationBranch } from "@roll/infra";
 import { killLiveAgents } from "./agent-spawn.js";
 import { checkMainDirty, quarantineEventToRollEvent, quarantineMainCheckout, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
 import type { CleanupResult } from "./environment-cleanup.js";
@@ -61,7 +61,9 @@ export async function rescueLeakedMain(
     backlogWorktreeContent = undefined;
   }
   try {
-    await execFileAsync("git", ["reset", "--hard", "origin/main"], {
+    // E1: restore the main checkout to the configured integration branch
+    // (default origin/main). The leaked commits are already bundled above.
+    await execFileAsync("git", ["reset", "--hard", resolveIntegrationBranch(repoCwd)], {
       cwd: repoCwd,
       encoding: "utf8",
     });

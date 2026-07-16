@@ -283,11 +283,11 @@ export function nodePorts(opts: {
       async fetchRemoteBranch(repoCwd, branch) {
         return fetchRemoteBranch(repoCwd, branch);
       },
-      async branchMergedIntoMain(repoCwd, branch) {
-        return branchMergedIntoMain(repoCwd, branch);
+      async branchMergedIntoMain(repoCwd, branch, integrationBranch) {
+        return branchMergedIntoMain(repoCwd, branch, integrationBranch);
       },
-      async branchCleanlyRebasesOntoMain(repoCwd, branch) {
-        return branchCleanlyRebasesOntoMain(repoCwd, branch);
+      async branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch) {
+        return branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch);
       },
       async resetWorktreeHard(worktreeCwd, ref, branch) {
         const r = await worktreeResetHard(worktreeCwd, ref, branch);

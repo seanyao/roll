@@ -4,19 +4,14 @@
  * loop-schedule / dream-time) stay on the bash fallback via the registry
  * router until their cards come up.
  */
-import { yamlReadFlat, yamlReadNested } from "@roll/infra";
+import { CONFIG_KEYS, yamlReadFlat, yamlReadNested } from "@roll/infra";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// key | scope | store | min | max | default — mirrors _config_keys verbatim.
-const CONFIG_KEYS: ReadonlyArray<readonly [string, "project" | "global", string, string, string, string]> = [
-  ["loop_active_start", "project", "nested:loop_schedule", "0", "23", "0"],
-  ["loop_active_end", "project", "nested:loop_schedule", "1", "24", "24"],
-  ["loop_schedule.period_minutes", "project", "nested:loop_schedule", "1", "1440", "60"],
-  ["loop_schedule.offset_minute", "project", "nested:loop_schedule", "0", "59", "0"],
-  ["loop_dream_hour", "global", "flat", "0", "23", "3"],
-  ["loop_dream_minute", "global", "flat", "0", "59", "-"],
-];
+// The scoped-key registry is the single source of truth in @roll/infra
+// (config.ts). REFACTOR: the former inline duplicate here drifted from that
+// registry; importing CONFIG_KEYS keeps `roll config` and the infra config
+// model in lockstep (scope / store / default) — one place to add a key.
 
 export const CONFIG_FACADE_KEYS = ["loop-window", "loop-schedule", "dream-time"];
 
@@ -72,9 +67,9 @@ function keyFile(scope: "project" | "global"): string {
 
 /** Mirrors _config_resolve: returns [value, source]. */
 function configResolve(key: string): [string, string] | null {
-  const record = CONFIG_KEYS.find((r) => r[0] === key);
+  const record = CONFIG_KEYS.find((r) => r.key === key);
   if (record === undefined) return null;
-  const [, scope, store, , , def] = record;
+  const { scope, store, default: def } = record;
   const file = keyFile(scope);
   let val: string;
   if (store.startsWith("nested:")) {
@@ -118,7 +113,7 @@ export function configGetCommand(args: string[]): number {
 
   if (wantList) {
     const out: string[] = [];
-    for (const [k] of CONFIG_KEYS) {
+    for (const { key: k } of CONFIG_KEYS) {
       const resolved = configResolve(k);
       if (resolved === null) continue;
       const [v, src] = resolved;

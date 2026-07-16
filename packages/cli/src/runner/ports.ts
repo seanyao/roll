@@ -51,11 +51,13 @@ export interface GitPort {
    *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
   fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** RESUME-PRIOR-WORK condition (a): is `origin/<branch>` already merged into
-   *  origin/main? A merged branch has nothing to resume. */
-  branchMergedIntoMain(repoCwd: string, branch: string): Promise<boolean>;
+   *  the integration branch? A merged branch has nothing to resume.
+   *  `integrationBranch` defaults to origin/main (E1). */
+  branchMergedIntoMain(repoCwd: string, branch: string, integrationBranch?: string): Promise<boolean>;
   /** RESUME-PRIOR-WORK condition (b): does `origin/<branch>` cleanly merge with
-   *  origin/main (no conflicts)? Non-mutating `merge-tree` dry-run. */
-  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string): Promise<boolean>;
+   *  the integration branch (no conflicts)? Non-mutating `merge-tree` dry-run.
+   *  `integrationBranch` defaults to origin/main (E1). */
+  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string, integrationBranch?: string): Promise<boolean>;
   /** RESUME-PRIOR-WORK re-point: fetch `<branch>` into the worktree and
    *  `git reset --hard <ref>` so the worktree's tracked tree moves onto the
    *  resume branch (called AFTER the story is picked — see `resume_worktree`).

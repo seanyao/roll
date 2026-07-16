@@ -24,6 +24,7 @@ import {
   type ExecPort,
   type FreshnessPort,
 } from "@roll/core";
+import { resolveIntegrationBranch } from "@roll/infra";
 import { resolveLang, STATUS_MARKER, t, v2Catalog, type Lang } from "@roll/spec";
 import { c, renderState, strw, trunc } from "../render.js";
 import { consistencyAuditCommand } from "./consistency-audit.js";
@@ -440,7 +441,7 @@ export function checkTruthLive(projectDir: string): DimResult {
   const deltaIds = releaseDeltaCardIds(projectDir);
   if (deltaIds.size === 0) return { status: "pass", gaps: [] };
 
-  const deliveries = ensureDeliveriesFresh(projectDir, nodeFreshnessPort, quietExecPort);
+  const deliveries = ensureDeliveriesFresh(projectDir, nodeFreshnessPort, quietExecPort, resolveIntegrationBranch(projectDir));
   const gaps: string[] = [];
 
   for (const id of deltaIds) {

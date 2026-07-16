@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { resolveIntegrationBranch } from "@roll/infra";
 
 // ─── types (shared with the spec) ───────────────────────────────────────────
 
@@ -88,6 +89,12 @@ export interface WorktreeAuditDeps {
   nowSec?: () => number;
   /** Home directory (for sibling worktree detection). */
   home: string;
+  /**
+   * E1: the integration branch the merge/ahead probes compare against. Defaults
+   * to the project's resolved `integration_branch` config (origin/main unless
+   * overridden). Injected in tests.
+   */
+  integrationBranch?: string;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -205,32 +212,33 @@ function detectMergeEvidence(
   wtPath: string,
   branch: string | undefined,
   deps: WorktreeAuditDeps,
+  integrationBranch: string,
 ): { kind: MergeEvidenceKind; detail?: string } {
-  // 1. Check if HEAD is ancestor of origin/main via merge-base comparison
+  // 1. Check if HEAD is ancestor of the integration branch via merge-base compare
   try {
     const g = deps.git ?? git;
     const headSha = g(["rev-parse", "HEAD"], wtPath);
-    const mergeBase = g(["merge-base", "HEAD", "origin/main"], wtPath);
+    const mergeBase = g(["merge-base", "HEAD", integrationBranch], wtPath);
     if (headSha && mergeBase && headSha === mergeBase) {
-      return { kind: "ancestor", detail: "HEAD is ancestor of origin/main" };
+      return { kind: "ancestor", detail: `HEAD is ancestor of ${integrationBranch}` };
     }
   } catch {
     // Fall through
   }
 
   // 2. Check --is-ancestor via exit code (covers squash merges where
-  //    branch is listed in `git branch --merged origin/main`)
+  //    branch is listed in `git branch --merged <integrationBranch>`)
   if (branch) {
     try {
       const g = deps.git ?? git;
-      const merged = g(["branch", "--merged", "origin/main"], wtPath);
+      const merged = g(["branch", "--merged", integrationBranch], wtPath);
       const branchName = branch.replace(/^refs\/heads\//, "");
       for (const line of merged.split("\n")) {
         const trimmed = line.replace(/^\*?\s+/, "").trim();
         if (trimmed === branchName) {
           return {
             kind: "pr_merged",
-            detail: `branch ${branchName} is merged into origin/main (squash-safe)`,
+            detail: `branch ${branchName} is merged into ${integrationBranch} (squash-safe)`,
           };
         }
       }
@@ -241,11 +249,11 @@ function detectMergeEvidence(
 
   // 3. Explicit is-ancestor exit code check
   try {
-    execFileSync("git", ["merge-base", "--is-ancestor", "HEAD", "origin/main"], {
+    execFileSync("git", ["merge-base", "--is-ancestor", "HEAD", integrationBranch], {
       cwd: wtPath,
       stdio: "ignore",
     });
-    return { kind: "ancestor", detail: "HEAD is ancestor of origin/main" };
+    return { kind: "ancestor", detail: `HEAD is ancestor of ${integrationBranch}` };
   } catch {
     // Not an ancestor
   }
@@ -255,10 +263,10 @@ function detectMergeEvidence(
 
 // ─── ahead count ────────────────────────────────────────────────────────────
 
-function countAhead(wtPath: string, deps: WorktreeAuditDeps): number | null {
+function countAhead(wtPath: string, deps: WorktreeAuditDeps, integrationBranch: string): number | null {
   try {
     const g = deps.git ?? git;
-    const out = g(["rev-list", "--count", "HEAD", "^origin/main"], wtPath).trim();
+    const out = g(["rev-list", "--count", "HEAD", `^${integrationBranch}`], wtPath).trim();
     if (!out) return null;
     const n = Number(out);
     return Number.isFinite(n) ? n : null;
@@ -366,6 +374,9 @@ function classifyDisposition(
 
 export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
   const repoRoot = resolve(deps.repoRoot);
+  // E1: resolve the integration branch ONCE (injected override wins for tests;
+  // otherwise the project's `integration_branch` config, default origin/main).
+  const integrationBranch = deps.integrationBranch ?? resolveIntegrationBranch(repoRoot);
 
   // 1. Parse `git worktree list --porcelain`
   const wtOutput = deps.git
@@ -423,8 +434,8 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     }
 
     const dirty = detectDirty(absPath, deps);
-    const ahead = countAhead(absPath, deps);
-    const mergeEvidence = detectMergeEvidence(absPath, entry.branch || undefined, deps);
+    const ahead = countAhead(absPath, deps, integrationBranch);
+    const mergeEvidence = detectMergeEvidence(absPath, entry.branch || undefined, deps, integrationBranch);
     const active = isActiveCycle(cycleId, repoRoot, deps);
 
     const baseRec: WorktreeAuditRecord = {

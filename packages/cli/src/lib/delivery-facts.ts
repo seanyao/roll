@@ -22,6 +22,7 @@
  * only run when L1 is silent.
  */
 import { nodeExecPort, reconcileDelivery, type ReconcileCycle, type ReconcileFacts, type ReconcileResult } from "@roll/core";
+import { resolveIntegrationBranch } from "@roll/infra";
 import { gitHasPrMergeCommit, storyHasMergeEvidence, type GitDossierFacts } from "./story-dossier.js";
 
 // ── git / gh fact primitives (extracted from loop-reconcile.ts, US-DELIV-002) ──
@@ -47,12 +48,18 @@ export function branchExists(cwd: string, branch: string): boolean {
  * Compute the git patch-id of `git diff origin/main...<branch>`.
  * Returns undefined when the branch doesn't exist or the diff is empty.
  */
-export function branchPatchId(cwd: string, branch: string): string | undefined {
+export function branchPatchId(
+  cwd: string,
+  branch: string,
+  integrationBranch: string = "origin/main",
+): string | undefined {
   if (!branchExists(cwd, branch)) return undefined;
-  // git patch-id reads the diff from stdin.
+  // git patch-id reads the diff from stdin. E1: the diff base is the configured
+  // integration branch (default origin/main); origin/<branch> is the STORY branch
+  // and is never rewritten.
   const result = nodeExecPort.run("sh", [
     "-c",
-    `cd '${cwd}' && git diff origin/main...origin/${branch} 2>/dev/null | git patch-id --stable 2>/dev/null`,
+    `cd '${cwd}' && git diff ${integrationBranch}...origin/${branch} 2>/dev/null | git patch-id --stable 2>/dev/null`,
   ]);
   if (result.code !== 0 || result.stdout === "") return undefined;
   // git patch-id output is "<hash> <patch-id>".
@@ -69,15 +76,21 @@ export function branchPatchId(cwd: string, branch: string): string | undefined {
  * an unmerged single-commit branch's patch-id self-matched and fabricated a
  * `delivered` — the exact misjudgment reconcile exists to prevent.
  */
-export function mainPatchIdsSinceBranch(cwd: string, branch: string): Set<string> {
+export function mainPatchIdsSinceBranch(
+  cwd: string,
+  branch: string,
+  integrationBranch: string = "origin/main",
+): Set<string> {
   const ids = new Set<string>();
   if (!branchExists(cwd, branch)) return ids;
 
+  // E1: walk the integration branch's commits not on the story branch
+  // (`<integrationBranch> ^origin/<branch>`); the story branch stays untouched.
   const commits = nodeExecPort.run("git", [
     "-C", cwd,
     "log",
     "--format=%H",
-    `origin/main`,
+    integrationBranch,
     `^origin/${branch}`,
   ]);
   if (commits.code !== 0 || commits.stdout === "") return ids;
@@ -161,9 +174,11 @@ export function cycleReconcileDecision(
     facts.prState = "MERGED";
   } else {
     // L2: patch-id equivalence (only when L1 is silent — it would win anyway).
-    facts.branchNetPatchId = branchPatchId(cwd, branch);
+    // E1: judged against the project's configured integration branch.
+    const integrationBranch = resolveIntegrationBranch(cwd);
+    facts.branchNetPatchId = branchPatchId(cwd, branch, integrationBranch);
     if (facts.branchNetPatchId !== undefined) {
-      facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, branch);
+      facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, branch, integrationBranch);
     }
   }
 

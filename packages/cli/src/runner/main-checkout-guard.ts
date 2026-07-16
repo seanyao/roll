@@ -3,6 +3,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, 
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { RollEvent } from "@roll/spec";
+import { resolveIntegrationBranch } from "@roll/infra";
 
 const execFileAsync = promisify(execFile);
 const PROTECTION_MARKER = "main-checkout-protection.json";
@@ -561,7 +562,9 @@ async function quarantineAhead(opts: QuarantineOptions): Promise<QuarantineResul
   const ref = refName(id);
   const files = aheadFiles(opts.repoCwd);
   if (!gitQuiet(opts.repoCwd, ["branch", ref, "HEAD"])) return null;
-  if (!gitQuiet(opts.repoCwd, ["reset", "--hard", "origin/main"])) return null;
+  // E1: reset the main checkout back onto the configured integration branch
+  // (default origin/main). The leaked commits are preserved on `ref` above.
+  if (!gitQuiet(opts.repoCwd, ["reset", "--hard", resolveIntegrationBranch(opts.repoCwd)])) return null;
   const restoreCommand = `git cherry-pick ${ref}`;
   const path = manifestPath(opts.runtimeDir, id);
   const ev = toEvent(opts, "ahead", ref, files, path, restoreCommand);

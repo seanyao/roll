@@ -131,6 +131,32 @@ describe("US-DELIV-008 — cycleReconcileDecision (unified engine, real git)", (
     expect(d.kind === "delivered" && d.signal).toBe("patch_id");
   });
 
+  it("E1: patch-id equivalence is judged against the configured integration branch (origin/dev)", () => {
+    const r = repoWithOrigin((repo) => {
+      // The integration branch is `dev`, not `main`.
+      git(repo, "checkout -q -b dev");
+      git(repo, "commit -q --allow-empty -m 'dev base'");
+      git(repo, `checkout -q -b loop/${CYCLE}`);
+      execSync("echo feature > feature.txt", { cwd: repo, shell: "/bin/bash" });
+      git(repo, "add feature.txt");
+      git(repo, "commit -q -m 'tcr: US-DELIV-008 feature'");
+      // Squash the SAME diff onto dev under a different subject.
+      git(repo, "checkout -q dev");
+      execSync("echo feature > feature.txt", { cwd: repo, shell: "/bin/bash" });
+      git(repo, "add feature.txt");
+      git(repo, "commit -q -m 'Story US-DELIV-009: something else (#999)'");
+      git(repo, `push -q origin main dev loop/${CYCLE}`);
+      // Configure the project to integrate on origin/dev.
+      execSync("mkdir -p .roll", { cwd: repo, shell: "/bin/bash" });
+      execSync("printf 'integration_branch: origin/dev\\n' > .roll/local.yaml", { cwd: repo, shell: "/bin/bash" });
+    });
+    const d = withoutGitEnv(() =>
+      cycleReconcileDecision(r, null, { cycleId: CYCLE, storyId: "US-DELIV-008", branch: `loop/${CYCLE}`, prNumber: 42 }),
+    );
+    expect(d.kind).toBe("delivered");
+    expect(d.kind === "delivered" && d.signal).toBe("patch_id");
+  });
+
   it("REGRESSION: an unmerged single-commit branch is NOT delivered — the branch's own commit must not self-match (symmetric-difference bug)", () => {
     const r = repoWithOrigin((repo) => {
       git(repo, `checkout -q -b loop/${CYCLE}`);

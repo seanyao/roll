@@ -54,6 +54,7 @@ import {
   prReady,
   prViewBotReviewState,
   releaseLock,
+  resolveIntegrationBranch,
   type GhResult,
 } from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
@@ -395,9 +396,10 @@ export async function runReconcileTick(
 
     // L2: patch-id equivalence (skipped when L1 already fired).
     if (facts.prState !== "MERGED") {
-      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      const integrationBranch = resolveIntegrationBranch(cwd);
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch, integrationBranch);
       if (facts.branchNetPatchId !== undefined) {
-        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch, integrationBranch);
       }
     }
 
@@ -846,9 +848,10 @@ export async function loopReconcileCommand(
     // L2: patch-id equivalence (skipped when L1 already fired — it wins inside
     // reconcileDelivery anyway, and the per-branch spawns are wasted).
     if (facts.prState !== "MERGED") {
-      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      const integrationBranch = resolveIntegrationBranch(cwd);
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch, integrationBranch);
       if (facts.branchNetPatchId !== undefined) {
-        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch, integrationBranch);
       }
     }
 

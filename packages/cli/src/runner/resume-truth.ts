@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { resumeCandidateBranches } from "@roll/core";
+import { resolveIntegrationBranch } from "@roll/infra";
 import { findStatusMarker, STATUS_MARKER, type TerminalOutcome } from "@roll/spec";
 import { cardArchiveDir, reportFileName } from "../lib/archive.js";
 import type { Ports } from "./ports.js";
@@ -40,7 +41,10 @@ export async function resolveResumeBase(
   ports: Ports,
   storyId: string | undefined,
 ): Promise<string> {
-  const FRESH = "origin/main";
+  // E1: the fresh-context base is the project's configured integration branch
+  // (default origin/main → byte-identical to the pre-config behaviour). Resolved
+  // once and used as the fallback AND the ancestor/rebase target for the probes.
+  const FRESH = resolveIntegrationBranch(ports.repoCwd);
   if (resumeDisabled()) return FRESH;
   if (storyId === undefined || storyId.trim() === "") return FRESH;
   try {
@@ -55,17 +59,17 @@ export async function resolveResumeBase(
       if (prState === "CLOSED") {
         ports.events.appendAlert(
           ports.paths.alertsPath,
-          `resume-prior-work: ${storyId} skips prior branch ${branch} because its PR is CLOSED — starting from origin/main unless explicitly rescued`,
+          `resume-prior-work: ${storyId} skips prior branch ${branch} because its PR is CLOSED — starting from ${FRESH} unless explicitly rescued`,
         );
         continue;
       }
-      // Condition (a): a branch already merged into origin/main has nothing to
-      // resume — its work is on main; the next candidate (older) may still hold
-      // un-merged work, so keep scanning.
-      if (await ports.git.branchMergedIntoMain(ports.repoCwd, branch)) continue;
+      // Condition (a): a branch already merged into the integration branch has
+      // nothing to resume — its work is on main; the next candidate (older) may
+      // still hold un-merged work, so keep scanning.
+      if (await ports.git.branchMergedIntoMain(ports.repoCwd, branch, FRESH)) continue;
       // Condition (b): only a clean rebase is safe to spawn into. A conflicting
       // un-merged branch is the "resumable existed but skipped" case → ALERT.
-      if (await ports.git.branchCleanlyRebasesOntoMain(ports.repoCwd, branch)) {
+      if (await ports.git.branchCleanlyRebasesOntoMain(ports.repoCwd, branch, FRESH)) {
         ports.events.appendAlert(
           ports.paths.alertsPath,
           `resume-prior-work: cycle for ${storyId} resumes un-merged branch ${branch} (rebased onto origin/main) instead of redoing from scratch`,

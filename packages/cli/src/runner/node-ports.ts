@@ -37,6 +37,7 @@ import {
   remoteUrl,
   runPublishPlan,
   systemClock,
+  resolveIntegrationBranch,
   worktreeAdd,
   worktreeFetchOrigin,
   worktreeRemove,
@@ -167,7 +168,7 @@ export function nodePorts(opts: {
   const deliveryTruth = (): Map<string, StoryDeliveryTruth> => {
     if (deliveryTruthCache === undefined) {
       try {
-        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort);
+        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort, resolveIntegrationBranch(opts.repoCwd));
         // Derive `delivered` per story via the single deterministic query so the
         // verdict matches `roll truth query` exactly (FIX-906: one truth, all
         // consumers). Group by storyId first to avoid re-querying the same id.
@@ -283,11 +284,11 @@ export function nodePorts(opts: {
       async fetchRemoteBranch(repoCwd, branch) {
         return fetchRemoteBranch(repoCwd, branch);
       },
-      async branchMergedIntoMain(repoCwd, branch) {
-        return branchMergedIntoMain(repoCwd, branch);
+      async branchMergedIntoMain(repoCwd, branch, integrationBranch) {
+        return branchMergedIntoMain(repoCwd, branch, integrationBranch);
       },
-      async branchCleanlyRebasesOntoMain(repoCwd, branch) {
-        return branchCleanlyRebasesOntoMain(repoCwd, branch);
+      async branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch) {
+        return branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch);
       },
       async resetWorktreeHard(worktreeCwd, ref, branch) {
         const r = await worktreeResetHard(worktreeCwd, ref, branch);

@@ -118,7 +118,7 @@ describe("configResolve (scoped registry)", () => {
     expect(configResolve("loop_active_start", { project: p })).toEqual(["9", p]);
     expect(configResolve("loop_active_end", { project: join(d, "absent.yaml") })).toEqual(["24", "default"]);
   });
-  it("registry mirrors the six v2 keys", () => {
+  it("registry mirrors the six v2 keys plus integration_branch", () => {
     expect(CONFIG_KEYS.map((k) => k.key)).toEqual([
       "loop_active_start",
       "loop_active_end",
@@ -126,6 +126,33 @@ describe("configResolve (scoped registry)", () => {
       "loop_schedule.offset_minute",
       "loop_dream_hour",
       "loop_dream_minute",
+      "integration_branch",
+    ]);
+  });
+  it("integration_branch is a project-scope flat string key defaulting to origin/main", () => {
+    const rec = CONFIG_KEYS.find((k) => k.key === "integration_branch");
+    expect(rec).toBeDefined();
+    expect(rec?.scope).toBe("project");
+    expect(rec?.store).toBe("flat");
+    expect(rec?.type).toBe("string");
+    expect(rec?.default).toBe("origin/main");
+  });
+  it("the six original keys keep integer semantics (type absent or 'int')", () => {
+    for (const rec of CONFIG_KEYS) {
+      if (rec.key === "integration_branch") continue;
+      expect(rec.type === undefined || rec.type === "int").toBe(true);
+    }
+  });
+  it("integration_branch resolves the configured value from local.yaml", () => {
+    const d = tmp();
+    const p = write(d, "local.yaml", "integration_branch: origin/dev\n");
+    expect(configResolve("integration_branch", { project: p })).toEqual(["origin/dev", p]);
+  });
+  it("integration_branch falls back to origin/main when unset", () => {
+    const d = tmp();
+    expect(configResolve("integration_branch", { project: join(d, "absent.yaml") })).toEqual([
+      "origin/main",
+      "default",
     ]);
   });
 });

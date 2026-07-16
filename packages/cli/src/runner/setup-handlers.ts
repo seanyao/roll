@@ -24,7 +24,7 @@ import {
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
-import { isScreenLocked } from "@roll/infra";
+import { isScreenLocked, resolveIntegrationBranch } from "@roll/infra";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
@@ -238,7 +238,8 @@ export async function executeSetupCommand(
       // AFTER pick_story with the real story id and re-points this worktree onto a
       // resumable un-merged branch when one exists. Keying purely on the runs
       // ledger + git keeps it uniform for every agent (normalize-agents thesis).
-      const base = "origin/main";
+      // E1: base = configured integration branch (default origin/main → unchanged).
+      const base = resolveIntegrationBranch(ports.repoCwd);
       const r = await ports.git.worktreeAdd(
         ports.repoCwd,
         ports.paths.worktreePath,
@@ -605,8 +606,10 @@ export async function executeSetupCommand(
     // worktree carries the resume tree by the time the agent spawns. Best-effort: a
     // reset failure leaves the worktree on origin/main rather than topple the cycle.
     case "resume_worktree": {
+      // E1: resolveResumeBase returns the configured integration branch verbatim
+      // when there is no resumable prior branch → that equality is the no-op.
       const base = await resolveResumeBase(ports, cmd.storyId);
-      if (base === "origin/main" || base.trim() === "") return {};
+      if (base === resolveIntegrationBranch(ports.repoCwd) || base.trim() === "") return {};
       // `origin/<branch>` → derive the bare branch name for the worktree-local
       // fetch (the resume probes fetched it into the MAIN tree, not this worktree).
       const branch = base.startsWith("origin/") ? base.slice("origin/".length) : undefined;

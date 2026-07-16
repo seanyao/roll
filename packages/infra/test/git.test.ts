@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   branchCleanlyRebasesOntoMain,
@@ -22,6 +23,7 @@ import {
   lsRemote,
   mergeBase,
   projectIdentity,
+  resolveIntegrationBranch,
   worktreeAdd,
   worktreeRemove,
   worktreeResetHard,
@@ -248,6 +250,51 @@ describe("RESUME-PRIOR-WORK probes (un-merged audit-branch reuse)", () => {
     const { clone } = setup("reset-miss", { branchFile: "x.txt", cycleBody: "x" });
     const r = await worktreeResetHard(clone, "origin/loop/cycle-missing", "loop/cycle-missing");
     expect(r.code).not.toBe(0);
+  });
+
+  it("branchMergedIntoMain honors a custom integrationBranch (default stays origin/main)", async () => {
+    // origin has two integration branches: main (unchanged) and release, into
+    // which the cycle branch is merged. The probe must consult whichever
+    // integration branch it is told, defaulting to origin/main.
+    const { clone, cycleBranch } = setup("custom-merged", { branchFile: "feat.txt", cycleBody: "work" });
+    const originPath = W(clone, "remote", "get-url", "origin");
+    W(originPath, "branch", "release", "main");
+    W(originPath, "checkout", "-q", "release");
+    W(originPath, "merge", "-q", "--no-ff", cycleBranch, "-m", "merge into release");
+    W(originPath, "checkout", "-q", "main");
+    W(clone, "fetch", "-q", "origin");
+    await fetchRemoteBranch(clone, cycleBranch);
+    // Default (origin/main): NOT merged there.
+    expect(await branchMergedIntoMain(clone, cycleBranch)).toBe(false);
+    // Custom integration branch origin/release: IS merged there.
+    expect(await branchMergedIntoMain(clone, cycleBranch, "origin/release")).toBe(true);
+  });
+
+  it("branchCleanlyRebasesOntoMain honors a custom integrationBranch", async () => {
+    // A clean branch rebases onto whichever integration branch is named.
+    const clean = setup("custom-rebase", {
+      branchFile: "feat.txt",
+      cycleBody: "feat work",
+      mainExtra: { file: "other.txt", body: "unrelated main change" },
+    });
+    const originPath = W(clean.clone, "remote", "get-url", "origin");
+    W(originPath, "branch", "release", "main");
+    W(clean.clone, "fetch", "-q", "origin");
+    await fetchRemoteBranch(clean.clone, clean.cycleBranch);
+    expect(await branchCleanlyRebasesOntoMain(clean.clone, clean.cycleBranch, "origin/release")).toBe(true);
+  });
+});
+
+describe("resolveIntegrationBranch", () => {
+  it("defaults to origin/main when no config file exists", () => {
+    const d = tmp("rib-default");
+    expect(resolveIntegrationBranch(d)).toBe("origin/main");
+  });
+  it("returns the configured integration_branch from .roll/local.yaml", () => {
+    const d = tmp("rib-config");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "integration_branch: origin/dev\n", "utf8");
+    expect(resolveIntegrationBranch(d)).toBe("origin/dev");
   });
 });
 

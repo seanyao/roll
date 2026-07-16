@@ -192,6 +192,13 @@ export interface ConfigKeyRecord {
   scope: "project" | "global";
   /** `flat` or `nested:<parent>`. */
   store: string;
+  /**
+   * Value domain for validation. Absent is treated as `"int"` (the v2 registry
+   * held only integers, so the six ported keys keep integer semantics without an
+   * explicit tag). `"string"` opts a key into the non-empty git-ref-safe string
+   * validation used by {@link configValidate}.
+   */
+  type?: "int" | "string";
   min: string;
   max: string;
   default: string;
@@ -210,6 +217,10 @@ export const CONFIG_KEYS: readonly ConfigKeyRecord[] = [
   { key: "loop_schedule.offset_minute", scope: "project", store: "nested:loop_schedule", min: "0", max: "59", default: "0" },
   { key: "loop_dream_hour", scope: "global", store: "flat", min: "0", max: "23", default: "3" },
   { key: "loop_dream_minute", scope: "global", store: "flat", min: "0", max: "59", default: "-" },
+  // E1: the loop's integration branch — the ref cycles rebase/merge/reset onto.
+  // A string key (not integer): non-empty + git-ref-safe. Default preserves the
+  // historical hardcoded `origin/main`, so unset = byte-identical prior behavior.
+  { key: "integration_branch", scope: "project", store: "flat", type: "string", min: "", max: "", default: "origin/main" },
 ];
 
 /** Project-scope yaml file — mirrors `_config_key_file project` (5786). */
@@ -317,6 +328,31 @@ export interface ConfigValidateError {
 export function configValidate(key: string, value: string): { ok: true } | ConfigValidateError {
   const rec = CONFIG_KEYS.find((r) => r.key === key);
   if (rec === undefined) return { ok: false, lines: ["", ""] };
+  // String keys (E1: integration_branch) validate as a non-empty, git-ref-safe
+  // token instead of an integer range. Safe charset mirrors the characters a git
+  // ref/refspec legitimately uses (`^[A-Za-z0-9/_.-]+$`) — this both rejects
+  // empties and blocks shell-injection into the `git` argv the ref feeds.
+  if (rec.type === "string") {
+    if (value === "") {
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' must not be empty`,
+          `config：'${key}' 不能为空`,
+        ],
+      };
+    }
+    if (!/^[A-Za-z0-9/_.-]+$/.test(value)) {
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' has unsafe characters, got '${value}'`,
+          `config：'${key}' 含非法字符，收到 '${value}'`,
+        ],
+      };
+    }
+    return { ok: true };
+  }
   if (!/^-?[0-9]+$/.test(value)) {
     return {
       ok: false,

@@ -54,6 +54,38 @@ describe("configValidate — integer range, bilingual lines (no [roll] prefix)",
   });
 });
 
+describe("configValidate — string keys (type: 'string')", () => {
+  it("accepts a git-ref-safe non-empty value", () => {
+    expect(configValidate("integration_branch", "origin/main")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "origin/release-2.0")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "main")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "upstream/feature_x.1")).toEqual({ ok: true });
+  });
+  it("does NOT apply integer validation to a string key (digits are just a valid ref)", () => {
+    expect(configValidate("integration_branch", "12345")).toEqual({ ok: true });
+  });
+  it("rejects an empty value", () => {
+    expect(configValidate("integration_branch", "")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'integration_branch' must not be empty",
+        "config：'integration_branch' 不能为空",
+      ],
+    });
+  });
+  it("rejects git-ref-unsafe characters", () => {
+    expect(configValidate("integration_branch", "origin/main; rm -rf")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'integration_branch' has unsafe characters, got 'origin/main; rm -rf'",
+        "config：'integration_branch' 含非法字符，收到 'origin/main; rm -rf'",
+      ],
+    });
+    expect(configValidate("integration_branch", "a b").ok).toBe(false);
+    expect(configValidate("integration_branch", "a~b").ok).toBe(false);
+  });
+});
+
 describe("configKeyFile — scope → backing yaml file", () => {
   it("global → rollConfigPath", () => {
     expect(configKeyFile("global")).toBe(rollConfigPath());

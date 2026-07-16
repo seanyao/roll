@@ -54,8 +54,36 @@ import {
   type ToolResult,
 } from "@roll/spec";
 import { invokeInfraTool } from "./tools/delegation.js";
+import { configResolve, projectConfigPath } from "./config.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * E1: the historical hardcoded integration branch. Kept as the default for every
+ * integration-branch parameter so unset config = byte-identical prior behavior.
+ */
+export const DEFAULT_INTEGRATION_BRANCH = "origin/main";
+
+/**
+ * E1: resolve the loop's integration branch — the ref cycles rebase/merge/reset
+ * onto. Reads the project-scope `integration_branch` config key (default
+ * `origin/main`). The registry key is relative-path-based
+ * ({@link projectConfigPath} → `.roll/local.yaml`); pass `projectRoot` to read a
+ * specific project tree's config, mirroring how repo-visibility joins its
+ * `projectCwd` with the local config path. A missing key / file falls back to
+ * {@link DEFAULT_INTEGRATION_BRANCH}, so callers never observe an empty ref.
+ *
+ * @param projectRoot absolute path to the project tree whose `.roll/local.yaml`
+ *                    should be read. Omitted → the cwd-relative default path
+ *                    (matches the other cwd-relative config readers).
+ */
+export function resolveIntegrationBranch(projectRoot?: string): string {
+  const project =
+    projectRoot === undefined ? projectConfigPath() : join(projectRoot, projectConfigPath());
+  const resolved = configResolve("integration_branch", { project });
+  const value = resolved?.[0]?.trim();
+  return value !== undefined && value !== "" ? value : DEFAULT_INTEGRATION_BRANCH;
+}
 
 /** Result of a raw git invocation. */
 export interface GitResult {
@@ -321,9 +349,10 @@ export async function fetchRemoteBranch(
 export async function branchMergedIntoMain(
   repoCwd: string,
   branch: string,
+  integrationBranch: string = DEFAULT_INTEGRATION_BRANCH,
 ): Promise<boolean> {
   const r = await git(
-    ["merge-base", "--is-ancestor", `origin/${branch}`, "origin/main"],
+    ["merge-base", "--is-ancestor", `origin/${branch}`, integrationBranch],
     repoCwd,
   );
   return r.code === 0;
@@ -344,9 +373,10 @@ export async function branchMergedIntoMain(
 export async function branchCleanlyRebasesOntoMain(
   repoCwd: string,
   branch: string,
+  integrationBranch: string = DEFAULT_INTEGRATION_BRANCH,
 ): Promise<boolean> {
   const r = await git(
-    ["merge-tree", "--write-tree", "origin/main", `origin/${branch}`],
+    ["merge-tree", "--write-tree", integrationBranch, `origin/${branch}`],
     repoCwd,
   );
   return r.code === 0;

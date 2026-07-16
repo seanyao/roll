@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.716.1 — 2026-07-16
+
 ### 外部行为验证(新能力:真实 smoke 不会被模拟冒充)
 - 验收报告新增醒目的"外部行为验证"横幅与表格:像"真实 `npm i -g github:...`、发布后 CLI 启动、线上 OAuth 回调"这类本地证明不了的 AC,现在必须声明 `external-smoke`(隔离环境跑真实命令)或 `owner-attested`(人工签字带批准引用)。只有真实 smoke 通过或有效 owner 认证才是绿色;`verified-in-simulation`(仅 `npm pack` 之类模拟)和 `UNVERIFIED — external smoke not run` 一律非绿,只要有一个外部 AC 不达标横幅就转红——交付不能夸大自己的外部行为 (US-ATTEST-017) `[core+cli]`
   <!-- evidence: packages/core/test/fixtures/outward-verification/report.html -->

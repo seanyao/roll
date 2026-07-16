@@ -315,6 +315,111 @@ export async function worktreeSubmoduleInit(worktreePath: string): Promise<GitRe
   return git(["submodule", "update", "--init", "--recursive", "--quiet"], worktreePath);
 }
 
+// ─── E2: submodule-aware worktree (worktree OF a git submodule) ───────────────
+
+/**
+ * E2 — the cycle worktree path for a submodule story. The runner hands the
+ * worktree bootstrap ONE canonical path (`.roll/loop/<cycleId>`), but a
+ * submodule cycle must check out INSIDE the submodule's own repo. This joins the
+ * submodule name under that cycle path so the submodule worktree gets its own
+ * stable subdirectory (`<cycleWorktreePath>/<submoduleName>`) that will never
+ * collide with the superproject worktree, and the delivery path can re-derive it
+ * deterministically from the same two inputs.
+ */
+export function submoduleWorktreePath(cycleWorktreePath: string, submoduleName: string): string {
+  return join(cycleWorktreePath, submoduleName);
+}
+
+/**
+ * E2 — create the cycle worktree ON a git SUBMODULE of the superproject, not on
+ * the superproject itself. This is decision #1 of the submodule-aware delivery
+ * design: a `git worktree add` on the submodule's OWN repo shares the submodule's
+ * object store and refs, so when the local-delivery landing (E3
+ * {@link landLocalDelivery}) `update-ref`s the submodule's local integration
+ * branch, the user's REAL submodule checkout sees the branch advance — a
+ * sibling-clone could never do that.
+ *
+ * Steps (all run against the SUBMODULE repo `<superprojectCwd>/<submoduleName>`):
+ *   1. Validate `<submoduleName>` is a declared submodule in the superproject's
+ *      `.gitmodules` (`git config --file .gitmodules --get submodule.<name>.path`
+ *      / `--get-regexp` — matches by declared PATH, which is how the runner names
+ *      it). A missing declaration is fail-loud (code≠0, stderr names the miss) —
+ *      never silently fall back to the superproject.
+ *   2. Validate the submodule is INITIALIZED: `git -C <sub> rev-parse --git-dir`
+ *      resolves. A declared-but-de-inited submodule (no gitdir) is fail-loud so
+ *      the caller surfaces an honest "submodule not initialized" terminal rather
+ *      than checking a worktree out of thin air.
+ *   3. `git -C <sub> worktree add --detach <submoduleWorktreePath> <base>` — the
+ *      SAME detached-worktree contract as {@link worktreeAdd} (US-LOOP-094: no
+ *      local branch is created; the cycle commits on a detached HEAD).
+ *
+ * @param superprojectCwd     the outer super-repo that embeds the submodule.
+ * @param submoduleName       the submodule's declared path in `.gitmodules`
+ *                            (e.g. `dukang-service-online`).
+ * @param cycleWorktreePath   the runner's canonical cycle worktree path; the
+ *                            submodule worktree lands at
+ *                            {@link submoduleWorktreePath}`(cycleWorktreePath, submoduleName)`.
+ * @param base                the worktree base ref (the submodule's integration
+ *                            branch, e.g. `feat/contractor2.0`).
+ */
+export async function worktreeAddInSubmodule(
+  superprojectCwd: string,
+  submoduleName: string,
+  cycleWorktreePath: string,
+  base: string,
+  exists: (p: string) => boolean = defaultExists,
+): Promise<GitResult> {
+  // (1) The submodule must be declared in .gitmodules — match by declared path
+  // (the name the runner uses). `--get-regexp submodule\..*\.path` lists every
+  // declared submodule PATH; we require an exact match on `submoduleName`.
+  const declared = await git(
+    ["config", "--file", ".gitmodules", "--get-regexp", "^submodule\\..*\\.path$"],
+    superprojectCwd,
+  );
+  const declaredPaths = declared.code === 0
+    ? declared.stdout
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/).slice(1).join(" ").trim())
+        .filter((p) => p !== "")
+    : [];
+  if (!declaredPaths.includes(submoduleName)) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: `submodule '${submoduleName}' is not declared in ${superprojectCwd}/.gitmodules (declared: ${declaredPaths.join(", ") || "none"})`,
+    };
+  }
+
+  // (2) The submodule must be initialized — its own git dir must resolve.
+  const submoduleCwd = join(superprojectCwd, submoduleName);
+  const gitDir = await git(["rev-parse", "--git-dir"], submoduleCwd);
+  if (gitDir.code !== 0) {
+    return {
+      code: gitDir.code === 0 ? 1 : gitDir.code,
+      stdout: "",
+      stderr: `submodule '${submoduleName}' is declared but not initialized (no git dir at ${submoduleCwd}); run 'git submodule update --init ${submoduleName}' — ${gitDir.stderr.trim()}`,
+    };
+  }
+
+  // (3) Detached worktree on the SUBMODULE repo (same contract as worktreeAdd).
+  const path = submoduleWorktreePath(cycleWorktreePath, submoduleName);
+  mkdirSync(dirname(path), { recursive: true });
+  await git(["worktree", "prune", "--expire", "now"], submoduleCwd); // lenient
+  if (exists(path)) {
+    await git(["worktree", "remove", "--force", path], submoduleCwd); // lenient
+    rmSyncQuiet(path);
+  }
+  const result = await git(["worktree", "add", "--detach", path, base], submoduleCwd);
+  if (result.code === 0) {
+    try {
+      await git(["config", "extensions.worktreeConfig", "true"], path);
+    } catch {
+      /* best-effort defense-in-depth (mirrors worktreeAdd) */
+    }
+  }
+  return result;
+}
+
 /**
  * RESUME-PRIOR-WORK: re-point an ALREADY-created cycle worktree's TRACKED tree to
  * a resume ref. The worktree was created on `origin/main` (the fresh-context

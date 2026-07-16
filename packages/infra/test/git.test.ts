@@ -26,7 +26,9 @@ import {
   projectIdentity,
   resolveIntegrationBranch,
   resolvePublishMode,
+  submoduleWorktreePath,
   worktreeAdd,
+  worktreeAddInSubmodule,
   worktreeRemove,
   worktreeResetHard,
 } from "../src/index.js";
@@ -455,5 +457,93 @@ describe("landLocalDelivery — E3 local-only landing", () => {
     // point at a non-worktree dir → rev-parse HEAD fails
     const r = await landLocalDelivery(repo, join(repo, "does-not-exist"), "origin/main");
     expect(r.code).not.toBe(0);
+  });
+});
+
+// ─── E2: submodule-aware worktree (worktree OF a git submodule) ───────────────
+
+/**
+ * Build a superproject that embeds a real git submodule.
+ *   - `submodule` repo: standalone repo with a `feat/contractor2.0` branch.
+ *   - `superproject` repo: embeds it at path `sub` via `git submodule add`,
+ *     then commits the `.gitmodules` + gitlink.
+ * Returns the superproject path and the submodule NAME (its path in .gitmodules).
+ */
+function superprojectWithSubmodule(tag: string): { superproject: string; submoduleName: string; subUpstream: string } {
+  // The upstream the submodule is cloned from (a bare-ish local origin).
+  const subUpstream = initRepo(`${tag}-subupstream`);
+  writeFileSync(join(subUpstream, "sub-file.txt"), "sub base\n");
+  g(subUpstream, "add", "-A");
+  g(subUpstream, "commit", "-q", "-m", "sub base");
+  // Give the submodule an integration branch to land onto (feat/contractor2.0).
+  g(subUpstream, "branch", "feat/contractor2.0");
+
+  const superproject = initRepo(`${tag}-super`);
+  // `git submodule add` needs a file:// URL or path; use the local path.
+  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", subUpstream, "sub"], {
+    cwd: superproject,
+  });
+  // A real initialized submodule that the user is developing on has its
+  // integration branch as a LOCAL branch. A fresh `submodule add` only tracks it
+  // as origin/feat/contractor2.0, so materialize the local branch (mirrors the
+  // user's real dukang-service-online checkout on feat/contractor2.0).
+  const submoduleClone = join(superproject, "sub");
+  g(submoduleClone, "config", "user.email", "t@t");
+  g(submoduleClone, "config", "user.name", "t");
+  g(submoduleClone, "branch", "feat/contractor2.0", "origin/feat/contractor2.0");
+  g(superproject, "add", "-A");
+  g(superproject, "commit", "-q", "-m", "add submodule sub");
+  return { superproject, submoduleName: "sub", subUpstream };
+}
+
+describe("submoduleWorktreePath — E2 path derivation", () => {
+  it("joins the submodule name under the cycle worktree path", () => {
+    const p = submoduleWorktreePath("/tmp/loop/cycle-x", "dukang-service-online");
+    expect(p).toBe(join("/tmp/loop/cycle-x", "dukang-service-online"));
+  });
+});
+
+describe("worktreeAddInSubmodule — E2 worktree of a submodule", () => {
+  it("creates a DETACHED worktree ON the submodule repo, sharing its object store", async () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("subwt");
+    const wtParent = tmp("subwt-side");
+    const cycleWt = join(wtParent, "cycle");
+
+    const r = await worktreeAddInSubmodule(superproject, submoduleName, cycleWt, "feat/contractor2.0");
+    expect(r.code).toBe(0);
+
+    // The worktree lives at <cycleWt>/<submoduleName> and is a real checkout.
+    const subWt = submoduleWorktreePath(cycleWt, submoduleName);
+    expect(existsSync(join(subWt, "sub-file.txt"))).toBe(true);
+
+    // Shared object store proof: a commit made in the worktree is visible to the
+    // ACTUAL submodule checkout (git -C <super>/<sub> rev-parse) — the whole
+    // point of a worktree-of-submodule vs a sibling clone.
+    writeFileSync(join(subWt, "cycle-work.txt"), "cycle\n");
+    g(subWt, "add", "-A");
+    g(subWt, "commit", "-q", "-m", "tcr: cycle work in submodule");
+    const cycleSha = sha(subWt);
+    const submodulePath = join(superproject, submoduleName);
+    expect(g(submodulePath, "cat-file", "-t", cycleSha)).toBe("commit");
+  });
+
+  it("fails loud when the submodule is not declared in .gitmodules", async () => {
+    const repo = initRepo("subwt-missing");
+    const wt = join(tmp("subwt-missing-side"), "cycle");
+    const r = await worktreeAddInSubmodule(repo, "nonexistent-sub", wt, "main");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/submodule/i);
+  });
+
+  it("fails loud when the submodule is declared but not initialized (no gitdir)", async () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("subwt-uninit");
+    // De-init the submodule so its working tree/gitdir is gone but .gitmodules
+    // still declares it.
+    execFileSync("git", ["submodule", "deinit", "-f", submoduleName], { cwd: superproject });
+    execFileSync("rm", ["-rf", join(superproject, submoduleName)]);
+    const wt = join(tmp("subwt-uninit-side"), "cycle");
+    const r = await worktreeAddInSubmodule(superproject, submoduleName, wt, "feat/contractor2.0");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/initiali[sz]ed|not.*init/i);
   });
 });

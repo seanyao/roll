@@ -522,4 +522,24 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     // wrong shape — no type field as string
     expect(parseEventLine('{"type":123,"ts":1}')).toBeNull();
   });
+
+  it("types and parses loop:screen_locked events (FIX-1268)", () => {
+    const locked: RollEvent = {
+      type: "loop:screen_locked",
+      cycleId: "c1",
+      storyId: "US-CAPTURE-007",
+      locked: true,
+      reason: "console locked — physical-surface cards held",
+      ts: 1_780_000_500,
+    };
+    expect(locked.type).toBe("loop:screen_locked");
+    expect(locked.locked).toBe(true);
+    const parsed = parseEventLine(JSON.stringify(locked));
+    expect(parsed).not.toBeNull();
+    expect(parsed?.type).toBe("loop:screen_locked");
+    if (parsed?.type === "loop:screen_locked") {
+      expect(parsed.reason).toBe("console locked — physical-surface cards held");
+      expect(parsed.storyId).toBe("US-CAPTURE-007");
+    }
+  });
 });

@@ -19,6 +19,9 @@ export type RollEvent =
   | { type: "loop:paused"; loop: LoopType; ts: number }
   | { type: "loop:resumed"; loop: LoopType; ts: number }
   | { type: "loop:pending"; loop: LoopType; cycleId: string; reason: string; suspended: Array<{ agent: string; cause: string; detail?: string }>; ts: number }
+  // FIX-1268: the screen is locked and at least one physical-surface card was held.
+  // Emitted once per idle cycle that is blocked solely (or primarily) by this gate.
+  | { type: "loop:screen_locked"; cycleId: string; storyId?: string; locked: boolean; reason: string; ts: number }
   // US-LOOP-079e: dormant/wake/failed state transitions
   | { type: "loop:dormant"; loop: LoopType; ts: number; reason: string; since: number }
   | { type: "loop:woke"; loop: LoopType; ts: number; trigger: "roll-cmd" | "dream" | "pr" | "manual"; picked?: string; wakeEpoch: number }

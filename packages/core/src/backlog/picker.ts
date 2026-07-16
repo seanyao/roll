@@ -94,6 +94,17 @@ export interface PickOptions {
    * card fan-out burned whole cycles on work only one merge could land.
    */
   deliveryLeaseBlock?: (id: string) => string | undefined;
+  /**
+   * FIX-1268: true when the host console is locked and physical-surface cards
+   * must not be dispatched. The picker skips any story whose spec declares a
+   * physical_terminal surface while this is true.
+   */
+  isScreenLocked?: boolean;
+  /**
+   * FIX-1268: true iff the story requires a physical surface (e.g. a real
+   * Terminal.app screenshot). Used together with {@link isScreenLocked}.
+   */
+  requiresPhysicalSurface?: (id: string) => boolean;
 }
 
 /** First occurrence of a depends-on tag, mirroring the bash regex. */
@@ -269,6 +280,9 @@ export function isEligible(
   // default kills same-card fan-out. `--race` is the explicit opt-in and is
   // resolved by the caller before wiring this predicate.
   if (deliveryLeaseBlock(item.id) !== undefined) return false;
+  // FIX-1268: while the console is locked, physical-surface cards cannot be
+  // dispatched because the attest gate cannot capture real evidence.
+  if (opts.isScreenLocked === true && opts.requiresPhysicalSurface?.(item.id) === true) return false;
   return true;
 }
 
@@ -371,6 +385,7 @@ export function assessBacklog(
   let hasBlockedBySkip = false;
   let hasBlockedByPendingPublish = false;
   let hasBlockedByLease = false;
+  let hasBlockedByScreenLocked = false;
 
   if (todoCount > 0) {
     const hasOpenPr = opts.hasOpenPr ?? (() => false);
@@ -378,6 +393,7 @@ export function assessBacklog(
     const shouldSkip = opts.shouldSkip ?? (() => false);
     const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
     const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
+    const requiresPhysicalSurface = opts.requiresPhysicalSurface ?? (() => false);
 
     for (const it of items) {
       if (classifyStatus(it.status) !== "todo") continue;
@@ -422,6 +438,19 @@ export function assessBacklog(
         deliveryLeaseBlock(it.id) !== undefined
       )
         blockedByLease = true;
+      // FIX-1268: screen-locked physical-surface gate is checked after the durable
+      // eligibility gates so a card blocked by lease/PR is attributed to that gate.
+      if (
+        !blockedByDeps &&
+        !blockedByPr &&
+        !blockedByMerged &&
+        !blockedBySkip &&
+        !blockedByPendingPublish &&
+        !blockedByLease &&
+        opts.isScreenLocked === true &&
+        requiresPhysicalSurface(it.id)
+      )
+        hasBlockedByScreenLocked = true;
 
       if (blockedByDeps) hasBlockedByDeps = true;
       if (blockedByPr) hasBlockedByPr = true;
@@ -440,6 +469,7 @@ export function assessBacklog(
     const shouldSkip = opts.shouldSkip ?? (() => false);
     const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
     const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
+    const requiresPhysicalSurface = opts.requiresPhysicalSurface ?? (() => false);
 
     for (const it of items) {
       if (classifyStatus(it.status) !== "todo") continue;
@@ -488,6 +518,12 @@ export function assessBacklog(
         hasBlockedByLease = true;
         continue;
       }
+      // FIX-1268: screen-locked physical-surface gate.
+      if (opts.isScreenLocked === true && requiresPhysicalSurface(it.id)) {
+        blockedCards.push({ id: it.id, reason: "screen locked — physical surface unavailable" });
+        hasBlockedByScreenLocked = true;
+        continue;
+      }
     }
   }
 
@@ -498,6 +534,7 @@ export function assessBacklog(
   if (hasBlockedBySkip) return { hasWork: false, reason: "all_skip_listed", blockedCards };
   if (hasBlockedByPendingPublish) return { hasWork: false, reason: "all_pending_publish", blockedCards };
   if (hasBlockedByLease) return { hasWork: false, reason: "all_leased", blockedCards };
+  if (hasBlockedByScreenLocked) return { hasWork: false, reason: "screen_locked", blockedCards };
 
   if (inProgressCount > 0 || holdCount > 0) {
     return { hasWork: false, reason: "all_in_progress" };
@@ -533,6 +570,7 @@ export const DORMANCY_SUPPRESSED_REASONS: ReadonlySet<BacklogReason> = new Set([
   "all_awaiting_merge",
   "all_pending_publish",
   "all_leased",
+  "screen_locked",
 ]);
 
 /** True when the given backlog reason should prevent the loop from entering DORMANT. */

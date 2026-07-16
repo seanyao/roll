@@ -1226,6 +1226,17 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // (written by the executor's append_run). When dormant is not entered,
   // idle still ultimately lands as idle_no_work (regression on existing paths).
   if (result.terminal === "idle") {
+    // FIX-1268: a screen-locked idle is a WAIT, not a drained backlog. Do not
+    // increment the idle counter and do not enter dormancy — the loop should
+    // resume dispatch the moment the screen unlocks.
+    if (result.state?.ctx.screenLocked === true) {
+      process.stdout.write(
+        "loop run-once: screen locked — physical-surface cards held until unlock\n" +
+          "loop run-once: 屏幕已锁定——物理证据卡待解锁后派工\n",
+      );
+      resetConsecutiveIdle(id.path, id.slug);
+      return 0;
+    }
     process.stdout.write(
       "loop run-once: idle — no work picked up this cycle\n" +
         "loop run-once: 空闲——本周期未拾取任务\n",

@@ -118,6 +118,18 @@ function fakeProvider(states: Record<number, PrCloudState>): PrStatusProvider {
   };
 }
 
+function writeAcceptanceEvidence(p: string, id: string): void {
+  const cardDir = join(p, ".roll", "features", "test", id);
+  mkdirSync(join(cardDir, "latest"), { recursive: true });
+  mkdirSync(join(cardDir, "screenshots"), { recursive: true });
+  writeFileSync(join(cardDir, "screenshots", "proof.png"), "png\n");
+  writeFileSync(
+    join(cardDir, "ac-map.json"),
+    JSON.stringify([{ ac: `${id}:AC1`, status: "pass", evidence: [{ kind: "screenshot", href: "screenshots/proof.png" }] }]) + "\n",
+  );
+  writeFileSync(join(cardDir, "latest", `${id}-report.html`), "<html>report</html>\n");
+}
+
 function deps(p: string, provider?: PrStatusProvider): LoopReconcileDeps & { out: string[]; err: string[] } {
   const out: string[] = [];
   const err: string[] = [];
@@ -140,6 +152,36 @@ function jsonReport(out: string[]): Record<string, unknown>[] {
 }
 
 describe("US-DELIV-010 — degraded/terminal observable through reconcile", () => {
+  it("merged PR flips an attested in-progress backlog card to Done", async () => {
+    const p = project();
+    seed(p);
+    const backlogPath = join(p, ".roll", "backlog.md");
+    writeFileSync(
+      backlogPath,
+      "## Epic: Test\n\n| ID | Description | Status |\n|----|----|----|\n| US-DELIV-010 | reconcile write-back | 🔨 In Progress |\n",
+    );
+    writeAcceptanceEvidence(p, "US-DELIV-010");
+    const d = deps(p, fakeProvider({
+      42: { kind: "merged", mergeCommit: "abc1234def", mergedAt: "2026-07-13T00:00:00Z", checkedAt: "2026-07-13T00:00:00Z" },
+    }));
+
+    const code = await withoutGitEnvAsync(() => loopReconcileCommand(["--json"], d));
+
+    expect(code).toBe(0);
+    expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
+
+    writeFileSync(
+      backlogPath,
+      "## Epic: Test\n\n| ID | Description | Status |\n|----|----|----|\n| US-DELIV-010 | reconcile write-back | 🔨 In Progress |\n",
+    );
+    const repaired = deps(p, fakeProvider({
+      42: { kind: "merged", mergeCommit: "abc1234def", mergedAt: "2026-07-13T00:00:00Z", checkedAt: "2026-07-13T00:00:00Z" },
+    }));
+    await withoutGitEnvAsync(() => loopReconcileCommand(["--json", "--story", "US-DELIV-010"], repaired));
+
+    expect(readFileSync(backlogPath, "utf8")).toContain("✅ Done");
+  });
+
   it("draft PR → degraded(draft) with dwell, no merge attempt", async () => {
     const p = project();
     seed(p);
@@ -193,7 +235,7 @@ describe("US-DELIV-010 — degraded/terminal observable through reconcile", () =
     expect(item!.dwellMs as number).toBeGreaterThan(24 * 60 * 60 * 1000);
   });
 
-  it("PR closed unmerged → terminal(pr_closed_unmerged), never delivered", async () => {
+  it("PR closed unmerged → terminal(pr_closed_unmerged) and releases the delivery lease", async () => {
     const p = project();
     seed(p);
     const d = deps(p, fakeProvider({
@@ -206,7 +248,18 @@ describe("US-DELIV-010 — degraded/terminal observable through reconcile", () =
     expect(item!.kind).toBe("terminal");
     expect(item!.reason).toBe("pr_closed_unmerged");
     const evs = readEvents(p);
-    expect(evs.find((e) => e.type === "delivery:reconciled")).toBeUndefined();
+    const abandoned = evs.find((e) => e.type === "delivery:abandoned");
+    expect(abandoned).toMatchObject({
+      cycleId: CYCLE,
+      storyId: "US-DELIV-010",
+      reason: "pr_closed_unmerged",
+    });
+
+    const second = deps(p, fakeProvider({
+      42: { kind: "closed_unmerged", closedAt: "2026-07-13T00:00:00Z", checkedAt: "2026-07-13T00:00:00Z" },
+    }));
+    await withoutGitEnvAsync(() => loopReconcileCommand(["--json"], second));
+    expect(second.out.join("")).toContain("No cycles awaiting reconciliation.");
   });
 
   it("gh unreachable auth → degraded(no_permission)", async () => {

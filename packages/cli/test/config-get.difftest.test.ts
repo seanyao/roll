@@ -132,6 +132,7 @@ describe("frozen: roll config (read) render", () => {
         loop_schedule.offset_minute    = 0        (default)
         loop_dream_hour                = 5        (<HOME>/.roll/config.yaml)
         loop_dream_minute              = -        (default)
+        integration_branch             = origin/main (default)
       ",
       }
     `);
@@ -192,6 +193,16 @@ describe("frozen: roll config (read) render", () => {
         "status": 0,
         "stderr": "",
         "stdout": "loop_dream_minute = -  (from default)
+      ",
+      }
+    `);
+  });
+  it("config integration_branch (project flat string, origin/main default)", () => {
+    expect(tsCfg(["integration_branch"])).toMatchInlineSnapshot(`
+      {
+        "status": 0,
+        "stderr": "",
+        "stdout": "integration_branch = origin/main  (from default)
       ",
       }
     `);

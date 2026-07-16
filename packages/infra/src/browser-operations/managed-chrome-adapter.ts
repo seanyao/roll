@@ -344,11 +344,36 @@ export class ManagedChromeAdapter {
   ): Promise<BrowserActionResult> {
     const initialUrl = action === "navigate" ? stringPayload(payload, "url") : undefined;
     await this.assertOriginAllowed(initialUrl ?? requestedOrigin, lanePolicy, "before typed MCP action");
+
+    // US-BROW-020 (live-gate finding): every managed run starts a FRESH
+    // temporary Chrome at about:blank, so a non-navigate diagnostic must load
+    // the requested page first or it inspects a blank tab. Only navigation
+    // reports a final URL on the real server (prose "## Pages … [selected]"),
+    // so the final-origin guard anchors on the navigate step.
+    let finalUrl: string;
+    if (action === "navigate") {
+      const nav = await session.facade.execute({ action, payload });
+      if (nav.status === "denied") throw new OriginDenialError(nav.denial ?? { code: "action_not_allowed", message: nav.summary });
+      if (nav.status === "failed") throw new DevToolsError(nav.summary);
+      if (nav.finalUrl === undefined) throw new DevToolsError("Typed MCP navigation did not report a final URL");
+      finalUrl = nav.finalUrl;
+      await this.assertOriginAllowed(finalUrl, lanePolicy, "after typed MCP action");
+      return actionResult("", "ok", nav.diagnosticRefs, nav.summary);
+    }
+
+    const nav = await session.facade.execute({ action: "navigate", payload: { url: requestedOrigin } });
+    if (nav.status === "denied") throw new OriginDenialError(nav.denial ?? { code: "action_not_allowed", message: nav.summary });
+    if (nav.status === "failed") throw new DevToolsError(nav.summary);
+    if (nav.finalUrl === undefined) throw new DevToolsError("Typed MCP navigation did not report a final URL");
+    finalUrl = nav.finalUrl;
+    await this.assertOriginAllowed(finalUrl, lanePolicy, "after navigation, before diagnostic");
+
     const result = await session.facade.execute({ action, payload });
     if (result.status === "denied") throw new OriginDenialError(result.denial ?? { code: "action_not_allowed", message: result.summary });
     if (result.status === "failed") throw new DevToolsError(result.summary);
-    if (result.finalUrl === undefined) throw new DevToolsError("Typed MCP action did not report a final URL");
-    await this.assertOriginAllowed(result.finalUrl, lanePolicy, "after typed MCP action");
+    if (result.finalUrl !== undefined) {
+      await this.assertOriginAllowed(result.finalUrl, lanePolicy, "after typed MCP action");
+    }
     return actionResult("", "ok", result.diagnosticRefs, result.summary);
   }
 

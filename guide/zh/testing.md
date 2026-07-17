@@ -70,6 +70,24 @@ pnpm test:cov           # 全套 + v8 覆盖率
 通过证明（见下）。纯文档改动无受影响测试，exit 0。pre-push / CI / release
 一律跑全套 `pnpm -r test`。
 
+### 运行器兼容性与保守回退
+
+`roll test` 从**目标项目**解析闸命令，而不是假定某一个固定 flag，因此始终与
+项目里已安装的测试运行器兼容（FIX-1274）：
+
+- Roll 自己的 wrapper 继续用 `--affected`。
+- 普通 Vitest 项目改用该版本支持的 `--changed` changed-test 模式。Roll 绝不把
+  `--affected` 传给 Vitest——Vitest CLI 会把它当未知选项拒绝，否则会卡死提交。
+- 当无法确认安全的 changed 模式（Vitest 版本探测不到/过旧、非 Vitest 运行器），
+  或 `--changed` 匹配到**零个**测试时，roll 改跑项目的**全量**测试命令。回退永远
+  比 affected 闸**更严格**——绝不放过部分或空测试。
+
+**证明保证**：`.roll/last-test-pass` **只在**受支持的命令真正执行且返回 0 后写入，
+记录被测树哈希、实际执行的命令、所选模式和时间戳。失败、未知选项、零测试的运行
+都不会生成证明，因此一份证明永远代表一次真实的绿色测试运行，且绑定到确切的提交树。
+无法解析的项目（`package.json` 没有 `scripts.test`）会带结构化诊断和安全的下一步
+明确报错，而不是静默通过。
+
 ## 测试质量评分卷（rubric）
 
 `guide/zh/testing/quality-rubric.md`（由 `$roll-.dream` Scan 7 消费）列出

@@ -7,9 +7,17 @@
  * Mirrored byte-for-byte: arg parse (`--help`/`-h` anywhere before `--` wins;
  * `--` forwards verbatim; `--where`; `--reset`), the `--where` routing tokens
  * (`host`, `unknown:<type>`), the reset-lock fast-fail messages, the
- * unknown-isolation-type error, and the default exec path (`npm test -- <args>`
- * with `--affected` default), including the dispatcher's "no config → falling
- * back to type=none" stderr INFO line.
+ * unknown-isolation-type error, and the dispatcher's "no config → falling back
+ * to type=none" stderr INFO line.
+ *
+ * COMPAT-AWARE GATE (FIX-1274): with no explicit `-- <args>`, the default exec
+ * path no longer blindly appends roll's `--affected` token (which a plain Vitest
+ * project rejects). It resolves a version-compatible command from the TARGET
+ * project via {@link resolveGateCommand}: the roll wrapper keeps `--affected`;
+ * a raw Vitest project uses the supported `--changed` mode (or the full suite as
+ * the conservative fallback, incl. when `--changed` matches 0 tests). The
+ * `.roll/last-test-pass` proof is written ONLY after a supported command really
+ * ran and returned zero. Explicit `-- <args>` still forwards verbatim.
  *
  * ISOLATION SURFACE (REFACTOR-046): only `type: none` is supported. The tart
  * VM lane was REMOVED — its real-VM path was never CI-exercised and the v3
@@ -37,6 +45,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { isNoTestsFoundOutput, resolveGateCommand, type GateMode } from "@roll/core";
 import { rollPkgDir } from "./setup-shared.js";
 
 // ─── bash UI helpers (bin/roll:41-56) ────────────────────────────────────────
@@ -233,8 +242,10 @@ function resetReleaseLock(): void {
 /**
  * Forward a (shimmed) child's stdout/stderr through our process streams so the
  * env-swap difftest harness captures it byte-identically (mirrors update.ts).
+ * Returns the exit status plus the combined child output so the gate can inspect
+ * it (e.g. detect a zero-test `--changed` selection — FIX-1274).
  */
-function runForward(cmd: string, argv: string[]): number {
+function runForward(cmd: string, argv: string[]): { status: number; output: string } {
   const frame = currentEvidenceFrame();
   const r = spawnSync(cmd, argv, { encoding: "utf8", env: childEnvForEvidence(frame) });
   const stdout = typeof r.stdout === "string" ? r.stdout : "";
@@ -243,7 +254,69 @@ function runForward(cmd: string, argv: string[]): number {
   if (stdout !== "") process.stdout.write(stdout);
   if (stderr !== "") process.stderr.write(stderr);
   if (frame !== null) appendRollTestEvidence(frame, cmd, argv, status, stdout, stderr);
-  return status;
+  return { status, output: stdout + stderr };
+}
+
+// ─── target-project runner resolution (FIX-1274) ─────────────────────────────
+/** Read `scripts.test` from the target project's package.json (or undefined). */
+function readTestScript(cwd: string): string | undefined {
+  const p = join(cwd, "package.json");
+  if (!existsSync(p)) return undefined;
+  try {
+    const pkg = JSON.parse(readFileSync(p, "utf8")) as { scripts?: Record<string, unknown> };
+    const t = pkg.scripts?.["test"];
+    return typeof t === "string" ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Detect the installed Vitest version by walking up from cwd to node_modules. */
+function detectVitestVersion(cwd: string): string | undefined {
+  let dir = cwd;
+  for (let i = 0; i < 6; i++) {
+    const vp = join(dir, "node_modules", "vitest", "package.json");
+    if (existsSync(vp)) {
+      try {
+        const v = (JSON.parse(readFileSync(vp, "utf8")) as { version?: string }).version;
+        if (typeof v === "string") return v;
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+function gitCapture(cwd: string, args: string[]): string {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  return r.status === 0 && typeof r.stdout === "string" ? r.stdout.trim() : "";
+}
+
+/**
+ * Record a fresh `.roll/last-test-pass` proof AFTER a supported command has
+ * actually executed and returned zero. The proof binds the exact tested tree
+ * hash to the executed command + selected mode + timestamp so the pre-commit
+ * freshness/tree-match guard stays effective. Fail-safe: if the tree cannot be
+ * computed (not a git worktree) the proof is NOT written — a missing proof
+ * blocks the commit loudly rather than fabricating a green (FIX-1274).
+ */
+function writeTestProof(cwd: string, mode: GateMode, command: string): void {
+  const top = gitCapture(cwd, ["rev-parse", "--show-toplevel"]);
+  if (top === "") return;
+  const tree = gitCapture(cwd, ["write-tree"]);
+  if (tree === "") return;
+  const ts = Math.floor(Date.now() / 1000);
+  const proofPath = join(top, ".roll", "last-test-pass");
+  try {
+    mkdirSync(dirname(proofPath), { recursive: true });
+    writeFileSync(proofPath, JSON.stringify({ ts, tree, mode, command, scope: mode }) + "\n", "utf8");
+  } catch {
+    /* best-effort write; an absent proof fails the commit loudly, never green */
+  }
 }
 
 function ensureSkillsSubmoduleReady(): boolean {
@@ -263,8 +336,12 @@ function ensureSkillsSubmoduleReady(): boolean {
 }
 
 // ─── _isolation_dispatch exec / reset (6582) ─────────────────────────────────
-/** Returns the dispatch exit status, or null when the type is unknown-but-handled. */
-function isolationDispatch(method: "exec" | "reset", args: string[]): number {
+/**
+ * Emit the no-config INFO line (bash parity) and validate the isolation type.
+ * Returns an exit status when the type is unknown (fail-loud, never a silent
+ * host fallback), or null when the type is the supported `none` adapter.
+ */
+function ensureNoneIsolation(): number | null {
   const type = isolationGetType();
   if (type === "none" && !existsSync(join(process.cwd(), ".roll", "local.yaml"))) {
     infoErr("isolation: no test_isolation config, falling back to type=none (host)");
@@ -274,13 +351,21 @@ function isolationDispatch(method: "exec" | "reset", args: string[]): number {
     process.stderr.write(`  supported types: ${SUPPORTED_TYPES.join(", ")}\n`);
     return 1;
   }
+  return null;
+}
+
+/** Returns the dispatch exit status. Reset lane only (exec is orchestrated by
+ *  the gate resolver in {@link testCommand}). */
+function isolationDispatch(method: "exec" | "reset", args: string[]): number {
+  const guard = ensureNoneIsolation();
+  if (guard !== null) return guard;
   // type === "none" (the only supported adapter — REFACTOR-046).
   if (method === "reset") {
     err("isolation type 'none' has nothing to reset (host execution is stateless)");
     return 0;
   }
   // _isolation_none_exec: run the command in the host shell unchanged.
-  return runForward(args[0] ?? "", args.slice(1));
+  return runForward(args[0] ?? "", args.slice(1)).status;
 }
 
 const HELP = `Usage: roll test [--where | --reset] [--] [<extra-args>...]
@@ -295,6 +380,19 @@ Any other configured type is rejected with an explicit error (exit 1) —
 never a silent host fallback. The \`<type>:<detail>\` routing token printed
 by --where is the extension point for future adapters.
 
+Runner compatibility (FIX-1274):
+  With no extra args, roll test resolves a per-commit gate command from the
+  TARGET project instead of assuming one flag:
+    - roll's own wrapper keeps its \`--affected\` token;
+    - a plain Vitest project uses the version-supported \`--changed\` mode
+      (roll never passes \`--affected\` to Vitest, which rejects it);
+    - if no safe changed mode exists (or a \`--changed\` run matched 0 tests),
+      roll runs the project's FULL test command — a strictly more conservative
+      gate, never a partial or empty pass.
+  The \`.roll/last-test-pass\` proof is recorded ONLY after a supported command
+  actually executes and returns zero, so a proof always represents a real,
+  green test run bound to the exact committed tree.
+
 Flags:
   --where        Print where tests will run, then exit (e.g. \`host\`,
                  \`unknown:<type>\`).
@@ -305,8 +403,8 @@ Flags:
   --help, -h     Show this help.
 
 Examples:
-  roll test                    Run affected tests (default: --affected HEAD~1).
-  roll test -- tests/          Run the full suite explicitly.
+  roll test                    Resolve + run the compatible changed-test gate.
+  roll test -- tests/          Forward arguments to npm test verbatim.
   roll test -- --tier=fast     Forward arguments to npm test.
   roll test --where            Don't run; just report routing.
 `;
@@ -359,8 +457,77 @@ export function testCommand(args: string[]): number {
     return 1;
   }
 
-  let npmArgs = argv;
-  if (npmArgs.length === 0) npmArgs = ["--affected"];
   if (!ensureSkillsSubmoduleReady()) return 1;
-  return isolationDispatch("exec", ["npm", "test", "--", ...npmArgs]);
+  const guard = ensureNoneIsolation();
+  if (guard !== null) return guard;
+
+  // Explicit passthrough: `roll test -- <args>` forwards verbatim. The caller
+  // owns the exact command and its proof; roll does not resolve or mint one.
+  if (argv.length > 0) {
+    return runForward("npm", ["test", "--", ...argv]).status;
+  }
+
+  // Default per-commit gate → resolve a version-compatible runner (FIX-1274).
+  // A raw Vitest project rejects roll's `--affected` token; the resolver picks a
+  // supported changed-test mode, or the project's full suite as the conservative
+  // fallback, and records a proof only after a real zero exit.
+  const cwd = process.cwd();
+  const resolution = resolveGateCommand({
+    hasPackageJson: existsSync(join(cwd, "package.json")),
+    testScript: readTestScript(cwd),
+    vitestVersion: detectVitestVersion(cwd),
+  });
+  if (!resolution.ok) {
+    err("roll test: no test command could be resolved for this project");
+    process.stderr.write(`  reason:    ${resolution.reason}\n`);
+    process.stderr.write(`  attempted: ${resolution.attempted}\n`);
+    process.stderr.write(`  next step: ${resolution.nextStep}\n`);
+    return 1;
+  }
+  const plan = resolution.plan;
+  // Surface the compatibility decision for the new (changed/full) paths; the
+  // legacy/wrapper `--affected` path stays silent for byte-stable parity.
+  if (plan.mode !== "affected") infoErr(`test gate: ${plan.mode} — ${plan.reason}`);
+
+  // Full mode runs the project's own `npm test` with no separator; changed /
+  // affected append their flag after `--`.
+  const npmArgv = plan.npmTestArgs.length > 0 ? ["test", "--", ...plan.npmTestArgs] : ["test"];
+  const primary = runForward("npm", npmArgv);
+
+  // A `--changed` selection that matched ZERO tests is not an honest green — and
+  // Vitest exits 0 in that case ("No test files found, exiting with code 0"), so
+  // the exit code alone would fabricate a pass. Detect the empty selection from
+  // the runner output and fall back to the FULL suite (stricter), regardless of
+  // exit code, rather than mint a proof for a run that executed no tests.
+  if (plan.mode === "changed" && isNoTestsFoundOutput(primary.output)) {
+    infoErr("test gate: changed-test mode matched 0 tests → running full suite (conservative fallback)");
+    const full = runForward("npm", ["test"]);
+    return finishGate(cwd, "full", "npm test", full, plan.writesProof);
+  }
+
+  return finishGate(cwd, plan.mode, ["npm", ...npmArgv].join(" "), primary, plan.writesProof);
+}
+
+/**
+ * Complete the gate for a run: mint the proof ONLY when the command really
+ * executed tests and returned zero. A non-zero exit fails as-is; a run that
+ * reported zero test files (even one that exits 0 via `--passWithNoTests`) is
+ * NOT an honest green — it verified nothing — so it fails loud instead of
+ * minting a fabricated proof (FIX-1274 scorer guarantee).
+ */
+function finishGate(
+  cwd: string,
+  mode: GateMode,
+  command: string,
+  run: { status: number; output: string },
+  writesProof: boolean,
+): number {
+  if (run.status !== 0) return run.status;
+  if (isNoTestsFoundOutput(run.output)) {
+    err("roll test: the test command reported no test files — nothing was verified");
+    process.stderr.write("  a green gate requires at least one executed test; add tests or scope the run\n");
+    return 1;
+  }
+  if (writesProof) writeTestProof(cwd, mode, command);
+  return 0;
 }

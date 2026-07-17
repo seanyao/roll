@@ -75,6 +75,29 @@ pnpm test:cov           # full suite with v8 coverage
 proof the commit gate checks (see below). A doc-only change has no affected
 tests and exits 0. Pre-push / CI / release always run the full `pnpm -r test`.
 
+### Runner compatibility & the conservative fallback
+
+`roll test` resolves the gate command from the **target project** rather than
+assuming one flag, so it stays compatible with the project's installed test
+runner (FIX-1274):
+
+- Roll's own wrapper keeps its `--affected` token.
+- A plain Vitest project uses the version-supported `--changed` changed-test
+  mode. Roll never passes `--affected` to Vitest — Vitest's CLI rejects it as an
+  unknown option, which would otherwise strand the commit.
+- When no safe changed mode can be verified (undetectable/too-old Vitest, a
+  non-Vitest runner), or when a `--changed` run matches **zero** tests, roll
+  runs the project's **full** test command instead. The fallback is always
+  *stricter* than the affected-only gate — never a partial or empty pass.
+
+**Proof guarantee:** `.roll/last-test-pass` is written **only after** a supported
+command actually executes and returns zero, recording the tested tree hash, the
+executed command, the selected mode, and a timestamp. A failed, unknown-option,
+or zero-test run never mints a proof, so a proof always represents a real green
+test run bound to the exact committed tree. An unresolvable project (a
+`package.json` with no `scripts.test`) fails loud with a structured diagnostic
+and a safe next step instead of silently passing.
+
 ## Test Quality Rubric
 
 `guide/en/testing/quality-rubric.md` (referenced from `$roll-.dream` Scan 7)

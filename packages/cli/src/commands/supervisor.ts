@@ -124,6 +124,19 @@ const quietExecPort: ExecPort = {
   },
 };
 
+function preservedWorktreeHasChanges(projectPath: string, cycleId: string): boolean {
+  const worktreePath = join(projectPath, ".roll", "loop", "worktrees", `cycle-${cycleId}`);
+  if (!existsSync(worktreePath)) return true;
+  try {
+    return execFileSync("git", ["-C", worktreePath, "status", "--porcelain"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() !== "";
+  } catch {
+    return true;
+  }
+}
+
 function summarizeList(items: readonly string[], limit = 5): string {
   if (items.length === 0) return "none";
   const shown = items.slice(0, limit).join(", ");
@@ -373,7 +386,7 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
       if (sid !== undefined) {
         // consecutive trailing failures: reset on a non-failure terminal.
         failuresByStory.set(sid, FAIL.has(ev.outcome) ? (failuresByStory.get(sid) ?? 0) + 1 : 0);
-        if (ev.outcome === "handoff_without_tcr") {
+        if (ev.outcome === "handoff_without_tcr" && preservedWorktreeHasChanges(projectPath, ev.cycleId)) {
           structuralFailures.set(sid, {
             storyId: sid,
             kind: "zero_tcr_dirty_worktree",
@@ -399,7 +412,10 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
         });
       }
     }
-    else if (ev.type === "builder:handoff_required") {
+    else if (
+      ev.type === "builder:handoff_required" &&
+      preservedWorktreeHasChanges(projectPath, ev.cycleId)
+    ) {
       const sid = ev.storyId !== "" ? ev.storyId : cycleStory.get(ev.cycleId);
       if (sid !== undefined) {
         structuralFailures.set(sid, {

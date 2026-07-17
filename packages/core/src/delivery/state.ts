@@ -50,6 +50,12 @@ const TERMINAL: ReadonlySet<DeliveryState> = new Set<DeliveryState>([
  * over the full append-only stream (that would be O(cycles × events)).
  */
 export function projectDeliveryState(events: readonly RollEvent[], cycleId: string): DeliveryState {
+  let latestAttestVerdict: "produced" | "skipped" | undefined;
+  for (const event of events) {
+    if (event.type === "attest:gate" && event.cycleId === cycleId) latestAttestVerdict = event.verdict;
+  }
+  if (latestAttestVerdict === "skipped") return "blocked_no_evidence";
+
   let state: DeliveryState = "building";
   for (const ev of events) {
     if (!("cycleId" in ev) || ev.cycleId !== cycleId) continue;

@@ -208,8 +208,9 @@ interface CycleSnapshot {
 
 /**
  * Read events.ndjson and extract cycle delivery snapshots.
- * Returns cycles that are awaiting_merge (or any non-terminal state that
- * could be reconciled).
+ * Returns published cycles that are awaiting_merge (or ci_failed). A cycle
+ * without a delivery:published event has no PR or branch claim to reconcile;
+ * admitting it would let unrelated main history credit an aborted attempt.
  */
 function readAwaitingCycles(cwd: string, includeDelivered = false): CycleSnapshot[] {
   const eventsPath = join(runtimeDir(cwd), "events.ndjson");
@@ -255,20 +256,18 @@ function readAwaitingCycles(cwd: string, includeDelivered = false): CycleSnapsho
   const snapshots: CycleSnapshot[] = [];
   for (const [cycleId, events] of cycleEvents) {
     const state = projectDeliveryState(events, cycleId);
-    // The periodic tick skips delivered rows after writing them back. The
+    // Only a published PR cycle has strong delivery evidence to reconcile.
+    // `ci_failed` retains its published metadata and is eligible for recovery.
+    // The periodic tick skips delivered rows after writing them back; the
     // explicit command includes them so a previously reconciled merge can
     // repair an interrupted backlog status flip.
-    // E3: `delivered_local` is terminal too (local-only landing, no PR to
-    // reconcile) — skip it exactly like the other delivered terminals.
-    if (
-      state === "superseded" ||
-      state === "abandoned" ||
-      (!includeDelivered &&
-        (state === "delivered" || state === "delivered_external" || state === "delivered_local"))
-    ) {
+    const deliveredTerminal =
+      state === "delivered" || state === "delivered_external" || state === "delivered_local";
+    if (state !== "awaiting_merge" && state !== "ci_failed" && !(includeDelivered && deliveredTerminal)) {
       continue;
     }
     const meta = cycleMeta.get(cycleId) ?? { storyId: "", branch: `loop/${cycleId}` };
+    if (meta.prNumber === undefined || meta.awaitingSinceMs === undefined) continue;
     snapshots.push({
       cycleId,
       storyId: meta.storyId,

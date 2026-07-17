@@ -159,8 +159,8 @@ const LOW_SCORE_FEEDBACK_MAX_CHARS = 1200;
  * FIX-386 — build a fix-forward task prompt from the reviewer's low-score
  * findings. Returns an empty string when there is no low score to forward, or
  * when the latest score is above the low threshold. The prompt tells the builder
- * to fix the specific reviewer findings ON THE SAME BRANCH (resumed worktree),
- * then re-submit for peer review — no fresh re-pick, no context loss.
+ * to fix the specific reviewer findings in the runner-provided worktree, then
+ * re-submit for peer review — no branch surgery or context loss.
  *
  * Reads the LATEST review score note for the story from the PERSISTENT .roll
  * (repoCwd). Best-effort: a read blip returns "" so the agent runs cold without
@@ -184,8 +184,8 @@ export function buildLowScoreFixForwardPrompt(
 
   const headline =
     verdict === "regression"
-      ? `⚠️  Prior peer review REGRESSION (${entry.score}/10) — fix these findings on the SAME branch and re-submit for review. Do NOT start fresh.`
-      : `⚠️  Prior peer review LOW SCORE (${entry.score}/10) — address reviewer findings on the SAME branch, then re-submit for peer review.`;
+      ? `⚠️  Prior peer review REGRESSION (${entry.score}/10) — fix these findings in the runner-provided worktree and re-submit for review.`
+      : `⚠️  Prior peer review LOW SCORE (${entry.score}/10) — address reviewer findings in the runner-provided worktree, then re-submit for peer review.`;
 
   const rationale =
     (entry.note ?? "").trim() === ""
@@ -205,7 +205,8 @@ export function buildLowScoreFixForwardPrompt(
     rationale,
     "",
     "**Instructions:**",
-    `- You are resuming the EXISTING branch for ${storyId} — all prior code is already here.`,
+    `- Work only from the current worktree and current base for ${storyId}; inspect it before assuming earlier changes are present.`,
+    "- Do not create, checkout, rename, or switch branches. The runner owns branch lifecycle and recovery base selection.",
     "- Fix each finding above with minimal, targeted changes.",
     "- Write/update regression tests for each fix.",
     `- When done, the cycle's peer review stage will RE-SCORE this delivery.`,

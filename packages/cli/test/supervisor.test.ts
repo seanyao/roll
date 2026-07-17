@@ -4,6 +4,7 @@
  * never implementing a Story or marking one Done.
  */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -512,6 +513,28 @@ describe("supervisorCommand", () => {
       source: "cycle:end/C-zero",
       worktreePath: ".roll/loop/worktrees/cycle-C-zero",
     });
+  });
+
+  it("US-V4-021: a clean preserved handoff worktree releases the structural retry block", () => {
+    const cwd = project(`# Backlog
+
+| ID | Description | Status |
+| --- | --- | --- |
+| US-1 | clean worktree handoff | 📋 Todo |
+`, {
+      events: [
+        JSON.stringify({ type: "cycle:start", cycleId: "C-clean", storyId: "US-1", agent: "pi", model: "m", ts: 1 }),
+        JSON.stringify({ type: "cycle:end", cycleId: "C-clean", outcome: "handoff_without_tcr", cost: {}, ts: 2 }),
+        JSON.stringify({ type: "builder:handoff_required", cycleId: "C-clean", storyId: "US-1", worktreePath: ".roll/loop/worktrees/cycle-C-clean", ts: 3 }),
+      ],
+    });
+    const worktreePath = join(cwd, ".roll", "loop", "worktrees", "cycle-C-clean");
+    mkdirSync(worktreePath, { recursive: true });
+    execFileSync("git", ["init"], { cwd: worktreePath, stdio: "ignore" });
+
+    const input = gatherSupervisorInput(cwd);
+
+    expect(input.structuralFailures?.some((failure) => failure.storyId === "US-1")).toBe(false);
   });
 
   it("US-V4-021: why ignores historical repeated failures when no live scoped card exists", () => {

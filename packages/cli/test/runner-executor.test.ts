@@ -16,7 +16,8 @@ import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { submoduleAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
-import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
+import { evaluateReviewScoreGate, readLatestStoryPeerScore, writeReviewScoreNote } from "../src/lib/review-score.js";
+import { buildLowScoreFixForwardPrompt } from "../src/runner/project-map.js";
 import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
@@ -161,10 +162,10 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["-p", prompt]);
   });
 
-  it("kimi: kimi -p <prompt>", () => {
+  it("kimi: kimi streams incremental activity", () => {
     const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("kimi");
-    expect(args).toEqual(["-p", prompt]);
+    expect(args).toEqual(["-p", prompt, "--output-format", "stream-json"]);
   });
 
   it("codex: codex exec under workspace-write sandbox", () => {
@@ -328,14 +329,14 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
   });
 
   it("kimi: a routed model is appended as `-m <model>`", () => {
-    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK", model: "moonshot/kimi-k2" });
+    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK", model: "k3" });
     expect(bin).toBe("kimi");
-    expect(args).toEqual(["-m", "moonshot/kimi-k2", "-p", prompt]);
+    expect(args).toEqual(["-m", "k3", "-p", prompt, "--output-format", "stream-json"]);
   });
 
   it("kimi: NO model → no -m flag", () => {
     const { args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(args).toEqual(["-p", prompt]);
+    expect(args).toEqual(["-p", prompt, "--output-format", "stream-json"]);
     expect(args).not.toContain("-m");
   });
 
@@ -4147,7 +4148,7 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     const base = fakePorts();
     const push = vi.fn(async () => ({ code: 0 }));
@@ -4170,12 +4171,42 @@ describe("executeCommand — command → executor mapping", () => {
     expect(gateEvents[0].verdict).toBe("earned");
   });
 
+  it("US-DELIV-004: ac-map rows that are not fully verified block publish", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-unverified-ac-");
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([
+      { ac: "US-RUN-001:AC1", status: "partial" },
+      { ac: "US-RUN-001:AC2", status: "missing" },
+    ]));
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: { ...base.ports.github, prState: vi.fn(async () => "UNKNOWN"), runPublishPlan },
+    });
+
+    const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false, gateBlocked: true } });
+    expect(push).not.toHaveBeenCalled();
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    const gateEvents = (calls["event"] ?? [])
+      .map((args) => (args as unknown[])[1] as { type: string; verdict?: string; reasons?: string[] })
+      .filter((event) => event.type === "delivery:evidence_gate");
+    expect(gateEvents[0].reasons?.join("; ")).toContain("unverified acceptance criteria");
+  });
+
   it("US-DELIV-004: a gate event-write failure must NOT abort a valid publish (best-effort observability)", async () => {
     const repo = initCleanGitRepo("roll-evidence-gate-event-fail-");
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     const base = fakePorts();
     const push = vi.fn(async () => ({ code: 0 }));
@@ -4214,7 +4245,7 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4261,7 +4292,7 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     const runDir = join(cardDir, CTX.cycleId);
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4336,7 +4367,7 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4381,7 +4412,7 @@ describe("executeCommand — command → executor mapping", () => {
     mkdirSync(dir, { recursive: true });
     const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
     writeFileSync(join(dir, "index.html"), skeleton, "utf8");
-    writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    writeFileSync(join(dir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(dir, "latest"), { recursive: true });
     writeFileSync(join(dir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4591,11 +4622,48 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      CTX,
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42" },
     );
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
     expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
     expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
+  });
+
+  it("does not credit a merged PR when this cycle has zero TCR commits", async () => {
+    const markStatus = vi.fn();
+    const prMergeInfo = vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }));
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prMergeInfo },
+    });
+
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, tcrCount: 0, preCycleStatus: "📋 Todo" },
+    );
+
+    expect(prMergeInfo).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+  });
+
+  it("does not credit an older merged PR when this cycle did not publish one", async () => {
+    const markStatus = vi.fn();
+    const prMergeInfo = vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }));
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prMergeInfo },
+    });
+
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, tcrCount: 1, preCycleStatus: "📋 Todo" },
+    );
+
+    expect(prMergeInfo).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalled();
   });
 
   it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
@@ -4671,7 +4739,7 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      { ...CTX, preCycleStatus: "📋 Todo" },
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42", preCycleStatus: "📋 Todo" },
     );
     // No false-Done left behind; the row is reverted to its pre-cycle Todo.
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
@@ -4715,7 +4783,7 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      { ...CTX, preCycleStatus: "📋 Todo" },
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42", preCycleStatus: "📋 Todo" },
     );
     // Legacy merged rows with no evidence directory are allowed but explicitly marked as debt.
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
@@ -5446,6 +5514,31 @@ describe("FIX-338 — project-map injection (Phase B 杠杆2, DEFAULT-OFF)", () 
     const missing = join(tmpdir(), "roll-projmap-does-not-exist-xyz");
     expect(buildProjectMap(missing, "FIX-1")).toBe("");
     expect(maybeInjectProjectMap("BODY", missing, true, "FIX-1")).toBe("BODY");
+  });
+});
+
+describe("FIX-386 — low-score recovery context", () => {
+  it("uses the current worktree and never tells a reverted delivery to reuse its old branch", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-low-score-recovery-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeReviewScoreNote(repo, {
+      skill: "roll-build",
+      story: "US-RETRY-001",
+      score: 2,
+      verdict: "regression",
+      rationale: "Fixture assertions no longer match the current base.",
+      scoring: "pair",
+      scoredBy: "codex",
+      sessionId: "reviewer-session",
+    });
+
+    const prompt = buildLowScoreFixForwardPrompt(repo, "US-RETRY-001");
+
+    expect(prompt).toContain("Do not create, checkout, rename, or switch branches.");
+    expect(prompt).toContain("current worktree and current base");
+    expect(prompt).not.toContain("SAME branch");
+    expect(prompt).not.toContain("EXISTING branch");
   });
 });
 

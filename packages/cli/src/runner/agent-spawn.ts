@@ -342,8 +342,9 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
   // pi `--model "provider/id:thinking"` (the `:thinking` suffix folds the
   // thinking-effort into the model string — no separate effort field).
   pi: simplePromptProfile("pi", "pi", (prompt) => ["-p", prompt], "--model"),
-  // kimi `-m <model>` / `--model <model>` (use the short form).
-  kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt], "-m"),
+  // kimi `-m <model>` / `--model <model>` (use the short form). Stream events
+  // keep the runner's activity monitor informed while Kimi performs tool work.
+  kimi: simplePromptProfile("kimi", "kimi", (prompt) => ["-p", prompt, "--output-format", "stream-json"], "-m"),
   codex: {
     name: "codex",
     usesWorkspaceSandbox: true,

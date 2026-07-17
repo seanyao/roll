@@ -88,6 +88,13 @@ describe("projectDeliveryState — US-DELIV-001", () => {
     expect(projectDeliveryState([start, published, superseded], CYCLE)).toBe("superseded");
   });
 
+  it("attest:gate skipped prevents an external merge from receiving delivery credit", () => {
+    const skipped = ev({ type: "attest:gate", cycleId: CYCLE, verdict: "skipped", reasons: ["visual proof missing"], ts: TS });
+    const external = ev({ type: "delivery:reconciled", cycleId: CYCLE, storyId: "US-X-001", state: "delivered_external", mergedBy: "external", mergeCommit: "def", signal: "pr_state", ts: TS + 1 });
+
+    expect(projectDeliveryState([start, skipped, external], CYCLE)).toBe("blocked_no_evidence");
+  });
+
   // ── E3 (local-only delivery): a local-landed cycle reconciles to a terminal
   // delivered_local WITHOUT a prior delivery:published (local mode never opens a
   // PR — the evidence_gate passes, the cycle lands on the local integration

@@ -59,7 +59,7 @@ import {
   withPtyWrap,
   detectAgyInternalFailure,
 } from "../src/runner/index.js";
-import { suspendRig } from "../src/runner/agent-liveness.js";
+import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
 import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
@@ -2493,6 +2493,50 @@ describe("executeCommand — command → executor mapping", () => {
       expect(quarantined).toMatchObject({ phase: "active-spawn", reason: "dirty", files: ["active-main-leak.ts"] });
       expect(execFileSync("git", ["status", "--porcelain", "--", "active-main-leak.ts"], { cwd: repo, encoding: "utf8" }).trim()).toBe("");
       expect((calls["alert"] ?? []).map((a) => (a as unknown[])[1]).join("\n")).toContain("detected main checkout write while builder was active");
+    } finally {
+      if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
+      else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;
+    }
+  });
+
+  it("E7-B: a main-leak kill records rig:suspended cause=main_checkout_leak, not agent_stall", async () => {
+    const repo = initCleanGitRepo("roll-main-leak-cause-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        setTimeout(() => {
+          chmodSync(repo, 0o755);
+          writeFileSync(join(repo, "active-main-leak.ts"), "export const dirty = true;\n");
+        }, 10);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return { stdout: "agent claimed success", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const previousPoll = process.env["ROLL_MAIN_LEAK_POLL_MS"];
+    process.env["ROLL_MAIN_LEAK_POLL_MS"] = "5";
+    try {
+      await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+      const suspended = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "rig:suspended");
+      // The death-cause label must name the real cause (a main-checkout leak),
+      // not the generic agent_stall that misdirected on-call to a timeout hunt.
+      expect(suspended).toMatchObject({ type: "rig:suspended", cause: "main_checkout_leak" });
+      expect((suspended as { detail?: string }).detail ?? "").toContain("active-main-leak.ts");
+      // The persisted rig lifecycle entry must carry the same accurate cause.
+      const rig = readRigLifecycleState(join(repo, ".roll", "loop"));
+      expect(rig.rigs["claude"]).toMatchObject({ status: "suspended", cause: "main_checkout_leak" });
     } finally {
       if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
       else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;

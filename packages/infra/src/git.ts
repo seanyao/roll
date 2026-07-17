@@ -44,7 +44,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   type ProjectIdentityInputs,
@@ -320,16 +320,28 @@ export async function worktreeSubmoduleInit(worktreePath: string): Promise<GitRe
 /**
  * E2 — the on-disk path of the submodule cycle worktree. The runner hands the
  * worktree layer ONE canonical cycle path (`.roll/loop/cycle-<id>`); a submodule
- * cycle checks the SUBMODULE out at `<cycleWorktreePath>/<submoduleName>`. Two
- * consumers derive the SAME path from the SAME two inputs: `create_worktree`
- * (which creates it) and the local-delivery landing (which reads its HEAD) — so
- * the delivery never has to guess where the submodule worktree lives. Keeping it
- * a subdirectory (never the bare cycle path) means the superproject-linked
- * scaffolding (`.roll` symlink lives at the cycle path) and the submodule
- * checkout never collide.
+ * cycle checks the SUBMODULE out in a SIBLING directory of that cycle path:
+ * `<dirname(cycle)>/<basename(cycle)>.submodules/<submoduleName>` (e.g.
+ * `.roll/loop/worktrees/cycle-XXX.submodules/dukang-service-online`).
+ *
+ * Three consumers derive the SAME path from the SAME two inputs — create
+ * (`worktreeAddInSubmodule` / `create_worktree`), land (E3 local-publish
+ * `resolveLandingTarget`) and execute (E4 `resolveExecutionCwd`) — so no site
+ * ever has to guess where the submodule worktree lives; changing this ONE formula
+ * moves all three in lock-step.
+ *
+ * E5 (real-pilot fix) — this used to be `join(cycleWorktreePath, submoduleName)`,
+ * a SUBDIRECTORY of the cycle worktree. But when the cycle worktree is itself a
+ * checkout of the SUPERPROJECT, `<cycle>/<submoduleName>` is exactly the
+ * superproject worktree's OWN submodule mount point — so `git worktree add` to
+ * that path collides with the already-present (gitlink) mount. Moving to a
+ * sibling `*.submodules/` dir keeps the submodule checkout entirely OUTSIDE the
+ * superproject worktree tree, so the superproject-linked scaffolding (the `.roll`
+ * symlink at the cycle path, the superproject's own submodule mounts) and the
+ * cycle's submodule worktree never collide.
  */
 export function submoduleWorktreePath(cycleWorktreePath: string, submoduleName: string): string {
-  return join(cycleWorktreePath, submoduleName);
+  return join(dirname(cycleWorktreePath), `${basename(cycleWorktreePath)}.submodules`, submoduleName);
 }
 
 /**

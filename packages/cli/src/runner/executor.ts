@@ -176,8 +176,8 @@ export async function executeCommand(
     // unknown so the zero-TCR gate stays conservative (never discards work).
     case "measure_worktree": {
       // E4: a submodule cycle's TCR commits landed in the SUBMODULE worktree, so
-      // count them there (resolveExecutionCwd = the same subdirectory the delivery
-      // lands from). No targetSubmodule ⇒ ports.paths.worktreePath, unchanged.
+      // count them there (resolveExecutionCwd = the same sibling submodule worktree
+      // the delivery lands from). No targetSubmodule ⇒ ports.paths.worktreePath.
       const measured = await ports.git.tcrCount(resolveExecutionCwd(ports, ctx)).catch(() => undefined);
       return measured === undefined ? {} : { ctxPatch: { tcrCount: measured } };
     }

@@ -202,8 +202,9 @@ export async function executeLocalPublish(
  *   - repoCwd     → `<superproject>/<submodule>` (owns the submodule's local
  *                   integration branch — the ref `landLocalDelivery` moves).
  *   - worktreeCwd → the submodule's cycle worktree
- *                   ({@link submoduleWorktreePath} under the canonical cycle path)
- *                   — whose detached HEAD is the cycle commit.
+ *                   ({@link submoduleWorktreePath} — the sibling `*.submodules/`
+ *                   dir of the canonical cycle path, E5) whose detached HEAD is
+ *                   the cycle commit.
  * The integration branch is then resolved from the SUBMODULE's own config
  * (E1 `resolveIntegrationBranch(<submodule path>)`), so a submodule configured
  * with `feat/contractor2.0` lands there while the superproject keeps its own.

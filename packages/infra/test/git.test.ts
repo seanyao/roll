@@ -497,9 +497,25 @@ function superprojectWithSubmodule(tag: string): { superproject: string; submodu
 }
 
 describe("submoduleWorktreePath — E2 path derivation", () => {
-  it("joins the submodule name under the cycle worktree path", () => {
-    const p = submoduleWorktreePath("/tmp/loop/cycle-x", "dukang-service-online");
-    expect(p).toBe(join("/tmp/loop/cycle-x", "dukang-service-online"));
+  // E5 (real-pilot fix): the submodule cycle worktree must NOT live UNDER the
+  // superproject cycle worktree — `<cycle>/<sub>` is exactly the superproject
+  // worktree's own submodule mount point, so `git worktree add` there collides.
+  // The path moves to a SIBLING: `<cycle>.submodules/<sub>`.
+  it("places the submodule worktree in a SIBLING dir, not under the cycle worktree (E5)", () => {
+    const cycle = "/tmp/loop/worktrees/cycle-x";
+    const p = submoduleWorktreePath(cycle, "dukang-service-online");
+    // Not a descendant of the superproject cycle worktree (no path collision).
+    expect(p.startsWith(`${cycle}/`)).toBe(false);
+    expect(p).not.toBe(join(cycle, "dukang-service-online"));
+    // Deterministic sibling formula: <cycle>.submodules/<sub>.
+    expect(p).toBe(join("/tmp/loop/worktrees", "cycle-x.submodules", "dukang-service-online"));
+  });
+
+  it("is deterministic — same inputs derive the same path (create/land/exec share it)", () => {
+    const cycle = "/tmp/loop/worktrees/cycle-42";
+    const a = submoduleWorktreePath(cycle, "sub");
+    const b = submoduleWorktreePath(cycle, "sub");
+    expect(a).toBe(b);
   });
 });
 

@@ -383,9 +383,9 @@ export type RollEvent =
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
   | { type: "agent:blocked"; cycleId: string; agent: string; cause: BlockCause; stage: "build" | "review" | "score"; detail: string; ts: number }
-  | { type: "rig:suspended"; cycleId?: string; agent: string; cause: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt: number; ts: number }
+  | { type: "rig:suspended"; cycleId?: string; agent: string; cause: "quota" | "auth" | "network" | "agent_stall" | "main_checkout_leak"; detail?: string; nextProbeAt: number; ts: number }
   | { type: "rig:recovered"; cycleId?: string; agent: string; detail?: string; ts: number }
-  | { type: "rig:probe"; cycleId?: string; agent: string; outcome: "live" | "still_suspended"; cause?: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt?: number; ts: number }
+  | { type: "rig:probe"; cycleId?: string; agent: string; outcome: "live" | "still_suspended"; cause?: "quota" | "auth" | "network" | "agent_stall" | "main_checkout_leak"; detail?: string; nextProbeAt?: number; ts: number }
   // FIX-930 — failure-driven agent swap on a zero-TCR/stalled cycle: the loop
   // re-marks the story Todo and routes the NEXT untried agent (excluding the one
   // that just gave up). `attempt` is the 1-based self-heal attempt for the story.

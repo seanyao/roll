@@ -39,7 +39,8 @@ import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, w
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { readCycleTimeoutThresholds } from "./spawn-observers.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
-import { agentWritableRoots } from "./worktree-bootstrap.js";
+import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
 type SpawnRoleCommand = Extract<CycleCommand, { kind: "spawn_role" }>;
@@ -110,11 +111,17 @@ export async function executeSpawnRoleCommand(
       }),
     );
     mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+    // E4: an adversarial role (test_author/implementer/attacker) writes code +
+    // tests just like the builder, so a submodule cycle runs it in the submodule
+    // cycle worktree (execCwd) with the submodule's git env + writable roots. No
+    // targetSubmodule ⇒ ports.paths.worktreePath / ports.repoCwd, unchanged.
+    const execCwd = resolveExecutionCwd(ports, ctx);
+    const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
     res = await ports.agentSpawn(cmd.agent, {
       purpose: cmd.role,
-      cwd: ports.paths.worktreePath,
+      cwd: execCwd,
       skillBody: `${rolePrompt}\n\n${ports.skillBody}`,
-      writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+      writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
       timeoutMs: wallSec * 1000,
       ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
       ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
@@ -123,7 +130,7 @@ export async function executeSpawnRoleCommand(
         ...process.env,
         ROLL_LOOP_ALERT: ports.paths.alertsPath,
         ROLL_ADVERSARIAL_MARKER: markerPath,
-        ...worktreeGitEnv(ports.paths.worktreePath, ports.repoCwd),
+        ...worktreeGitEnv(execCwd, ports.repoCwd),
         ...agentSpawnEnvironment(cmd.agent),
       },
     });

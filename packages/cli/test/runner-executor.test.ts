@@ -6123,6 +6123,28 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     expect(spawns[0]?.env?.["ROLL_ADVERSARIAL_MARKER"]).toBeTruthy();
   });
 
+  it("E4: spawn_role runs the adversarial role INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
+    const repo = initCleanGitRepo("roll-e4-role-super-");
+    const sub = "dukang-service-online";
+    const wt = join(repo, ".roll", "loop", "wt");
+    const subWt = join(wt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const base = fakePorts();
+    const spawns: AgentSpawnOptions[] = [];
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(repo, ".roll", "loop", "events.ndjson"), alertsPath: join(repo, ".roll", "loop", "alerts.log") },
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        spawns.push(opts);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    await executeCommand({ kind: "spawn_role", role: "implementer", agent: "codex", round: 0 }, ports, { ...CTX, targetSubmodule: sub });
+    expect(spawns[0]?.cwd).toBe(subWt);
+  });
+
   it("spawn_role attacker reads its finding marker (newHole + attackTest)", async () => {
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-adv-marker-")));
     execDirs.push(rt);

@@ -140,6 +140,12 @@ function makeFixture(tag: string): { repo: string; remote: string } {
   mkdirSync(join(seed, ".roll"), { recursive: true });
   writeFileSync(join(seed, ".roll", "backlog.md"), BACKLOG, "utf8");
   seedFeatureCard(seed, "US-RUN-001");
+  // Soft gates (9212553a fixture shape): the fixture env cannot run a REAL
+  // peer consult or attest render (exit 2), and the default HARD gate modes
+  // would classifyCaptured → needs_review → a manualMerge+draft publish whose
+  // terminal is `local`, never `published`. `loop_safety: soft` keeps the
+  // gates record-only — the same policy.yaml the US-LOOP-098 test writes.
+  writeFileSync(join(seed, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n  peer_gate: soft\n", "utf8");
   git(seed, [...GIT_ID, "add", "-A"]);
   git(seed, [...GIT_ID, "commit", "-q", "-m", "seed backlog"]);
   git(seed, ["push", "-q", "origin", "main"]);
@@ -148,6 +154,13 @@ function makeFixture(tag: string): { repo: string; remote: string } {
   const repo = tmp(`${tag}-repo`);
   git(repo, ["clone", "-q", remote, "."]);
   git(repo, ["fetch", "-q", "origin"]);
+  // The honest publish path (9212553a fixture shape) commits acceptance
+  // evidence / roll-meta with AMBIENT git identity (publish-lifecycle +
+  // commitRollMetadata); CI runners carry no global identity, so pin a
+  // persistent one (worktrees share the repo config) — same rationale as the
+  // US-LOOP-098 test above.
+  git(repo, ["config", "user.email", "t@t"]);
+  git(repo, ["config", "user.name", "t"]);
   return { repo, remote };
 }
 
@@ -210,6 +223,27 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
     "utf8",
   );
   writeFileSync(join(wt, "delivered.txt"), "work done by shim agent\n", "utf8");
+  // 9212553a honest-publish fixture shape: mirror the agent-deposited cycle
+  // evidence into the WORKTREE's own runDir too. For the tracked-.roll layout
+  // (makeFixture) the worktree carries a physical .roll checkout and the
+  // publish-time in-repo evidence commit (commitInRepoEvidence) stages the
+  // cycle runDir FROM THE WORKTREE — it must exist there. For the gitignored
+  // layout the worktree .roll is the FIX-204C symlink, so the runDir is the
+  // same persistent dir the frame opened and the write is skipped.
+  const runDirName = opts.runDir?.split(/[\\/]/).filter((part) => part !== "").pop();
+  if (opts.runDir !== undefined && runDirName !== undefined) {
+    const wtRunDirBase = join(wt, ".roll", "features", "uncategorized", storyId, runDirName);
+    let sameDir = false;
+    try {
+      sameDir = realpathSync(wtRunDirBase) === realpathSync(opts.runDir);
+    } catch {
+      sameDir = false; // the worktree-local runDir does not exist yet (tracked layout)
+    }
+    if (!sameDir) {
+      mkdirSync(join(wtRunDirBase, "evidence"), { recursive: true });
+      writeFileSync(join(wtRunDirBase, "evidence", "shim-evidence.txt"), "shim cycle evidence\n", "utf8");
+    }
+  }
   git(wt, [...GIT_ID, "add", "-A"]);
   git(wt, [...GIT_ID, "commit", "-q", "--no-verify", "-m", `tcr: deliver ${storyId}`]);
   return { stdout: CLAUDE_STREAM_JSON, stderr: "", exitCode: 0, timedOut: false };
@@ -218,17 +252,29 @@ const shimAgentTcr: AgentSpawn = async (_agent, opts): Promise<AgentSpawnResult>
 /** A fake github facet that returns a canned publish status without any gh.
  *  `prState` defaults to "MERGED" (the auto-merge already completed) but can be
  *  overridden — FIX-211 needs to drive the "published-but-OPEN" path where the
- *  backlog row must rest at 🔨 (delivered, pending merge), never premature Done. */
+ *  backlog row must rest at 🔨 (delivered, pending merge), never premature Done.
+ *
+ *  v2 honest-publish shape (9212553a): the terminal MERGED credit now requires
+ *  `ctx.tcrCount > 0 && ctx.prUrl`, and `ctx.prUrl` is threaded ONLY by the
+ *  normal publish path — a pre-existing OPEN/MERGED PR at publish time trips
+ *  the FIX-245 self-publish adoption short-circuit, which never sets it. So
+ *  the fake simulates an honest first-time publish: NO PR exists before
+ *  runPublishPlan (`prState` "UNKNOWN", the real prViewState fallback when gh
+ *  finds no PR), and the returned prUrl parses under prNumberFromUrl
+ *  (`/pull/<n>`) so `delivery:published` is emitted and the DeliveryRecord
+ *  carries a real prNumber. */
 function fakeGithub(status: 0 | 1 | 2, prState: string = "MERGED"): Ports["github"] {
+  let published = false;
   return {
     async repoSlug() {
       return "fixture/runner";
     },
     async runPublishPlan() {
-      return { status, prUrl: status === 0 ? "https://example/pr/1" : "", ok: status === 0 };
+      published = true;
+      return { status, prUrl: status === 0 ? "https://github.com/fixture/runner/pull/1" : "", ok: status === 0 };
     },
     async prState() {
-      return prState;
+      return published ? prState : "UNKNOWN";
     },
     async prMergeInfo() {
       return prState === "MERGED"
@@ -830,7 +876,22 @@ function makeGitignoredFixture(tag: string): { repo: string; remote: string } {
   mkdirSync(join(repo, ".roll"), { recursive: true });
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
   seedFeatureCard(repo, "US-RUN-001");
+  // Soft gates (9212553a fixture shape — see makeFixture) so the no-real-attest
+  // fixture env reaches the honest publish path instead of a gate-blocked
+  // needs_review/manualMerge terminal. The waiver lets the roll-meta commit
+  // carry the seeded proof.png against the local (visibility-undetermined)
+  // bare remote — the fixture remote stands in for a private one.
+  writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n  peer_gate: soft\n", "utf8");
+  writeFileSync(join(repo, ".roll", "local.yaml"), "evidence_public_waiver: true\n", "utf8");
   initRollMetaOrigin(repo, tag);
+  // The honest publish path (9212553a fixture shape) commits .roll evidence +
+  // metadata with AMBIENT git identity; CI runners carry no global identity, so
+  // pin a persistent one in the repo AND the nested roll-meta repo (worktrees
+  // share the repo config) — same rationale as the US-LOOP-098 test.
+  for (const dir of [repo, join(repo, ".roll")]) {
+    git(dir, ["config", "user.email", "t@t"]);
+    git(dir, ["config", "user.name", "t"]);
+  }
   return { repo, remote };
 }
 
@@ -865,6 +926,11 @@ function makePartialFossilFixture(tag: string): { repo: string } {
   // but never this backlog.
   writeFileSync(join(repo, ".roll", "backlog.md"), BACKLOG, "utf8");
   seedFeatureCard(repo, "US-RUN-001");
+  // Soft gates + evidence waiver (9212553a fixture shape — see makeFixture /
+  // makeGitignoredFixture). No initRollMetaOrigin here: the fossil layout's
+  // .roll is not its own git repo.
+  writeFileSync(join(repo, ".roll", "policy.yaml"), "loop_safety:\n  attest_gate: soft\n  peer_gate: soft\n", "utf8");
+  writeFileSync(join(repo, ".roll", "local.yaml"), "evidence_public_waiver: true\n", "utf8");
   return { repo };
 }
 
@@ -884,7 +950,33 @@ describe("FIX-206 — a partial-fossil .roll is relinked so the backlog is visib
       return shimAgentTcr(agent, opts);
     };
     const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
-    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    // This test's intent is the fossil-relink mechanics, not the publish path.
+    // Its `.roll` is NEITHER a nested roll-meta repo NOR tracked (beyond the
+    // fossil file), so the honest remote-publish ladder cannot run here: the
+    // in-repo evidence commit (commitInRepoEvidence) dies on `git add` beyond
+    // the worktree's .roll SYMLINK (git refuses paths through a symlink). The
+    // github fake therefore simulates the FIX-245 agent-self-published world it
+    // always ran in (a pre-existing MERGED PR at publish time → the runner
+    // adopts the registration, status 0). 9212553a: that world no longer earns
+    // terminal Done credit (no ctx.prUrl) — this test asserts no Done flip.
+    const selfPublishedGithub: Ports["github"] = {
+      async repoSlug() {
+        return "fixture/runner";
+      },
+      async runPublishPlan() {
+        return { status: 0 as const, prUrl: "", ok: true };
+      },
+      async prState() {
+        return "MERGED"; // the agent opened (and merged) its own PR mid-cycle
+      },
+      async prMergeInfo() {
+        return { state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" };
+      },
+      async openPrTitles() {
+        return [];
+      },
+    };
+    const ports: Ports = { ...base, agentSpawn: shim, github: selfPublishedGithub };
     const result = await runCycleOnce({
       ports,
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
@@ -1081,16 +1173,26 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
   ].join("\n");
 
   /** A github fake that maps cycle branch → PR state (branch-aware), so a prior
-   *  delivery's branch and the current cycle's branch can report differently. */
-  function branchAwareGithub(byBranch: Record<string, string>): Ports["github"] {
+   *  delivery's branch and the current cycle's branch can report differently.
+   *
+   *  v2 honest-publish shape (9212553a): `liveBranch` (this cycle's branch) must
+   *  report NO PR before this cycle's runPublishPlan — a pre-existing OPEN/MERGED
+   *  state would trip the FIX-245 adoption short-circuit, which never threads
+   *  `ctx.prUrl` into the terminal MERGED-credit gate. Prior-cycle branches carry
+   *  their PR state from the start (the preflight claim reconcile probes them).
+   *  The prUrl parses under prNumberFromUrl so `delivery:published` is emitted. */
+  function branchAwareGithub(byBranch: Record<string, string>, liveBranch: string): Ports["github"] {
+    let livePublished = false;
     return {
       async repoSlug() {
         return "fixture/runner";
       },
       async runPublishPlan() {
-        return { status: 0, prUrl: "https://example/pr/1", ok: true };
+        livePublished = true;
+        return { status: 0, prUrl: "https://github.com/fixture/runner/pull/1", ok: true };
       },
       async prState(_repoCwd, branch) {
+        if (branch === liveBranch && !livePublished) return "UNKNOWN";
         return byBranch[branch] ?? "OPEN";
       },
       async prMergeInfo(_repoCwd, branch) {
@@ -1127,10 +1229,13 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const ports: Ports = {
       ...base,
       agentSpawn: shimAgentTcr,
-      github: branchAwareGithub({
-        "loop/cycle-c-prior": "MERGED", // the async PR loop merged it
-        [`loop/cycle-${cycleId}`]: "OPEN", // this cycle's own PR not yet merged
-      }),
+      github: branchAwareGithub(
+        {
+          "loop/cycle-c-prior": "MERGED", // the async PR loop merged it
+          [`loop/cycle-${cycleId}`]: "OPEN", // this cycle's own PR not yet merged
+        },
+        `loop/cycle-${cycleId}`,
+      ),
     };
     const result = await runCycleOnce({
       ports,
@@ -1159,7 +1264,10 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const ports: Ports = {
       ...base,
       agentSpawn: shimAgentTcr,
-      github: branchAwareGithub({ "loop/cycle-c-prior": "OPEN", [`loop/cycle-${cycleId}`]: "MERGED" }),
+      github: branchAwareGithub(
+        { "loop/cycle-c-prior": "OPEN", [`loop/cycle-${cycleId}`]: "MERGED" },
+        `loop/cycle-${cycleId}`,
+      ),
     };
     const result = await runCycleOnce({
       ports,
@@ -1187,7 +1295,7 @@ describe("FIX-211 — preflight reconcile 补翻: async PR-loop merge flips a st
     const ports: Ports = {
       ...base,
       agentSpawn: shimAgentTcr,
-      github: branchAwareGithub({ [`loop/cycle-${cycleId}`]: "MERGED" }),
+      github: branchAwareGithub({ [`loop/cycle-${cycleId}`]: "MERGED" }, `loop/cycle-${cycleId}`),
     };
     const result = await runCycleOnce({
       ports,

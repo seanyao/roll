@@ -5329,6 +5329,44 @@ describe("FIX-302 — worktree submodule (skills/) populate before agent spawn",
     expect(alerts).toEqual([]);
   });
 
+  // E5 (real-pilot fix): a superproject whose `.gitmodules` declares OTHER
+  // submodules (e.g. contractor-2.0's `dukang-service-online`) but NO `skills`
+  // submodule is NOT roll's own self-host. The old logic saw `.gitmodules` +
+  // an empty `skills/` (count 0) and recursively `git submodule update --init`d
+  // EVERY submodule — materializing dukang against a superproject gitlink that
+  // resolves nowhere (`fatal: upload-pack: not our ref`), hanging create_worktree
+  // forever. The guard now bootstraps ONLY when a `skills` submodule is declared.
+  it("no-ops a superproject with non-skills submodules only (E5: no init, no alert)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "dukang-service-online"]\n  path = dukang-service-online\n  url = ../dukang.git\n',
+    );
+    const init = vi.fn(async () => ({ code: 0 }));
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("bootstraps when skills is declared alongside other submodules (E5: roll self-host)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "dukang-service-online"]\n  path = dukang-service-online\n' +
+        '[submodule "skills"]\n  path = skills\n',
+    );
+    const init = vi.fn(async () => {
+      mkdirSync(join(wt, "skills", "roll-build"), { recursive: true });
+      writeFileSync(join(wt, "skills", "roll-build", "SKILL.md"), "# skill\n");
+      return { code: 0 };
+    });
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(alerts).toEqual([]);
+  });
+
   it("runs submodule init and verifies skills/ is populated (AC1/AC2)", async () => {
     const wt = tmpWorktree();
     writeFileSync(join(wt, ".gitmodules"), '[submodule "skills"]\n  path = skills\n');

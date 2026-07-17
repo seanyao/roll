@@ -143,6 +143,20 @@ describe("US-TRUTH-017 AC1 — deriveStoryTruth with structured deliveryTruth", 
     expect(t).toMatchObject({ state: "unknown", reason: "merge_evidence_unavailable" });
   });
 
+  it("deliveryTruth done + mergeCommit confirms delivery without a legacy PR probe", () => {
+    const t = deriveStoryTruth(
+      storyInput({
+        deliveryTruth: dtInput({
+          lifecycleState: "done",
+          delivered: true,
+          prNumber: 10,
+          mergeCommit: "abc123",
+        }),
+      }),
+    );
+    expect(t).toMatchObject({ state: "truth", delivered: true, reason: "merge_evidence_confirms" });
+  });
+
   it("deliveryTruth todo → no claim (not reading ✅ from backlog)", () => {
     // Even if backlogStatus says "✅ Done", deliveryTruth says "todo" →
     // the structured truth wins and there is no claim being made.

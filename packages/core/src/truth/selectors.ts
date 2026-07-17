@@ -105,6 +105,9 @@ export function deriveStoryTruth(input: StoryTruthInput): StoryTruth {
     input.deliveringCycles.some((c) => c.merged) && superseded.length > 0 ? { ...t, supersededCycles: superseded } : t;
 
   if (ev === undefined) {
+    if (dt?.lifecycleState === "done" && dt.delivered && dt.mergeCommit !== undefined) {
+      return { storyId: input.storyId, delivered: true, state: "truth", reason: "merge_evidence_confirms" };
+    }
     if (isDoneRow && !annotated) {
       return { storyId: input.storyId, delivered: false, state: "grandfathered", reason: "pre_card_era" };
     }

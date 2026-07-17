@@ -324,6 +324,9 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   // must fail before any "agent did real work" or "existing PR" branch can
   // publish, otherwise an escaped builder can both dirty main and still ship.
   if (facts.mainDirty === true) return "failed";
+  // A committed prefix plus uncommitted work is an incomplete handoff, not a
+  // publishable delivery. Preserve the worktree before any publish-ladder path.
+  if (facts.worktreeDirty === true) return "handoff_without_tcr";
   // Gate-blocked cycles (attest/peer policy rejection) are always failures —
   // the agent's work was withheld by policy, not by a code defect. They MUST
   // NOT enter the publish ladder.
@@ -364,7 +367,6 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
     // ahead — the builder produced code but never TCR-committed it. This is
     // a handoff contract gap, NOT a "did nothing" gave_up. The worktree is
     // PRESERVED so the owner can inspect or rescue the uncommitted work.
-    if (facts.worktreeDirty === true) return "handoff_without_tcr";
     // FIX-1051: agent exited cleanly but an internal tool error was detected in
     // the native CLI log (e.g. agy GREP_SEARCH timeout → zero trajectory).
     // Classify as agent_internal so the failure reason is surfaced instead of

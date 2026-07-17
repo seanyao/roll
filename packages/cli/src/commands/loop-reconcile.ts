@@ -26,6 +26,7 @@ import { resolveLang, parseEventLine } from "@roll/spec";
 import type { DeliveryLease, RollEvent, DeliveryState } from "@roll/spec";
 import {
   EventBus,
+  BacklogStore,
   reconcileDelivery,
   projectDeliveryState,
   leaseStateFor,
@@ -62,6 +63,7 @@ import {
 // the SAME facts (one truth engine, no parallel probes).
 import { branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence, resolveRepoSlug } from "../lib/delivery-facts.js";
 import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
+import { markDoneGuarded } from "../runner/done-guard.js";
 
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
@@ -210,7 +212,7 @@ interface CycleSnapshot {
  * without a delivery:published event has no PR or branch claim to reconcile;
  * admitting it would let unrelated main history credit an aborted attempt.
  */
-function readAwaitingCycles(cwd: string): CycleSnapshot[] {
+function readAwaitingCycles(cwd: string, includeDelivered = false): CycleSnapshot[] {
   const eventsPath = join(runtimeDir(cwd), "events.ndjson");
   if (!existsSync(eventsPath)) return [];
 
@@ -256,7 +258,14 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
     const state = projectDeliveryState(events, cycleId);
     // Only a published PR cycle has strong delivery evidence to reconcile.
     // `ci_failed` retains its published metadata and is eligible for recovery.
-    if (state !== "awaiting_merge" && state !== "ci_failed") continue;
+    // The periodic tick skips delivered rows after writing them back; the
+    // explicit command includes them so a previously reconciled merge can
+    // repair an interrupted backlog status flip.
+    const deliveredTerminal =
+      state === "delivered" || state === "delivered_external" || state === "delivered_local";
+    if (state !== "awaiting_merge" && state !== "ci_failed" && !(includeDelivered && deliveredTerminal)) {
+      continue;
+    }
     const meta = cycleMeta.get(cycleId) ?? { storyId: "", branch: `loop/${cycleId}` };
     if (meta.prNumber === undefined || meta.awaitingSinceMs === undefined) continue;
     snapshots.push({
@@ -270,6 +279,29 @@ function readAwaitingCycles(cwd: string): CycleSnapshot[] {
   }
 
   return snapshots;
+}
+
+function markDeliveredBacklog(
+  cwd: string,
+  storyId: string,
+  bus: EventBus,
+  eventsPath: string,
+  now: number,
+): void {
+  if (storyId === "") return;
+  try {
+    markDoneGuarded(cwd, storyId, { mergedToMain: true }, {
+      markStatus: (projectCwd, id, status) => {
+        const backlogPath = join(projectCwd, ".roll", "backlog.md");
+        const store = new BacklogStore();
+        const snapshot = store.readBacklog(backlogPath);
+        store.mark(backlogPath, snapshot.hash, id, status);
+      },
+      alert: (message) => bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
+    });
+  } catch {
+    // Delivery truth remains recorded even if the convenience status write-back fails.
+  }
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -676,6 +708,16 @@ export async function runReconcileTick(
           bus.appendEvent(eventsPath, ev);
         }
       }
+      markDeliveredBacklog(cwd, cyc.storyId, bus, eventsPath, now);
+    }
+    if (result.kind === "terminal") {
+      bus.appendEvent(eventsPath, {
+        type: "delivery:abandoned",
+        cycleId: cyc.cycleId,
+        storyId: cyc.storyId,
+        reason: result.reason,
+        ts: now,
+      });
     }
 
     // ── merge_now: execute gh pr merge --squash ───────────────────────────
@@ -768,7 +810,7 @@ export async function loopReconcileCommand(
   const slug = resolveRepoSlug(cwd);
 
   // Read awaiting cycles from event stream.
-  let cycles = readAwaitingCycles(cwd);
+  let cycles = readAwaitingCycles(cwd, storyFilter !== undefined);
   if (storyFilter !== undefined) {
     cycles = cycles.filter((c) => c.storyId === storyFilter);
   }
@@ -921,6 +963,16 @@ export async function loopReconcileCommand(
           }
         }
       }
+      markDeliveredBacklog(cwd, cyc.storyId, deps.bus, eventsPath, now);
+    }
+    if (result.kind === "terminal" && !dryRun) {
+      deps.bus.appendEvent(eventsPath, {
+        type: "delivery:abandoned",
+        cycleId: cyc.cycleId,
+        storyId: cyc.storyId,
+        reason: result.reason,
+        ts: now,
+      });
     }
 
     // ── merge_now: execute gh pr merge --squash ───────────────────────────

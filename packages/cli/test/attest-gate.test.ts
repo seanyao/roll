@@ -574,6 +574,37 @@ describe("FIX-400 — run-dir fallback for report / ac-map candidates", () => {
     expect(verificationReportHasContent(wt, "FIX-400C")).toBe(true);
   });
 
+  it("AC2b: legacy ../evidence refs resolve to evidence captured in the current run directory", () => {
+    const storyId = "FIX-400C-RUN";
+    const runId = "20260624-110904-79182";
+    const [wt] = withRunDirReport(storyId, runId, 2000);
+    const runDir = join(wt, ".roll", "features", "uncategorized", storyId, runId);
+    writeFileSync(
+      join(runDir, "ac-map.json"),
+      JSON.stringify(
+        [
+          {
+            ac: `${storyId}:AC1`,
+            status: "pass",
+            evidence: [
+              { kind: "text", label: "current run log", textFile: "../evidence/current-run.txt" },
+              { kind: "screenshot", label: "terminal", href: "screenshots/p.png" },
+            ],
+          },
+        ],
+        null,
+        2,
+      ) + "\n",
+    );
+    mkdirSync(join(runDir, "evidence"), { recursive: true });
+    mkdirSync(join(runDir, "screenshots"), { recursive: true });
+    writeFileSync(join(runDir, "evidence", "current-run.txt"), "ok\n");
+    writeFileSync(join(runDir, "screenshots", "p.png"), "pixels\n");
+
+    expect(evidencePathsUnresolved(wt, storyId)).toEqual([]);
+    expect(verificationReportHasContent(wt, storyId)).toBe(true);
+  });
+
   it("AC2: ac-map in card root (legacy, priority) + also in run dir → card-root wins", () => {
     const wt = withReport("FIX-400D", 2000);
     withRunDirAcMap(wt, "FIX-400D", "20260624-110904-79182", []);

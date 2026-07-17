@@ -916,13 +916,16 @@ function evidenceRefResolves(worktreeCwd: string, storyId: string, ref: string, 
   }
   if (report !== null) bases.unshift(dirname(report));
   for (const base of bases) {
-    const candidate = resolve(base, ref);
-    // FIX-1233: evidence may live in EITHER tree (worktree or persistent .roll).
-    if (!roots.some((root) => inside(root, candidate))) continue;
-    try {
-      if (statSync(candidate).isFile()) return true;
-    } catch {
-      /* try next base */
+    const refs = /^\.\.\/(?:evidence|screenshots)\//.test(ref) ? [ref, ref.slice(3)] : [ref];
+    for (const candidateRef of refs) {
+      const candidate = resolve(base, candidateRef);
+      // FIX-1233: evidence may live in EITHER tree (worktree or persistent .roll).
+      if (!roots.some((root) => inside(root, candidate))) continue;
+      try {
+        if (statSync(candidate).isFile()) return true;
+      } catch {
+        /* try next base */
+      }
     }
   }
   return false;

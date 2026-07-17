@@ -15,19 +15,21 @@ import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "@roll
  * Mapping rules (from the FIX-1068 design):
  *   - main checkout dirty           → boundary_violation (fail-loud)
  *   - process still running + recent activity → no_progress_still_running (do not kill)
- *   - tcrCount > 0 and no boundary violation  → ready_for_peer_and_attest
- *   - tcrCount === 0 + dirty worktree + exited → handoff_without_tcr
+ *   - dirty worktree + exited                 → handoff_without_tcr
+ *   - tcrCount > 0 and clean worktree         → ready_for_peer_and_attest
  *   - tcrCount === 0 + clean worktree + exited → gave_up_clean
  */
 export function finalizeBuilder(facts: BuilderFinalizationFacts): BuilderFinalizationVerdict {
   if (facts.mainCheckoutDirty || (facts.mainAhead ?? 0) > 0) return "boundary_violation";
   if (!facts.processExited && facts.recentActivity) return "no_progress_still_running";
+  // A committed prefix is never permission to discard a dirty suffix. Publishing
+  // it would merge an incomplete Story while cleanup loses the remaining work.
+  if (facts.worktreeDirty && facts.processExited) return "handoff_without_tcr";
   // FIX-1068: positive TCR count is the normal ready signal. Commits ahead with
   // no TCR prefix still represent real work that passed the existing gate, so
   // the adapter-agnostic gate lets it continue while the TCR contract remains
   // the authoritative ready signal.
   if (facts.tcrCount > 0 || facts.commitsAhead > 0) return "ready_for_peer_and_attest";
-  if (facts.worktreeDirty && facts.processExited) return "handoff_without_tcr";
   if (facts.processExited) return "gave_up_clean";
   return "no_progress_still_running";
 }

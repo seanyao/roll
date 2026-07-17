@@ -131,6 +131,11 @@ describe("Hook 1 — productivity floor: gave_up vs idle", () => {
 });
 
 describe("FIX-1039 — handoff_without_tcr: dirty worktree but zero TCR commits", () => {
+  it("committed prefix + dirty worktree → handoff_without_tcr before publish", () => {
+    expect(
+      classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1, worktreeDirty: true }),
+    ).toBe("handoff_without_tcr");
+  });
   it("exit 0 + 0 commits + dirty worktree → handoff_without_tcr (recoverable, not gave_up)", () => {
     expect(
       classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 0, worktreeDirty: true }),
@@ -1118,6 +1123,10 @@ describe("FIX-1068 — finalizeBuilder verdict mapping", () => {
     const verdict = finalizeBuilder({ ...base, worktreeDirty: true });
     expect(verdict).toBe("handoff_without_tcr");
     expect(handoffKindFor(verdict)).toBe("zero_tcr_dirty_worktree");
+  });
+
+  it("committed prefix plus dirty suffix is a recoverable handoff, not publish-ready", () => {
+    expect(finalizeBuilder({ ...base, commitsAhead: 1, tcrCount: 1, worktreeDirty: true })).toBe("handoff_without_tcr");
   });
 
   it("Pi-style: main checkout dirty → boundary_violation", () => {

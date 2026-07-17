@@ -14,11 +14,18 @@ import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresh
 import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
+import { readSkillBody } from "./skill-body.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import type { ExecuteResult, Ports } from "./ports.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
+
+function executionSkillBody(ports: Ports, storyId: string | undefined): string {
+  if (!ports.skillBody.startsWith("# Roll Loop")) return ports.skillBody;
+  const skillName = storyId?.startsWith("FIX-") || storyId?.startsWith("BUG-") ? "roll-fix" : "roll-build";
+  return readSkillBody(ports.repoCwd, { skillName }) ?? ports.skillBody;
+}
 
 export async function executeSpawnAgentCommand(
   cmd: SpawnAgentCommand,
@@ -151,7 +158,7 @@ export async function executeSpawnAgentCommand(
       // body all shapes consume) + bounded (hard char cap). DEFAULT-OFF — a no-op
       // until flipped on, in which case `ports.skillBody` is sent unchanged.
       const skillBodyForSpawn = maybeInjectProjectMap(
-        ports.skillBody,
+        executionSkillBody(ports, ctx.storyId),
         // E4: map the tree the builder actually works in (the submodule for a
         // submodule cycle), not the superproject shell.
         execCwd,

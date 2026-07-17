@@ -2359,6 +2359,27 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("routes a US builder to the roll-build skill instead of the loop scheduler skill", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-execution-skill-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, "skills", "roll-build"), { recursive: true });
+    writeFileSync(join(repo, "skills", "roll-build", "SKILL.md"), "---\nname: roll-build\n---\nBUILD THIS STORY\n");
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: join(repo, "worktree") },
+      skillBody: "# Roll Loop\n\nSchedule work.",
+    });
+    mkdirSync(ports.paths.worktreePath, { recursive: true });
+
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    expect(ports.agentSpawn).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ skillBody: "BUILD THIS STORY" }),
+    );
+  });
+
   it("E4: spawn_agent runs the builder INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
     // Real superproject + a nested repo standing in for the submodule + the
     // submodule cycle worktree (E5: submoduleWorktreePath == sibling

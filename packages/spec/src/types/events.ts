@@ -221,6 +221,9 @@ export type RollEvent =
   | { type: "delivery:published"; cycleId: string; storyId: string; branch: string; prNumber: number; prUrl: string; ts: number }
   // Self-driven merge attempt (emitter lands with US-DELIV-003).
   | { type: "delivery:merge_attempt"; cycleId: string; prNumber: number; method: "squash"; outcome: "merged" | "ci_red" | "blocked" | "gh_down"; ts: number }
+  // A published PR was closed without merging. This is terminal for the
+  // cycle and releases its delivery lease without claiming delivery.
+  | { type: "delivery:abandoned"; cycleId: string; storyId: string; reason: "pr_closed_unmerged"; ts: number }
   // Reconcile-from-main backfill (emitter lands with US-DELIV-002): a strong
   // signal (PR-state / patch-id) confirmed the cycle's change on main.
   // E3: `delivered_local` — a local-only delivery landed the cycle on the LOCAL

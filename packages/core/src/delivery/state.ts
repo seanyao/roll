@@ -16,9 +16,7 @@
  *   delivery:merge_attempt{ci_red}        → ci_failed
  *   delivery:reconciled{state}            → delivered / delivered_external /
  *                                           delivered_local / superseded
- *
- * `abandoned` has no emitter yet — it arrives with the one-card-one-lease
- * card (US-DELIV-005). The vocabulary reserves it.
+ *   delivery:abandoned                    → abandoned
  *
  * Guarantees (exhaustively unit-tested):
  * - total + pure: any event list yields a state, same input → same output;
@@ -71,6 +69,9 @@ export function projectDeliveryState(events: readonly RollEvent[], cycleId: stri
         break;
       case "delivery:merge_attempt":
         if (ev.outcome === "ci_red") state = "ci_failed";
+        break;
+      case "delivery:abandoned":
+        state = "abandoned";
         break;
       case "delivery:reconciled":
         state = ev.state;

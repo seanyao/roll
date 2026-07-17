@@ -51,6 +51,31 @@ export type McpSpawn = (
   options: McpSpawnOptions,
 ) => ChildProcessWithoutNullStreams;
 
+/**
+ * Injectable process-control seam for managed MCP cleanup.
+ *
+ * FIX-1275: cleanup must be testable without spawning a real browser and must
+ * distinguish "already-dead / macOS EPERM-on-a-redundant-kill" (harmless) from
+ * "genuinely alive and unkillable" (an explicit failure). All process-group
+ * signalling and the cleanup timing flow through this seam so tests can inject
+ * a `kill` that throws `{ code: "EPERM" }` and drive every terminal path
+ * deterministically.
+ */
+export interface ManagedProcessControl {
+  /** Platform gate — mirrors `process.platform`; only non-win32 uses group signals. */
+  platform: NodeJS.Platform;
+  /** Signal (or probe, with signal 0) the process GROUP led by `pid` via `kill(-pid, signal)`. */
+  killGroup(pid: number, signal: NodeJS.Signals | 0): void;
+  /** Sleep between liveness polls. Defaults to a real timer. */
+  sleep?(ms: number): Promise<void>;
+  /** Grace period a SIGTERM'd group gets to exit before SIGKILL. Default 250ms. */
+  sigtermGraceMs?: number;
+  /** Settle window a SIGKILL'd group gets before the final liveness verdict. Default 100ms. */
+  sigkillSettleMs?: number;
+  /** Liveness poll interval. Default 20ms. */
+  pollIntervalMs?: number;
+}
+
 /** Dependencies for {@link McpBrowserSession}. */
 export interface McpBrowserSessionDeps {
   runId: string;
@@ -58,6 +83,8 @@ export interface McpBrowserSessionDeps {
   emit: (event: McpBrowserSessionEvent) => void;
   manifest?: DevToolsMcpManifest;
   spawn?: McpSpawn;
+  /** FIX-1275: injectable process-control seam for cleanup; defaults to real `process.kill`. */
+  processControl?: ManagedProcessControl;
 }
 
 /** Factory that creates an MCP-backed CDP session for a managed run. */
@@ -84,6 +111,7 @@ export class McpDiagnosticSessionFactory {
       emit: this.options.emit ?? noopEmit,
       spawn: this.options.spawn,
       manifest: this.options.manifest,
+      processControl: this.options.processControl,
     });
     return {
       facade: new McpDiagnosticFacade({
@@ -102,6 +130,8 @@ export interface McpCdpTransportFactoryOptions {
   emit?: (event: McpBrowserSessionEvent) => void;
   spawn?: McpSpawn;
   manifest?: DevToolsMcpManifest;
+  /** FIX-1275: injectable process-control seam for cleanup; defaults to real `process.kill`. */
+  processControl?: ManagedProcessControl;
 }
 
 // ── McpBrowserSession ────────────────────────────────────────────────────────
@@ -118,6 +148,7 @@ export class McpBrowserSession {
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly rpc: McpJsonRpcClient,
     private readonly deps: Required<Pick<McpBrowserSessionDeps, "runId" | "now" | "emit" | "manifest">>,
+    private readonly control: ManagedProcessControl,
   ) {}
 
   /** Spawn, initialize, and validate the MCP session. */
@@ -127,6 +158,7 @@ export class McpBrowserSession {
     const emit = deps.emit;
     const manifest = deps.manifest ?? MINIMUM_DEVTOOLS_MCP_MANIFEST;
     const doSpawn = deps.spawn ?? defaultMcpSpawn;
+    const control = deps.processControl ?? defaultProcessControl;
 
     const command = "npx";
     // US-BROW-020 (live-gate finding): --isolated gives the server a temporary
@@ -160,13 +192,13 @@ export class McpBrowserSession {
       const tools = await rpc.listTools();
       validateManifest(tools, manifest);
       emit({ type: "browser:mcp-initialized", runId, ts: now(), version: manifest.version, tools });
-      return new McpBrowserSession(child, rpc, { runId, now, emit, manifest });
+      return new McpBrowserSession(child, rpc, { runId, now, emit, manifest }, control);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       const category = failureCategory(cause);
       emit({ type: "browser:mcp-failed", runId, ts: now(), category, message });
       try {
-        await terminateMcpProcessTree(child);
+        await terminateMcpProcessTree(child, control);
       } catch (cleanupCause) {
         emit({ type: "browser:mcp-failed", runId, ts: now(), category: "crash", message: cleanupFailureMessage(cleanupCause) });
       }
@@ -193,7 +225,7 @@ export class McpBrowserSession {
     if (this.rpc.isClosed()) return;
     this.rpc.markClosed();
     try {
-      await terminateMcpProcessTree(this.child);
+      await terminateMcpProcessTree(this.child, this.control);
     } catch (cause) {
       const message = cleanupFailureMessage(cause);
       this.deps.emit({ type: "browser:mcp-failed", runId: this.deps.runId, ts: this.deps.now(), category: "crash", message });
@@ -222,6 +254,7 @@ export class McpCdpTransportFactory implements McpBrowserSessionFactory {
       emit: this.options.emit ?? noopEmit,
       spawn: this.options.spawn,
       manifest: this.options.manifest,
+      processControl: this.options.processControl,
     });
     return new McpCdpSession(session);
   }
@@ -422,52 +455,153 @@ function failureCategory(cause: unknown): BrowserMcpFailureCategory {
   return "crash";
 }
 
-async function terminateMcpProcessTree(child: ChildProcessWithoutNullStreams): Promise<void> {
+/**
+ * Explicit cleanup failure for a managed MCP process that is genuinely still
+ * alive and could not be terminated. Distinct from the harmless
+ * already-dead / EPERM-on-a-redundant-kill paths, which resolve successfully.
+ */
+export class McpProcessCleanupError extends Error {
+  readonly code = "mcp_process_cleanup_failed" as const;
+  constructor(
+    message: string,
+    readonly diagnostics: { pid: number; groupState: GroupLiveness; childExited: boolean },
+  ) {
+    super(message);
+    this.name = "McpProcessCleanupError";
+  }
+}
+
+/** Liveness verdict for a managed process group. */
+type GroupLiveness =
+  /** `kill(-pgid, 0)` returned ESRCH — the group is gone. */
+  | "dead"
+  /** `kill(-pgid, 0)` succeeded — at least one signalable member is alive. */
+  | "alive"
+  /**
+   * `kill(-pgid, 0)` was rejected with EPERM — the group cannot be signalled.
+   * On macOS this is what a redundant kill against an already-dead / zombie
+   * group returns; it does NOT prove a live server is leaking.
+   */
+  | "uncertain";
+
+const defaultProcessControl: ManagedProcessControl = {
+  platform: process.platform,
+  killGroup: (pid, signal) => {
+    process.kill(-pid, signal);
+  },
+};
+
+function controlSleep(control: ManagedProcessControl): (ms: number) => Promise<void> {
+  return control.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+}
+
+async function terminateMcpProcessTree(
+  child: ChildProcessWithoutNullStreams,
+  control: ManagedProcessControl,
+): Promise<void> {
   const pid = child.pid;
-  if (pid !== undefined && process.platform !== "win32") {
-    await terminateProcessGroup(pid);
+  if (pid !== undefined && control.platform !== "win32") {
+    await terminateProcessGroup(control, child, pid);
     return;
   }
   await terminateChild(child);
 }
 
-async function terminateProcessGroup(pid: number): Promise<void> {
-  if (!processGroupExists(pid)) return;
-  signalProcessGroup(pid, "SIGTERM");
-  if (await waitForProcessGroupExit(pid, 250)) return;
-  signalProcessGroup(pid, "SIGKILL");
-  // A delivered SIGKILL is terminal for every live member. The process group
-  // may briefly retain zombies, for which `kill(-pgid, 0)` still succeeds even
-  // though no server is alive to leak.
-  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+/**
+ * FIX-1275: bounded, idempotent process-group termination that stays honest
+ * about the outcome.
+ *
+ * - Already-dead group (ESRCH) → success, nothing to do.
+ * - Our direct MCP child has exited and the group only answers EPERM → success:
+ *   the child is gone and macOS is merely refusing a redundant kill against a
+ *   dead / zombie group; a best-effort group SIGKILL reaps any lingering
+ *   descendant.
+ * - A genuinely alive group that survives SIGKILL, or an EPERM group while our
+ *   MCP child is STILL running, → explicit {@link McpProcessCleanupError} with
+ *   actionable diagnostics. Arbitrary (non-ESRCH/EPERM) errors are never
+ *   swallowed; they surface as cleanup failures too.
+ */
+async function terminateProcessGroup(
+  control: ManagedProcessControl,
+  child: ChildProcessWithoutNullStreams,
+  pid: number,
+): Promise<void> {
+  const initial = probeGroup(control, pid);
+  if (initial === "dead") return;
+  if (initial === "uncertain" && child.exitCode !== null) {
+    // EPERM-on-dead: our direct child already exited and the group refuses a
+    // redundant kill. Attempt a best-effort SIGKILL to reap any descendant,
+    // ignore the redundant-kill rejection, and accept — nothing we own is alive.
+    signalGroupBestEffort(control, pid, "SIGKILL");
+    return;
+  }
+
+  const sigtermGraceMs = control.sigtermGraceMs ?? 250;
+  const sigkillSettleMs = control.sigkillSettleMs ?? 100;
+
+  signalGroupBestEffort(control, pid, "SIGTERM");
+  if (await waitForGroupDead(control, pid, sigtermGraceMs)) return;
+
+  signalGroupBestEffort(control, pid, "SIGKILL");
+  if (await waitForGroupDead(control, pid, sigkillSettleMs)) return;
+
+  const finalState = probeGroup(control, pid);
+  if (finalState === "dead") return;
+  // Our direct child has exited; residual EPERM is a dead/zombie group we cannot
+  // (and need not) signal. Not a leak.
+  if (finalState === "uncertain" && child.exitCode !== null) return;
+
+  throw new McpProcessCleanupError(describeUnkillableGroup(pid, finalState, child.exitCode !== null), {
+    pid,
+    groupState: finalState,
+    childExited: child.exitCode !== null,
+  });
 }
 
-function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+function describeUnkillableGroup(pid: number, state: GroupLiveness, childExited: boolean): string {
+  if (state === "alive") {
+    return `managed MCP process group ${pid} is still alive after SIGTERM and SIGKILL`;
+  }
+  // state === "uncertain" while the MCP child is still running.
+  return (
+    `managed MCP process group ${pid} could not be confirmed terminated ` +
+    `(kill returned EPERM while the MCP child is still running${childExited ? "" : ", child not exited"})`
+  );
+}
+
+function probeGroup(control: ManagedProcessControl, pid: number): GroupLiveness {
   try {
-    process.kill(-pid, signal);
+    control.killGroup(pid, 0);
+    return "alive";
   } catch (cause) {
-    if (hasCode(cause, "ESRCH")) return;
+    if (hasCode(cause, "ESRCH")) return "dead";
+    if (hasCode(cause, "EPERM")) return "uncertain";
+    // Never swallow an unexpected error class — surface it as a cleanup failure.
     throw cause;
   }
 }
 
-function processGroupExists(pid: number): boolean {
+function signalGroupBestEffort(control: ManagedProcessControl, pid: number, signal: NodeJS.Signals): void {
   try {
-    process.kill(-pid, 0);
-    return true;
+    control.killGroup(pid, signal);
   } catch (cause) {
-    if (hasCode(cause, "ESRCH")) return false;
+    // ESRCH: the group is already gone. EPERM: macOS refusing a redundant kill
+    // against an already-dead / zombie member. Neither is a cleanup failure —
+    // liveness is judged afterwards by probeGroup. Any other error surfaces.
+    if (hasCode(cause, "ESRCH") || hasCode(cause, "EPERM")) return;
     throw cause;
   }
 }
 
-async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
+async function waitForGroupDead(control: ManagedProcessControl, pid: number, timeoutMs: number): Promise<boolean> {
+  const sleep = controlSleep(control);
+  const pollIntervalMs = control.pollIntervalMs ?? 20;
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!processGroupExists(pid)) return true;
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  for (;;) {
+    if (probeGroup(control, pid) === "dead") return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(pollIntervalMs);
   }
-  return !processGroupExists(pid);
 }
 
 async function terminateChild(child: ChildProcessWithoutNullStreams): Promise<void> {

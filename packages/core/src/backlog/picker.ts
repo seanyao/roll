@@ -111,6 +111,15 @@ export interface PickOptions {
 const DEPENDS_ON_RE = /depends-on:([A-Za-z][A-Za-z0-9,-]+)/;
 const STORY_ID_TOKEN_RE = /^(?:US|FIX|REFACTOR|IDEA)(?:-[A-Z0-9]+)*-\d+[a-z]?$/;
 
+/**
+ * E2 — first occurrence of a per-story `target-submodule:` tag. A submodule
+ * path (the `.gitmodules` declared path) may contain letters, digits, dashes,
+ * dots, underscores and slashes (e.g. `dukang-service-online`, `libs/foo`), so
+ * the value class is broader than a story id. The value ends at the first
+ * character outside that class (whitespace / backtick / end-of-string).
+ */
+const TARGET_SUBMODULE_RE = /target-submodule:([A-Za-z0-9._/-]+)/;
+
 /** Token-bounded id reference, mirroring bash gate 2 `${id}([^0-9A-Za-z]|$)`. */
 export function prTitleReferences(id: string, title: string): boolean {
   let from = 0;
@@ -200,6 +209,21 @@ export function parseDependsOn(desc: string): string[] {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * E2 — parse a row's per-story `target-submodule:` tag (first occurrence only).
+ * Returns the declared submodule path, or `undefined` when the row carries no
+ * such tag (the overwhelming majority — a non-submodule story routes through the
+ * existing superproject path with zero behavioural change). This is METADATA,
+ * not an eligibility gate: the picker still selects the story the same way; the
+ * runner reads this off the picked story to decide WHERE (which submodule) the
+ * worktree + delivery land.
+ */
+export function parseTargetSubmodule(desc: string): string | undefined {
+  const m = TARGET_SUBMODULE_RE.exec(desc);
+  const value = m?.[1]?.trim();
+  return value !== undefined && value !== "" ? value : undefined;
 }
 
 /**

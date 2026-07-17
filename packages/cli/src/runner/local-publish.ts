@@ -28,7 +28,7 @@ import {
   type PublishResult,
 } from "@roll/core";
 import { absent, present, type EvidenceClassifierInput } from "@roll/spec";
-import { resolveIntegrationBranch } from "@roll/infra";
+import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
 import { acMapCandidates, storySpecPath, verificationReportFresh } from "./attest-gate.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
@@ -123,10 +123,16 @@ export async function executeLocalPublish(
     }
   }
 
+  // Resolve WHERE the landing happens. E2 (submodule-aware delivery): when the
+  // story declares a target_submodule, the delivery targets the SUBMODULE's own
+  // repo + integration branch, not the superproject — so the user's real
+  // submodule checkout sees the local integration branch advance (decision #1).
+  // No target_submodule → the superproject path (E3), byte-identical.
+  const target = resolveLandingTarget(ports, ctx);
   // Land the cycle HEAD onto the LOCAL integration branch (E1's configured
   // branch, minus any origin/ prefix). No remote interaction whatsoever.
-  const integrationBranch = resolveIntegrationBranch(ports.repoCwd);
-  const landing = await ports.git.landLocalDelivery(ports.repoCwd, ports.paths.worktreePath, integrationBranch);
+  const integrationBranch = resolveIntegrationBranch(target.repoCwd);
+  const landing = await ports.git.landLocalDelivery(target.repoCwd, target.worktreeCwd, integrationBranch);
   if (landing.code !== 0) {
     // Fail-loud: the landing did not complete → treat as an unpublished local
     // cycle (worktree preserved for recovery), never a false delivery.
@@ -185,6 +191,32 @@ export async function executeLocalPublish(
   // status-0 done classification.
   const pub: PublishResult = { status: 0, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
   return { event: { type: "published", result: pub } };
+}
+
+/**
+ * E2 — resolve the local-landing target (which repo owns the integration branch,
+ * and which worktree HEAD is the delivery). Default = the superproject
+ * (`ports.repoCwd` + `ports.paths.worktreePath`), byte-identical to E3. When the
+ * picked story declared a `target_submodule` (threaded via {@link CycleContext}),
+ * both are redirected INTO the submodule:
+ *   - repoCwd     → `<superproject>/<submodule>` (owns the submodule's local
+ *                   integration branch — the ref `landLocalDelivery` moves).
+ *   - worktreeCwd → the submodule's cycle worktree
+ *                   ({@link submoduleWorktreePath} under the canonical cycle path)
+ *                   — whose detached HEAD is the cycle commit.
+ * The integration branch is then resolved from the SUBMODULE's own config
+ * (E1 `resolveIntegrationBranch(<submodule path>)`), so a submodule configured
+ * with `feat/contractor2.0` lands there while the superproject keeps its own.
+ */
+function resolveLandingTarget(ports: Ports, ctx: CycleContext): { repoCwd: string; worktreeCwd: string } {
+  const sub = ctx.targetSubmodule;
+  if (sub === undefined || sub === "") {
+    return { repoCwd: ports.repoCwd, worktreeCwd: ports.paths.worktreePath };
+  }
+  return {
+    repoCwd: join(ports.repoCwd, sub),
+    worktreeCwd: submoduleWorktreePath(ports.paths.worktreePath, sub),
+  };
 }
 
 /** Read only the persisted CaptureBridge artifacts offered by this story's attest path. */

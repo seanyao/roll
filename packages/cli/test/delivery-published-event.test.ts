@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { CycleContext } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
-import { landLocalDelivery } from "@roll/infra";
+import { landLocalDelivery, submoduleWorktreePath, worktreeAddInSubmodule } from "@roll/infra";
 import type { Ports } from "../src/runner/ports.js";
 import { executeCommand } from "../src/runner/executor.js";
 
@@ -299,6 +299,106 @@ describe("US-E3 — local-only delivery (publish_mode: local)", () => {
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── E2: submodule-aware local delivery (target_submodule + publish_mode:local) ─
+
+/**
+ * Build a superproject (with acceptance evidence + publish_mode:local) that
+ * embeds a real git submodule `sub` on a local integration branch
+ * `feat/contractor2.0`. Returns the pieces the e2e assertion needs.
+ */
+function initSuperprojectWithSubmoduleCycle(): {
+  root: string;
+  runtimeDir: string;
+  submoduleName: string;
+  submodulePath: string;
+  cycleWtRoot: string;
+} {
+  const subUpstream = mkdtempSync(join(tmpdir(), "roll-e2-subup-"));
+  git(subUpstream, "init", "-b", "main");
+  git(subUpstream, "config", "user.email", "roll-test@example.test");
+  git(subUpstream, "config", "user.name", "Roll Test");
+  git(subUpstream, "config", "core.hooksPath", "");
+  writeFileSync(join(subUpstream, "sub-file.txt"), "sub base\n");
+  git(subUpstream, "add", "-A");
+  git(subUpstream, "commit", "-m", "sub base");
+  git(subUpstream, "branch", "feat/contractor2.0");
+
+  const { root, runtimeDir } = initRepoWithEvidence();
+  setPublishMode(root, "local");
+  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", subUpstream, "sub"], { cwd: root });
+  const submoduleName = "sub";
+  const submodulePath = join(root, submoduleName);
+  git(submodulePath, "config", "user.email", "roll-test@example.test");
+  git(submodulePath, "config", "user.name", "Roll Test");
+  git(submodulePath, "branch", "feat/contractor2.0", "origin/feat/contractor2.0");
+  // The submodule's OWN integration branch (E1 config on the SUBMODULE tree).
+  mkdirSync(join(submodulePath, ".roll"), { recursive: true });
+  writeFileSync(join(submodulePath, ".roll", "local.yaml"), "integration_branch: feat/contractor2.0\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-m", "add submodule sub");
+
+  const cycleWtRoot = join(mkdtempSync(join(tmpdir(), "roll-e2-cyc-")), "cycle");
+  return { root, runtimeDir, submoduleName, submodulePath, cycleWtRoot };
+}
+
+describe("US-E2 — submodule-aware local delivery", () => {
+  it("lands on the SUBMODULE's local integration branch; the real submodule checkout sees it advance; no push", async () => {
+    const { root, runtimeDir, submoduleName, submodulePath, cycleWtRoot } = initSuperprojectWithSubmoduleCycle();
+    try {
+      await withCleanGitEnv(async () => {
+        // Build the submodule cycle worktree via the E2 infra primitive.
+        const add = await worktreeAddInSubmodule(root, submoduleName, cycleWtRoot, "feat/contractor2.0");
+        expect(add.code).toBe(0);
+        const subWt = submoduleWorktreePath(cycleWtRoot, submoduleName);
+        writeFileSync(join(subWt, "cycle-work.txt"), "cycle in submodule\n");
+        git(subWt, "add", "-A");
+        git(subWt, "commit", "-m", "tcr: cycle work in submodule");
+        const cycleSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: subWt, encoding: "utf8" }).trim();
+
+        const branchBefore = execFileSync("git", ["rev-parse", "refs/heads/feat/contractor2.0"], { cwd: submodulePath, encoding: "utf8" }).trim();
+        expect(branchBefore).not.toBe(cycleSha);
+
+        // Ports: repoCwd is the SUPERPROJECT; worktreePath is the canonical cycle
+        // path. Delivery redirects into the submodule from ctx.targetSubmodule.
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        (ports as { paths: { worktreePath: string } }).paths.worktreePath = cycleWtRoot;
+
+        const ctx = { ...makeCtx(), targetSubmodule: submoduleName } as CycleContext;
+        const r = await executeCommand(
+          { kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false },
+          ports,
+          ctx,
+        );
+
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(ports.github.runPublishPlan).not.toHaveBeenCalled();
+
+        // The SUBMODULE's local integration branch advanced to the cycle commit —
+        // the user's REAL submodule checkout (git -C <super>/<sub>) sees it.
+        const branchAfter = execFileSync("git", ["rev-parse", "refs/heads/feat/contractor2.0"], { cwd: submodulePath, encoding: "utf8" }).trim();
+        expect(branchAfter).toBe(cycleSha);
+
+        const reconciled = events.filter((e) => e.type === "delivery:reconciled");
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0]).toMatchObject({
+          type: "delivery:reconciled",
+          state: "delivered_local",
+          mergeCommit: cycleSha,
+        });
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "earned" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(cycleWtRoot, { recursive: true, force: true });
     }
   });
 });

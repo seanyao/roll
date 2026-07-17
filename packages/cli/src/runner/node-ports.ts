@@ -40,6 +40,7 @@ import {
   systemClock,
   resolveIntegrationBranch,
   worktreeAdd,
+  worktreeAddInSubmodule,
   worktreeFetchOrigin,
   worktreeRemove,
   worktreeResetHard,
@@ -216,6 +217,10 @@ export function nodePorts(opts: {
       },
       async worktreeAdd(repoCwd, path, branch, base) {
         return worktreeAdd(repoCwd, path, branch, base);
+      },
+      async worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base) {
+        const r = await worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base);
+        return { code: r.code, stderr: r.stderr };
       },
       async worktreeSubmoduleInit(worktreePath) {
         return worktreeSubmoduleInit(worktreePath);

@@ -101,6 +101,22 @@ describe("US-DELIV-009 — runReconcileTick", () => {
     expect(result.cyclesProcessed).toBe(0);
   });
 
+  it("does not reconcile an unpublished cycle from unrelated main history", async () => {
+    const p = project();
+    gitEnvCleanup(() => {
+      writeEvents(p, [
+        { type: "cycle:start", cycleId: CYCLE, storyId: "US-DELIV-009", ts: TS_MS },
+        { type: "cycle:end", cycleId: CYCLE, outcome: "handoff_without_tcr", ts: TS_MS + 1 },
+      ]);
+      execSync('git commit -q --allow-empty -m "US-DELIV-009 unrelated main history"', { cwd: p });
+    });
+
+    const result = await runReconcileTick(p, { silent: true });
+
+    expect(result.cyclesProcessed).toBe(0);
+    expect(readEvents(p).filter((event) => event.type === "delivery:reconciled")).toHaveLength(0);
+  });
+
   it("processes awaiting_merge cycle with open+green PR → emits merge_attempt event", async () => {
     const p = project();
     gitEnvCleanup(() => {

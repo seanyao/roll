@@ -233,6 +233,13 @@ export const CONFIG_KEYS: readonly ConfigKeyRecord[] = [
   // enum string key: validation checks membership in remote|local. Default
   // `remote` keeps every existing remote delivery path byte-identical.
   { key: "publish_mode", scope: "project", store: "flat", type: "string", enum: ["remote", "local"], min: "", max: "", default: "remote" },
+  // E6: the fallback target submodule for a submodule-superproject story that
+  // neither declares `target-submodule:` / `target_submodule:` nor unambiguously
+  // references exactly one submodule in its spec. A string key; default EMPTY
+  // (= unset → no fallback, story routes to the superproject as today). When a
+  // user sets it, it must be a git-ref-safe token (a submodule path); an empty
+  // value is treated as unset by every reader, so it never trips validation.
+  { key: "default_submodule", scope: "project", store: "flat", type: "string", min: "", max: "", default: "" },
 ];
 
 /** Project-scope yaml file — mirrors `_config_key_file project` (5786). */

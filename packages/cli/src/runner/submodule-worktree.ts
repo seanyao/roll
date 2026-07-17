@@ -21,11 +21,11 @@
  *     superproject worktree/repo, byte-identical to today (zero regression).
  */
 import { parseTargetSubmodule } from "@roll/core";
-import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
-import { readFileSync } from "node:fs";
+import { configResolve, projectConfigPath, resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { storySpecPath } from "./attest-gate.js";
-import { targetSubmoduleFromSpecText } from "../lib/target-submodule.js";
+import { gitmodulesPaths, inferTargetSubmodule, targetSubmoduleFromSpecText } from "../lib/target-submodule.js";
 import { eventTs } from "./runner-time.js";
 import type { Ports } from "./ports.js";
 
@@ -68,28 +68,90 @@ export function resolveExecutionRepoCwd(ports: Ports, ctx: { targetSubmodule?: s
 }
 
 /**
- * Resolve the picked story's target submodule, consulting BOTH declaration sites
- * (either may be present):
- *   1. the backlog row tag `target-submodule:<path>` (core `parseTargetSubmodule`);
- *   2. the spec.md frontmatter `target_submodule: <path>` (read from DESIGN
- *      TRUTH — `ports.repoCwd`, the persistent `.roll`, not the mutable worktree).
- * The backlog tag wins when both are present (it is the pick-time source). Spec
- * reads are best-effort: an unreadable/missing spec never fails the resolve — it
- * falls through to "no submodule".
+ * Resolve the picked story's target submodule. E6 makes the explicit
+ * `target_submodule` declaration OPTIONAL by adding inference + a config fallback;
+ * the full precedence chain (highest first) is:
+ *   1. EXPLICIT backlog row tag `target-submodule:<path>` (core `parseTargetSubmodule`);
+ *   2. EXPLICIT spec.md frontmatter `target_submodule: <path>` (read from DESIGN
+ *      TRUTH — `ports.repoCwd`, the persistent `.roll`, not the mutable worktree);
+ *   3. INFERENCE (E6): the superproject's `.gitmodules` declares its submodule
+ *      paths; if the spec text LITERALLY references EXACTLY ONE of them, that is the
+ *      target. Two or more (ambiguous) → do NOT guess, fall through. This is pure
+ *      literal path matching (reliable), never prose classification;
+ *   4. `default_submodule` config (E6): the project-scope fallback for a submodule
+ *      story that neither declares nor unambiguously references a submodule;
+ *   5. `undefined` — a normal superproject story (zero behavioural change).
+ * Spec / gitmodules / config reads are all best-effort: an unreadable file never
+ * fails the resolve — it simply skips that layer.
  */
 export function resolveStoryTargetSubmodule(
   ports: Ports,
   story: { id: string; desc?: string },
 ): string | undefined {
+  // (1) explicit backlog tag — the pick-time source, highest precedence.
   const fromTag = parseTargetSubmodule(story.desc ?? "");
   if (fromTag !== undefined) return fromTag;
+
+  // (2) explicit spec frontmatter — read the spec once, reuse the text for (3).
+  let specText: string | undefined;
   try {
     const spec = storySpecPath(ports.repoCwd, story.id);
-    if (spec !== null) return targetSubmoduleFromSpecText(readFileSync(spec, "utf8"));
+    if (spec !== null) specText = readFileSync(spec, "utf8");
   } catch {
     /* best-effort: an unreadable spec is treated as "no submodule declared" */
   }
+  if (specText !== undefined) {
+    const fromSpec = targetSubmoduleFromSpecText(specText);
+    if (fromSpec !== undefined) return fromSpec;
+  }
+
+  // (3) inference — literal submodule-path match in the spec, only when the
+  // superproject declares submodules and the spec text is available.
+  if (specText !== undefined) {
+    const paths = readSubmodulePaths(ports.repoCwd);
+    if (paths.length > 0) {
+      const inferred = inferTargetSubmodule(specText, paths);
+      if (inferred !== undefined) return inferred;
+    }
+  }
+
+  // (4) default_submodule config fallback (empty / unset ⇒ skip).
+  const fallback = resolveDefaultSubmodule(ports.repoCwd);
+  if (fallback !== undefined) return fallback;
+
+  // (5) no submodule — a normal superproject story.
   return undefined;
+}
+
+/**
+ * E6 — the superproject's declared submodule paths from `<repoCwd>/.gitmodules`,
+ * or `[]` when there is no `.gitmodules` (a plain project — no inference) or it is
+ * unreadable. Best-effort: never throws.
+ */
+function readSubmodulePaths(repoCwd: string): string[] {
+  const gm = join(repoCwd, ".gitmodules");
+  if (!existsSync(gm)) return [];
+  try {
+    return gitmodulesPaths(readFileSync(gm, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * E6 — the project-scope `default_submodule` config value (from
+ * `<repoCwd>/.roll/local.yaml`), or `undefined` when unset/empty. Reuses the
+ * shared config registry so the key's scope/default stay single-sourced.
+ */
+function resolveDefaultSubmodule(repoCwd: string): string | undefined {
+  const resolved = configResolve("default_submodule", {
+    project: join(repoCwd, projectConfigPath()),
+  });
+  const value = resolved?.[0]?.trim();
+  const source = resolved?.[1];
+  return source !== undefined && source !== "default" && value !== undefined && value !== ""
+    ? value
+    : undefined;
 }
 
 /** Outcome of {@link createSubmoduleWorktreeIfDeclared}. */

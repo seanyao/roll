@@ -118,7 +118,7 @@ describe("configResolve (scoped registry)", () => {
     expect(configResolve("loop_active_start", { project: p })).toEqual(["9", p]);
     expect(configResolve("loop_active_end", { project: join(d, "absent.yaml") })).toEqual(["24", "default"]);
   });
-  it("registry mirrors the six v2 keys plus integration_branch + publish_mode", () => {
+  it("registry mirrors the six v2 keys plus integration_branch + publish_mode + default_submodule", () => {
     expect(CONFIG_KEYS.map((k) => k.key)).toEqual([
       "loop_active_start",
       "loop_active_end",
@@ -128,7 +128,16 @@ describe("configResolve (scoped registry)", () => {
       "loop_dream_minute",
       "integration_branch",
       "publish_mode",
+      "default_submodule",
     ]);
+  });
+  it("E6: default_submodule is a project-scope flat string key defaulting to empty", () => {
+    const rec = CONFIG_KEYS.find((k) => k.key === "default_submodule");
+    expect(rec).toBeDefined();
+    expect(rec?.scope).toBe("project");
+    expect(rec?.store).toBe("flat");
+    expect(rec?.type).toBe("string");
+    expect(rec?.default).toBe("");
   });
   it("integration_branch is a project-scope flat string key defaulting to origin/main", () => {
     const rec = CONFIG_KEYS.find((k) => k.key === "integration_branch");
@@ -139,9 +148,10 @@ describe("configResolve (scoped registry)", () => {
     expect(rec?.default).toBe("origin/main");
   });
   it("the six original keys keep integer semantics (type absent or 'int')", () => {
-    // E1 added integration_branch (string); E3 added publish_mode (string enum).
-    // Both are excluded — the assertion is about the ORIGINAL six integer keys.
-    const stringKeys = new Set(["integration_branch", "publish_mode"]);
+    // E1 added integration_branch (string); E3 added publish_mode (string enum);
+    // E6 added default_submodule (string). All excluded — the assertion is about
+    // the ORIGINAL six integer keys.
+    const stringKeys = new Set(["integration_branch", "publish_mode", "default_submodule"]);
     for (const rec of CONFIG_KEYS) {
       if (stringKeys.has(rec.key)) continue;
       expect(rec.type === undefined || rec.type === "int").toBe(true);

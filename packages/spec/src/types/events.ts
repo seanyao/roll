@@ -223,7 +223,11 @@ export type RollEvent =
   | { type: "delivery:merge_attempt"; cycleId: string; prNumber: number; method: "squash"; outcome: "merged" | "ci_red" | "blocked" | "gh_down"; ts: number }
   // Reconcile-from-main backfill (emitter lands with US-DELIV-002): a strong
   // signal (PR-state / patch-id) confirmed the cycle's change on main.
-  | { type: "delivery:reconciled"; cycleId: string; storyId: string; state: "delivered" | "delivered_external" | "superseded"; mergedBy: "runner" | "external"; mergeCommit: string; signal: "pr_state" | "patch_id" | "backlog_attest"; patchId?: string; ts: number }
+  // E3: `delivered_local` — a local-only delivery landed the cycle on the LOCAL
+  // integration branch (no push / no PR / no remote merge). `mergedBy:"runner"`,
+  // `mergeCommit` = the local landing SHA, `signal:"patch_id"` (the local commit
+  // identity, not a PR state).
+  | { type: "delivery:reconciled"; cycleId: string; storyId: string; state: "delivered" | "delivered_external" | "delivered_local" | "superseded"; mergedBy: "runner" | "external"; mergeCommit: string; signal: "pr_state" | "patch_id" | "backlog_attest"; patchId?: string; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
   // Supervisor journal (US-OBS-048) — structured narrative of decisions,

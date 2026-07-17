@@ -69,6 +69,32 @@ describe("US-DELIV-011 — reconcile guards", () => {
     expect(shouldAttemptPrMerge(events, CYCLE)).toBe(false);
   });
 
+  it("delivered_local cycle (E3) is credited — no PR merge, no duplicate credit", () => {
+    const localGate: RollEvent = {
+      type: "delivery:evidence_gate",
+      cycleId: CYCLE,
+      storyId: "US-DELIV-011",
+      verdict: "earned",
+      reasons: [],
+      ts: TS + 1,
+    };
+    const localCredit: RollEvent = {
+      type: "delivery:reconciled",
+      cycleId: CYCLE,
+      storyId: "US-DELIV-011",
+      state: "delivered_local",
+      mergedBy: "runner",
+      mergeCommit: "localsha",
+      signal: "patch_id",
+      ts: TS + 2,
+    };
+    const events = [start, localGate, localCredit];
+    expect(cycleAlreadyCredited(events, CYCLE)).toBe(true);
+    expect(hasCreditedReconciledEvent(events, CYCLE)).toBe(true);
+    expect(shouldAppendDeliveredCredit(events, CYCLE)).toBe(false);
+    expect(shouldAttemptPrMerge(events, CYCLE)).toBe(false);
+  });
+
   it("successful merge_attempt blocks duplicate gh pr merge", () => {
     const events = [start, published, mergeMerged];
     expect(cycleAlreadyCredited(events, CYCLE)).toBe(false);

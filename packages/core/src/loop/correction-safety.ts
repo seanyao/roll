@@ -61,7 +61,9 @@ function healedStoryIds(events: readonly RollEvent[]): Set<string> {
     if (ev.type === "cycle:terminal" && ev.outcome === "delivered") {
       out.add(ev.storyId);
     }
-    if (ev.type === "delivery:reconciled" && (ev.state === "delivered" || ev.state === "delivered_external" || ev.state === "superseded")) {
+    // E3: `delivered_local` is a real (local-only) delivery — it heals the
+    // story exactly like a remote delivered/delivered_external.
+    if (ev.type === "delivery:reconciled" && (ev.state === "delivered" || ev.state === "delivered_external" || ev.state === "delivered_local" || ev.state === "superseded")) {
       out.add(ev.storyId);
     }
   }

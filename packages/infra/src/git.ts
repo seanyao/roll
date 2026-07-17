@@ -85,6 +85,32 @@ export function resolveIntegrationBranch(projectRoot?: string): string {
   return value !== undefined && value !== "" ? value : DEFAULT_INTEGRATION_BRANCH;
 }
 
+/** E3: the delivery publish mode vocabulary. `remote` (default) = push→PR→CI→
+ *  merge; `local` = land on the local integration branch, no remote at all. */
+export type PublishMode = "remote" | "local";
+
+/** E3: the default publish mode — `remote`, so an unset config observes the
+ *  existing push/PR/merge delivery byte-for-byte (zero regression). */
+export const DEFAULT_PUBLISH_MODE: PublishMode = "remote";
+
+/**
+ * E3: resolve the project's delivery publish mode from the project-scope
+ * `publish_mode` config key (default `remote`). Mirrors
+ * {@link resolveIntegrationBranch}'s project-root handling. Any value other than
+ * the exact `local` (the only non-default the validator admits) resolves to
+ * `remote` — a corrupt/hand-edited file can never silently disable remote
+ * delivery; it can only fall back to the safe default.
+ *
+ * @param projectRoot absolute path to the project tree whose `.roll/local.yaml`
+ *                    should be read. Omitted → the cwd-relative default path.
+ */
+export function resolvePublishMode(projectRoot?: string): PublishMode {
+  const project =
+    projectRoot === undefined ? projectConfigPath() : join(projectRoot, projectConfigPath());
+  const resolved = configResolve("publish_mode", { project });
+  return resolved?.[0]?.trim() === "local" ? "local" : DEFAULT_PUBLISH_MODE;
+}
+
 /** Result of a raw git invocation. */
 export interface GitResult {
   /** Process exit code (0 = success). */
@@ -380,6 +406,111 @@ export async function branchCleanlyRebasesOntoMain(
     repoCwd,
   );
   return r.code === 0;
+}
+
+// ─── E3: local-only delivery landing ─────────────────────────────────────────
+
+/** How {@link landLocalDelivery} moved the local integration branch. */
+export type LocalLandingMethod = "created" | "fast_forward" | "merge";
+
+/** Result of a local-only landing. `code !== 0` ⇒ the landing failed (the SHA
+ *  or a git step errored) and the ref was NOT moved. */
+export interface LocalLandingResult {
+  code: number;
+  /** The cycle worktree HEAD SHA that was landed (empty when it could not be resolved). */
+  sha: string;
+  /** The LOCAL branch the delivery landed on (integration branch minus any `origin/`). */
+  landedBranch: string;
+  /** How the ref moved. */
+  method: LocalLandingMethod;
+  /** git stderr on failure (diagnostics). */
+  stderr: string;
+}
+
+/**
+ * E3 — land a cycle's work onto the LOCAL integration branch WITHOUT any remote
+ * interaction (no push / no PR / no CI). This is the local-only delivery
+ * primitive: the config `publish_mode: local` path calls it INSTEAD of the
+ * push→PR ladder.
+ *
+ * Semantics (the plan's "落到整合分支" — chosen for maximum safety):
+ *   - The landing branch is the integration branch with any leading `origin/`
+ *     stripped: you cannot move a remote-tracking ref locally, and a local-only
+ *     repo's integration branch is a LOCAL branch (`origin/main` → `main`).
+ *   - The cycle HEAD SHA is read from the DETACHED worktree (`rev-parse HEAD`).
+ *   - If the local branch does not exist yet → create it at the SHA (`created`).
+ *   - Else if the local branch is an ANCESTOR of the SHA → fast-forward the ref
+ *     to the SHA (`fast_forward`). This is the normal case: the worktree was
+ *     branched off the integration branch, so the cycle HEAD is a descendant.
+ *   - Else (the local branch moved on independently) → build a real merge commit
+ *     with `merge-tree --write-tree` + `commit-tree` and point the ref at it
+ *     (`merge`). The cycle HEAD and the diverged branch are both parents.
+ *
+ * ALL ref moves use `update-ref` (never a checkout), so NO working tree — not
+ * the main checkout, not any sibling worktree — is ever touched or dirtied. A
+ * conflicting merge (merge-tree exit ≠ 0) returns a non-zero code and leaves the
+ * ref unmoved (fail-loud; the caller keeps the worktree for recovery).
+ *
+ * @param repoCwd        the MAIN checkout (owns the local integration branch ref).
+ * @param worktreeCwd    the cycle's detached worktree (its HEAD is the delivery).
+ * @param integrationBranch the configured integration branch (E1); default origin/main.
+ */
+export async function landLocalDelivery(
+  repoCwd: string,
+  worktreeCwd: string,
+  integrationBranch: string = DEFAULT_INTEGRATION_BRANCH,
+): Promise<LocalLandingResult> {
+  const landedBranch = integrationBranch.replace(/^origin\//, "");
+  const fail = (code: number, stderr: string, method: LocalLandingMethod = "fast_forward"): LocalLandingResult => ({
+    code,
+    sha: "",
+    landedBranch,
+    method,
+    stderr,
+  });
+
+  const head = await git(["rev-parse", "HEAD"], worktreeCwd);
+  if (head.code !== 0) return fail(head.code === 0 ? 1 : head.code, head.stderr);
+  const sha = head.stdout.trim();
+  if (sha === "") return fail(1, "empty HEAD sha");
+
+  // Does the local landing branch exist yet?
+  const localRef = `refs/heads/${landedBranch}`;
+  const exists = await git(["rev-parse", "--verify", "--quiet", localRef], repoCwd);
+  if (exists.code !== 0 || exists.stdout.trim() === "") {
+    // Create it directly at the cycle SHA (no checkout).
+    const created = await git(["update-ref", localRef, sha], repoCwd);
+    if (created.code !== 0) return { code: created.code, sha, landedBranch, method: "created", stderr: created.stderr };
+    return { code: 0, sha, landedBranch, method: "created", stderr: "" };
+  }
+  const localSha = exists.stdout.trim();
+
+  // Fast-forward when the local branch is an ancestor of the cycle HEAD.
+  const anc = await git(["merge-base", "--is-ancestor", localSha, sha], repoCwd);
+  if (anc.code === 0) {
+    const ff = await git(["update-ref", localRef, sha, localSha], repoCwd);
+    if (ff.code !== 0) return { code: ff.code, sha, landedBranch, method: "fast_forward", stderr: ff.stderr };
+    return { code: 0, sha, landedBranch, method: "fast_forward", stderr: "" };
+  }
+
+  // Diverged → real merge commit built at ref level (no checkout / no index).
+  const mergeTree = await git(["merge-tree", "--write-tree", localSha, sha], repoCwd);
+  if (mergeTree.code !== 0) {
+    // Conflict (exit 1) or old-git error → fail-loud, leave the ref unmoved.
+    return { code: mergeTree.code === 0 ? 1 : mergeTree.code, sha, landedBranch, method: "merge", stderr: mergeTree.stdout + mergeTree.stderr };
+  }
+  const treeSha = mergeTree.stdout.trim().split("\n")[0] ?? "";
+  if (treeSha === "") return { code: 1, sha, landedBranch, method: "merge", stderr: "merge-tree produced no tree" };
+  const msg = `merge: local delivery of ${sha.slice(0, 12)} onto ${landedBranch}`;
+  const commitTree = await git(
+    ["commit-tree", treeSha, "-p", localSha, "-p", sha, "-m", msg],
+    repoCwd,
+  );
+  if (commitTree.code !== 0) return { code: commitTree.code, sha, landedBranch, method: "merge", stderr: commitTree.stderr };
+  const mergeSha = commitTree.stdout.trim();
+  const move = await git(["update-ref", localRef, mergeSha, localSha], repoCwd);
+  if (move.code !== 0) return { code: move.code, sha, landedBranch, method: "merge", stderr: move.stderr };
+  return { code: 0, sha, landedBranch, method: "merge", stderr: "" };
 }
 
 // ─── branch / commit / push / queries ────────────────────────────────────────

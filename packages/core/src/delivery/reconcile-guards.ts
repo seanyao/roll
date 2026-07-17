@@ -10,7 +10,10 @@
 import type { RollEvent } from "@roll/spec";
 import { projectDeliveryState } from "./state.js";
 
-const CREDITED_STATES = new Set(["delivered", "delivered_external"]);
+// E3: `delivered_local` is a credited terminal too — a local-only cycle that
+// landed on the local integration branch has nothing left to reconcile (no PR
+// to merge, no duplicate credit to append).
+const CREDITED_STATES = new Set(["delivered", "delivered_external", "delivered_local"]);
 
 /** True when the cycle projection is already credited on main. */
 export function cycleAlreadyCredited(events: readonly RollEvent[], cycleId: string): boolean {
@@ -23,7 +26,7 @@ export function hasCreditedReconciledEvent(events: readonly RollEvent[], cycleId
     if (!("cycleId" in ev) || ev.cycleId !== cycleId) continue;
     if (
       ev.type === "delivery:reconciled" &&
-      (ev.state === "delivered" || ev.state === "delivered_external")
+      (ev.state === "delivered" || ev.state === "delivered_external" || ev.state === "delivered_local")
     ) {
       return true;
     }

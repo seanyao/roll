@@ -64,6 +64,16 @@ export interface GitPort {
    *  `code !== 0` ⇒ the re-point failed; the caller leaves the worktree on
    *  origin/main rather than topple the cycle. */
   resetWorktreeHard(worktreeCwd: string, ref: string, branch?: string): Promise<{ code: number }>;
+  /** E3: land the cycle worktree HEAD onto the LOCAL integration branch (no
+   *  push / PR / CI) — the `publish_mode: local` primitive. `integrationBranch`
+   *  defaults to origin/main; its `origin/` prefix is stripped to a local branch.
+   *  Returns the landing SHA, the branch landed on, how the ref moved, and a
+   *  non-zero `code` on failure (ref left unmoved). */
+  landLocalDelivery(
+    repoCwd: string,
+    worktreeCwd: string,
+    integrationBranch?: string,
+  ): Promise<{ code: number; sha: string; landedBranch: string; method: "created" | "fast_forward" | "merge"; stderr: string }>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */

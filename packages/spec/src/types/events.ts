@@ -516,6 +516,46 @@ export type RollEvent =
       capped: boolean;
       ts: number;
     }
+  // FIX-1273 — branch/worktree canary + safe recovery. The canary trip now
+  // enumerates the EXACT counted ephemeral branches and loop worktree dirs with
+  // their fresh audit disposition, so the pause is auditable rather than a bare
+  // count. `worktree_cleanup_planned` records the minimal, audit-derived
+  // candidate set a dry-run proposes; `worktree_cleanup_applied` is emitted once
+  // per verified removal (after a FRESH re-audit); `worktree_cleanup_refused`
+  // makes every fail-closed refusal (changed head / new dirt / missing path /
+  // concurrent activation / lost disposability) a durable, never-silent fact.
+  // A canary count NEVER becomes a blanket deletion: action derives from audit.
+  | {
+      type: "branch_canary_tripped";
+      total: number;
+      threshold: number;
+      ephemeralBranches: string[];
+      worktrees: Array<{ path: string; disposition: string }>;
+      ts: number;
+    }
+  | {
+      type: "worktree_cleanup_planned";
+      threshold: number;
+      canaryTotal: number;
+      dryRun: boolean;
+      candidates: Array<{ path: string; expectedHead: string; branch?: string; cycleId?: string }>;
+      preserved: Array<{ path: string; disposition: string }>;
+      ts: number;
+    }
+  | {
+      type: "worktree_cleanup_applied";
+      path: string;
+      expectedHead: string;
+      branch?: string;
+      cycleId?: string;
+      ts: number;
+    }
+  | {
+      type: "worktree_cleanup_refused";
+      path: string;
+      reason: string;
+      ts: number;
+    }
   // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).

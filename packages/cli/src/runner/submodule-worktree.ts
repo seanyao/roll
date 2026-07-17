@@ -32,19 +32,20 @@ import type { Ports } from "./ports.js";
 /**
  * E4 — the EXECUTION-side cwd. A submodule cycle runs the agent (and observes it)
  * inside the SUBMODULE cycle worktree — `submoduleWorktreePath(<canonical cycle
- * path>, <submodule>)`, the SAME subdirectory E2's `resolveLandingTarget` lands
- * from — so the code the agent edits, builds, tests and commits, and the TCR/diff
- * the runner observes, all live where the delivery ultimately lands. Without a
- * target submodule this is exactly `ports.paths.worktreePath`, so the existing
- * superproject path is unchanged (byte-identical). An empty-string submodule is
- * treated as "none" (mirrors `resolveLandingTarget`'s `sub === ""` guard).
+ * path>, <submodule>)`, the SAME sibling `*.submodules/` location E2's
+ * `resolveLandingTarget` lands from — so the code the agent edits, builds, tests
+ * and commits, and the TCR/diff the runner observes, all live where the delivery
+ * ultimately lands. Without a target submodule this is exactly
+ * `ports.paths.worktreePath`, so the existing superproject path is unchanged
+ * (byte-identical). An empty-string submodule is treated as "none" (mirrors
+ * `resolveLandingTarget`'s `sub === ""` guard).
  *
  * NOTE the deliberate split from the persistent-`.roll` reads: the loop's `.roll`
  * (backlog/specs/evidence/attest) is symlinked ONLY into the canonical
  * superproject cycle worktree (`linkRollIntoWorktree`), never the submodule
- * subdirectory — so spec/evidence/attest reads keep using
- * `ports.paths.worktreePath`, while ONLY the agent-execution + git-observation
- * sites route here.
+ * worktree (E5: a sibling dir outside the superproject worktree tree) — so
+ * spec/evidence/attest reads keep using `ports.paths.worktreePath`, while ONLY
+ * the agent-execution + git-observation sites route here.
  */
 export function resolveExecutionCwd(ports: Ports, ctx: { targetSubmodule?: string }): string {
   const sub = ctx.targetSubmodule;

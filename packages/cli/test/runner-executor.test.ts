@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, CycleEvent, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
+import { submoduleWorktreePath } from "@roll/infra";
 import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
@@ -1024,6 +1025,7 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       fetchOrigin: vi.fn(async () => ({ fetched: true })),
       worktreeAdd: vi.fn(async () => ({ code: 0 })),
       worktreeAddInSubmodule: vi.fn(async () => ({ code: 0, stderr: "" })),
+      worktreeRemoveInSubmodule: vi.fn(async () => ({ code: 0 })),
       worktreeSubmoduleInit: vi.fn(async () => ({ code: 0 })),
       worktreeRemove: vi.fn(async () => ({ code: 0 })),
       push: vi.fn(async () => ({ code: 0 })),
@@ -1476,7 +1478,7 @@ describe("executeCommand — command → executor mapping", () => {
     );
     expect(r.ctxPatch?.tcrCount).toBe(7);
     // observed the agent's commits in the submodule cycle worktree, not /rt/wt.
-    expect(seen).toEqual([join("/rt/wt", "dukang-service-online")]);
+    expect(seen).toEqual([submoduleWorktreePath("/rt/wt", "dukang-service-online")]);
   });
 
   it("E4: measure_worktree stays on the superproject worktree with no targetSubmodule (zero regression)", async () => {
@@ -1516,7 +1518,7 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       { ...CTX, targetSubmodule: "dukang-service-online" },
     );
-    const sub = join("/rt/wt", "dukang-service-online");
+    const sub = submoduleWorktreePath("/rt/wt", "dukang-service-online");
     // The runner's git observation of the agent's delivery routes into the submodule.
     expect(commitsAheadCwd).toEqual([sub]);
     expect(tcrCwd).toEqual([sub]);
@@ -2301,11 +2303,12 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("E4: spawn_agent runs the builder INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
     // Real superproject + a nested repo standing in for the submodule + the
-    // submodule cycle worktree subdir (submoduleWorktreePath == <wt>/<sub>).
+    // submodule cycle worktree (E5: submoduleWorktreePath == sibling
+    // <wt>.submodules/<sub>, NOT under the superproject worktree).
     const repo = initCleanGitRepo("roll-e4-spawn-super-");
     const sub = "dukang-service-online";
     const wt = join(repo, ".roll", "loop", "wt");
-    const subWt = join(wt, sub);
+    const subWt = submoduleWorktreePath(wt, sub);
     mkdirSync(subWt, { recursive: true });
     execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
     const base = fakePorts();
@@ -3100,7 +3103,7 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("E4 (end-to-end): capture_facts observes a REAL tcr commit made in the submodule worktree, not the empty superproject worktree", async () => {
     // Build a real superproject worktree with a nested repo standing in for the
-    // submodule, plus the submodule cycle worktree subdir (submoduleWorktreePath).
+    // submodule, plus the submodule cycle worktree (E5: sibling submoduleWorktreePath).
     const superWt = realpathSync(mkdtempSync(join(tmpdir(), "roll-e4-e2e-super-")));
     execDirs.push(superWt);
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: superWt });
@@ -3112,7 +3115,7 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["branch", "-f", "origin/main"], { cwd: superWt }); // local ref standing in for origin/main
 
     const sub = "dukang-service-online";
-    const subWt = join(superWt, sub);
+    const subWt = submoduleWorktreePath(superWt, sub);
     mkdirSync(subWt, { recursive: true });
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: subWt });
     execFileSync("git", ["config", "user.email", "t@e.test"], { cwd: subWt });
@@ -4719,6 +4722,40 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);
     expect(ports.git.worktreeRemove).toHaveBeenCalled();
   });
+
+  // E5 (real-pilot fix): a submodule cycle also creates a SIBLING submodule
+  // worktree (E5-B). Terminal cleanup must remove it too, or every submodule
+  // cycle leaks a *.submodules/<sub> worktree + its git worktree admin metadata.
+  it("E5: cleanup_worktree removes the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
+    const { ports } = fakePorts();
+    const sub = "dukang-service-online";
+    await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, { ...CTX, targetSubmodule: sub });
+    expect(ports.git.worktreeRemove).toHaveBeenCalled(); // superproject teardown still happens
+    expect(ports.git.worktreeRemoveInSubmodule).toHaveBeenCalledTimes(1);
+    // called with (superprojectCwd, submoduleName, submoduleWorktreePath)
+    const args = (ports.git.worktreeRemoveInSubmodule as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args?.[0]).toBe(ports.repoCwd);
+    expect(args?.[1]).toBe(sub);
+    expect(args?.[2]).toBe(submoduleWorktreePath(ports.paths.worktreePath, sub));
+  });
+
+  it("E5: cleanup_worktree does NOT touch the submodule remove port with no targetSubmodule (zero regression)", async () => {
+    const { ports } = fakePorts();
+    await executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, CTX);
+    expect(ports.git.worktreeRemoveInSubmodule).not.toHaveBeenCalled();
+  });
+
+  it("E5: a failing submodule remove is best-effort — cleanup_worktree still tears down the superproject", async () => {
+    const { ports } = fakePorts();
+    ports.git.worktreeRemoveInSubmodule = vi.fn(async () => {
+      throw new Error("git worktree remove exploded");
+    });
+    const sub = "dukang-service-online";
+    await expect(
+      executeCommand({ kind: "cleanup_worktree", branch: "b" }, ports, { ...CTX, targetSubmodule: sub }),
+    ).resolves.toBeTruthy();
+    expect(ports.git.worktreeRemove).toHaveBeenCalled(); // superproject teardown NOT skipped
+  });
 });
 
 function zeroCost(): RollEvent extends { type: "cycle:end"; cost: infer C } ? C : never {
@@ -5326,6 +5363,44 @@ describe("FIX-302 — worktree submodule (skills/) populate before agent spawn",
     const { events, alerts } = alertSink();
     await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
     expect(init).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  // E5 (real-pilot fix): a superproject whose `.gitmodules` declares OTHER
+  // submodules (e.g. contractor-2.0's `dukang-service-online`) but NO `skills`
+  // submodule is NOT roll's own self-host. The old logic saw `.gitmodules` +
+  // an empty `skills/` (count 0) and recursively `git submodule update --init`d
+  // EVERY submodule — materializing dukang against a superproject gitlink that
+  // resolves nowhere (`fatal: upload-pack: not our ref`), hanging create_worktree
+  // forever. The guard now bootstraps ONLY when a `skills` submodule is declared.
+  it("no-ops a superproject with non-skills submodules only (E5: no init, no alert)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "dukang-service-online"]\n  path = dukang-service-online\n  url = ../dukang.git\n',
+    );
+    const init = vi.fn(async () => ({ code: 0 }));
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).not.toHaveBeenCalled();
+    expect(alerts).toEqual([]);
+  });
+
+  it("bootstraps when skills is declared alongside other submodules (E5: roll self-host)", async () => {
+    const wt = tmpWorktree();
+    writeFileSync(
+      join(wt, ".gitmodules"),
+      '[submodule "dukang-service-online"]\n  path = dukang-service-online\n' +
+        '[submodule "skills"]\n  path = skills\n',
+    );
+    const init = vi.fn(async () => {
+      mkdirSync(join(wt, "skills", "roll-build"), { recursive: true });
+      writeFileSync(join(wt, "skills", "roll-build", "SKILL.md"), "# skill\n");
+      return { code: 0 };
+    });
+    const { events, alerts } = alertSink();
+    await expect(bootstrapWorktreeSkills(wt, join(wt, "alerts.md"), events as never, init)).resolves.toBe(true);
+    expect(init).toHaveBeenCalledTimes(1);
     expect(alerts).toEqual([]);
   });
 
@@ -6127,7 +6202,7 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     const repo = initCleanGitRepo("roll-e4-role-super-");
     const sub = "dukang-service-online";
     const wt = join(repo, ".roll", "loop", "wt");
-    const subWt = join(wt, sub);
+    const subWt = submoduleWorktreePath(wt, sub); // E5: sibling, not <wt>/<sub>
     mkdirSync(subWt, { recursive: true });
     execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });

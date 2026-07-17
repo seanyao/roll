@@ -13,7 +13,7 @@ import {
   type RunKey,
 } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
-import { prNumberFromUrl, resolvePublishMode } from "@roll/infra";
+import { prNumberFromUrl, resolvePublishMode, submoduleWorktreePath } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { evaluateEvidenceGate, executeLocalPublish } from "./local-publish.js";
 import { markDoneGuarded } from "./done-guard.js";
@@ -343,6 +343,24 @@ export async function executeTerminalCommand(
       // US-LOOP-095: worktreeRemove bundles unpushed detached work unless the
       // caller marks it already-on-remote (bundleUnpushed=false).
       await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch, cmd.bundleUnpushed);
+      // E5: a submodule cycle ALSO created a SIBLING submodule worktree
+      // (`<wt>.submodules/<sub>`, E5-B). Tear it down too, or every submodule
+      // cycle leaks that worktree + its git worktree admin metadata. BEST-EFFORT
+      // (the port is code-0-always; the try/catch is belt-and-braces): a cleanup
+      // blip must never topple the cycle's terminal path.
+      if (ctx.targetSubmodule !== undefined && ctx.targetSubmodule !== "") {
+        try {
+          await ports.git.worktreeRemoveInSubmodule(
+            ports.repoCwd,
+            ctx.targetSubmodule,
+            submoduleWorktreePath(ports.paths.worktreePath, ctx.targetSubmodule),
+          );
+        } catch {
+          /* tolerant cleanup, mirrors _worktree_cleanup — the superproject
+             worktree was already removed above; a submodule remove blip is
+             non-fatal (leaked sibling worktree at worst, never a toppled cycle). */
+        }
+      }
       return {};
 
     // events/bus appendEvent (I8 — terminal event written unconditionally).

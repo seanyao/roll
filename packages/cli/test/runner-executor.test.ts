@@ -161,10 +161,10 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     expect(args).toEqual(["-p", prompt]);
   });
 
-  it("kimi: kimi -p <prompt>", () => {
+  it("kimi: kimi streams incremental activity", () => {
     const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
     expect(bin).toBe("kimi");
-    expect(args).toEqual(["-p", prompt]);
+    expect(args).toEqual(["-p", prompt, "--output-format", "stream-json"]);
   });
 
   it("codex: codex exec under workspace-write sandbox", () => {
@@ -328,14 +328,14 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
   });
 
   it("kimi: a routed model is appended as `-m <model>`", () => {
-    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK", model: "moonshot/kimi-k2" });
+    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK", model: "k3" });
     expect(bin).toBe("kimi");
-    expect(args).toEqual(["-m", "moonshot/kimi-k2", "-p", prompt]);
+    expect(args).toEqual(["-m", "k3", "-p", prompt, "--output-format", "stream-json"]);
   });
 
   it("kimi: NO model → no -m flag", () => {
     const { args } = buildSpawnCommand("kimi", { cwd: "/wt", skillBody: "DO WORK" });
-    expect(args).toEqual(["-p", prompt]);
+    expect(args).toEqual(["-p", prompt, "--output-format", "stream-json"]);
     expect(args).not.toContain("-m");
   });
 

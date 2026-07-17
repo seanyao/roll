@@ -149,6 +149,14 @@ describe("US-AGENT-048 — Cursor headless Builder argv", () => {
   });
 });
 
+describe("FIX-1264 — Kimi Builder activity is observable", () => {
+  it("requests stream-json so tool progress reaches the loop runner", () => {
+    const { bin, args } = buildSpawnCommand("kimi", { cwd: "/cycle/wt", skillBody: "DO WORK" });
+    expect(bin).toBe("kimi");
+    expect(args).toEqual(["-p", expect.stringContaining("DO WORK"), "--output-format", "stream-json"]);
+  });
+});
+
 describe("FIX-1231 — codex git isolation", () => {
   it("codex profile declares isolateGit:true", () => {
     const profile = agentProfile("codex");

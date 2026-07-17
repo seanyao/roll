@@ -834,3 +834,37 @@ gh issue create --title "Safari 上登录失败" --body "复现步骤: ..."
 
 租约最多 15 分钟，操作结束后立即释放。无人值守诊断请用受管通道
 （`roll browser run`）。
+
+### C13. 某个故事被标记为证据降级——需要重建吗？
+
+**简答：** 不需要。`degraded-infrastructure` 表示代码交付已通过，只是截图机器
+出了故障（宿主 / 供应方 / 工具）。重建故事解决不了任何问题。只修复证据即可：
+
+```bash
+roll capture repair <story-id>
+```
+
+**细节：** `roll capture repair` **只**重跑截图通道并重新解析证据健康，绝不重开
+构建或 TCR 周期，交付结论原样带过。对失败交付或任何非降级状态，它会拒绝（同样
+不重建）。
+
+先查清截图为何不可用：
+
+```bash
+roll doctor                 # “Capture policy readiness / 截图策略就绪度” 一节
+roll capture status         # 网关 + 渲染器就绪度与有效策略
+roll loop status --capture
+```
+
+若 v2 网关显示 `provider_v2_unavailable`，请安装/更新 Roll Capture.app 使其
+advertise `roll.capture.v2`；若渲染器不可用，运行 `npx playwright install
+chromium`。视觉 AC 由 **Roll Capture · physical** 图像或绑定目标的
+**Playwright · rendered** 回执任一满足——当渲染回执已绑定该目标面时，并不要求
+必须有物理图像。
+
+### C14. `roll capture migrate` 显示 “retained”——为什么没启用 best_effort？
+
+迁移是能力感知的，绝不猜测。只有在 v2 网关**和**渲染器**都**就绪时才启用
+`best_effort`；否则保留既有策略并给出显式原因：`provider_v2_unavailable`（截图
+宿主未 advertise v2）或 `renderer_unavailable`（未安装 Playwright Chromium）。
+修好所报能力后重跑即可——迁移是幂等的，`roll capture migrate --revert` 可回退。

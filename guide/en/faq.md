@@ -918,3 +918,42 @@ It will **never**:
 The lease lasts at most 15 minutes and is released immediately after the
 operation. For unattended diagnostics, use the managed lane (`roll browser run`)
 instead.
+
+### C13. A story is marked evidence-degraded — do I need to rebuild it?
+
+**Short answer:** No. `degraded-infrastructure` means the code delivery passed
+but the capture machine was broken (host / provider / tooling). Rebuilding the
+story would fix nothing. Repair the evidence only:
+
+```bash
+roll capture repair <story-id>
+```
+
+**Details:** `roll capture repair` re-runs **only** the capture lanes and
+re-resolves evidence health. It never reopens the build or the TCR cycle, and the
+delivery verdict is carried through unchanged. It refuses (still without
+rebuilding) for a failed delivery or any non-degraded state.
+
+Check why capture is unavailable first:
+
+```bash
+roll doctor                 # "Capture policy readiness" section
+roll capture status         # gateway + renderer readiness and effective policy
+roll loop status --capture
+```
+
+If the v2 gateway reads `provider_v2_unavailable`, install/update Roll Capture.app
+so it advertises `roll.capture.v2`. If the renderer is unavailable, run
+`npx playwright install chromium`. A visual AC is satisfied by either a
+**Roll Capture · physical** image or a target-bound **Playwright · rendered**
+receipt — it does not require a physical image when a rendered receipt is bound
+to the surface.
+
+### C14. `roll capture migrate` says "retained" — why didn't it enable best_effort?
+
+The migration is capability-aware and never guesses. It enables `best_effort`
+only when **both** the v2 gateway and the renderer are ready. Otherwise it
+retains your existing policy with an explicit reason: `provider_v2_unavailable`
+(the capture host does not advertise v2) or `renderer_unavailable` (Playwright
+Chromium is not installed). Fix the reported capability, then re-run — the
+migration is idempotent, and `roll capture migrate --revert` reverses it.

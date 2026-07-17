@@ -333,6 +333,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -458,6 +470,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -546,6 +570,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -633,6 +669,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -719,6 +767,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -804,6 +864,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);
@@ -910,6 +982,18 @@ describe("frozen: roll doctor", () => {
         ✗ managed: unknown — no managed operation facts
         ✗ interactive: unknown — no owner lease facts
         ✗ capture: unknown — no physical capture facts
+
+      Capture policy readiness
+      截图策略就绪度
+
+        − v2 capture gateway — unavailable
+          host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
+        − browser renderer — unavailable
+          Playwright Chromium is not installed; run \`npx playwright install chromium\`
+        · effective capture policy — unset
+          no capture mode recorded; project retains legacy behavior until \`roll capture migrate\` enables best_effort
+        · next migration — retained (provider_v2_unavailable)
+          v2 Roll Capture gateway unavailable; retained existing policy — host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host
       ",
       }
     `);

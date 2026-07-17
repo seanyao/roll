@@ -283,6 +283,94 @@ The machine Agents page (`.roll/features/agents.html`) includes the same tool
 status block so a reviewer can see whether evidence capture depends on
 machine setup rather than story code.
 
+## Best-effort capture, evidence health, and repair
+
+Visual evidence is a **best-effort** delivery capability: every declared visual
+surface is attempted through every eligible capture lane, and a capture-service
+outage is never misread as a product regression. Delivery correctness and
+visual-evidence health are kept as **separate facts**.
+
+### Source labels
+
+Every accepted image carries the lane that produced it:
+
+- **Roll Capture · physical** — a physical screenshot of your real terminal or
+  app window, taken by Roll Capture.app. It proves what was on screen; it never
+  claims a URL it cannot observe.
+- **Playwright · rendered** — a rendered receipt whose `finalUrl` equals the
+  declared surface after approved redirect normalization. A target-bound rendered
+  receipt is eligible visual evidence — distinct from a diagnostic screenshot.
+
+A target-bound rendered receipt can satisfy a visual AC on its own. A physical
+Roll Capture image is one eligible source for a visual AC; a target-bound
+rendered receipt is another, equally valid one.
+
+### The four visual states
+
+| State | Meaning | Gate action |
+|-------|---------|-------------|
+| `verified` | at least one valid, target-bound image (physical or rendered) | publish normally |
+| `degraded-infrastructure` | every configured lane was attempted; only host/provider/tooling failures occurred | publish, visibly marked degraded; **do not rebuild** — repairable by an evidence-only rerun |
+| `invalid-target` | a lane reached login, an unapproved redirect, the wrong target, a corrupt image, or a forged receipt | block as an evidence failure; repair the target/configuration |
+| `absent-contract` | no declared surface, no planned attempt, or the planner was bypassed | block as a design/execution failure |
+
+`degraded-infrastructure` is intentionally not a green screenshot claim. It
+separates code delivery from a broken evidence machine so the same completed
+story is never repeatedly rebuilt.
+
+### Privacy boundaries
+
+- Receipts never include credentials, cookies, DOM dumps, or network bodies.
+- Window capture is window-scoped by default; a missing target produces a typed
+  failure, never a silent expansion to full-screen.
+- `ROLL_NO_SCREENCAP=1` bans only the Runner's direct native `screencapture` /
+  AppleScript path. It does not disable the Roll Capture gateway request or the
+  Playwright rendered attempt.
+
+### Evidence-only repair
+
+A `degraded-infrastructure` delivery can be repaired without reopening the build:
+
+```bash
+roll capture repair <story-id>
+```
+
+This re-runs **only** the capture lanes and re-resolves evidence health. It never
+touches the TCR / build cycle and never reopens the completed delivery. It
+refuses (and still does not rebuild) for a failed delivery or any non-degraded
+state. A `verified` result publishes the newly captured image; a still-degraded
+result stays publishable and marked degraded.
+
+### Enabling best-effort capture
+
+The default for new visual stories is `best_effort`. Existing projects keep their
+recorded policy until an explicit, capability-aware, reversible migration enables
+it:
+
+```bash
+roll capture migrate            # enable best_effort ONLY when the v2 gateway AND renderer are ready
+roll capture migrate --dry-run  # preview without writing
+roll capture migrate --revert   # restore the previously recorded policy
+```
+
+The migration is idempotent. It enables `best_effort` only when **both** the v2
+Roll Capture gateway and the browser renderer are ready; otherwise it retains the
+existing policy with an explicit reason (`provider_v2_unavailable` /
+`renderer_unavailable`) — never a guessed fallback. It never force-flips an
+existing project.
+
+### Readiness
+
+`roll doctor` (and `roll capture status`, and `roll loop status --capture`)
+report the v2 gateway readiness, the renderer readiness, and the effective
+capture policy — each with an actionable reason:
+
+```bash
+roll doctor              # includes a "Capture policy readiness" section
+roll capture status      # the same readiness, standalone (add --json for machines)
+roll loop status --capture
+```
+
 ## Review Score fold
 
 When `.roll/notes/` carries the story's Review Score entry, the report ends

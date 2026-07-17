@@ -547,16 +547,21 @@ Managed browser diagnostics and interactive owner-run results are
 **diagnostic-only / manual-attest only**. Every run report repeats it:
 *diagnostic success is not visual acceptance evidence*. A diagnostic screenshot
 or interactive result is classified as a diagnostic artifact, not a visual-AC
-artifact, so it can never fake a story's visual acceptance. When a story needs
-visual acceptance, use **Roll Capture** — a physical screenshot of your real
-terminal/app — which alone satisfies that requirement. See
-[Acceptance evidence](acceptance-evidence.md).
+artifact, so it can never fake a story's visual acceptance.
+
+Under best-effort capture, a visual AC is satisfied by any valid, target-bound
+image — a **Roll Capture · physical** screenshot of your real terminal/app, or a
+**Playwright · rendered** receipt whose `finalUrl` equals the declared surface.
+Both are eligible; a target-bound rendered receipt is not the same as a
+diagnostic screenshot. A physical image never claims a `finalUrl` it cannot
+observe. See [Acceptance evidence](acceptance-evidence.md).
 
 When `roll attest` receives a physical capture response, it writes a validated
 CaptureBridge link to `.roll/browser-operations/events.ndjson`. Doctor, truth,
 and dossier surfaces read that durable fact: a verified `roll.capture.v1`
-physical capture can satisfy a visual AC, while Playwright and DevTools
-diagnostics remain ineligible. With no persisted link, capture truth stays
+physical capture satisfies a visual AC, and so does a target-bound
+`roll.capture.v2` rendered receipt; only unbound Playwright and DevTools
+*diagnostics* remain ineligible. With no persisted link, capture truth stays
 honestly unknown and the dossier does not invent a capture event.
 
 ---

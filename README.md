@@ -285,6 +285,18 @@ to find dangling evidence references and `evidence_debt` rows. See
 [Acceptance evidence](guide/en/acceptance-evidence.md) and
 [Loop failure handling](guide/en/loop.md#failure-attribution-and-pauses).
 
+Visual evidence is **best-effort**: a visual AC is satisfied by either a
+**Roll Capture · physical** image or a target-bound **Playwright · rendered**
+receipt — a physical image is not the only thing that can satisfy it. Evidence
+health is one of four states: `verified`, `degraded-infrastructure` (capture
+machine broken — published, marked degraded, **never rebuilt**), `invalid-target`
+(blocks), or `absent-contract` (blocks). Receipts never include credentials,
+cookies, DOM, or network bodies, capture is window-scoped, and `ROLL_NO_SCREENCAP`
+bans only the runner's native path. Enable best-effort with the capability-gated,
+reversible `roll capture migrate`; repair a degraded record without reopening the
+build via `roll capture repair <story-id>`; and check readiness with `roll doctor`
+or `roll capture status`.
+
 Behavior Roll cannot prove locally — a real `npm i -g github:...`, a published
 CLI's first run, a live OAuth callback — must declare an `external-smoke` or
 `owner-attested` verification path. The attest report shows an **Outward

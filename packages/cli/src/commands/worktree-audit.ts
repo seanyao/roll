@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { isEphemeralBranch } from "@roll/core";
 import { resolveIntegrationBranch } from "@roll/infra";
 
 // ─── types (shared with the spec) ───────────────────────────────────────────
@@ -63,6 +64,13 @@ export interface WorktreeAuditOutput {
   generatedAt: string;
   repo: string;
   records: WorktreeAuditRecord[];
+  /**
+   * FIX-1273: the EXACT ephemeral local branches the branch/worktree canary
+   * counts (isEphemeralBranch over `git branch`). Enumerated here so the canary
+   * trip + cleanup planner can report the full counted set — the audit is the
+   * SOLE authority over what the canary sees, never a separate ad-hoc count.
+   */
+  ephemeralBranches: string[];
   summary: {
     total: number;
     loop: number;
@@ -71,6 +79,8 @@ export interface WorktreeAuditOutput {
     active: number;
     disposableCandidates: number;
     preserved: number;
+    /** FIX-1273: ephemeral local branch count (canary's other addend). */
+    ephemeralBranches: number;
   };
 }
 
@@ -462,6 +472,25 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     records.push(baseRec);
   }
 
+  // 4b. Enumerate the EXACT ephemeral local branches the canary counts. The
+  // canary's total = ephemeral branches + loop worktree dirs; surfacing the
+  // branch names here makes the audit the single source of truth for what the
+  // canary sees (FIX-1273 AC1).
+  let ephemeralBranches: string[] = [];
+  try {
+    const g = deps.git ?? git;
+    const branchOut = g(["branch", "--format=%(refname:short)"], repoRoot);
+    ephemeralBranches = branchOut
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((b) => b !== "" && isEphemeralBranch(b))
+      .sort();
+  } catch {
+    // A git hiccup while listing branches must not topple the audit — the
+    // canary/cleanup surface simply sees zero enumerated branches.
+    ephemeralBranches = [];
+  }
+
   // 5. Summary
   const summary = {
     total: records.length,
@@ -473,6 +502,7 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     preserved: records.filter(
       (r) => r.disposition !== "disposable_candidate" && r.disposition !== "external_unmanaged",
     ).length,
+    ephemeralBranches: ephemeralBranches.length,
   };
 
   const repoName = basename(repoRoot);
@@ -483,6 +513,7 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     generatedAt: nowISO,
     repo: repoName,
     records,
+    ephemeralBranches,
     summary,
   };
 }
@@ -499,7 +530,14 @@ function renderHuman(output: WorktreeAuditOutput): string {
   lines.push(`  active: ${output.summary.active}`);
   lines.push(`  disposable candidates: ${output.summary.disposableCandidates}`);
   lines.push(`  preserved: ${output.summary.preserved}`);
+  lines.push(`  ephemeral branches: ${output.summary.ephemeralBranches}`);
   lines.push("");
+
+  if (output.ephemeralBranches.length > 0) {
+    lines.push("ephemeral branches (canary-counted)");
+    for (const b of output.ephemeralBranches) lines.push(`  ${b}`);
+    lines.push("");
+  }
 
   // Group by disposition
   const groups = new Map<WorktreeDisposition, WorktreeAuditRecord[]>();

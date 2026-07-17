@@ -38,6 +38,8 @@ import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.j
 import { readLatestResizeSignal } from "../lib/review-score.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
+import { auditWorktrees } from "./worktree-audit.js";
+import { formatCanaryTripReport } from "./worktree-cleanup.js";
 import { writeLatestLoopDigest } from "../lib/morning-report.js";
 import { backfillMergedRuns } from "../lib/runs-backfill.js";
 import { runReconcileTick } from "./loop-reconcile.js";
@@ -1668,11 +1670,25 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
   });
   if (verdict.shouldPause) {
     const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
-    const msg =
-      `# ALERT — loop auto-paused: branch/worktree leak canary tripped (US-LOOP-096)\n\n` +
-      `**Leak count**: ${verdict.total} (ephemeral branches ${ephemeralBranchCount} + worktrees ${worktreeCount}) > threshold ${threshold}\n` +
-      `**Action**: the branch-GC contract appears broken — loop paused to stop piling up.\n` +
-      `  Inspect \`git branch\` / \`git worktree list\`, clean up, then: \`roll loop resume\`\n`;
+    // FIX-1273 AC1: enumerate the EXACT counted branches + loop worktrees with
+    // their fresh audit disposition so the pause is auditable and points at the
+    // safe recovery route — not a bare number. The audit runs ONLY on trip (rare)
+    // so it never taxes the steady-state tick.
+    let msg: string;
+    let event: ReturnType<typeof formatCanaryTripReport>["event"] | null = null;
+    try {
+      const audit = auditWorktrees({ repoRoot: projectPath, home: process.env["HOME"] ?? "" });
+      const report = formatCanaryTripReport(audit, threshold, Date.now());
+      msg = report.alert;
+      event = report.event;
+    } catch {
+      // Fall back to the light count if the audit itself hiccups — the pause must
+      // still be written; only the enumeration degrades.
+      msg =
+        `# ALERT — loop auto-paused: branch/worktree leak canary tripped (US-LOOP-096 / FIX-1273)\n\n` +
+        `**Leak count**: ${verdict.total} (ephemeral branches ${ephemeralBranchCount} + worktrees ${worktreeCount}) > threshold ${threshold}\n` +
+        `**Safe recovery**: \`roll worktree cleanup --dry-run\` → \`--apply\` → \`roll loop resume\`\n`;
+    }
     try {
       mkdirSync(dirname(pauseMarker), { recursive: true });
       writeFileSync(pauseMarker, msg, "utf8");
@@ -1683,6 +1699,13 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
       appendFileSync(alertsPath, `${msg}\n`, "utf8");
     } catch {
       /* best-effort */
+    }
+    if (event) {
+      try {
+        new EventBus().appendEvent(join(rt, "events.ndjson"), event);
+      } catch {
+        /* best-effort observability */
+      }
     }
   }
   return verdict.tripped;

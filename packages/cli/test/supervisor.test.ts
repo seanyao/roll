@@ -525,6 +525,7 @@ describe("supervisorCommand", () => {
       events: [
         JSON.stringify({ type: "cycle:start", cycleId: "C-clean", storyId: "US-1", agent: "pi", model: "m", ts: 1 }),
         JSON.stringify({ type: "cycle:end", cycleId: "C-clean", outcome: "handoff_without_tcr", cost: {}, ts: 2 }),
+        JSON.stringify({ type: "builder:handoff_required", cycleId: "C-clean", storyId: "US-1", worktreePath: ".roll/loop/worktrees/cycle-C-clean", ts: 3 }),
       ],
     });
     const worktreePath = join(cwd, ".roll", "loop", "worktrees", "cycle-C-clean");

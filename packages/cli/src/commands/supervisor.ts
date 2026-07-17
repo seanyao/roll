@@ -412,7 +412,10 @@ export function gatherSupervisorInput(projectPath: string): SupervisorInput {
         });
       }
     }
-    else if (ev.type === "builder:handoff_required") {
+    else if (
+      ev.type === "builder:handoff_required" &&
+      preservedWorktreeHasChanges(projectPath, ev.cycleId)
+    ) {
       const sid = ev.storyId !== "" ? ev.storyId : cycleStory.get(ev.cycleId);
       if (sid !== undefined) {
         structuralFailures.set(sid, {

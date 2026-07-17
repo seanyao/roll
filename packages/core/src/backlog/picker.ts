@@ -308,6 +308,7 @@ export function isEligible(
  */
 export function pickStory(items: BacklogItem[], opts: PickOptions = {}): BacklogItem | undefined {
   const isDone = buildDoneIndex(items);
+  const isRecoveryCandidate = opts.isRecoveryCandidate ?? (() => false);
 
   if (opts.ranking !== undefined && opts.ranking.length > 0) {
     for (const it of advisoryRankItems(items, opts.ranking)) {
@@ -361,10 +362,12 @@ export function assessBacklog(
   opts: PickOptions = {},
 ): BacklogAssessment {
   const isDone = buildDoneIndex(items);
+  const isRecoveryCandidate = opts.isRecoveryCandidate ?? (() => false);
 
   // --- histogram over ALL rows (AC2) ----------------------------------------
   let todoCount = 0;
   let inProgressCount = 0;
+  let recoveryInProgressCount = 0;
   let holdCount = 0;
   let doneCount = 0;
   for (const it of items) {
@@ -375,6 +378,7 @@ export function assessBacklog(
         break;
       case "in_progress":
         inProgressCount++;
+        if (isRecoveryCandidate(it.id)) recoveryInProgressCount++;
         break;
       case "hold":
         holdCount++;
@@ -395,7 +399,7 @@ export function assessBacklog(
   let hasBlockedByLease = false;
   let hasBlockedByScreenLocked = false;
 
-  if (todoCount > 0) {
+  if (todoCount > 0 || recoveryInProgressCount > 0) {
     const hasOpenPr = opts.hasOpenPr ?? (() => false);
     const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
     const shouldSkip = opts.shouldSkip ?? (() => false);
@@ -404,7 +408,9 @@ export function assessBacklog(
     const requiresPhysicalSurface = opts.requiresPhysicalSurface ?? (() => false);
 
     for (const it of items) {
-      if (classifyStatus(it.status) !== "todo") continue;
+      const status = classifyStatus(it.status);
+      const recoveryCandidate = isRecoveryCandidate(it.id);
+      if (status !== "todo" && !(recoveryCandidate && status === "in_progress")) continue;
       if (isEligible(it, isDone, opts)) {
         return { hasWork: true, reason: "has_work" };
       }
@@ -423,7 +429,8 @@ export function assessBacklog(
         }
       }
       if (!blockedByDeps && hasOpenPr(it.id)) blockedByPr = true;
-      if (!blockedByDeps && !blockedByPr && hasMergedDelivery(it.id)) blockedByMerged = true;
+      const mergedDelivery = hasMergedDelivery(it.id);
+      if (!blockedByDeps && !blockedByPr && mergedDelivery && !recoveryCandidate) blockedByMerged = true;
       if (!blockedByDeps && !blockedByPr && !blockedByMerged && shouldSkip(it.id)) blockedBySkip = true;
       // FIX-1212: pending-publish blocks only when card also has an open PR
       // (stale marker without PR does not block — prevents starvation).
@@ -443,7 +450,7 @@ export function assessBacklog(
         !blockedByMerged &&
         !blockedBySkip &&
         !blockedByPendingPublish &&
-        deliveryLeaseBlock(it.id) !== undefined
+        deliveryLeaseBlock(it.id) !== undefined && !(recoveryCandidate && mergedDelivery)
       )
         blockedByLease = true;
       // FIX-1268: screen-locked physical-surface gate is checked after the durable
@@ -471,7 +478,7 @@ export function assessBacklog(
 
   // --- FIX-1215: collect blocked-card details for idle output observability ---
   const blockedCards: BlockedCard[] = [];
-  if (todoCount > 0) {
+  if (todoCount > 0 || recoveryInProgressCount > 0) {
     const hasOpenPr = opts.hasOpenPr ?? (() => false);
     const hasMergedDelivery = opts.hasMergedDelivery ?? (() => false);
     const shouldSkip = opts.shouldSkip ?? (() => false);
@@ -480,7 +487,9 @@ export function assessBacklog(
     const requiresPhysicalSurface = opts.requiresPhysicalSurface ?? (() => false);
 
     for (const it of items) {
-      if (classifyStatus(it.status) !== "todo") continue;
+      const status = classifyStatus(it.status);
+      const recoveryCandidate = isRecoveryCandidate(it.id);
+      if (status !== "todo" && !(recoveryCandidate && status === "in_progress")) continue;
       // Collect blocking reason per card (mirrors the isEligible gate order).
       let blockedByDeps = false;
       let unmetDeps: string[] = [];
@@ -501,7 +510,8 @@ export function assessBacklog(
         hasBlockedByPr = true;
         continue;
       }
-      if (hasMergedDelivery(it.id)) {
+      const mergedDelivery = hasMergedDelivery(it.id);
+      if (mergedDelivery && !recoveryCandidate) {
         blockedCards.push({ id: it.id, reason: "already merged to main" });
         hasBlockedByMerged = true;
         continue;
@@ -521,7 +531,7 @@ export function assessBacklog(
       // US-DELIV-005: one-card-one-lease — the card is held by an active
       // delivery lease (see delivery/lease.ts); the reason names the state.
       const leaseReason = deliveryLeaseBlock(it.id);
-      if (leaseReason !== undefined) {
+      if (leaseReason !== undefined && !(recoveryCandidate && mergedDelivery)) {
         blockedCards.push({ id: it.id, reason: leaseReason });
         hasBlockedByLease = true;
         continue;

@@ -148,25 +148,48 @@ export function startMainCheckoutLeakWatchdog(
   let stopped = false;
   let inFlight: Promise<void> | null = null;
 
+  // E7: snapshot the main checkout's dirt at startup and DIFF every tick against
+  // it, so only paths the builder writes AFTER spawn count as a leak. On a
+  // submodule super-repo the main checkout is permanently dirty (gitlink pointer
+  // drift, colleague WIP, untracked `wt-*/`); the previous absolute-dirt check
+  // SIGKILL'd every builder on its first tick. The baseline is captured async so
+  // this function stays synchronous; the git status resolves in a few dozen ms
+  // while the first tick is pollMs (default 2s) away, so ticks that run before
+  // the baseline is ready are skipped (see `baselineReady` below) rather than
+  // racing an unset baseline. A best-effort empty baseline on git error degrades
+  // to the original absolute-dirt behavior rather than toppling the cycle.
+  let baseline: Set<string> | null = null;
+  const baselinePromise = checkMainDirty(ports.repoCwd)
+    .then((dirty) => {
+      baseline = new Set(dirty);
+    })
+    .catch(() => {
+      baseline = new Set();
+    });
+
   const tick = async (): Promise<void> => {
     if (running || stopped || detected) return;
+    // Skip ticks until the baseline snapshot is ready — never diff against null.
+    if (baseline === null) return;
     running = true;
     try {
       const dirty = await checkMainDirty(ports.repoCwd);
-      if (dirty.length === 0) return;
+      const base = baseline;
+      const newDirty = dirty.filter((path) => !base.has(path));
+      if (newDirty.length === 0) return;
       detected = true;
-      files = dirty;
+      files = newDirty;
       clearInterval(timer);
       ports.events.appendEvent(ports.paths.eventsPath, {
         type: "sandbox:main_dirty",
         cycleId: ctx.cycleId ?? "",
         phase: "active-spawn",
-        files: dirty,
+        files: newDirty,
         ts: eventTs(ports),
       });
       ports.events.appendAlert(
         ports.paths.alertsPath,
-        `cycle ${ctx.cycleId ?? "?"}: detected main checkout write while builder was active; killing agent; files: ${dirty.join(", ")}`,
+        `cycle ${ctx.cycleId ?? "?"}: detected main checkout write while builder was active; killing agent; files: ${newDirty.join(", ")}`,
       );
       kill();
     } catch {
@@ -187,6 +210,9 @@ export function startMainCheckoutLeakWatchdog(
     stop: async () => {
       stopped = true;
       clearInterval(timer);
+      // Settle the baseline snapshot even for a very short spawn, so its promise
+      // is never left dangling (no unhandled rejection); it is best-effort.
+      await baselinePromise.catch(() => {});
       if (inFlight !== null) await inFlight;
       return { detected, files };
     },

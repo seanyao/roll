@@ -37,7 +37,8 @@ import { executeSpawnAgentCommand } from "./spawn-agent-handler.js";
 import { executeSpawnRoleCommand } from "./spawn-role-handler.js";
 import { executeCaptureFactsCommand } from "./capture-facts-handler.js";
 import { executeTerminalCommand } from "./terminal-handlers.js";
-import { resolveExecutionCwd } from "./submodule-worktree.js";
+import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
+import { resolveIntegrationBranch } from "@roll/infra";
 
 export { checkMainDirty } from "./main-checkout-guard.js";
 export { buildRunRow, buildTerminalRecord } from "./run-records.js";
@@ -178,7 +179,13 @@ export async function executeCommand(
       // E4: a submodule cycle's TCR commits landed in the SUBMODULE worktree, so
       // count them there (resolveExecutionCwd = the same sibling submodule worktree
       // the delivery lands from). No targetSubmodule ⇒ ports.paths.worktreePath.
-      const measured = await ports.git.tcrCount(resolveExecutionCwd(ports, ctx)).catch(() => undefined);
+      // E8: count against the EXECUTION repo's integration branch (execRepoCwd —
+      // the submodule's own working branch), NOT the hardwired origin/main the
+      // detached submodule cycle worktree lacks. No targetSubmodule ⇒
+      // resolveIntegrationBranch(repoCwd) → origin/main default (zero regression).
+      const measured = await ports.git
+        .tcrCount(resolveExecutionCwd(ports, ctx), resolveIntegrationBranch(resolveExecutionRepoCwd(ports, ctx)))
+        .catch(() => undefined);
       return measured === undefined ? {} : { ctxPatch: { tcrCount: measured } };
     }
 

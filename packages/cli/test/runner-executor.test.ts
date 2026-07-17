@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, CycleEvent, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
-import { submoduleWorktreePath } from "@roll/infra";
+import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
 import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
@@ -60,7 +60,8 @@ import {
   withPtyWrap,
   detectAgyInternalFailure,
 } from "../src/runner/index.js";
-import { suspendRig } from "../src/runner/agent-liveness.js";
+import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
+import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -1463,11 +1464,13 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("E4: measure_worktree counts TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
     const seen: string[] = [];
+    const seenBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           seen.push(cwd);
+          seenBase.push(baseRef);
           return 7;
         }),
       },
@@ -1480,15 +1483,20 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.ctxPatch?.tcrCount).toBe(7);
     // observed the agent's commits in the submodule cycle worktree, not /rt/wt.
     expect(seen).toEqual([submoduleWorktreePath("/rt/wt", "dukang-service-online")]);
+    // E8: counted against the SUBMODULE repo's integration branch (execRepoCwd),
+    // never the hardwired origin/main the detached cycle worktree lacks.
+    expect(seenBase).toEqual([resolveIntegrationBranch(join("/repo", "dukang-service-online"))]);
   });
 
   it("E4: measure_worktree stays on the superproject worktree with no targetSubmodule (zero regression)", async () => {
     const seen: string[] = [];
+    const seenBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           seen.push(cwd);
+          seenBase.push(baseRef);
           return 2;
         }),
       },
@@ -1496,20 +1504,26 @@ describe("executeCommand — command → executor mapping", () => {
     const r = await executeCommand({ kind: "measure_worktree" }, ports, CTX);
     expect(r.ctxPatch?.tcrCount).toBe(2);
     expect(seen).toEqual(["/rt/wt"]);
+    // E8: no submodule → resolveIntegrationBranch(repoCwd) → origin/main default.
+    expect(seenBase).toEqual([resolveIntegrationBranch("/repo")]);
   });
 
   it("E4: capture_facts observes commits/TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
     const commitsAheadCwd: string[] = [];
+    const commitsAheadBase: (string | undefined)[] = [];
     const tcrCwd: string[] = [];
+    const tcrBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        commitsAhead: vi.fn(async (cwd: string) => {
+        commitsAhead: vi.fn(async (cwd: string, baseRef?: string) => {
           commitsAheadCwd.push(cwd);
+          commitsAheadBase.push(baseRef);
           return 0; // 0 commits → skip the score/attest reads that need a real .roll
         }),
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           tcrCwd.push(cwd);
+          tcrBase.push(baseRef);
           return 0;
         }),
       },
@@ -1523,20 +1537,29 @@ describe("executeCommand — command → executor mapping", () => {
     // The runner's git observation of the agent's delivery routes into the submodule.
     expect(commitsAheadCwd).toEqual([sub]);
     expect(tcrCwd).toEqual([sub]);
+    // E8: counted against the SUBMODULE repo's integration branch (execRepoCwd),
+    // NOT the hardwired origin/main a submodule cycle worktree does not have.
+    const subBase = resolveIntegrationBranch(join("/repo", "dukang-service-online"));
+    expect(commitsAheadBase).toEqual([subBase]);
+    expect(tcrBase).toEqual([subBase]);
   });
 
   it("E4: capture_facts observes the superproject worktree with no targetSubmodule (zero regression)", async () => {
     const commitsAheadCwd: string[] = [];
+    const commitsAheadBase: (string | undefined)[] = [];
     const tcrCwd: string[] = [];
+    const tcrBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        commitsAhead: vi.fn(async (cwd: string) => {
+        commitsAhead: vi.fn(async (cwd: string, baseRef?: string) => {
           commitsAheadCwd.push(cwd);
+          commitsAheadBase.push(baseRef);
           return 0;
         }),
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           tcrCwd.push(cwd);
+          tcrBase.push(baseRef);
           return 0;
         }),
       },
@@ -1544,6 +1567,10 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(commitsAheadCwd).toEqual(["/rt/wt"]);
     expect(tcrCwd).toEqual(["/rt/wt"]);
+    // E8: no submodule → resolveIntegrationBranch(repoCwd) → origin/main default.
+    const base = resolveIntegrationBranch("/repo");
+    expect(commitsAheadBase).toEqual([base]);
+    expect(tcrBase).toEqual([base]);
   });
 
   it("FIX-1205: loop-named pending-merge PR is skipped via body trailer and the next card is picked", async () => {
@@ -2497,6 +2524,133 @@ describe("executeCommand — command → executor mapping", () => {
       if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
       else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;
     }
+  });
+
+  it("E7-B: a main-leak kill records rig:suspended cause=main_checkout_leak, not agent_stall", async () => {
+    const repo = initCleanGitRepo("roll-main-leak-cause-");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt);
+    const base = fakePorts();
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => {
+        setTimeout(() => {
+          chmodSync(repo, 0o755);
+          writeFileSync(join(repo, "active-main-leak.ts"), "export const dirty = true;\n");
+        }, 10);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        return { stdout: "agent claimed success", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const previousPoll = process.env["ROLL_MAIN_LEAK_POLL_MS"];
+    process.env["ROLL_MAIN_LEAK_POLL_MS"] = "5";
+    try {
+      await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+      const suspended = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "rig:suspended");
+      // The death-cause label must name the real cause (a main-checkout leak),
+      // not the generic agent_stall that misdirected on-call to a timeout hunt.
+      expect(suspended).toMatchObject({ type: "rig:suspended", cause: "main_checkout_leak" });
+      expect((suspended as { detail?: string }).detail ?? "").toContain("active-main-leak.ts");
+      // The persisted rig lifecycle entry must carry the same accurate cause.
+      const rig = readRigLifecycleState(join(repo, ".roll", "loop"));
+      expect(rig.rigs["claude"]).toMatchObject({ status: "suspended", cause: "main_checkout_leak" });
+    } finally {
+      if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
+      else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;
+    }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // E7 — main-checkout leak watchdog must DIFF against a startup baseline, not
+  // fire on absolute dirt. On a submodule super-repo the main checkout is
+  // permanently dirty (gitlink pointer drift, colleague WIP, untracked wt-*/),
+  // so the pre-diff watchdog SIGKILL'd every builder on its first tick.
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("E7 startMainCheckoutLeakWatchdog — baseline-diff (no false SIGKILL on a dirty super-repo)", () => {
+    function watchdogPorts(repo: string): { ports: Ports; calls: Record<string, unknown[]> } {
+      const wt = join(repo, ".roll", "loop", "wt");
+      mkdirSync(wt, { recursive: true });
+      const base = fakePorts();
+      return fakePorts({
+        repoCwd: repo,
+        clock: () => 1000,
+        paths: {
+          ...base.ports.paths,
+          worktreePath: wt,
+          eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+          alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+        },
+      });
+    }
+
+    /** Poll until `predicate()` or the deadline; the watchdog ticks async. */
+    async function until(predicate: () => boolean, ms = 2000): Promise<void> {
+      const deadline = Date.now() + ms;
+      while (!predicate() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    it("A-regression: a PRE-existing dirty super-repo with NO new writes never fires or kills", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-preexisting-");
+      // Ancestral dirt present BEFORE the watchdog starts (the super-repo shape).
+      writeFileSync(join(repo, "ancestral-submodule-drift.ts"), "export const drift = 1;\n");
+      writeFileSync(join(repo, "untracked-wt-noise.ts"), "export const noise = 1;\n");
+      const { ports } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      // Give the baseline snapshot + several ticks time to run against static dirt.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(0);
+      expect(detected).toBe(false);
+      expect(files).toEqual([]);
+    });
+
+    it("A-protection: a NEW dirty path added AFTER baseline fires + kills with only the delta", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-newwrite-");
+      writeFileSync(join(repo, "ancestral-submodule-drift.ts"), "export const drift = 1;\n");
+      const { ports, calls } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      // Let the baseline settle (it captures the ancestral dirt), THEN leak a new path.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      writeFileSync(join(repo, "agent-leaked-new.ts"), "export const leaked = 1;\n");
+      await until(() => kills > 0);
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(1);
+      expect(detected).toBe(true);
+      // Only the DELTA — never the ancestral baseline entry.
+      expect(files).toEqual(["agent-leaked-new.ts"]);
+      const mainDirty = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "sandbox:main_dirty");
+      expect(mainDirty).toMatchObject({ phase: "active-spawn", files: ["agent-leaked-new.ts"] });
+    });
+
+    it("A-zero-regression: an empty baseline (ordinary repo) + a new write fires exactly like before", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-empty-");
+      const { ports } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      writeFileSync(join(repo, "leaked-on-clean-repo.ts"), "export const leaked = 1;\n");
+      await until(() => kills > 0);
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(1);
+      expect(detected).toBe(true);
+      expect(files).toEqual(["leaked-on-clean-repo.ts"]);
+    });
   });
 
   it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {

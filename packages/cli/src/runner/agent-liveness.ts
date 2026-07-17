@@ -43,7 +43,12 @@ import { join } from "node:path";
  *  we can attribute (treated as soft — never drives the all-blocked alert). */
 export type BlockCause = "quota" | "auth" | "network" | "unknown";
 
-export type RigSuspendCause = "quota" | "auth" | "network" | "agent_stall";
+// E7: `main_checkout_leak` is a distinct death cause from `agent_stall` — the
+// watchdog SIGKILL'd the agent for writing outside its sandbox (into the main
+// checkout), which folds into `timedOut` for teardown but must NOT be reported
+// as a timeout: mislabeling it agent_stall misdirected on-call to a no-progress
+// hunt when the real cause was a sandbox escape.
+export type RigSuspendCause = "quota" | "auth" | "network" | "agent_stall" | "main_checkout_leak";
 
 export interface RigLifecycleEntry {
   readonly status: "active" | "suspended";
@@ -212,7 +217,12 @@ export function readRigLifecycleState(runtimeDir: string): RigLifecycleState {
       const status = rec["status"];
       if (status !== "active" && status !== "suspended") continue;
       const cause = rec["cause"];
-      const validCause = cause === "quota" || cause === "auth" || cause === "network" || cause === "agent_stall";
+      const validCause =
+        cause === "quota" ||
+        cause === "auth" ||
+        cause === "network" ||
+        cause === "agent_stall" ||
+        cause === "main_checkout_leak";
       rigs[agent] = {
         status,
         ...(validCause ? { cause } : {}),

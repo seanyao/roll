@@ -69,8 +69,19 @@ export async function executeCaptureFactsCommand(
       // `.roll`. No targetSubmodule ⇒ both equal today's paths (zero regression).
       const execCwd = resolveExecutionCwd(ports, ctx);
       const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      // E8: observe commits/TCR against the EXECUTION repo's integration branch,
+      // NOT the hardwired origin/main. A submodule cycle worktree is a detached
+      // `worktree add --detach` off the submodule's integration branch and has NO
+      // origin/main — the old `git rev-list origin/main..HEAD` fataled → the catch
+      // collapsed to 0/undefined → the engine misjudged a real N-commit delivery
+      // as a zero-output failure. The baseline MUST come from execRepoCwd (the
+      // submodule's <super>/<sub> main checkout, on its working branch), never the
+      // detached cycle worktree (whose currentBranchSync is undefined → falls back
+      // to origin/main again). No targetSubmodule ⇒ resolveIntegrationBranch(repoCwd)
+      // → origin/main default, byte-identical to the prior hardcode.
+      const observeBase = resolveIntegrationBranch(execRepoCwd);
       await quarantineMainCheckoutForCycle(ports, ctx, "capture");
-      const commitsAhead = await ports.git.commitsAhead(execCwd);
+      const commitsAhead = await ports.git.commitsAhead(execCwd, observeBase);
       let mainAhead = 0;
       try {
         mainAhead = await ports.git.mainAhead(ports.repoCwd);
@@ -87,7 +98,7 @@ export async function executeCaptureFactsCommand(
         // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
         // on THIS path (the publish-path gates already treat 0 conservatively);
         // the timeout teardown's measure_worktree is where unknown stays unknown.
-        tcrCount = (await ports.git.tcrCount(execCwd)) ?? 0;
+        tcrCount = (await ports.git.tcrCount(execCwd, observeBase)) ?? 0;
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }

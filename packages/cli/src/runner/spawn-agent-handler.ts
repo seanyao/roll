@@ -15,6 +15,7 @@ import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-b
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
+import { resolveIntegrationBranch } from "@roll/infra";
 import type { ExecuteResult, Ports } from "./ports.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
@@ -45,6 +46,15 @@ export async function executeSpawnAgentCommand(
       // (execRepoCwd ⇒ ports.repoCwd), byte-identical to today.
       const execCwd = resolveExecutionCwd(ports, ctx);
       const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      // E8: the cycle observer and the timeout watchdog's commit probe count the
+      // builder's commits against the EXECUTION repo's integration branch (the
+      // submodule's own working branch), NOT the hardwired origin/main. A submodule
+      // cycle worktree is detached off the submodule's integration branch and has
+      // no origin/main, so `origin/main..HEAD` fataled → the observer saw zero
+      // commits (no cycle:tcr events) and the watchdog's commitCount read 0. The
+      // baseline is resolved from execRepoCwd, never the detached worktree. No
+      // targetSubmodule ⇒ resolveIntegrationBranch(repoCwd) → origin/main default.
+      const observeBase = resolveIntegrationBranch(execRepoCwd);
       await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
       const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
       if (credentialBlock !== null) {
@@ -105,7 +115,7 @@ export async function executeSpawnAgentCommand(
       // git commits on the worktree branch + the wall clock — and DERIVES standard
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
-      const observer = await startCycleObserver(ports, ctx.cycleId ?? "", execCwd);
+      const observer = await startCycleObserver(ports, ctx.cycleId ?? "", execCwd, observeBase);
       // FIX-907 — the HUNG-BUILDER KILLER. The agentSpawn below is a single
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
@@ -132,7 +142,7 @@ export async function executeSpawnAgentCommand(
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
-        commitCount: () => ports.git.commitsAhead(execCwd),
+        commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -324,6 +334,23 @@ export async function executeSpawnAgentCommand(
           cycleId: ctx.cycleId,
           agent: cmd.agent,
           cause: builderBlock,
+          detail,
+          nextProbeAt: suspended.nextProbeAt ?? eventTs(ports),
+          ts: eventTs(ports),
+        });
+      } else if (activeMainLeak.detected) {
+        // E7: the leak watchdog SIGKILL'd the agent for writing into the main
+        // checkout. That kill folds into `res.timedOut` for teardown (above),
+        // but it is NOT a timeout — report the accurate death cause so on-call
+        // is not misdirected to a no-progress hunt. detail lists the leaked
+        // (newDirty) paths for immediate diagnosis.
+        const detail = `agent wrote outside its sandbox into the main checkout: ${activeMainLeak.files.join(", ")}`.slice(0, 200);
+        const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, "main_checkout_leak", detail, eventTs(ports));
+        ports.events.appendEvent(ports.paths.eventsPath, {
+          type: "rig:suspended",
+          cycleId: ctx.cycleId,
+          agent: cmd.agent,
+          cause: "main_checkout_leak",
           detail,
           nextProbeAt: suspended.nextProbeAt ?? eventTs(ports),
           ts: eventTs(ports),

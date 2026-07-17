@@ -1395,6 +1395,21 @@ export function runAttestGate(
   scoreRepoCwd: string = worktreeCwd,
   builderSessionId = "",
   renderExitCode = 0,
+  // E9 (PR9): the cwd whose `.roll` holds the DESIGN TRUTH spec. The picker and
+  // designer resolve the story spec from the live main checkout
+  // (`storySpecPath(ports.repoCwd, id)`); the attest gate must read it from the
+  // SAME live tree. Historically the gate read the spec from `worktreeCwd`, the
+  // cycle worktree snapshot. For a project that TRACKS `.roll` (a committed
+  // backlog.md), `linkRollIntoWorktree` keeps the CHECKED-OUT `.roll` in the
+  // worktree instead of symlinking to the live tree, so an as-yet-UNCOMMITTED
+  // spec is absent from the snapshot and the gate mis-read the story as "not
+  // found". Defaults to `worktreeCwd` for byte-identical back-compat: callers
+  // (and every pre-E9 test) that don't pass it keep the prior behaviour, and a
+  // NON-tracked-`.roll` project has `worktreePath/.roll` symlinked to the live
+  // `.roll` — same bytes either way. This is decoupled from `scoreRepoCwd`
+  // (evidence/score truth) on purpose: spec = design truth (repoCwd), evidence =
+  // cycle-generated artifacts (worktree-first, repoCwd fallback), unchanged.
+  specRepoCwd: string = worktreeCwd,
 ): AttestGateResult {
   // FIX-343 (step ②): a missing PEER score must surface as a blocking
   // skipped/blocked verdict — the bottom blanket catch below must NOT soft-fail
@@ -1409,9 +1424,12 @@ export function runAttestGate(
     // below is judged the same as before — drift is a VISIBLE SIGNAL ONLY, never
     // a block, honouring the owner red line (a false positive must not stall).
     try {
-      const worktreeSpec = storySpecPath(worktreeCwd, storyId);
-      if (worktreeSpec !== null) {
-        const drift = contractDrift(scoreRepoCwd, storyId, readFileSync(worktreeSpec, "utf8"));
+      // E9: resolve the drift-comparison spec from the DESIGN-TRUTH tree
+      // (specRepoCwd), the same live `.roll` the picker/designer read — never the
+      // committed worktree snapshot (which lacks an uncommitted spec).
+      const liveSpec = storySpecPath(specRepoCwd, storyId);
+      if (liveSpec !== null) {
+        const drift = contractDrift(scoreRepoCwd, storyId, readFileSync(liveSpec, "utf8"));
         if (drift !== null) sinks.alert(`attest: ${drift} — cycle ${cycleId}`);
       }
     } catch {
@@ -1424,7 +1442,8 @@ export function runAttestGate(
     // arbitrary execution). The command never ran; the gate FAILS LOUD here (it
     // is never silently honest-skipped). Reported even ahead of the AC-block
     // exemption, since the security problem stands regardless of AC shape.
-    const rejectedCmds = rejectedDeliverableCmdsForStory(worktreeCwd, storyId);
+    // E9: deliverable_cmd is a SPEC-declared field → read it from design truth.
+    const rejectedCmds = rejectedDeliverableCmdsForStory(specRepoCwd, storyId);
     if (rejectedCmds.length > 0) {
       const reasons = [
         `deliverable_cmd 非白名单(仅限 roll 只读子命令): ${rejectedCmds.join(", ")} — refused (no arbitrary command execution; no state-changing roll subcommand)`,
@@ -1447,12 +1466,16 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
-    if (storyHasAcBlock(worktreeCwd, storyId) === false) {
+    // E9: the AC block lives in the SPEC (design truth) → read from specRepoCwd,
+    // so an uncommitted spec present only in the live checkout is seen. This is
+    // the primary fix for the "story not found" mis-read on tracked-`.roll` repos.
+    if (storyHasAcBlock(specRepoCwd, storyId) === false) {
       const reasons = ["story has no AC block; acceptance report not required"];
       sinks.event({ cycleId, verdict: "produced", reasons });
       return { verdict: "produced", mode, reasons, blocked: false };
     }
-    const diagnostics = violatesMustDeclareSurface(worktreeCwd, storyId) ? [MUST_DECLARE_FAIL_REASON] : [];
+    // E9: must-declare is a SPEC-frontmatter diagnostic → read from design truth.
+    const diagnostics = violatesMustDeclareSurface(specRepoCwd, storyId) ? [MUST_DECLARE_FAIL_REASON] : [];
     // FIX-295 (AC-FIX2/AC-FIX3): a red assertion is a regression, never an
     // "environmental" exception. A `fail` AC (a check that ran and went red) on
     // a cycle branch can only be the cycle's own regression — main is always

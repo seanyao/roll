@@ -2299,6 +2299,63 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("E4: spawn_agent runs the builder INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
+    // Real superproject + a nested repo standing in for the submodule + the
+    // submodule cycle worktree subdir (submoduleWorktreePath == <wt>/<sub>).
+    const repo = initCleanGitRepo("roll-e4-spawn-super-");
+    const sub = "dukang-service-online";
+    const wt = join(repo, ".roll", "loop", "wt");
+    const subWt = join(wt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, targetSubmodule: sub },
+    );
+
+    const opts = (ports.agentSpawn as unknown as { mock: { calls: [string, { cwd: string; writableRoots?: string[] }][] } }).mock.calls[0]?.[1];
+    // The builder's process cwd is the SUBMODULE cycle worktree — where its
+    // edits/build/test/commits land (E2's landing reads that same HEAD).
+    expect(opts?.cwd).toBe(subWt);
+  });
+
+  it("E4: spawn_agent runs the builder in the superproject worktree with no targetSubmodule (zero regression)", async () => {
+    const repo = initCleanGitRepo("roll-e4-spawn-nosub-");
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt, { recursive: true });
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    const opts = (ports.agentSpawn as unknown as { mock: { calls: [string, { cwd: string }][] } }).mock.calls[0]?.[1];
+    expect(opts?.cwd).toBe(wt);
+  });
+
   it("FIX-1037: checkMainDirty ignores .roll metadata dirt but reports product checkout dirt", async () => {
     const repo = initCleanGitRepo("roll-main-dirty-probe-");
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });

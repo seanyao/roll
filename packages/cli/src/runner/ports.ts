@@ -53,24 +53,33 @@ export interface GitPort {
   worktreeRemove(repoCwd: string, path: string, branch: string, bundleUnpushed?: boolean): Promise<{ code: number }>;
   /** `git push origin <branch>` (orphan push safety net). */
   push(repoCwd: string, branch: string): Promise<{ code: number }>;
-  /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */
-  commitsAhead(worktreeCwd: string): Promise<number>;
+  /** `git rev-list --count <baseRef>..HEAD` in the worktree → commits ahead.
+   *  E8: `baseRef` defaults to `origin/main` (byte-identical to the historical
+   *  hardcode). A submodule cycle passes the SUBMODULE's integration branch
+   *  ({@link resolveIntegrationBranch}(execRepoCwd)) — a submodule has no
+   *  `origin/main`, so the hardcode fataled → false zero. */
+  commitsAhead(worktreeCwd: string, baseRef?: string): Promise<number>;
   /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
   mainAhead(repoCwd: string): Promise<number>;
   /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),
    *  then reset main to origin/main. Returns the rescued SHA and exit code. */
   rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
-  /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
-   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree.
+  /** FIX-208: count `tcr:` commits ahead of the integration branch (v2口径:
+   *  `git log --oneline <baseRef>..HEAD | grep -c ' tcr:'`) in the worktree.
+   *  E8: `baseRef` defaults to `origin/main` (byte-identical to the historical
+   *  hardcode); a submodule cycle passes the submodule's integration branch.
    *  FIX-1244: `undefined` = could NOT determine (git error / missing ref) —
    *  callers must not collapse unknown into 0 (a false zero orphans real work). */
-  tcrCount(worktreeCwd: string): Promise<number | undefined>;
+  tcrCount(worktreeCwd: string, baseRef?: string): Promise<number | undefined>;
   /** US-LOOP-076: the runner's OWN observation of commits on the cycle branch —
-   *  `git log --format=%H%x09%ct%x09%s origin/main..HEAD` (oldest-first) in the
+   *  `git log --format=%H%x09%ct%x09%s <baseRef>..HEAD` (oldest-first) in the
    *  worktree. Feeds the agent-agnostic cycle observer so the build/TCR phase
    *  emits standard signals for EVERY agent, never by parsing agent stdout.
+   *  E8: `baseRef` defaults to `origin/main`; a submodule cycle passes the
+   *  submodule's integration branch (else the observer sees zero commits and
+   *  emits no cycle:tcr events).
    *  LENIENT: returns [] on any git error (observation must never fail a cycle). */
-  recentCommits(worktreeCwd: string): Promise<ObservedCommit[]>;
+  recentCommits(worktreeCwd: string, baseRef?: string): Promise<ObservedCommit[]>;
   /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
    *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
   fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;

@@ -100,6 +100,12 @@ export async function startCycleObserver(
   // commits; omitted ⇒ ports.paths.worktreePath (the superproject worktree),
   // byte-identical to before.
   observeCwd: string = ports.paths.worktreePath,
+  // E8: the integration-branch baseline the commits are counted ahead of. A
+  // submodule cycle passes the submodule's integration branch (its worktree has
+  // no origin/main, so the hardwired `origin/main..HEAD` fataled → the observer
+  // saw zero commits and emitted no cycle:tcr events); omitted ⇒ origin/main,
+  // byte-identical to before.
+  baseRef?: string,
 ): Promise<{ stop(): Promise<void> }> {
   if (cycleId === "") return { stop: async () => {} };
   const st: CycleObserverState = newCycleObserverState(cycleId);
@@ -114,7 +120,7 @@ export async function startCycleObserver(
   };
   const pollGapMs = Number((process.env["ROLL_OBSERVE_POLL_MS"] ?? "").trim()) || OBSERVE_POLL_MS;
   try {
-    baselineCommits(await ports.git.recentCommits(observeCwd), st);
+    baselineCommits(await ports.git.recentCommits(observeCwd, baseRef), st);
   } catch {
     /* baseline is best-effort; observation must not block the cycle */
   }
@@ -124,7 +130,7 @@ export async function startCycleObserver(
     if (running) return; // a slow git read must not stack ticks
     running = true;
     try {
-      const commits = await ports.git.recentCommits(observeCwd);
+      const commits = await ports.git.recentCommits(observeCwd, baseRef);
       const now = Date.now();
       emit(observeCommits(commits, st, now));
       emit(maybeBuildHeartbeat(st, now));

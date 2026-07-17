@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, CycleEvent, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
-import { submoduleWorktreePath } from "@roll/infra";
+import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
 import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
@@ -1463,11 +1463,13 @@ describe("executeCommand — command → executor mapping", () => {
 
   it("E4: measure_worktree counts TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
     const seen: string[] = [];
+    const seenBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           seen.push(cwd);
+          seenBase.push(baseRef);
           return 7;
         }),
       },
@@ -1480,15 +1482,20 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.ctxPatch?.tcrCount).toBe(7);
     // observed the agent's commits in the submodule cycle worktree, not /rt/wt.
     expect(seen).toEqual([submoduleWorktreePath("/rt/wt", "dukang-service-online")]);
+    // E8: counted against the SUBMODULE repo's integration branch (execRepoCwd),
+    // never the hardwired origin/main the detached cycle worktree lacks.
+    expect(seenBase).toEqual([resolveIntegrationBranch(join("/repo", "dukang-service-online"))]);
   });
 
   it("E4: measure_worktree stays on the superproject worktree with no targetSubmodule (zero regression)", async () => {
     const seen: string[] = [];
+    const seenBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           seen.push(cwd);
+          seenBase.push(baseRef);
           return 2;
         }),
       },
@@ -1496,20 +1503,26 @@ describe("executeCommand — command → executor mapping", () => {
     const r = await executeCommand({ kind: "measure_worktree" }, ports, CTX);
     expect(r.ctxPatch?.tcrCount).toBe(2);
     expect(seen).toEqual(["/rt/wt"]);
+    // E8: no submodule → resolveIntegrationBranch(repoCwd) → origin/main default.
+    expect(seenBase).toEqual([resolveIntegrationBranch("/repo")]);
   });
 
   it("E4: capture_facts observes commits/TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
     const commitsAheadCwd: string[] = [];
+    const commitsAheadBase: (string | undefined)[] = [];
     const tcrCwd: string[] = [];
+    const tcrBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        commitsAhead: vi.fn(async (cwd: string) => {
+        commitsAhead: vi.fn(async (cwd: string, baseRef?: string) => {
           commitsAheadCwd.push(cwd);
+          commitsAheadBase.push(baseRef);
           return 0; // 0 commits → skip the score/attest reads that need a real .roll
         }),
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           tcrCwd.push(cwd);
+          tcrBase.push(baseRef);
           return 0;
         }),
       },
@@ -1523,20 +1536,29 @@ describe("executeCommand — command → executor mapping", () => {
     // The runner's git observation of the agent's delivery routes into the submodule.
     expect(commitsAheadCwd).toEqual([sub]);
     expect(tcrCwd).toEqual([sub]);
+    // E8: counted against the SUBMODULE repo's integration branch (execRepoCwd),
+    // NOT the hardwired origin/main a submodule cycle worktree does not have.
+    const subBase = resolveIntegrationBranch(join("/repo", "dukang-service-online"));
+    expect(commitsAheadBase).toEqual([subBase]);
+    expect(tcrBase).toEqual([subBase]);
   });
 
   it("E4: capture_facts observes the superproject worktree with no targetSubmodule (zero regression)", async () => {
     const commitsAheadCwd: string[] = [];
+    const commitsAheadBase: (string | undefined)[] = [];
     const tcrCwd: string[] = [];
+    const tcrBase: (string | undefined)[] = [];
     const { ports } = fakePorts({
       git: {
         ...fakePorts().ports.git,
-        commitsAhead: vi.fn(async (cwd: string) => {
+        commitsAhead: vi.fn(async (cwd: string, baseRef?: string) => {
           commitsAheadCwd.push(cwd);
+          commitsAheadBase.push(baseRef);
           return 0;
         }),
-        tcrCount: vi.fn(async (cwd: string) => {
+        tcrCount: vi.fn(async (cwd: string, baseRef?: string) => {
           tcrCwd.push(cwd);
+          tcrBase.push(baseRef);
           return 0;
         }),
       },
@@ -1544,6 +1566,10 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand({ kind: "capture_facts" }, ports, CTX);
     expect(commitsAheadCwd).toEqual(["/rt/wt"]);
     expect(tcrCwd).toEqual(["/rt/wt"]);
+    // E8: no submodule → resolveIntegrationBranch(repoCwd) → origin/main default.
+    const base = resolveIntegrationBranch("/repo");
+    expect(commitsAheadBase).toEqual([base]);
+    expect(tcrBase).toEqual([base]);
   });
 
   it("FIX-1205: loop-named pending-merge PR is skipped via body trailer and the next card is picked", async () => {

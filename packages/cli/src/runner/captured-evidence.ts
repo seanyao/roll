@@ -37,6 +37,7 @@ interface Manifest {
   captures?: unknown;
   screenshots?: unknown;
   texts?: unknown;
+  capture_receipts?: unknown;
 }
 
 function readManifest(runDir: string): Manifest | null {
@@ -97,6 +98,38 @@ export function capturedEvidenceRefs(runDir: string): CapturedRef[] {
     }
   } catch {
     /* no screenshots dir */
+  }
+  return out;
+}
+
+/**
+ * US-EVID-030 — the harness-owned refs for accepted Capture Gateway v2 receipts
+ * the planner recorded into this run's CaptureSet (folded into `evidence.json`'s
+ * `capture_receipts`). Only genuinely-taken receipts with a screenshot path count;
+ * both physical AND rendered images are surfaced, each labelled by source. Pure
+ * read of the run dir — no writes, no network (the read-only binding invariant).
+ */
+export function capturedReceiptRefs(runDir: string): CapturedRef[] {
+  const m = readManifest(runDir);
+  if (m === null || !Array.isArray(m.capture_receipts)) return [];
+  const out: CapturedRef[] = [];
+  const seen = new Set<string>();
+  for (const raw of m.capture_receipts) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    if (row["state"] !== "taken") continue;
+    const ref = rowStr(row, "screenshotPath");
+    if (ref === undefined || seen.has(ref)) continue;
+    seen.add(ref);
+    const source = rowStr(row, "source");
+    const surface = rowStr(row, "surfaceId");
+    const label =
+      source === "roll-capture-window"
+        ? `Roll Capture · physical${surface !== undefined ? ` · ${surface}` : ""}`
+        : source === "playwright-rendered"
+          ? `Playwright · rendered${surface !== undefined ? ` · ${surface}` : ""}`
+          : (surface ?? "capture");
+    out.push({ kind: "screenshot", ref, label });
   }
   return out;
 }

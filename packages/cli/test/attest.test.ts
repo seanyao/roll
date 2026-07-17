@@ -22,14 +22,18 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { RollCaptureProvider, type EvidenceRun, type ShotRun } from "@roll/infra";
+import { createHash } from "node:crypto";
 import {
   ROLL_CAPTURE_HOST_APP_NAME,
   ROLL_CAPTURE_HOST_BUNDLE_ID,
   ROLL_CAPTURE_PROTOCOL_V1,
+  ROLL_CAPTURE_PROTOCOL_V2,
+  type CaptureIntentV2,
+  type CaptureReceiptV2,
   type RollCaptureRequestV1,
   type RollCaptureResponseV1,
 } from "@roll/spec";
-import { bi } from "@roll/core";
+import { bi, type CaptureLanePort } from "@roll/core";
 import {
   assessDocGapFromFiles,
   attestCommand,
@@ -2149,5 +2153,84 @@ describe("attestCommand — process trace inline (US-ATTEST-014)", () => {
     expect(code).toBe(0);
     const html = readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "FIX-300-report.html"), "utf8");
     expect(html).not.toContain("过程档案");
+  });
+});
+
+describe("attestCommand — US-EVID-030 CapturePlanner seam", () => {
+  const PNG_HEADER = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  function fakeLane(source: CaptureLanePort["source"], seed: number): CaptureLanePort {
+    return {
+      source,
+      async run(intent: CaptureIntentV2): Promise<CaptureReceiptV2> {
+        mkdirSync(dirname(intent.out), { recursive: true });
+        const bytes = Buffer.from([...PNG_HEADER, seed]);
+        writeFileSync(intent.out, bytes);
+        const captureClass = source === "roll-capture-window" ? "physical" : "rendered";
+        return {
+          protocol: ROLL_CAPTURE_PROTOCOL_V2,
+          requestId: intent.requestId,
+          storyId: intent.storyId,
+          runId: intent.runId,
+          surfaceId: intent.surface.id,
+          source,
+          captureClass,
+          state: "taken",
+          screenshotPath: intent.out,
+          sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+          ...(captureClass === "rendered" ? { finalUrl: intent.surface.id } : {}),
+          ...(captureClass === "physical" && intent.target !== undefined ? { target: intent.target } : {}),
+          responsePath: `${intent.out}.response.json`,
+          startedAt: "2026-07-18T10:00:01.000+08:00",
+          finishedAt: "2026-07-18T10:00:02.000+08:00",
+        };
+      },
+    };
+  }
+
+  it("plans + dispatches both lanes and folds BOTH receipts into the manifest, even with ROLL_NO_SCREENCAP=1", async () => {
+    const proj = project();
+    const captureRoot = join(proj, ".roll", "capture-gateway");
+    const surface = { declaredUrl: "http://localhost:3000/team", expectedAcIds: ["FIX-300:AC1"], windowApp: "Google Chrome", windowTitle: "团队管理" };
+    const prev = process.env["ROLL_NO_SCREENCAP"];
+    process.env["ROLL_NO_SCREENCAP"] = "1"; // must NOT gate the planner
+    try {
+      const code = await silenced(() =>
+        inDir(proj, () =>
+          attestCommand(["FIX-300"], {
+            now: () => T0,
+            run: quietRun,
+            ghProbe: () => Promise.resolve(false),
+            rollCapture: { root: captureRoot, captureSurfaces: [{ surface, lanes: [fakeLane("roll-capture-window", 1), fakeLane("playwright-rendered", 2)] }] },
+          }),
+        ),
+      );
+      expect(code).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env["ROLL_NO_SCREENCAP"];
+      else process.env["ROLL_NO_SCREENCAP"] = prev;
+    }
+
+    const runDir = join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03");
+    const manifest = JSON.parse(readFileSync(join(runDir, "evidence.json"), "utf8")) as { capture_receipts: Array<{ captureClass: string; surfaceId: string; state: string }> };
+    expect(manifest.capture_receipts).toHaveLength(2);
+    expect(manifest.capture_receipts.map((r) => r.captureClass).sort()).toEqual(["physical", "rendered"]);
+    expect(manifest.capture_receipts.every((r) => r.surfaceId === "http://localhost:3000/team" && r.state === "taken")).toBe(true);
+
+    const html = readFileSync(join(runDir, "FIX-300-report.html"), "utf8");
+    expect(html).toContain("Roll Capture · physical");
+    expect(html).toContain("Playwright · rendered");
+  });
+
+  it("is default-off: no captureSurfaces ⇒ no capture_receipts, exit 0", async () => {
+    const proj = project();
+    const code = await silenced(() =>
+      inDir(proj, () => attestCommand(["FIX-300"], { now: () => T0, run: quietRun, ghProbe: () => Promise.resolve(false) })),
+    );
+    expect(code).toBe(0);
+    const manifest = JSON.parse(
+      readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "evidence.json"), "utf8"),
+    ) as { capture_receipts?: unknown };
+    expect(manifest.capture_receipts ?? []).toEqual([]);
   });
 });

@@ -18,7 +18,8 @@
  * Claimed — that's the report's red line, not an exception path).
  */
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
+import type { CaptureIntentV2, CaptureReceiptV2 } from "@roll/spec";
 import { gh, ghAvailable } from "./github.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -66,6 +67,34 @@ export interface EvidenceManifest {
   texts: string[];
   captures: CaptureFact[];
   capture_command: CaptureCommandFact | null;
+  /**
+   * US-PHYSICAL-009 — accepted Capture Gateway v2 receipts. Additive: legacy
+   * readers ignore this key. Each fact preserves the receipt identity, source
+   * class, PNG digest, and surface/AC binding across the package boundary.
+   */
+  capture_receipts: CaptureReceiptFact[];
+}
+
+/**
+ * US-PHYSICAL-009 — a v2 receipt frozen into the run manifest. `screenshotPath`
+ * is stored relative to the run dir so the report attachment path resolves the
+ * same PNG the receipt digested.
+ */
+export interface CaptureReceiptFact {
+  protocol: string;
+  requestId: string;
+  storyId: string;
+  runId: string;
+  surfaceId: string;
+  source: string;
+  captureClass: string;
+  state: string;
+  screenshotPath?: string;
+  sha256?: string;
+  finalUrl?: string;
+  expectedAcIds: string[];
+  captureSetId?: string;
+  accepted: boolean;
 }
 
 export interface CaptureFact {
@@ -99,6 +128,42 @@ export interface CollectOptions {
   ghProbe?: () => Promise<boolean>;
   captures?: readonly CaptureFact[];
   captureCommand?: CaptureCommandFact | null;
+  /** US-PHYSICAL-009 — accepted v2 receipt facts to freeze into the manifest. */
+  captureReceipts?: readonly CaptureReceiptFact[];
+}
+
+/**
+ * US-PHYSICAL-009 — build a manifest fact from a v2 receipt + its intent,
+ * preserving source class, digest, and surface/AC binding. `runDir` (when
+ * given) rewrites an accepted screenshot to a run-relative attachment path.
+ */
+export function captureReceiptFact(
+  receipt: CaptureReceiptV2,
+  intent: CaptureIntentV2,
+  opts: { runDir?: string; accepted: boolean; captureSetId?: string },
+): CaptureReceiptFact {
+  const screenshotPath =
+    receipt.screenshotPath !== undefined
+      ? opts.runDir !== undefined && isAbsolute(receipt.screenshotPath)
+        ? relative(opts.runDir, receipt.screenshotPath)
+        : receipt.screenshotPath
+      : undefined;
+  return {
+    protocol: receipt.protocol,
+    requestId: receipt.requestId,
+    storyId: receipt.storyId,
+    runId: receipt.runId,
+    surfaceId: receipt.surfaceId,
+    source: receipt.source,
+    captureClass: receipt.captureClass,
+    state: receipt.state,
+    ...(screenshotPath !== undefined ? { screenshotPath } : {}),
+    ...(receipt.sha256 !== undefined ? { sha256: receipt.sha256 } : {}),
+    ...(receipt.finalUrl !== undefined ? { finalUrl: receipt.finalUrl } : {}),
+    expectedAcIds: [...intent.surface.expectedAcIds],
+    ...(opts.captureSetId !== undefined ? { captureSetId: opts.captureSetId } : {}),
+    accepted: opts.accepted,
+  };
 }
 
 export interface EvidenceFrame {
@@ -218,6 +283,7 @@ export async function collectEvidence(opts: CollectOptions): Promise<EvidenceMan
     texts: listDir("evidence", /\.(txt|log)$/i),
     captures: [...(opts.captures ?? [])],
     capture_command: opts.captureCommand ?? null,
+    capture_receipts: [...(opts.captureReceipts ?? [])],
   };
 }
 

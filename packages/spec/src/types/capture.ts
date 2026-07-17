@@ -382,6 +382,439 @@ function withTrailingSeparator(path: string): string {
   return path.endsWith(sep) ? path : `${path}${sep}`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// US-PHYSICAL-009 — Capture Gateway v2 contract
+//
+// v2 is ADDITIVE: `roll.capture.v1` above stays fully readable. v2 gives
+// physical and rendered captures ONE durable, source-labelled evidence
+// contract. Old hosts that do not advertise v2 are NEVER guessed to support it
+// — negotiation retains explicit v1/v2 unavailable reasons instead.
+// ════════════════════════════════════════════════════════════════════════════
+
+export const ROLL_CAPTURE_PROTOCOL_V2 = "roll.capture.v2";
+
+/** Where a capture's pixels came from. `legacy-native` is never a v2 accepted capture. */
+export type CaptureSource = "roll-capture-window" | "playwright-rendered" | "legacy-native";
+/** Physical (real screen pixels) vs rendered (controlled browser PNG). */
+export type CaptureClass = "physical" | "rendered";
+/** Full lifecycle; a receipt can carry every state except the pre-dispatch `requested`. */
+export type CaptureState = "requested" | "taken" | "skipped" | "failed" | "timeout";
+/** The terminal states a receipt may record. */
+export type CaptureReceiptState = Exclude<CaptureState, "requested">;
+
+export const CAPTURE_SOURCES: readonly CaptureSource[] = ["roll-capture-window", "playwright-rendered", "legacy-native"];
+export const CAPTURE_CLASSES: readonly CaptureClass[] = ["physical", "rendered"];
+export const CAPTURE_RECEIPT_STATES: readonly CaptureReceiptState[] = ["taken", "skipped", "failed", "timeout"];
+
+export type CaptureOperationV2 = "capture-window" | "register-rendered";
+
+export interface CaptureIntentV2 {
+  protocol: typeof ROLL_CAPTURE_PROTOCOL_V2;
+  requestId: string;
+  storyId: string;
+  runId: string;
+  surface: { id: string; declaredUrl: string; expectedAcIds: string[] };
+  operation: CaptureOperationV2;
+  source: CaptureSource;
+  target?: { appName: string; windowTitle?: string };
+  /** register-rendered only: the staged client PNG to adopt. */
+  inputPath?: string;
+  out: string;
+  timeoutMs: number;
+  createdAt: string;
+}
+
+export interface CaptureReceiptV2 {
+  protocol: typeof ROLL_CAPTURE_PROTOCOL_V2;
+  requestId: string;
+  storyId: string;
+  runId: string;
+  surfaceId: string;
+  source: CaptureSource;
+  captureClass: CaptureClass;
+  state: CaptureReceiptState;
+  screenshotPath?: string;
+  sha256?: string;
+  /** Renderer reports this; a physical capture can never claim URL verification. */
+  finalUrl?: string;
+  target?: { appName: string; windowTitle?: string };
+  reason?: string;
+  responsePath: string;
+  startedAt: string;
+  finishedAt: string;
+}
+
+export interface EvidenceHealth {
+  delivery: "passed" | "failed";
+  visual: "verified" | "degraded-infrastructure" | "invalid-target" | "absent-contract";
+  acceptedReceiptIds: string[];
+  attempts: string[];
+}
+
+// ── Surface canonicalization ─────────────────────────────────────────────────
+
+/**
+ * `surface.id` is the canonical declared URL: `origin + pathname + search + hash`.
+ * Different ACs may share it. Returns null for a non-URL string.
+ */
+export function canonicalizeSurfaceUrl(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    return `${u.origin}${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+// ── Protocol negotiation (AC1) ───────────────────────────────────────────────
+
+/** What a Roll Capture host advertises about the protocols it can serve. */
+export interface CaptureProtocolAdvertisement {
+  /** Protocols the host declares it can serve. Absent = legacy host. */
+  protocols?: readonly string[];
+  /** Optional host build version, for diagnostics. */
+  hostVersion?: string;
+}
+
+export type CaptureProtocolAvailability = { available: true } | { available: false; reason: string };
+
+export interface CaptureProtocolNegotiation {
+  v1: CaptureProtocolAvailability;
+  v2: CaptureProtocolAvailability;
+  /** Highest mutually-supported protocol, or null when none can be negotiated. */
+  selected: typeof ROLL_CAPTURE_PROTOCOL_V2 | typeof ROLL_CAPTURE_PROTOCOL_V1 | null;
+}
+
+/**
+ * Negotiate capture protocol readiness from a host advertisement.
+ *
+ * Security invariant (AC1): v2 is ONLY available when the host EXPLICITLY
+ * advertises `roll.capture.v2`. An absent advertisement (legacy / unknown host)
+ * yields an explicit v2-unavailable reason — v2 is never guessed. v1 stays
+ * readable but is also only negotiated on an explicit advertisement, so an old
+ * host that speaks nothing gets clear reasons for both.
+ */
+export function negotiateCaptureProtocol(
+  advertisement: CaptureProtocolAdvertisement | null | undefined,
+): CaptureProtocolNegotiation {
+  const protocols = advertisement?.protocols;
+  if (protocols === undefined || protocols === null) {
+    return {
+      v1: {
+        available: false,
+        reason: "host advertised no capture protocols (legacy host); v1 negotiation requires an explicit advertisement",
+      },
+      v2: {
+        available: false,
+        reason: "host advertised no capture protocols (legacy host); roll.capture.v2 is never assumed for an unadvertised host",
+      },
+      selected: null,
+    };
+  }
+  const v1: CaptureProtocolAvailability = protocols.includes(ROLL_CAPTURE_PROTOCOL_V1)
+    ? { available: true }
+    : { available: false, reason: `host does not advertise ${ROLL_CAPTURE_PROTOCOL_V1}` };
+  const v2: CaptureProtocolAvailability = protocols.includes(ROLL_CAPTURE_PROTOCOL_V2)
+    ? { available: true }
+    : { available: false, reason: `host does not advertise ${ROLL_CAPTURE_PROTOCOL_V2}` };
+  const selected = v2.available ? ROLL_CAPTURE_PROTOCOL_V2 : v1.available ? ROLL_CAPTURE_PROTOCOL_V1 : null;
+  return { v1, v2, selected };
+}
+
+export function parseCaptureProtocolAdvertisement(value: unknown): CaptureProtocolAdvertisement | null {
+  if (!isRecord(value)) return null;
+  const rawProtocols = value["protocols"];
+  const protocols = Array.isArray(rawProtocols) ? rawProtocols.filter((p): p is string => typeof p === "string") : undefined;
+  return {
+    ...(protocols !== undefined ? { protocols } : {}),
+    ...(typeof value["hostVersion"] === "string" ? { hostVersion: value["hostVersion"] } : {}),
+  };
+}
+
+// ── v2 schemas ───────────────────────────────────────────────────────────────
+
+const captureSourceSchema: JsonSchema = { type: "string", enum: [...CAPTURE_SOURCES] };
+const captureClassSchema: JsonSchema = { type: "string", enum: [...CAPTURE_CLASSES] };
+const captureReceiptStateSchema: JsonSchema = { type: "string", enum: [...CAPTURE_RECEIPT_STATES] };
+const captureWindowTargetSchema: JsonSchema = objectSchema(
+  { appName: nonEmptyStringSchema, windowTitle: stringSchema },
+  ["appName"],
+);
+
+export const captureIntentV2Schema: JsonSchema = objectSchema(
+  {
+    protocol: { const: ROLL_CAPTURE_PROTOCOL_V2 },
+    requestId: nonEmptyStringSchema,
+    storyId: nonEmptyStringSchema,
+    runId: nonEmptyStringSchema,
+    surface: objectSchema(
+      { id: nonEmptyStringSchema, declaredUrl: nonEmptyStringSchema, expectedAcIds: { type: "array", items: nonEmptyStringSchema } },
+      ["id", "declaredUrl", "expectedAcIds"],
+    ),
+    operation: { type: "string", enum: ["capture-window", "register-rendered"] },
+    source: captureSourceSchema,
+    target: captureWindowTargetSchema,
+    inputPath: stringSchema,
+    out: nonEmptyStringSchema,
+    timeoutMs: integerSchema,
+    createdAt: nonEmptyStringSchema,
+  },
+  ["protocol", "requestId", "storyId", "runId", "surface", "operation", "source", "out", "timeoutMs", "createdAt"],
+);
+
+export const captureReceiptV2Schema: JsonSchema = objectSchema(
+  {
+    protocol: { const: ROLL_CAPTURE_PROTOCOL_V2 },
+    requestId: nonEmptyStringSchema,
+    storyId: nonEmptyStringSchema,
+    runId: nonEmptyStringSchema,
+    surfaceId: nonEmptyStringSchema,
+    source: captureSourceSchema,
+    captureClass: captureClassSchema,
+    state: captureReceiptStateSchema,
+    screenshotPath: stringSchema,
+    sha256: stringSchema,
+    finalUrl: stringSchema,
+    target: captureWindowTargetSchema,
+    reason: stringSchema,
+    responsePath: nonEmptyStringSchema,
+    startedAt: nonEmptyStringSchema,
+    finishedAt: nonEmptyStringSchema,
+  },
+  ["protocol", "requestId", "storyId", "runId", "surfaceId", "source", "captureClass", "state", "responsePath", "startedAt", "finishedAt"],
+);
+
+// ── v2 parsers ───────────────────────────────────────────────────────────────
+
+function parseWindowTarget(value: unknown): { appName: string; windowTitle?: string } | null {
+  if (!isRecord(value) || typeof value["appName"] !== "string") return null;
+  return { appName: value["appName"], ...(typeof value["windowTitle"] === "string" ? { windowTitle: value["windowTitle"] } : {}) };
+}
+
+export function parseCaptureIntentV2(value: unknown): CaptureIntentV2 | null {
+  if (!isRecord(value)) return null;
+  if (value["protocol"] !== ROLL_CAPTURE_PROTOCOL_V2) return null;
+  const surface = value["surface"];
+  if (!isRecord(surface)) return null;
+  if (typeof surface["id"] !== "string" || typeof surface["declaredUrl"] !== "string") return null;
+  const rawAc = surface["expectedAcIds"];
+  if (!Array.isArray(rawAc) || !rawAc.every((x) => typeof x === "string")) return null;
+  if (value["operation"] !== "capture-window" && value["operation"] !== "register-rendered") return null;
+  if (!isCaptureSource(value["source"])) return null;
+  if (
+    typeof value["requestId"] !== "string" ||
+    typeof value["storyId"] !== "string" ||
+    typeof value["runId"] !== "string" ||
+    typeof value["out"] !== "string" ||
+    typeof value["timeoutMs"] !== "number" ||
+    typeof value["createdAt"] !== "string"
+  ) {
+    return null;
+  }
+  const target = value["target"] !== undefined ? parseWindowTarget(value["target"]) : undefined;
+  if (value["target"] !== undefined && target === null) return null;
+  return {
+    protocol: ROLL_CAPTURE_PROTOCOL_V2,
+    requestId: value["requestId"],
+    storyId: value["storyId"],
+    runId: value["runId"],
+    surface: { id: surface["id"], declaredUrl: surface["declaredUrl"], expectedAcIds: [...(rawAc as string[])] },
+    operation: value["operation"],
+    source: value["source"],
+    ...(target != null ? { target } : {}),
+    ...(typeof value["inputPath"] === "string" ? { inputPath: value["inputPath"] } : {}),
+    out: value["out"],
+    timeoutMs: value["timeoutMs"],
+    createdAt: value["createdAt"],
+  };
+}
+
+export function parseCaptureReceiptV2(value: unknown): CaptureReceiptV2 | null {
+  if (!isRecord(value)) return null;
+  if (value["protocol"] !== ROLL_CAPTURE_PROTOCOL_V2) return null;
+  if (!isCaptureSource(value["source"])) return null;
+  if (!isCaptureClass(value["captureClass"])) return null;
+  if (!isCaptureReceiptState(value["state"])) return null;
+  if (
+    typeof value["requestId"] !== "string" ||
+    typeof value["storyId"] !== "string" ||
+    typeof value["runId"] !== "string" ||
+    typeof value["surfaceId"] !== "string" ||
+    typeof value["responsePath"] !== "string" ||
+    typeof value["startedAt"] !== "string" ||
+    typeof value["finishedAt"] !== "string"
+  ) {
+    return null;
+  }
+  const target = value["target"] !== undefined ? parseWindowTarget(value["target"]) : undefined;
+  if (value["target"] !== undefined && target === null) return null;
+  return {
+    protocol: ROLL_CAPTURE_PROTOCOL_V2,
+    requestId: value["requestId"],
+    storyId: value["storyId"],
+    runId: value["runId"],
+    surfaceId: value["surfaceId"],
+    source: value["source"],
+    captureClass: value["captureClass"],
+    state: value["state"],
+    ...(typeof value["screenshotPath"] === "string" ? { screenshotPath: value["screenshotPath"] } : {}),
+    ...(typeof value["sha256"] === "string" ? { sha256: value["sha256"] } : {}),
+    ...(typeof value["finalUrl"] === "string" ? { finalUrl: value["finalUrl"] } : {}),
+    ...(target != null ? { target } : {}),
+    ...(typeof value["reason"] === "string" ? { reason: value["reason"] } : {}),
+    responsePath: value["responsePath"],
+    startedAt: value["startedAt"],
+    finishedAt: value["finishedAt"],
+  };
+}
+
+// ── v2 validators (AC4) ──────────────────────────────────────────────────────
+
+const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+
+export type CaptureIntentV2ValidationOptions = {
+  projectRoot: string;
+  expectedRequestId?: string;
+};
+
+export function validateCaptureIntentV2(
+  intent: CaptureIntentV2,
+  options: CaptureIntentV2ValidationOptions,
+): RollCaptureValidationResult {
+  const errors: string[] = [];
+  if (intent.protocol !== ROLL_CAPTURE_PROTOCOL_V2) {
+    errors.push(`unsupported protocol "${intent.protocol}", expected ${ROLL_CAPTURE_PROTOCOL_V2}`);
+  }
+  errors.push(...validateRequestId(intent.requestId, options.expectedRequestId));
+  if (intent.storyId.trim() === "") errors.push("invalid intent: empty storyId");
+  if (intent.runId.trim() === "") errors.push("invalid intent: empty runId");
+
+  const canonical = canonicalizeSurfaceUrl(intent.surface.declaredUrl);
+  if (canonical === null) {
+    errors.push(`invalid surface: declaredUrl "${intent.surface.declaredUrl}" is not a valid URL`);
+  } else if (intent.surface.id !== canonical) {
+    errors.push(`invalid surface: id "${intent.surface.id}" is not the canonical declared URL "${canonical}"`);
+  }
+  if (intent.surface.expectedAcIds.length === 0) errors.push("invalid surface: expectedAcIds must be non-empty");
+
+  if (intent.operation === "capture-window") {
+    if (intent.source !== "roll-capture-window") {
+      errors.push(`invalid intent: capture-window requires source "roll-capture-window", got "${intent.source}"`);
+    }
+    if (intent.target === undefined || intent.target.appName.trim() === "") {
+      errors.push("invalid intent: capture-window requires a target with a non-empty appName");
+    }
+  } else {
+    if (intent.source !== "playwright-rendered") {
+      errors.push(`invalid intent: register-rendered requires source "playwright-rendered", got "${intent.source}"`);
+    }
+    if (intent.inputPath === undefined || intent.inputPath.trim() === "") {
+      errors.push("invalid intent: register-rendered requires an inputPath");
+    } else {
+      errors.push(...validateOutputPath(intent.inputPath, options.projectRoot).map((e) => e.replace("output path", "inputPath")));
+    }
+  }
+
+  errors.push(...validateOutputPath(intent.out, options.projectRoot));
+  if (!Number.isInteger(intent.timeoutMs) || intent.timeoutMs <= 0 || intent.timeoutMs > 600_000) {
+    errors.push(`invalid timeout: ${intent.timeoutMs}ms outside 1...600000`);
+  }
+  return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
+}
+
+/**
+ * Validate a v2 receipt against its intent. Rejects malformed / mismatched /
+ * missing-artifact receipts. A `taken` receipt must satisfy its class rules:
+ * physical never claims a finalUrl and must match the requested target; rendered
+ * must report a finalUrl equal to the canonical surface. `legacy-native` is
+ * never a v2 accepted capture.
+ */
+export function validateCaptureReceiptV2(receipt: CaptureReceiptV2, intent?: CaptureIntentV2): RollCaptureValidationResult {
+  const errors: string[] = [];
+  if (receipt.protocol !== ROLL_CAPTURE_PROTOCOL_V2) {
+    errors.push(`unsupported protocol "${receipt.protocol}", expected ${ROLL_CAPTURE_PROTOCOL_V2}`);
+  }
+  if (receipt.responsePath.trim() === "") errors.push("invalid receipt: empty responsePath");
+
+  if (intent !== undefined) {
+    if (receipt.requestId !== intent.requestId) errors.push(`receipt requestId "${receipt.requestId}" does not match intent "${intent.requestId}"`);
+    if (receipt.storyId !== intent.storyId) errors.push(`receipt storyId "${receipt.storyId}" does not match intent "${intent.storyId}"`);
+    if (receipt.runId !== intent.runId) errors.push(`receipt runId "${receipt.runId}" does not match intent "${intent.runId}"`);
+    if (receipt.surfaceId !== intent.surface.id) errors.push(`receipt surfaceId "${receipt.surfaceId}" does not match intent surface "${intent.surface.id}"`);
+    if (receipt.source !== intent.source) errors.push(`receipt source "${receipt.source}" does not match intent source "${intent.source}"`);
+  }
+
+  // Source → class binding.
+  if (receipt.source === "legacy-native") {
+    errors.push("legacy-native captures are never a v2 accepted capture; they stay legacy-unverified");
+  } else if (receipt.source === "roll-capture-window" && receipt.captureClass !== "physical") {
+    errors.push(`source "roll-capture-window" must be captureClass "physical", got "${receipt.captureClass}"`);
+  } else if (receipt.source === "playwright-rendered" && receipt.captureClass !== "rendered") {
+    errors.push(`source "playwright-rendered" must be captureClass "rendered", got "${receipt.captureClass}"`);
+  }
+
+  if (receipt.state === "taken") {
+    if (receipt.screenshotPath === undefined || receipt.screenshotPath.trim() === "") {
+      errors.push("taken receipt requires a screenshotPath (missing artifact)");
+    }
+    if (receipt.sha256 === undefined || receipt.sha256.trim() === "") {
+      errors.push("taken receipt requires a sha256 digest");
+    } else if (!SHA256_PATTERN.test(receipt.sha256)) {
+      errors.push(`taken receipt has a malformed sha256 digest "${receipt.sha256}"`);
+    }
+    if (receipt.captureClass === "physical") {
+      if (receipt.finalUrl !== undefined) errors.push("physical receipt must not claim a finalUrl");
+      const target = intent?.target;
+      if (target !== undefined) {
+        if (receipt.target === undefined) {
+          errors.push("physical receipt must echo the requested target");
+        } else {
+          if (receipt.target.appName !== target.appName) errors.push(`physical receipt appName "${receipt.target.appName}" does not match requested "${target.appName}"`);
+          if ((target.windowTitle ?? undefined) !== (receipt.target.windowTitle ?? undefined)) {
+            errors.push(`physical receipt windowTitle "${receipt.target.windowTitle ?? ""}" does not match requested "${target.windowTitle ?? ""}"`);
+          }
+        }
+      }
+    } else if (receipt.captureClass === "rendered") {
+      if (receipt.finalUrl === undefined || receipt.finalUrl.trim() === "") {
+        errors.push("rendered receipt requires a finalUrl equal to the canonical surface");
+      } else {
+        const canonicalFinal = canonicalizeSurfaceUrl(receipt.finalUrl);
+        if (canonicalFinal === null) {
+          errors.push(`rendered receipt finalUrl "${receipt.finalUrl}" is not a valid URL`);
+        } else if (canonicalFinal !== receipt.surfaceId) {
+          errors.push(`rendered receipt finalUrl "${canonicalFinal}" does not equal the surface "${receipt.surfaceId}" (invalid target / redirect)`);
+        }
+      }
+    }
+  } else {
+    // Non-taken terminal states record why, and carry no accepted artifact.
+    if (receipt.reason === undefined || receipt.reason.trim() === "") errors.push(`${receipt.state} receipt requires a reason`);
+    if (receipt.screenshotPath !== undefined) errors.push(`${receipt.state} receipt must not claim a screenshotPath`);
+    if (receipt.sha256 !== undefined) errors.push(`${receipt.state} receipt must not claim a sha256 digest`);
+    if (receipt.finalUrl !== undefined) errors.push(`${receipt.state} receipt must not claim a finalUrl`);
+  }
+
+  return errors.length === 0 ? { ok: true, errors: [] } : { ok: false, errors };
+}
+
+/** True iff the receipt is a valid, accepted (taken) v2 capture for its intent. */
+export function isAcceptedCaptureReceiptV2(receipt: CaptureReceiptV2, intent?: CaptureIntentV2): boolean {
+  return receipt.state === "taken" && validateCaptureReceiptV2(receipt, intent).ok;
+}
+
+function isCaptureSource(value: unknown): value is CaptureSource {
+  return value === "roll-capture-window" || value === "playwright-rendered" || value === "legacy-native";
+}
+
+function isCaptureClass(value: unknown): value is CaptureClass {
+  return value === "physical" || value === "rendered";
+}
+
+function isCaptureReceiptState(value: unknown): value is CaptureReceiptState {
+  return value === "taken" || value === "skipped" || value === "failed" || value === "timeout";
+}
+
 function toolResultSchema(output: JsonSchema): JsonSchema {
   const meta = objectSchema(
     {

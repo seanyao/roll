@@ -29,8 +29,14 @@ export const EVIDENCE_CLASSES: readonly EvidenceClass[] = [
 
 // ── Protocol identifiers ────────────────────────────────────────────────────
 
-/** The only protocol whose evidence can satisfy a visual AC. */
+/** The v1 protocol whose evidence can satisfy a visual AC. */
 export const PHYSICAL_CAPTURE_PROTOCOL = "roll.capture.v1";
+
+/** US-PHYSICAL-009 — the additive v2 gateway protocol. */
+export const PHYSICAL_CAPTURE_PROTOCOL_V2 = "roll.capture.v2";
+
+/** Both physical-capture protocols eligible for a visual AC (v1 + v2). */
+export const PHYSICAL_CAPTURE_PROTOCOLS: readonly string[] = ["roll.capture.v1", "roll.capture.v2"];
 
 /** Provider identifiers that map to each evidence class. */
 export const PHYSICAL_CAPTURE_PROVIDERS: readonly string[] = ["roll-capture"];

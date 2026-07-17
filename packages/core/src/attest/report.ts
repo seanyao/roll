@@ -21,7 +21,7 @@
  * Deletion-not-placeholder: the screenshot <figure> renders ONLY when a
  * screenshot evidence ref exists (no placeholder image, no warning text — D6).
  */
-import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type OutwardVerificationStatus } from "@roll/spec";
+import { type CaptureReceiptV2, type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type OutwardVerificationStatus } from "@roll/spec";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.js";
 import { ANSI_CSS } from "./ansi-html.js";
 import { buildExecutionCastProjection, type ExecutionCastRow } from "./execution-cast.js";
@@ -278,6 +278,21 @@ export function enforceRedLine(item: AcReportItem): { item: AcReportItem; downgr
     return { item: { ...item, status: "claimed" }, downgraded: true };
   }
   return { item, downgraded: false };
+}
+
+/**
+ * US-PHYSICAL-009 — turn an accepted v2 physical receipt into a screenshot
+ * EvidenceRef so its PNG reaches the report attachment path (`screenshots/*`).
+ * Returns null for a non-taken receipt with no artifact (deletion-not-placeholder).
+ * `screenshotPathHref` overrides the rendered href (e.g. a run-relative manifest
+ * path); otherwise the receipt's own screenshotPath basename is used.
+ */
+export function captureReceiptEvidenceRef(receipt: CaptureReceiptV2, screenshotPathHref?: string): EvidenceRef | null {
+  if (receipt.state !== "taken") return null;
+  if (receipt.screenshotPath === undefined || receipt.screenshotPath.length === 0) return null;
+  const href = screenshotPathHref ?? `screenshots/${receipt.screenshotPath.split(/[\\/]/u).pop() ?? receipt.screenshotPath}`;
+  const label = `${receipt.captureClass === "physical" ? "Roll Capture · physical" : "Playwright · rendered"} · ${receipt.surfaceId}`;
+  return { kind: "screenshot", label, href };
 }
 
 function evidenceCard(ref: EvidenceRef): string {

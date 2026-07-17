@@ -53,6 +53,12 @@ export interface PickOptions {
    */
   hasMergedDelivery?: (id: string) => boolean;
   /**
+   * True only for the one card explicitly re-armed by supervised recovery.
+   * A recovery candidate may retry a merged delivery that failed its Done guard;
+   * all other merged cards remain permanently ineligible.
+   */
+  isRecoveryCandidate?: (id: string) => boolean;
+  /**
    * FIX-363 (loop resilience): true iff this story is on the runtime skip-list —
    * it failed K times (a poison pill that, before this, halted the WHOLE loop
    * after 3 consecutive fails via the cron auto-PAUSE). The loop now SKIPS it and
@@ -263,13 +269,14 @@ export function isEligible(
   const hasPendingPublish = opts.hasPendingPublish ?? (() => false);
   const isClaimedByOther = opts.isClaimedByOther ?? (() => false);
   const deliveryLeaseBlock = opts.deliveryLeaseBlock ?? (() => undefined);
+  const isRecoveryCandidate = opts.isRecoveryCandidate?.(item.id) === true;
 
   // Recognize the Todo marker via the single-source classifier (FIX-300),
   // not an exact-string equality. An annotated status — the Todo marker
   // followed by parenthetical text (e.g. `📋 Todo (rebased)`) — is still a
   // Todo and must stay pickable; an exact `=== "📋 Todo"` check silently
   // dropped such rows and idled the loop (FIX-301).
-  if (classifyStatus(item.status) !== "todo") return false;
+  if (classifyStatus(item.status) !== "todo" && !(isRecoveryCandidate && classifyStatus(item.status) === "in_progress")) return false;
   for (const dep of parseDependsOn(item.desc)) {
     if (!isDone(dep)) return false;
   }
@@ -277,7 +284,8 @@ export function isEligible(
   // FIX-323: a card whose deliverable already MERGED is Done — never re-pick,
   // even if its backlog status was (wrongly) reset to 📋 Todo. The picker is
   // blind to delivery truth, so this guard is injected from runs.jsonl.
-  if (hasMergedDelivery(item.id)) return false;
+  const mergedDelivery = hasMergedDelivery(item.id);
+  if (mergedDelivery && !isRecoveryCandidate) return false;
   // FIX-363: a poison-pill card (failed K times) is on the runtime skip-list —
   // skip it so the loop keeps delivering OTHER cards instead of halting. The
   // card stays Todo in the backlog (truth unchanged); an owner clears the
@@ -303,7 +311,7 @@ export function isEligible(
   // lease (in_flight / awaiting_merge / ci_red / delivered) is skipped; the
   // default kills same-card fan-out. `--race` is the explicit opt-in and is
   // resolved by the caller before wiring this predicate.
-  if (deliveryLeaseBlock(item.id) !== undefined) return false;
+  if (deliveryLeaseBlock(item.id) !== undefined && !(isRecoveryCandidate && mergedDelivery)) return false;
   // FIX-1268: while the console is locked, physical-surface cards cannot be
   // dispatched because the attest gate cannot capture real evidence.
   if (opts.isScreenLocked === true && opts.requiresPhysicalSurface?.(item.id) === true) return false;

@@ -11,9 +11,10 @@ import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
-import { persistWorktreeAlerts, agentWritableRoots } from "./worktree-bootstrap.js";
+import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
+import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
@@ -36,6 +37,14 @@ export async function executeSpawnAgentCommand(
         ctx.builderSessionId !== undefined && ctx.builderSessionId !== ""
           ? ctx.builderSessionId
           : `${ctx.cycleId ?? "cycle"}:build:${cmd.agent}:${ports.clock()}`;
+      // E4: a submodule cycle runs the BUILDER (and everything that observes it —
+      // the cycle observer, the timeout watchdog's commit probe, the git env, the
+      // post-spawn alert scoop, the session-store usage recovery) INSIDE the
+      // submodule cycle worktree, where its edits/build/test/commits land and E2's
+      // landing reads the HEAD. No targetSubmodule ⇒ ports.paths.worktreePath
+      // (execRepoCwd ⇒ ports.repoCwd), byte-identical to today.
+      const execCwd = resolveExecutionCwd(ports, ctx);
+      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
       await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
       const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
       if (credentialBlock !== null) {
@@ -96,7 +105,7 @@ export async function executeSpawnAgentCommand(
       // git commits on the worktree branch + the wall clock — and DERIVES standard
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
-      const observer = await startCycleObserver(ports, ctx.cycleId ?? "");
+      const observer = await startCycleObserver(ports, ctx.cycleId ?? "", execCwd);
       // FIX-907 — the HUNG-BUILDER KILLER. The agentSpawn below is a single
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
@@ -123,7 +132,7 @@ export async function executeSpawnAgentCommand(
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
-        commitCount: () => ports.git.commitsAhead(ports.paths.worktreePath),
+        commitCount: () => ports.git.commitsAhead(execCwd),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -133,7 +142,9 @@ export async function executeSpawnAgentCommand(
       // until flipped on, in which case `ports.skillBody` is sent unchanged.
       const skillBodyForSpawn = maybeInjectProjectMap(
         ports.skillBody,
-        ports.paths.worktreePath,
+        // E4: map the tree the builder actually works in (the submodule for a
+        // submodule cycle), not the superproject shell.
+        execCwd,
         readProjectMapEnabled(ports.repoCwd),
         ctx.storyId,
       );
@@ -170,15 +181,18 @@ export async function executeSpawnAgentCommand(
         mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
         res = await ports.agentSpawn(cmd.agent, {
           purpose: "builder",
-          cwd: ports.paths.worktreePath,
+          // E4: the builder runs in the submodule cycle worktree for a submodule
+          // story (execCwd); its git env + writable roots target the submodule's
+          // own repo/object store so its commits actually land there.
+          cwd: execCwd,
           skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-          writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+          writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
-            ...worktreeGitEnv(ports.paths.worktreePath, ports.repoCwd),
+            ...worktreeGitEnv(execCwd, ports.repoCwd),
             ...agentSpawnEnvironment(cmd.agent),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the
@@ -227,7 +241,9 @@ export async function executeSpawnAgentCommand(
       // breach moment (auditable reason: wall/no-progress).
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
-      persistWorktreeAlerts(ports.paths.worktreePath, ports.paths.alertsPath, ports.events);
+      // E4: scoop ALERT*.md the builder dropped in its OWN cwd (the submodule
+      // cycle worktree for a submodule story).
+      persistWorktreeAlerts(execCwd, ports.paths.alertsPath, ports.events);
       if (activeMainLeak.detected) {
         await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
         res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
@@ -368,8 +384,10 @@ export async function executeSpawnAgentCommand(
         let usage = usageSpec?.stdoutExtractor === "claude-stream" ? extractUsage(agentName, lines) : null;
         if (usage === null && usageSpec?.sessionRecovery === "pi") {
           const rootOverride = (process.env["ROLL_PI_SESSIONS_ROOT"] ?? "").trim();
+          // E4: pi/kimi key their session store by the agent's CWD, so recover
+          // from execCwd (where the builder actually ran) for a submodule cycle.
           usage = recoverPiUsage(
-            ports.paths.worktreePath,
+            execCwd,
             ctx.startSec,
             ...(rootOverride !== "" ? [rootOverride] : []),
           );
@@ -377,7 +395,7 @@ export async function executeSpawnAgentCommand(
         if (usage === null && usageSpec?.sessionRecovery === "kimi") {
           const rootOverride = (process.env["ROLL_KIMI_SESSIONS_DIR"] ?? "").trim();
           usage = recoverKimiUsage(
-            ports.paths.worktreePath,
+            execCwd,
             ctx.startSec,
             ...(rootOverride !== "" ? [rootOverride] : []),
           );

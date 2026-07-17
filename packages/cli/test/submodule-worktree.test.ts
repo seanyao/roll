@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import type { Ports } from "../src/runner/ports.js";
 import {
   createSubmoduleWorktreeIfDeclared,
+  resolveExecutionCwd,
+  resolveExecutionRepoCwd,
   resolveStoryTargetSubmodule,
 } from "../src/runner/submodule-worktree.js";
 
@@ -110,5 +112,37 @@ describe("createSubmoduleWorktreeIfDeclared", () => {
     expect(r).toEqual({ targetSubmodule: "sub", failed: true });
     expect(events).toHaveLength(0);
     expect(alerts.join("\n")).toMatch(/submodule worktree add FAILED/);
+  });
+});
+
+describe("resolveExecutionCwd (E4)", () => {
+  it("returns the superproject worktree path when no target submodule is declared", () => {
+    const { ports: p } = ports(mkdtempSync(join(tmpdir(), "roll-e4-")));
+    expect(resolveExecutionCwd(p, {})).toBe(p.paths.worktreePath);
+    expect(resolveExecutionCwd(p, { targetSubmodule: undefined })).toBe(p.paths.worktreePath);
+    // An empty string is treated as "no submodule" (byte-identical to today).
+    expect(resolveExecutionCwd(p, { targetSubmodule: "" })).toBe(p.paths.worktreePath);
+  });
+
+  it("routes into the submodule cycle worktree when a target submodule is declared", () => {
+    const { ports: p } = ports(mkdtempSync(join(tmpdir(), "roll-e4-")));
+    expect(resolveExecutionCwd(p, { targetSubmodule: "dukang-service-online" })).toBe(
+      join(p.paths.worktreePath, "dukang-service-online"),
+    );
+  });
+});
+
+describe("resolveExecutionRepoCwd (E4)", () => {
+  it("returns the superproject repoCwd when no target submodule is declared", () => {
+    const { ports: p } = ports(mkdtempSync(join(tmpdir(), "roll-e4-")));
+    expect(resolveExecutionRepoCwd(p, {})).toBe(p.repoCwd);
+    expect(resolveExecutionRepoCwd(p, { targetSubmodule: "" })).toBe(p.repoCwd);
+  });
+
+  it("routes into the submodule repo root when a target submodule is declared", () => {
+    const { ports: p } = ports(mkdtempSync(join(tmpdir(), "roll-e4-")));
+    expect(resolveExecutionRepoCwd(p, { targetSubmodule: "dukang-service-online" })).toBe(
+      join(p.repoCwd, "dukang-service-online"),
+    );
   });
 });

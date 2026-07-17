@@ -20,6 +20,7 @@ import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
 import { cardArchiveDir } from "../lib/archive.js";
 import { readLatestStoryReviewScore } from "../lib/review-score.js";
 import { storySpecPath } from "./attest-gate.js";
+import { resolveExecutionCwd } from "./submodule-worktree.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 
@@ -191,7 +192,9 @@ export function writeEvaluatorArtifact(
     // claiming an independent evaluation by an agent that never ran.
     rig: { agent: scoreEntry?.scoredBy } as Rig,
     sessionId: scoreEntry?.sessionId ?? "",
-    worktreeCwd: ports.paths.worktreePath,
+    // E4: record the execution worktree (submodule cycle worktree for a submodule
+    // story) as the delivery's worktree — the same place the builder/scorer ran.
+    worktreeCwd: resolveExecutionCwd(ports, ctx),
     scoreRepoCwd: ports.repoCwd,
     inputs: [
       { path: `${storyId}-report.html`, kind: "report" },
@@ -258,11 +261,15 @@ export async function runDesignerStage(
   const contractPath = join(dir, "design-contract.md");
   const manifestPath = join(dir, "artifact-manifest.json");
   const designerSessionId = `${ctx.cycleId ?? "cycle"}:design:${designerAgent}:${ports.clock()}`;
+  // E4: the designer reads the code it designs against; run it where the builder
+  // will run (submodule cycle worktree for a submodule story). No targetSubmodule
+  // ⇒ ports.paths.worktreePath, unchanged.
+  const execCwd = resolveExecutionCwd(ports, ctx);
   if (!existsSync(contractPath)) {
     try {
       mkdirSync(dir, { recursive: true });
       await ports.agentSpawn(designerAgent, {
-        cwd: ports.paths.worktreePath,
+        cwd: execCwd,
         skillBody: buildDesignerPrompt(storyId, contractPath),
         storyId,
         timeoutMs: DESIGNER_TIMEOUT_MS,
@@ -279,7 +286,7 @@ export async function runDesignerStage(
     role: "designer",
     rig: { agent: designerAgent } as Rig,
     sessionId: designerSessionId,
-    worktreeCwd: ports.paths.worktreePath,
+    worktreeCwd: execCwd,
     scoreRepoCwd: ports.repoCwd,
     inputs: [{ path: `.roll/features/**/${storyId}/spec.md`, kind: "contract" }],
     outputs: [{ path: "role-artifacts/designer/design-contract.md", kind: "contract" }],

@@ -45,7 +45,9 @@ import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
-import { agentWritableRoots } from "./worktree-bootstrap.js";
+import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
+import { resolveIntegrationBranch } from "@roll/infra";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,8 +59,18 @@ export async function executeCaptureFactsCommand(
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
   void cmd;
+      // E4: the agent built/committed inside the EXECUTION worktree (the submodule
+      // cycle worktree when the story declared a target_submodule, else the
+      // superproject worktree). Every git OBSERVATION of the agent's delivery
+      // (commits/TCR/diff/status) and every AGENT spawn that inspects it (scorer,
+      // reviewer, remediation) runs there. The persistent-`.roll` reads
+      // (spec/evidence/attest — `ports.paths.worktreePath`, where the loop `.roll`
+      // is symlinked) are deliberately NOT routed: the submodule subdir has no
+      // `.roll`. No targetSubmodule ⇒ both equal today's paths (zero regression).
+      const execCwd = resolveExecutionCwd(ports, ctx);
+      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
       await quarantineMainCheckoutForCycle(ports, ctx, "capture");
-      const commitsAhead = await ports.git.commitsAhead(ports.paths.worktreePath);
+      const commitsAhead = await ports.git.commitsAhead(execCwd);
       let mainAhead = 0;
       try {
         mainAhead = await ports.git.mainAhead(ports.repoCwd);
@@ -75,7 +87,7 @@ export async function executeCaptureFactsCommand(
         // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
         // on THIS path (the publish-path gates already treat 0 conservatively);
         // the timeout teardown's measure_worktree is where unknown stays unknown.
-        tcrCount = (await ports.git.tcrCount(ports.paths.worktreePath)) ?? 0;
+        tcrCount = (await ports.git.tcrCount(execCwd)) ?? 0;
       } catch {
         /* count is best-effort; a git miss must not fail the cycle */
       }
@@ -84,7 +96,7 @@ export async function executeCaptureFactsCommand(
       let worktreeDirty = false;
       try {
         const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
-          cwd: ports.paths.worktreePath,
+          cwd: execCwd,
           encoding: "utf8",
         });
         worktreeDirty = stdout.trim() !== "";
@@ -190,19 +202,21 @@ export async function executeCaptureFactsCommand(
         // Iterate the enabled stages (config order). file-absent/disabled → [] →
         // the loop body never runs, so a repo without pairing.yaml is untouched.
         for (const stage of enabledPairingStages(ports.repoCwd)) {
-          await runPairing(ports.repoCwd, ports.paths.worktreePath, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
+          // E4: the pairing reviewer diffs + reviews the delivery in the execution
+          // worktree (the submodule cycle worktree for a submodule story).
+          await runPairing(ports.repoCwd, execCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
         }
       }
       // FIX-362: peer-gate runs HERE — AFTER the pairing review wrote its evidence
       // (.pair.json), so a genuinely hetero-reviewed delivery reads as `consulted`
       // and is NOT blocked. When pairing is OFF (no pairing.yaml) no evidence exists,
       // so the gate's own retryPeerConsult fallback runs (single-agent path, unchanged).
-      let peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+      let peerGate = await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
       let peerBlocked = peerGate.blocked;
       if (peerGate.blocked) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
         const retryInstalled = peerGateInstalled.filter((a) => peerAvailable(a));
-        const retry = await retryPeerConsult(ports.paths.worktreePath, runtimeDir, cycleIdStr, {
+        const retry = await retryPeerConsult(execCwd, runtimeDir, cycleIdStr, {
           installed: retryInstalled.length > 0 ? retryInstalled : peerGateInstalled,
           workingAgent: peerGateWorker,
           reviewPeer,
@@ -214,7 +228,7 @@ export async function executeCaptureFactsCommand(
         });
         if (retry.status === "reviewed" && peerEvidencePresent(runtimeDir, cycleIdStr)) {
           // Retry produced evidence → re-run the gate; it now sees `consulted`.
-          peerGate = await runPeerGate(ports.paths.worktreePath, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+          peerGate = await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
           peerBlocked = peerGate.blocked;
         }
         if (peerBlocked && retry.status === "timeout" && readPeerOnPoolTimeout(ports.repoCwd) === "degrade") {
@@ -337,7 +351,9 @@ export async function executeCaptureFactsCommand(
           try {
             res = await Promise.race([
               ports.agentSpawn(peer, {
-                cwd: ports.paths.worktreePath,
+                // E4: the scorer inspects the committed delivery, so it runs in the
+                // execution worktree (submodule cycle worktree for a submodule story).
+                cwd: execCwd,
                 skillBody: prompt,
                 timeoutMs,
                 ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
@@ -411,7 +427,14 @@ export async function executeCaptureFactsCommand(
         };
         let diffStat = "";
         try {
-          const { stdout } = await execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], { cwd: ports.paths.worktreePath, encoding: "utf8" });
+          // E4: diff against the EXECUTION repo's integration branch (a submodule
+          // cycle branched off the submodule's own integration branch, E1
+          // `resolveIntegrationBranch(<submodule repo>)`, NOT the superproject's
+          // origin/main) and run it in the execution worktree. No targetSubmodule ⇒
+          // resolveIntegrationBranch(ports.repoCwd) which defaults to origin/main —
+          // byte-identical to the prior hardcode.
+          const diffBase = resolveIntegrationBranch(execRepoCwd);
+          const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
           diffStat = stdout.slice(0, 4_000);
         } catch {
           /* summary degrades gracefully */
@@ -463,13 +486,16 @@ export async function executeCaptureFactsCommand(
       if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         const remediationAgent = ctx.agent ?? "claude";
         const selfHeal = await runAcMapSelfHeal({
-          worktreeCwd: ports.paths.worktreePath,
+          // E4: the remediation agent inspects the delivery + collects git evidence
+          // in the execution worktree, but the ac-map/spec it heals live in the
+          // persistent `.roll` (archiveCwd = ports.repoCwd, superproject — unchanged).
+          worktreeCwd: execCwd,
           archiveCwd: ports.repoCwd,
           storyId,
           runDir: ctx.evidenceRunDir,
           cycleId: ctx.cycleId ?? "",
           agent: remediationAgent,
-          collectDraftEvidence: () => collectDraftEvidence(ports.paths.worktreePath),
+          collectDraftEvidence: () => collectDraftEvidence(execCwd, execRepoCwd),
           collectCycleSignals: () => {
             try {
               const bus = new EventBus();
@@ -484,7 +510,13 @@ export async function executeCaptureFactsCommand(
           },
           canSpawnRemediation: () => blockIfAgentCredentialsMissing(remediationAgent, "build", ports, ctx) === null,
           agentSpawn: ports.agentSpawn,
-          writableRoots: agentWritableRoots(ports.repoCwd, ports.paths.alertsPath),
+          // E4: a submodule cycle's remediation agent commits into the SUBMODULE's
+          // object store, so it needs write access to the submodule's git-common-dir
+          // (as well as the superproject `.roll`). No targetSubmodule ⇒ exactly
+          // agentWritableRoots(ports.repoCwd, …), unchanged.
+          writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
+          // Attest render reads the card's `.roll` evidence/spec (symlinked into the
+          // superproject worktree only) → stays on ports.paths.worktreePath.
           renderAttest: () => ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir ?? ""),
           appendEvent: (event) => ports.events.appendEvent(ports.paths.eventsPath, event),
           now: () => eventTs(ports),
@@ -656,22 +688,28 @@ export async function executeCaptureFactsCommand(
  * Best-effort: on ANY failure returns an empty evidence structure (the draft
  * generator then produces an all-`needs-confirmation` skeleton). The cap
  * values are generous for a normal cycle but bounded for safety.
+ *
+ * E4: `repoCwd` (the EXECUTION repo root) resolves the diff baseline — a submodule
+ * cycle diffs against the SUBMODULE's own integration branch, not the
+ * superproject's origin/main. Absent/superproject ⇒ resolveIntegrationBranch
+ * defaults to origin/main (byte-identical to the prior hardcode).
  */
-async function collectDraftEvidence(worktreeCwd: string): Promise<DraftEvidence> {
+async function collectDraftEvidence(worktreeCwd: string, repoCwd: string): Promise<DraftEvidence> {
   const empty: DraftEvidence = { commitLines: [], diffStatLines: [], changedFilenames: [] };
+  const base = resolveIntegrationBranch(repoCwd);
   try {
     const [commits, diffStat, changedFiles] = await Promise.all([
-      execFileAsync("git", ["log", "--oneline", "origin/main..HEAD", "-n", "50"], {
+      execFileAsync("git", ["log", "--oneline", `${base}..HEAD`, "-n", "50"], {
         cwd: worktreeCwd,
         encoding: "utf8",
         timeout: 15_000,
       }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--stat", "origin/main...HEAD"], {
+      execFileAsync("git", ["diff", "--stat", `${base}...HEAD`], {
         cwd: worktreeCwd,
         encoding: "utf8",
         timeout: 15_000,
       }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--name-only", "origin/main...HEAD"], {
+      execFileAsync("git", ["diff", "--name-only", `${base}...HEAD`], {
         cwd: worktreeCwd,
         encoding: "utf8",
         timeout: 15_000,

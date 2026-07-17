@@ -37,6 +37,7 @@ import { executeSpawnAgentCommand } from "./spawn-agent-handler.js";
 import { executeSpawnRoleCommand } from "./spawn-role-handler.js";
 import { executeCaptureFactsCommand } from "./capture-facts-handler.js";
 import { executeTerminalCommand } from "./terminal-handlers.js";
+import { resolveExecutionCwd } from "./submodule-worktree.js";
 
 export { checkMainDirty } from "./main-checkout-guard.js";
 export { buildRunRow, buildTerminalRecord } from "./run-records.js";
@@ -174,7 +175,10 @@ export async function executeCommand(
     // the count is UNDETERMINABLE (git error) patch nothing: unknown stays
     // unknown so the zero-TCR gate stays conservative (never discards work).
     case "measure_worktree": {
-      const measured = await ports.git.tcrCount(ports.paths.worktreePath).catch(() => undefined);
+      // E4: a submodule cycle's TCR commits landed in the SUBMODULE worktree, so
+      // count them there (resolveExecutionCwd = the same subdirectory the delivery
+      // lands from). No targetSubmodule ⇒ ports.paths.worktreePath, unchanged.
+      const measured = await ports.git.tcrCount(resolveExecutionCwd(ports, ctx)).catch(() => undefined);
       return measured === undefined ? {} : { ctxPatch: { tcrCount: measured } };
     }
 

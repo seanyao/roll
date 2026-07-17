@@ -92,7 +92,15 @@ const OBSERVE_POLL_MS = 5_000;
  * {@link maybeBuildHeartbeat}; this is just the I/O loop (git read + event
  * append). Best-effort throughout: observation must NEVER fail the cycle.
  */
-export async function startCycleObserver(ports: Ports, cycleId: string): Promise<{ stop(): Promise<void> }> {
+export async function startCycleObserver(
+  ports: Ports,
+  cycleId: string,
+  // E4: the worktree the agent's commits actually land in. A submodule cycle
+  // passes the submodule cycle worktree so the runner observes the RIGHT branch's
+  // commits; omitted ⇒ ports.paths.worktreePath (the superproject worktree),
+  // byte-identical to before.
+  observeCwd: string = ports.paths.worktreePath,
+): Promise<{ stop(): Promise<void> }> {
   if (cycleId === "") return { stop: async () => {} };
   const st: CycleObserverState = newCycleObserverState(cycleId);
   const emit = (events: RollEvent[]): void => {
@@ -106,7 +114,7 @@ export async function startCycleObserver(ports: Ports, cycleId: string): Promise
   };
   const pollGapMs = Number((process.env["ROLL_OBSERVE_POLL_MS"] ?? "").trim()) || OBSERVE_POLL_MS;
   try {
-    baselineCommits(await ports.git.recentCommits(ports.paths.worktreePath), st);
+    baselineCommits(await ports.git.recentCommits(observeCwd), st);
   } catch {
     /* baseline is best-effort; observation must not block the cycle */
   }
@@ -116,7 +124,7 @@ export async function startCycleObserver(ports: Ports, cycleId: string): Promise
     if (running) return; // a slow git read must not stack ticks
     running = true;
     try {
-      const commits = await ports.git.recentCommits(ports.paths.worktreePath);
+      const commits = await ports.git.recentCommits(observeCwd);
       const now = Date.now();
       emit(observeCommits(commits, st, now));
       emit(maybeBuildHeartbeat(st, now));

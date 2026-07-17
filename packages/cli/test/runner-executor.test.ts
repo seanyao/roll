@@ -14,6 +14,7 @@ import { AGENTS } from "../../core/src/agent/specs.js";
 import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
+import { submoduleAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
 import {
   AGENT_ARGV_TODO,
@@ -1457,6 +1458,91 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "worktree_failed" });
   });
 
+  it("E4: measure_worktree counts TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
+    const seen: string[] = [];
+    const { ports } = fakePorts({
+      git: {
+        ...fakePorts().ports.git,
+        tcrCount: vi.fn(async (cwd: string) => {
+          seen.push(cwd);
+          return 7;
+        }),
+      },
+    });
+    const r = await executeCommand(
+      { kind: "measure_worktree" },
+      ports,
+      { ...CTX, targetSubmodule: "dukang-service-online" },
+    );
+    expect(r.ctxPatch?.tcrCount).toBe(7);
+    // observed the agent's commits in the submodule cycle worktree, not /rt/wt.
+    expect(seen).toEqual([join("/rt/wt", "dukang-service-online")]);
+  });
+
+  it("E4: measure_worktree stays on the superproject worktree with no targetSubmodule (zero regression)", async () => {
+    const seen: string[] = [];
+    const { ports } = fakePorts({
+      git: {
+        ...fakePorts().ports.git,
+        tcrCount: vi.fn(async (cwd: string) => {
+          seen.push(cwd);
+          return 2;
+        }),
+      },
+    });
+    const r = await executeCommand({ kind: "measure_worktree" }, ports, CTX);
+    expect(r.ctxPatch?.tcrCount).toBe(2);
+    expect(seen).toEqual(["/rt/wt"]);
+  });
+
+  it("E4: capture_facts observes commits/TCR in the SUBMODULE worktree when ctx.targetSubmodule is set", async () => {
+    const commitsAheadCwd: string[] = [];
+    const tcrCwd: string[] = [];
+    const { ports } = fakePorts({
+      git: {
+        ...fakePorts().ports.git,
+        commitsAhead: vi.fn(async (cwd: string) => {
+          commitsAheadCwd.push(cwd);
+          return 0; // 0 commits → skip the score/attest reads that need a real .roll
+        }),
+        tcrCount: vi.fn(async (cwd: string) => {
+          tcrCwd.push(cwd);
+          return 0;
+        }),
+      },
+    });
+    await executeCommand(
+      { kind: "capture_facts" },
+      ports,
+      { ...CTX, targetSubmodule: "dukang-service-online" },
+    );
+    const sub = join("/rt/wt", "dukang-service-online");
+    // The runner's git observation of the agent's delivery routes into the submodule.
+    expect(commitsAheadCwd).toEqual([sub]);
+    expect(tcrCwd).toEqual([sub]);
+  });
+
+  it("E4: capture_facts observes the superproject worktree with no targetSubmodule (zero regression)", async () => {
+    const commitsAheadCwd: string[] = [];
+    const tcrCwd: string[] = [];
+    const { ports } = fakePorts({
+      git: {
+        ...fakePorts().ports.git,
+        commitsAhead: vi.fn(async (cwd: string) => {
+          commitsAheadCwd.push(cwd);
+          return 0;
+        }),
+        tcrCount: vi.fn(async (cwd: string) => {
+          tcrCwd.push(cwd);
+          return 0;
+        }),
+      },
+    });
+    await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect(commitsAheadCwd).toEqual(["/rt/wt"]);
+    expect(tcrCwd).toEqual(["/rt/wt"]);
+  });
+
   it("FIX-1205: loop-named pending-merge PR is skipped via body trailer and the next card is picked", async () => {
     const { ports, calls } = fakePorts({
       backlog: { read: () => [
@@ -2213,6 +2299,63 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toEqual({ type: "agent_exited", exit: 0, timedOut: false });
   });
 
+  it("E4: spawn_agent runs the builder INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
+    // Real superproject + a nested repo standing in for the submodule + the
+    // submodule cycle worktree subdir (submoduleWorktreePath == <wt>/<sub>).
+    const repo = initCleanGitRepo("roll-e4-spawn-super-");
+    const sub = "dukang-service-online";
+    const wt = join(repo, ".roll", "loop", "wt");
+    const subWt = join(wt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+
+    await executeCommand(
+      { kind: "spawn_agent", agent: "claude", attempt: 1 },
+      ports,
+      { ...CTX, targetSubmodule: sub },
+    );
+
+    const opts = (ports.agentSpawn as unknown as { mock: { calls: [string, { cwd: string; writableRoots?: string[] }][] } }).mock.calls[0]?.[1];
+    // The builder's process cwd is the SUBMODULE cycle worktree — where its
+    // edits/build/test/commits land (E2's landing reads that same HEAD).
+    expect(opts?.cwd).toBe(subWt);
+  });
+
+  it("E4: spawn_agent runs the builder in the superproject worktree with no targetSubmodule (zero regression)", async () => {
+    const repo = initCleanGitRepo("roll-e4-spawn-nosub-");
+    const wt = join(repo, ".roll", "loop", "wt");
+    mkdirSync(wt, { recursive: true });
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+        alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+      },
+      agentSpawn: vi.fn(async () => ({ stdout: "done", stderr: "", exitCode: 0, timedOut: false })),
+    });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+
+    await executeCommand({ kind: "spawn_agent", agent: "claude", attempt: 1 }, ports, CTX);
+
+    const opts = (ports.agentSpawn as unknown as { mock: { calls: [string, { cwd: string }][] } }).mock.calls[0]?.[1];
+    expect(opts?.cwd).toBe(wt);
+  });
+
   it("FIX-1037: checkMainDirty ignores .roll metadata dirt but reports product checkout dirt", async () => {
     const repo = initCleanGitRepo("roll-main-dirty-probe-");
     mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
@@ -2953,6 +3096,65 @@ describe("executeCommand — command → executor mapping", () => {
     expect(execFileSync("git", ["status", "--short", "--", "."], { cwd: main, encoding: "utf8" }).trim()).toBe("?? .roll/");
     expect(execFileSync("git", ["status", "--porcelain", "--", "escaped.txt", "README.md"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
     expect(execFileSync("git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: wt, encoding: "utf8" }).trim()).toBe("0");
+  });
+
+  it("E4 (end-to-end): capture_facts observes a REAL tcr commit made in the submodule worktree, not the empty superproject worktree", async () => {
+    // Build a real superproject worktree with a nested repo standing in for the
+    // submodule, plus the submodule cycle worktree subdir (submoduleWorktreePath).
+    const superWt = realpathSync(mkdtempSync(join(tmpdir(), "roll-e4-e2e-super-")));
+    execDirs.push(superWt);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: superWt });
+    execFileSync("git", ["config", "user.email", "t@e.test"], { cwd: superWt });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: superWt });
+    writeFileSync(join(superWt, "README.md"), "# super\n");
+    execFileSync("git", ["add", "."], { cwd: superWt });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: superWt });
+    execFileSync("git", ["branch", "-f", "origin/main"], { cwd: superWt }); // local ref standing in for origin/main
+
+    const sub = "dukang-service-online";
+    const subWt = join(superWt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: subWt });
+    execFileSync("git", ["config", "user.email", "t@e.test"], { cwd: subWt });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: subWt });
+    writeFileSync(join(subWt, "svc.txt"), "base\n");
+    execFileSync("git", ["add", "."], { cwd: subWt });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: subWt });
+    execFileSync("git", ["branch", "-f", "origin/main"], { cwd: subWt });
+    // The agent's delivery: ONE tcr commit, landed ONLY in the submodule worktree.
+    writeFileSync(join(subWt, "svc.txt"), "delivered\n");
+    execFileSync("git", ["add", "."], { cwd: subWt });
+    execFileSync("git", ["commit", "-q", "-m", "tcr: submodule delivery"], { cwd: subWt });
+
+    // Real-git-backed observation ports (mirror the FIX-1237 count() pattern).
+    const count = (cwd: string, range: string): number =>
+      Number(execFileSync("git", ["rev-list", "--count", range], { cwd, encoding: "utf8" }).trim());
+    const tcr = (cwd: string): number =>
+      execFileSync("git", ["log", "--oneline", "origin/main..HEAD"], { cwd, encoding: "utf8" })
+        .split("\n")
+        .filter((l) => l.includes(" tcr:")).length;
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: superWt,
+      paths: { ...base.ports.paths, worktreePath: superWt, eventsPath: join(superWt, "events.ndjson"), alertsPath: join(superWt, "alerts.log") },
+      git: {
+        ...base.ports.git,
+        commitsAhead: vi.fn(async (cwd: string) => count(cwd, "origin/main..HEAD")),
+        mainAhead: vi.fn(async () => 0),
+        tcrCount: vi.fn(async (cwd: string) => tcr(cwd)),
+      },
+    });
+
+    // Submodule cycle → observes the submodule worktree → sees the tcr commit.
+    const rSub = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, targetSubmodule: sub });
+    expect((rSub.event as { facts: { commitsAhead: number } }).facts.commitsAhead).toBe(1);
+    expect(rSub.ctxPatch?.tcrCount).toBe(1);
+
+    // Superproject cycle (same repo) → observes the SUPERPROJECT worktree, whose
+    // HEAD carries no delivery → 0 (proves the routing, not a global count).
+    const rSuper = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect((rSuper.event as { facts: { commitsAhead: number } }).facts.commitsAhead).toBe(0);
+    expect(rSuper.ctxPatch?.tcrCount).toBe(0);
   });
 
   it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {
@@ -5211,6 +5413,40 @@ describe("agentWritableRoots — FIX-326: a sandboxed agent can write the git-in
   });
 });
 
+describe("submoduleAgentWritableRoots (E4) — grants the SUBMODULE's git-common-dir too", () => {
+  it("no submodule (execRepoCwd === repoCwd) ⇒ identical to agentWritableRoots (zero regression)", () => {
+    const repo = realpathSync(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+    const alerts = join(repo, ".roll", "loop", "alerts", "x.md");
+    expect(submoduleAgentWritableRoots(repo, repo, alerts)).toEqual(agentWritableRoots(repo, alerts));
+  });
+
+  it("submodule cycle ⇒ also grants the submodule's own git-common-dir (else the agent's commits into the submodule silently fail)", () => {
+    // Real superproject repo + a real nested git repo standing in for a submodule.
+    const superRepo = realpathSync(mkdtempSync(join(tmpdir(), "roll-e4-super-")));
+    execDirs.push(superRepo);
+    execFileSync("git", ["init", "-q"], { cwd: superRepo });
+    const subRel = "dukang-service-online";
+    const subAbs = join(superRepo, subRel);
+    mkdirSync(subAbs, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: subAbs });
+
+    const alerts = join(superRepo, ".roll", "loop", "alerts", "x.md");
+    const superCommon = realpathSync(
+      execFileSync("git", ["-C", superRepo, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim(),
+    );
+    const subCommon = realpathSync(
+      execFileSync("git", ["-C", subAbs, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" }).trim(),
+    );
+    expect(subCommon).not.toBe(superCommon);
+
+    const roots = submoduleAgentWritableRoots(superRepo, subAbs, alerts);
+    // Superproject roots preserved (the .roll/alerts the agent still writes) …
+    expect(roots).toContain(superCommon);
+    // … PLUS the submodule's own object store, where its TCR commits land.
+    expect(roots).toContain(subCommon);
+  });
+});
+
 // ── FIX-1056: same-envelope auth cooldown (only a genuine streak excludes) ────
 describe("FIX-1056 — same-envelope auth cooldown excludes only a genuine streak", () => {
   // A worktree with a story spec (no AC block → attest gate inert) so the score
@@ -5885,6 +6121,28 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     // The US-LOOP-101 role framing is prepended to the skill body.
     expect(spawns[0]?.skillBody).toContain("test author");
     expect(spawns[0]?.env?.["ROLL_ADVERSARIAL_MARKER"]).toBeTruthy();
+  });
+
+  it("E4: spawn_role runs the adversarial role INSIDE the submodule cycle worktree when ctx.targetSubmodule is set", async () => {
+    const repo = initCleanGitRepo("roll-e4-role-super-");
+    const sub = "dukang-service-online";
+    const wt = join(repo, ".roll", "loop", "wt");
+    const subWt = join(wt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-b", "main"], { cwd: subWt });
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    const base = fakePorts();
+    const spawns: AgentSpawnOptions[] = [];
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: { ...base.ports.paths, worktreePath: wt, eventsPath: join(repo, ".roll", "loop", "events.ndjson"), alertsPath: join(repo, ".roll", "loop", "alerts.log") },
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        spawns.push(opts);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    await executeCommand({ kind: "spawn_role", role: "implementer", agent: "codex", round: 0 }, ports, { ...CTX, targetSubmodule: sub });
+    expect(spawns[0]?.cwd).toBe(subWt);
   });
 
   it("spawn_role attacker reads its finding marker (newHole + attackTest)", async () => {

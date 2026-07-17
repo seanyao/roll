@@ -28,6 +28,8 @@ import {
   BrowserOperationLedger,
   parseBacklog,
   CaptureBridge,
+  captureReceiptEvidenceRef,
+  classifyCaptureReceiptV2,
   renderReport,
   ansiPre,
   buildExecutionCastProjection,
@@ -54,8 +56,10 @@ import {
 import {
   ROLL_CAPTURE_PROTOCOL_V1,
   classifyStatus,
+  type CaptureIntentV2,
   type CaptureKind,
   type CaptureLedgerEntry,
+  type CaptureReceiptV2,
   type CaptureTarget,
   type Lang,
   type OutwardSmokeDeclaration,
@@ -64,6 +68,7 @@ import {
   type CycleRoleSummary,
 } from "@roll/spec";
 import {
+  captureReceiptFact,
   captureScreenshot,
   checkCapturePrivacy,
   collectEvidence,
@@ -72,10 +77,12 @@ import {
   openEvidenceFrame,
   redactSecrets,
   RollCaptureProvider,
+  RollCaptureReceiptStore,
   screenshotEvidenceRef,
   writeEvidenceJson,
   type CaptureCommandFact,
   type CaptureFact,
+  type CaptureReceiptFact,
   type CapturePrivacyOptions,
   type EvidenceRun,
   type RunOut,
@@ -126,6 +133,13 @@ export interface AttestDeps {
     readiness?: () => RollCaptureReadiness;
     root?: string;
     timeoutMs?: number;
+    /**
+     * US-PHYSICAL-009 — Capture Gateway v2 receipts to persist and fold into the
+     * manifest + report. The v2 planner (US-EVID-030) produces these upstream;
+     * until then this is an injectable seam (integration fixtures / future
+     * caller). ROLL_NO_SCREENCAP never gates this path.
+     */
+    receipts?: readonly { intent: CaptureIntentV2; receipt: CaptureReceiptV2 }[];
   };
   /** US-ATTEST-014 — injectable seam for the cycle process archive sources. */
   process?: ProcessReaders;
@@ -1535,6 +1549,32 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     if (!physical.fact.taken) warn(`physical.screenshot ${physical.report.statusChain.join(" → ")}: ${physical.fact.skipped ?? "unknown"}`);
   }
 
+  // US-PHYSICAL-009 — Capture Gateway v2 receipts. Persist each injected receipt
+  // through the durable store (dup/no-overwrite guards live there), then fold the
+  // accepted ones into the manifest and, for a valid physical receipt, into the
+  // report attachment path. This path NEVER consults ROLL_NO_SCREENCAP.
+  const captureReceiptFacts: CaptureReceiptFact[] = [];
+  const injectedReceipts = deps.rollCapture?.receipts ?? [];
+  if (injectedReceipts.length > 0) {
+    const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
+    const store = new RollCaptureReceiptStore({ root: captureRoot });
+    for (const { intent, receipt } of injectedReceipts) {
+      const persisted = await store.persistReceipt(intent, receipt);
+      if (persisted.status === "rejected") {
+        warn(`capture v2 receipt ${receipt.requestId} rejected: ${persisted.reason}`);
+        continue;
+      }
+      const accepted = persisted.accepted;
+      captureReceiptFacts.push(
+        captureReceiptFact(persisted.receipt, intent, { runDir, accepted, captureSetId: persisted.captureSetId }),
+      );
+      if (accepted && classifyCaptureReceiptV2(persisted.receipt, intent).verdict === "valid") {
+        const ref = captureReceiptEvidenceRef(persisted.receipt);
+        if (ref !== null) selfCaptures.push(ref);
+      }
+    }
+  }
+
   // hard facts.
   const manifest = await collectEvidence({
     storyId,
@@ -1546,6 +1586,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(deps.ghProbe !== undefined ? { ghProbe: deps.ghProbe } : {}),
     captures: captureFacts,
     captureCommand: commandFact,
+    ...(captureReceiptFacts.length > 0 ? { captureReceipts: captureReceiptFacts } : {}),
   });
   writeEvidenceJson(manifest, runDir);
 

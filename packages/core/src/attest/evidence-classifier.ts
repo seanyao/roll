@@ -11,6 +11,8 @@
  */
 
 import {
+  type CaptureIntentV2,
+  type CaptureReceiptV2,
   type DiagnosticFact,
   type EvidenceClass,
   type EvidenceClassification,
@@ -24,6 +26,7 @@ import {
   PHYSICAL_CAPTURE_PROTOCOL,
   PHYSICAL_CAPTURE_PROVIDERS,
   PLAYWRIGHT_PROVIDERS,
+  validateCaptureReceiptV2,
 } from "@roll/spec";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -350,6 +353,67 @@ export class EvidenceClassifier {
       },
     };
   }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// US-PHYSICAL-009 — Capture Gateway v2 receipt awareness
+//
+// The gate stays v1-authoritative (validateVisualEvidence above), but it must
+// also let a VALID v2 physical receipt satisfy a visual AC. The full 4-state
+// EvidenceHealth resolver (rendered handling, degraded-infrastructure) lands in
+// US-EVID-031; here we only accept a valid physical v2 receipt and surface a
+// precise verdict for invalid ones, without touching the v1 path.
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Classify a Capture Gateway v2 receipt against a visual AC. A valid, taken
+ * physical receipt (source `roll-capture-window`) is `valid`; rendered/legacy
+ * receipts are `not_physical` (their gate is the later health resolver);
+ * malformed/mismatched ones surface a concrete verdict with the reason.
+ */
+export function classifyCaptureReceiptV2(receipt: CaptureReceiptV2, intent?: CaptureIntentV2): VisualEvidenceResult {
+  const artifactId = receipt.requestId;
+
+  if (receipt.captureClass !== "physical" || receipt.source !== "roll-capture-window") {
+    return {
+      artifactId,
+      verdict: "not_physical",
+      reason: `${receipt.captureClass} capture from "${receipt.source}" is not a physical AC receipt (handled by the evidence-health resolver)`,
+      evidenceClass: "physical-capture",
+    };
+  }
+
+  const validation = validateCaptureReceiptV2(receipt, intent);
+  if (validation.ok && receipt.state === "taken") {
+    return {
+      artifactId,
+      verdict: "valid",
+      reason: "Physical v2 receipt verified: roll.capture.v2, taken, PNG attached, digest present, target-bound",
+      evidenceClass: "physical-capture",
+      evidence: {
+        protocol: receipt.protocol,
+        provider: "roll-capture",
+        screenshotPath: receipt.screenshotPath ?? "",
+        digest: receipt.sha256 ?? "",
+      },
+    };
+  }
+
+  const detail = validation.errors.join("; ");
+  const verdict: VisualEvidenceVerdict =
+    receipt.state !== "taken"
+      ? "capture_failed"
+      : receipt.screenshotPath === undefined || receipt.screenshotPath.length === 0
+        ? "png_missing"
+        : receipt.sha256 === undefined || receipt.sha256.length === 0
+          ? "digest_mismatch"
+          : "capture_failed";
+  return {
+    artifactId,
+    verdict,
+    reason: detail !== "" ? detail : `physical v2 receipt is not acceptable (state=${receipt.state})`,
+    evidenceClass: "physical-capture",
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════

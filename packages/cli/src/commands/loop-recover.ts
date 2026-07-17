@@ -258,7 +258,7 @@ function applyDecision(
   // ALLOWED: clear the stall for ONE more attempt, re-activate, record the event.
   const at = new Date(ts).toISOString();
   const clearedProgress = clearStallForRecovery(goal.progress, decision.storyId);
-  const reactivated = transitionGoal({ ...goal, progress: clearedProgress }, "active", { actor, reason, at });
+  const reactivated = transitionGoal(goalAfterRecovery(goal, clearedProgress), "active", { actor, reason, at });
   const next: RollGoal = clearedProgress === undefined ? stripProgress(reactivated) : reactivated;
   writeGoal(gPath, next);
   bus.appendEvent(eventsPath(projectPath), recoveryEvent(decision, stall, actor, reason, ts));
@@ -288,7 +288,7 @@ function applyDecisionJson(
   if (decision.decision === "allowed") {
     const at = new Date(ts).toISOString();
     const clearedProgress = clearStallForRecovery(goal.progress, decision.storyId);
-    const reactivated = transitionGoal({ ...goal, progress: clearedProgress }, "active", { actor, reason, at });
+    const reactivated = transitionGoal(goalAfterRecovery(goal, clearedProgress), "active", { actor, reason, at });
     writeGoal(gPath, clearedProgress === undefined ? stripProgress(reactivated) : reactivated);
   }
   bus.appendEvent(eventsPath(projectPath), event);
@@ -299,4 +299,10 @@ function applyDecisionJson(
 function stripProgress(goal: RollGoal): RollGoal {
   const { progress: _drop, ...rest } = goal;
   return rest;
+}
+
+function goalAfterRecovery(goal: RollGoal, progress: RollGoal["progress"]): RollGoal {
+  if (goal.safety?.lastGate !== "progress") return { ...goal, progress };
+  const { safety: _resolvedProgressGate, ...rest } = goal;
+  return { ...rest, progress };
 }

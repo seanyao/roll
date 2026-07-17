@@ -128,7 +128,15 @@ describe("roll loop recover", () => {
   });
 
   it("--apply re-arms the goal for the next Builder and records an allowed event", () => {
-    seedGoal({ ...STALLED });
+    seedGoal({
+      ...STALLED,
+      safety: {
+        lastGate: "progress",
+        lastReason: "no_progress_on_all_cards",
+        lastAt: "2026-06-30T00:59:00Z",
+        lastReading: "all cards exhausted",
+      },
+    });
     seedEvents([cs("c2", "REFACTOR-055", "pi", 3), ce("c2", "blocked", 4)]);
     const r = run(["REFACTOR-055", "--apply", "--reason", "agy/pi runtime failures; rotate to reasonix"], depsWith("reasonix"));
     expect(r.code).toBe(0);
@@ -140,6 +148,7 @@ describe("roll loop recover", () => {
     // the skip + streak for the recovered card are cleared so the next go runs it
     expect(g.progress?.skippedCards ?? []).not.toContain("REFACTOR-055");
     expect(g.progress?.noProgressCycles ?? 0).toBe(0);
+    expect(g.safety).toBeUndefined();
 
     const ev = events().find((e) => e["type"] === "goal:recovery");
     expect(ev).toBeDefined();

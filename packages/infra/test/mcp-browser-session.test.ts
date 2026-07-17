@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   McpBrowserSession,
   McpCdpTransportFactory,
+  type ManagedProcessControl,
   type McpBrowserSessionEvent,
   type McpSpawn,
 } from "../src/browser-operations/mcp-session.js";
@@ -70,6 +71,7 @@ class FakeMcpChild extends EventEmitter {
   readonly stderr = new PassThrough();
   killed = false;
   exitCode: number | null = null;
+  pid?: number;
   private buffer = Buffer.alloc(0);
   private handlers = new Map<string, (params: Record<string, unknown>) => unknown>();
   private nextFailure?: { method: string; error: string };
@@ -364,6 +366,155 @@ describe("US-BROW-016 McpBrowserSession", () => {
     await session.close();
 
     await expect(session.callTool("navigate_page", {})).rejects.toBeInstanceOf(DevToolsProtocolError);
+  });
+});
+
+describe("FIX-1275 managed MCP cleanup is resilient to macOS EPERM", () => {
+  const GROUP_PID = 4242;
+
+  function errno(code: string, message: string): NodeJS.ErrnoException {
+    return Object.assign(new Error(message), { code }) as NodeJS.ErrnoException;
+  }
+
+  interface KillCall {
+    pid: number;
+    signal: NodeJS.Signals | 0;
+  }
+
+  /**
+   * Build a darwin-like process control whose `killGroup(pid, signal)` behaviour
+   * is fully scripted. `onKill` may throw (to simulate ESRCH / EPERM / other) or
+   * return (signal delivered). Timing is compressed so failure paths finish fast.
+   */
+  function fakeControl(onKill: (call: KillCall) => void): {
+    control: ManagedProcessControl;
+    calls: KillCall[];
+  } {
+    const calls: KillCall[] = [];
+    const control: ManagedProcessControl = {
+      platform: "darwin",
+      sleep: () => Promise.resolve(),
+      sigtermGraceMs: 5,
+      sigkillSettleMs: 5,
+      pollIntervalMs: 1,
+      killGroup: (pid, signal) => {
+        calls.push({ pid, signal });
+        onKill({ pid, signal });
+      },
+    };
+    return { control, calls };
+  }
+
+  async function openGroupSession(
+    control: ManagedProcessControl,
+    emit: (event: McpBrowserSessionEvent) => void,
+    runId = "run-cleanup",
+  ): Promise<{ session: McpBrowserSession; child: FakeMcpChild }> {
+    const child = defaultChild();
+    child.pid = GROUP_PID;
+    const session = await McpBrowserSession.open({
+      runId,
+      now,
+      emit,
+      spawn: fakeSpawn(child),
+      processControl: control,
+    });
+    return { session, child };
+  }
+
+  it("does not fail when the managed child has already exited (group is gone / ESRCH)", async () => {
+    const { events, emit } = captureEvents();
+    const { control } = fakeControl(() => {
+      throw errno("ESRCH", "kill ESRCH");
+    });
+    const { session, child } = await openGroupSession(control, emit);
+    child.exitCode = 0; // child exited on its own before close
+
+    await expect(session.close()).resolves.toBeUndefined();
+
+    expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
+    expect(events.some((e) => e.type === "browser:mcp-failed")).toBe(false);
+  });
+
+  it("does not downgrade a completed op when macOS rejects a redundant kill with EPERM", async () => {
+    const { events, emit } = captureEvents();
+    const { control, calls } = fakeControl(() => {
+      // macOS refuses every kill against the already-dead / zombie group.
+      throw errno("EPERM", "kill EPERM");
+    });
+    const { session, child } = await openGroupSession(control, emit, "run-eperm-dead");
+    child.exitCode = 0; // the MCP child already exited; only EPERM residue remains
+
+    await expect(session.close()).resolves.toBeUndefined();
+
+    expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
+    expect(events.some((e) => e.type === "browser:mcp-failed")).toBe(false);
+    // Cleanup still makes a bounded best-effort SIGKILL to reap descendants.
+    expect(calls.some((c) => c.signal === "SIGKILL")).toBe(true);
+  });
+
+  it("reports an explicit failure for a genuinely alive, unkillable group", async () => {
+    const { events, emit } = captureEvents();
+    // signal 0 succeeds (group alive & signalable) and real signals are delivered
+    // but the group never dies — a genuine leak, not an EPERM race.
+    const { control } = fakeControl(() => {
+      /* every kill "succeeds" yet the group stays alive */
+    });
+    const { session, child } = await openGroupSession(control, emit, "run-alive-unkillable");
+    // child.exitCode stays null: the MCP child is still running.
+    expect(child.exitCode).toBeNull();
+
+    await expect(session.close()).rejects.toThrow(/still alive after SIGTERM and SIGKILL/);
+
+    expect(events.some((e) => e.type === "browser:mcp-closed")).toBe(false);
+    const failed = events.find((e) => e.type === "browser:mcp-failed");
+    expect(failed?.type === "browser:mcp-failed" && failed.category).toBe("crash");
+    expect(failed?.type === "browser:mcp-failed" && failed.message).toMatch(/MCP process cleanup failed/);
+  });
+
+  it("does NOT swallow EPERM while the MCP child is still running", async () => {
+    const { events, emit } = captureEvents();
+    const { control } = fakeControl(() => {
+      throw errno("EPERM", "kill EPERM");
+    });
+    const { session, child } = await openGroupSession(control, emit, "run-eperm-alive");
+    // child.exitCode null → EPERM here is "alive & unsignalable", not dead residue.
+    expect(child.exitCode).toBeNull();
+
+    await expect(session.close()).rejects.toThrow(/could not be confirmed terminated.*EPERM.*still running/s);
+
+    expect(events.some((e) => e.type === "browser:mcp-closed")).toBe(false);
+    expect(events.some((e) => e.type === "browser:mcp-failed")).toBe(true);
+  });
+
+  it("does not swallow an arbitrary (non-ESRCH/EPERM) process error", async () => {
+    const { events, emit } = captureEvents();
+    const { control } = fakeControl(() => {
+      throw errno("EINVAL", "kill EINVAL");
+    });
+    const { session } = await openGroupSession(control, emit, "run-arbitrary");
+
+    await expect(session.close()).rejects.toThrow(/MCP process cleanup failed: kill EINVAL/);
+
+    expect(events.some((e) => e.type === "browser:mcp-closed")).toBe(false);
+  });
+
+  it("produces deterministic terminal results when the same snapshot is repeated 3x", async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { events, emit } = captureEvents();
+      const { control } = fakeControl(() => {
+        throw errno("EPERM", "kill EPERM");
+      });
+      const { session, child } = await openGroupSession(control, emit, `run-repeat-${attempt}`);
+      child.exitCode = 0;
+
+      await expect(session.close()).resolves.toBeUndefined();
+      // Idempotent: a second close is a no-op with no extra events.
+      await expect(session.close()).resolves.toBeUndefined();
+
+      expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
+      expect(events.some((e) => e.type === "browser:mcp-failed")).toBe(false);
+    }
   });
 });
 

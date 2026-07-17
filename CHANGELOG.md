@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### 新功能
+- `roll agent disable/enable` 一键把不靠谱的 agent 撤出或放回派工池 (US-AGENT-050) `[loop]`
+  <!-- evidence: .roll/features/agent-scope/US-AGENT-050/latest/US-AGENT-050-report.html -->
+- loop 能进 git submodule 交付：建造、评审、发布全落在子模块自己的分支
+- 子模块项目基本零配置：卡该落哪个子模块、走哪条分支都能自动推断
+- 纯本地项目不开 PR 也能完成交付，诚实记为已交付
+
+### 自动化流水线
+- 只是在标题提了一嘴卡号的文档 PR，不再被误算成那张卡的交付 (FIX-1270) `[loop]`
+  <!-- evidence: .roll/features/delivery-reconciler/FIX-1270/latest/FIX-1270-report.html -->
+- 交付记账收紧：零提交、跳过验收、验收项没通过的一律拿不到"已交付"
+- 中止的 cycle 不再被无关主干历史冒领成交付，对账只认真实开出的 PR
+- 还有改动没提交时不许发布，已提交的部分不再掩护可能丢失的尾巴
+- 已合并却被卡住的卡可经监督恢复救回一次，漏翻的完成状态也会自动补上
+
+### 可见性
+- Kimi builder 干活时你能实时看到它在做什么，不再长时间无声像卡死
+
+### 稳定性
+- macOS 锁屏不再白烧 cycle：需物理截图的卡挂起等解锁，等待不算失败 (FIX-1268) `[loop]`
+- 浏览器操作结束后 MCP 进程真正清干净，清不掉会大声报错 (FIX-1271) `[loop]`
+  <!-- evidence: .roll/features/browser-automation/FIX-1271/latest/FIX-1271-report.html -->
+- 主 checkout 看门狗不再误杀 builder：只认开工后新造成的泄漏，死因如实标注
+- cycle 善后收紧：被杀干净放手、交接残留不误报、恢复不立即再拦、重试不丢上下文
+- 子模块项目的 cycle 不再卡在准备阶段，真实提交也不再被误判零产出
+
 ## v4.716.1 — 2026-07-16
 
 ### 外部行为验证(新能力:真实 smoke 不会被模拟冒充)

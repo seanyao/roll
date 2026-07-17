@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { capturedEvidenceRefs, captureFailures } from "../src/runner/captured-evidence.js";
+import { capturedEvidenceRefs, capturedReceiptRefs, captureFailures } from "../src/runner/captured-evidence.js";
 
 function runDir(manifest: unknown, screenshots: string[] = []): string {
   const dir = mkdtempSync(join(tmpdir(), "roll-evid023-"));
@@ -56,6 +56,37 @@ describe("capturedEvidenceRefs — real harness artifacts only", () => {
   it("an HONEST machine-skip (taken:false + skipped) is NOT bound as a captured ref", () => {
     const dir = runDir({ captures: [{ taken: false, skipped: "no visual surface", label: "x" }] });
     expect(capturedEvidenceRefs(dir)).toEqual([]);
+  });
+});
+
+describe("capturedReceiptRefs — US-EVID-030 v2 CaptureSet receipts (read-only)", () => {
+  it("surfaces BOTH taken physical and rendered receipts, each labelled by source", () => {
+    const dir = runDir({
+      capture_receipts: [
+        { state: "taken", source: "roll-capture-window", captureClass: "physical", surfaceId: "http://localhost:3000/team", screenshotPath: "screenshots/team-physical.png" },
+        { state: "taken", source: "playwright-rendered", captureClass: "rendered", surfaceId: "http://localhost:3000/team", screenshotPath: "screenshots/team-rendered.png" },
+      ],
+    });
+    const refs = capturedReceiptRefs(dir);
+    expect(refs).toEqual([
+      { kind: "screenshot", ref: "screenshots/team-physical.png", label: "Roll Capture · physical · http://localhost:3000/team" },
+      { kind: "screenshot", ref: "screenshots/team-rendered.png", label: "Playwright · rendered · http://localhost:3000/team" },
+    ]);
+  });
+
+  it("excludes non-taken receipts and those without a screenshot path", () => {
+    const dir = runDir({
+      capture_receipts: [
+        { state: "failed", source: "roll-capture-window", captureClass: "physical", surfaceId: "s", reason: "app not running" },
+        { state: "taken", source: "playwright-rendered", captureClass: "rendered", surfaceId: "s" }, // no path
+      ],
+    });
+    expect(capturedReceiptRefs(dir)).toEqual([]);
+  });
+
+  it("no evidence.json / no capture_receipts ⇒ [] (never throws)", () => {
+    expect(capturedReceiptRefs(mkdtempSync(join(tmpdir(), "roll-evid030-none-")))).toEqual([]);
+    expect(capturedReceiptRefs(runDir({ captures: [] }))).toEqual([]);
   });
 });
 

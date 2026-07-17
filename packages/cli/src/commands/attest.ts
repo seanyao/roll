@@ -28,6 +28,7 @@ import {
   BrowserOperationLedger,
   parseBacklog,
   CaptureBridge,
+  CapturePlanner,
   captureReceiptEvidenceRef,
   classifyCaptureReceiptV2,
   renderReport,
@@ -44,7 +45,9 @@ import {
   type AcReportItem,
   type AcStatus,
   type BeforeAfterPair,
+  type CaptureLanePort,
   type CardContext,
+  type DeclaredSurface,
   type DocGapWarning,
   type EvidenceRef,
   type PhysicalCaptureReportEntry,
@@ -140,6 +143,15 @@ export interface AttestDeps {
      * caller). ROLL_NO_SCREENCAP never gates this path.
      */
     receipts?: readonly { intent: CaptureIntentV2; receipt: CaptureReceiptV2 }[];
+    /**
+     * US-EVID-030 — declared visual surfaces + their injected lane executors.
+     * When present, the CapturePlanner PLANS and DISPATCHES every policy-eligible
+     * lane per surface, records all attempts into one CaptureSet via the durable
+     * store, and folds accepted images into the manifest + report. Additive and
+     * default-off (there is no live Capture.app / browser in CI, so lanes are
+     * injected). ROLL_NO_SCREENCAP never gates this planner.
+     */
+    captureSurfaces?: readonly { surface: DeclaredSurface; lanes: readonly CaptureLanePort[] }[];
   };
   /** US-ATTEST-014 — injectable seam for the cycle process archive sources. */
   process?: ProcessReaders;
@@ -1571,6 +1583,35 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
       if (accepted && classifyCaptureReceiptV2(persisted.receipt, intent).verdict === "valid") {
         const ref = captureReceiptEvidenceRef(persisted.receipt);
         if (ref !== null) selfCaptures.push(ref);
+      }
+    }
+  }
+
+  // US-EVID-030 — CapturePlanner: for each declared surface, PLAN and DISPATCH
+  // every policy-eligible lane through injected executors, record all attempts
+  // into one CaptureSet (durable store), and fold accepted images into the
+  // manifest + report. Additive/default-off; ROLL_NO_SCREENCAP never gates it.
+  const captureSurfaces = deps.rollCapture?.captureSurfaces ?? [];
+  if (captureSurfaces.length > 0) {
+    const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
+    const store = new RollCaptureReceiptStore({ root: captureRoot });
+    const planner = new CapturePlanner({ now: () => now });
+    for (const { surface, lanes } of captureSurfaces) {
+      const result = await planner.capture(surface, { storyId, runId: basename(runDir), runDir, projectRoot: projectPath }, lanes, store);
+      for (const p of result.persisted) {
+        captureReceiptFacts.push(
+          captureReceiptFact(p.receipt, p.intent, { runDir, accepted: p.receipt.state === "taken", captureSetId: p.captureSetId }),
+        );
+      }
+      // Attach EVERY retained taken image (physical AND rendered) to the report.
+      for (const t of result.taken) {
+        if (classifyCaptureReceiptV2(t.receipt, t.intent).verdict === "valid" || t.receipt.captureClass === "rendered") {
+          const ref = captureReceiptEvidenceRef(t.receipt);
+          if (ref !== null) selfCaptures.push(ref);
+        }
+      }
+      for (const a of result.attempts) {
+        if (a.state !== "taken") warn(`capture lane ${a.source} (${a.surfaceId}): ${a.state}${a.reason !== undefined ? ` — ${a.reason}` : ""}`);
       }
     }
   }

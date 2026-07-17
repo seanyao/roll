@@ -89,6 +89,7 @@ export * from "./attest/report.js";
 export * from "./attest/report-smoke.js";
 export * from "./attest/evidence-drafter.js";
 export * from "./attest/evidence-classifier.js";
+export * from "./attest/capture-planner.js";
 export * from "./attest/capture-bridge.js";
 export * from "./attest/outward-verification.js";
 export * from "./attest/outward-smoke.js";

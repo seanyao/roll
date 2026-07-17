@@ -60,5 +60,9 @@ packages/*/dist/
 
 # Codex CLI local state (per-machine, not tracked)
 .codex/
+
+# Pi workflow runtime state (per-machine, not tracked)
+.pi/
+
 # Root-level git worktrees (agent/manual, auto-created)
 .worktrees/

@@ -44,6 +44,7 @@ import { planAdversarial, recordExecutionProfile, routerEstMin } from "./executi
 import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 import { latestScreenLockEvent } from "./screen-lock-events.js";
+import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -381,7 +382,9 @@ export async function executeSetupCommand(
       // (see loop-reconcile siblingCancelEvents).
       const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
       const liveClaims = readLeases(storyLeasePath(ports));
-      const activeLeases = projectDeliveryLeases(readLeaseEvents(ports.paths.eventsPath)).filter(
+      const cycleEvents = readLeaseEvents(ports.paths.eventsPath);
+      const recoveryCandidateIds = pendingRecoveryCandidateIds(cycleEvents);
+      const activeLeases = projectDeliveryLeases(cycleEvents).filter(
         // An in_flight lease with no LIVE cycle claim is a ghost (crashed
         // cycle, no cycle:end) — a legal fix-forward retry must stay pickable.
         (l) => {
@@ -420,6 +423,7 @@ export async function executeSetupCommand(
         hasOpenPr,
         hasMergedDelivery: (id) =>
           (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
+        isRecoveryCandidate: (id) => recoveryCandidateIds.has(id),
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),

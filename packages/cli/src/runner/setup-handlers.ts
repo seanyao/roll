@@ -372,14 +372,8 @@ export async function executeSetupCommand(
           `[FIX-1232] cleaned ${deadLeases.length} dead lease(s): ${deadLeases.join(", ")}`,
         );
       }
-      // US-DELIV-005 (one-card-one-lease): consult the delivery leases derived
-      // from the event stream BEFORE picking. A card held in any lease state
-      // (in_flight / awaiting_merge / ci_red / delivered) is skipped — the
-      // default kills same-card fan-out (the ir-pipeline waste: 3 agents, 1
-      // merge, 2 discarded). `--race` (env ROLL_LOOP_RACE=1, set by
-      // `roll loop run-once --race`) is the explicit opt-in for parallel
-      // racing; the FIRST merge atomically supersedes the remaining siblings
-      // (see loop-reconcile siblingCancelEvents).
+      // US-DELIV-005: derive delivery leases before picking; --race permits
+      // parallel work, then the first merge supersedes its siblings.
       const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
       const liveClaims = readLeases(storyLeasePath(ports));
       const cycleEvents = readLeaseEvents(ports.paths.eventsPath);

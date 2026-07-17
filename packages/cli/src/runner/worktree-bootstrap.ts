@@ -47,6 +47,40 @@ export function agentWritableRoots(repoCwd: string, alertsPath: string): string[
   return roots;
 }
 
+/**
+ * E4 — the submodule-aware writable roots. A submodule cycle's agent commits its
+ * TCR work into the SUBMODULE's object store (`<super>/.git/modules/<sub>`),
+ * which is a DIFFERENT git-common-dir than the superproject's (`<super>/.git`).
+ * FIX-326's grant must therefore cover the submodule's common dir too — without
+ * it a sandboxed agent's `git write-tree`/`git commit` in the submodule worktree
+ * silently fails (the very failure FIX-326 fixed, now re-armed for submodules).
+ *
+ * Returns the superproject roots (`.roll` for evidence/backlog writes + alert dir
+ * + superproject git-common-dir) UNION the execution repo's own git-common-dir.
+ * When `execRepoCwd === repoCwd` (no submodule) this is byte-identical to
+ * {@link agentWritableRoots} (the union adds nothing new), so the existing path
+ * is unchanged.
+ */
+export function submoduleAgentWritableRoots(repoCwd: string, execRepoCwd: string, alertsPath: string): string[] {
+  const roots = agentWritableRoots(repoCwd, alertsPath);
+  if (execRepoCwd === repoCwd) return roots;
+  try {
+    const common = execFileSync(
+      "git",
+      ["-C", execRepoCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    if (common !== "") {
+      const real = existsSync(common) ? realpathSync(common) : common;
+      if (!roots.includes(real)) roots.push(real);
+    }
+  } catch {
+    /* best-effort: same fail-loud posture as agentWritableRoots — a probe miss
+       lets the agent's submodule commit fail visibly rather than masking it. */
+  }
+  return roots;
+}
+
 export function persistWorktreeAlerts(worktreePath: string, alertsPath: string, events: EventsPort): void {
   let names: string[];
   try {

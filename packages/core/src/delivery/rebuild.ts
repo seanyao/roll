@@ -837,22 +837,46 @@ function deliveriesHeadPath(projectRoot: string): string {
 function resolveMainRef(
   projectRoot: string,
   exec: ExecPort,
+  integrationBranch: string = DEFAULT_INTEGRATION_BRANCH,
 ): { ref: string; sha: string | undefined } {
   const originRev = exec.run("git", [
-    "-C", projectRoot, "rev-parse", "--verify", "--quiet", "origin/main",
+    "-C", projectRoot, "rev-parse", "--verify", "--quiet", integrationBranch,
   ]);
   if (originRev.code === 0 && originRev.stdout !== "") {
-    return { ref: "origin/main", sha: originRev.stdout.trim() };
+    return { ref: integrationBranch, sha: originRev.stdout.trim() };
   }
 
-  // Fallback: local main (offline, no remote, or test fixtures).
+  // Fallback: the LOCAL branch (offline, no remote, or test fixtures). Derive
+  // the local branch name from the integration ref (strip a leading remote).
+  const localBranch = localBranchOf(integrationBranch);
   const localRev = exec.run("git", [
-    "-C", projectRoot, "rev-parse", "--verify", "--quiet", "main",
+    "-C", projectRoot, "rev-parse", "--verify", "--quiet", localBranch,
   ]);
   const sha = localRev.code === 0 && localRev.stdout !== ""
     ? localRev.stdout.trim()
     : undefined;
-  return { ref: "main", sha };
+  return { ref: localBranch, sha };
+}
+
+/**
+ * E1: the historical hardcoded integration branch. Duplicated from
+ * @roll/infra's DEFAULT_INTEGRATION_BRANCH to keep @roll/core free of an
+ * @roll/infra dependency; the CLI resolves the config value and passes it in.
+ */
+const DEFAULT_INTEGRATION_BRANCH = "origin/main";
+
+/** Split an integration ref into `{ remote, branch }` for a `git fetch`, and
+ *  the local branch name for the offline fallback. `origin/dev` → remote
+ *  `origin`, branch `dev`; a bare `main` → remote `origin`, branch `main`. */
+function fetchTargetOf(integrationBranch: string): { remote: string; branch: string } {
+  const slash = integrationBranch.indexOf("/");
+  if (slash === -1) return { remote: "origin", branch: integrationBranch };
+  return { remote: integrationBranch.slice(0, slash), branch: integrationBranch.slice(slash + 1) };
+}
+
+/** The local branch name an integration ref maps to (drops the remote prefix). */
+function localBranchOf(integrationBranch: string): string {
+  return fetchTargetOf(integrationBranch).branch;
 }
 
 /**
@@ -889,6 +913,7 @@ export function ensureDeliveriesFresh(
   projectRoot: string,
   freshness: FreshnessPort,
   exec: ExecPort,
+  integrationBranch: string = DEFAULT_INTEGRATION_BRANCH,
 ): DeliveryRecord[] {
   const runsPath = join(projectRoot, ".roll", "loop", RUNS_FILE);
   const delPath = deliveriesPath(projectRoot);
@@ -896,13 +921,16 @@ export function ensureDeliveriesFresh(
 
   // ── 1. Best-effort refresh the remote ref (FIX-905) ──────────────────────
   // Cheap, non-fatal: a failure (offline / no remote / no creds) just leaves
-  // the existing origin/main baseline in place, and resolveMainRef will fall
-  // back to local `main` if origin/main never existed. We do NOT reset the
-  // worktree — that is the loop preflight's job; here we only need the ref.
-  exec.run("git", ["-C", projectRoot, "fetch", "origin", "main", "--quiet"]);
+  // the existing integration-branch baseline in place, and resolveMainRef will
+  // fall back to the local branch if the remote ref never existed. We do NOT
+  // reset the worktree — that is the loop preflight's job; here we only need
+  // the ref. E1: the remote+branch are derived from the configured integration
+  // branch (default origin/main → the fetch stays `fetch origin main`).
+  const { remote: fetchRemote, branch: fetchBranch } = fetchTargetOf(integrationBranch);
+  exec.run("git", ["-C", projectRoot, "fetch", fetchRemote, fetchBranch, "--quiet"]);
 
   // ── 2. Resolve the authoritative main ref + its current SHA ──────────────
-  const { ref: mainRef, sha: mainSha } = resolveMainRef(projectRoot, exec);
+  const { ref: mainRef, sha: mainSha } = resolveMainRef(projectRoot, exec, integrationBranch);
 
   // ── 3. Staleness gate ────────────────────────────────────────────────────
   const runsMtime = freshness.mtimeMs(runsPath) ?? 0;

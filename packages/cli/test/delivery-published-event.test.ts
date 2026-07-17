@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { CycleContext } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
+import { landLocalDelivery, submoduleWorktreePath, worktreeAddInSubmodule } from "@roll/infra";
 import type { Ports } from "../src/runner/ports.js";
 import { executeCommand } from "../src/runner/executor.js";
 
@@ -94,6 +95,9 @@ function makePorts(runtimeDir: string, repoCwd: string, publishPlan: () => Promi
       branchMergedIntoMain: vi.fn(async () => false),
       branchCleanlyRebasesOntoMain: vi.fn(async () => true),
       resetWorktreeHard: vi.fn(async () => ({ code: 0 })),
+      // E3: the real infra landing over the real temp repo/worktree, wrapped in a
+      // spy so tests can assert it was (or was not) called.
+      landLocalDelivery: vi.fn(async (r: string, wt: string, ib?: string) => landLocalDelivery(r, wt, ib)),
     },
     events: {
       ensureEventFiles: vi.fn(),
@@ -171,6 +175,230 @@ describe("US-DELIV-001 — delivery:published emission", () => {
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── E3: local-only delivery mode (publish_mode: local) ──────────────────────
+
+/** Set publish_mode in the repo's project config. */
+function setPublishMode(root: string, mode: string): void {
+  mkdirSync(join(root, ".roll"), { recursive: true });
+  writeFileSync(join(root, ".roll", "local.yaml"), `publish_mode: ${mode}\n`);
+}
+
+/** Create a REAL detached cycle worktree at <root>/wt with one cycle commit,
+ *  branched off main. Returns the cycle HEAD sha. */
+function makeCycleWorktree(root: string): string {
+  const wt = join(root, "wt");
+  git(root, "worktree", "add", "--detach", wt, "main");
+  writeFileSync(join(wt, "feature.txt"), "cycle work\n");
+  git(wt, "add", "-A");
+  git(wt, "commit", "-m", "tcr: cycle work");
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" }).trim();
+}
+
+describe("US-E3 — local-only delivery (publish_mode: local)", () => {
+  it("gate passes → lands locally, emits delivery:reconciled{delivered_local}, NO push / NO gh, status 0", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        setPublishMode(root, "local");
+        const cycleSha = makeCycleWorktree(root);
+        const mainBefore = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: root, encoding: "utf8" }).trim();
+        expect(mainBefore).not.toBe(cycleSha);
+
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+
+        // cycle success
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+
+        // NO remote work
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(ports.github.runPublishPlan).not.toHaveBeenCalled();
+        expect(ports.github.repoSlug).not.toHaveBeenCalled();
+        // NO awaiting_merge (that is the REMOTE fact) — no PR was opened
+        expect(events.filter((e) => e.type === "delivery:published")).toHaveLength(0);
+
+        // the local integration branch now contains the cycle commit
+        const mainAfter = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: root, encoding: "utf8" }).trim();
+        expect(mainAfter).toBe(cycleSha);
+        expect(ports.git.landLocalDelivery).toHaveBeenCalledTimes(1);
+
+        // delivery:reconciled{delivered_local} with the landing sha
+        const reconciled = events.filter((e) => e.type === "delivery:reconciled");
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0]).toMatchObject({
+          type: "delivery:reconciled",
+          cycleId: "20260712-000000-1",
+          storyId: "US-DELIV-001",
+          state: "delivered_local",
+          mergedBy: "runner",
+          mergeCommit: cycleSha,
+        });
+
+        // the evidence gate STILL ran (earned)
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "earned" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("gate FAILS → blocked_no_evidence, NO push, NO local landing", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        setPublishMode(root, "local");
+        makeCycleWorktree(root);
+        // remove ALL acceptance evidence so the evidence gate blocks (report +
+        // ac-map both gone → attestReportPresent:false, acMapPresent:false).
+        // initRepoWithEvidence commits .roll, so the detached worktree carries a
+        // copy too — clear the card from BOTH evidence roots (worktree + repo).
+        for (const base of [root, join(root, "wt")]) {
+          rmSync(join(base, ".roll", "features", "delivery-reconciler", "US-DELIV-001"), { recursive: true, force: true });
+        }
+
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+
+        // blocked: status 1 + gateBlocked (same as remote gate-block)
+        expect(r.event).toMatchObject({ type: "published", result: { status: 1, gateBlocked: true } });
+        // no landing, no push, no reconciled credit
+        expect(ports.git.landLocalDelivery).not.toHaveBeenCalled();
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(events.filter((e) => e.type === "delivery:reconciled")).toHaveLength(0);
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "blocked" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("publish_mode remote (default) still opens a PR — zero regression", async () => {
+    const { root, runtimeDir } = initRepoWithEvidence();
+    try {
+      await withCleanGitEnv(async () => {
+        // no publish_mode config → default remote
+        const { ports, events } = makePorts(runtimeDir, root, async () => ({ status: 0 as const, prUrl: "https://github.com/o/r/pull/42", ok: true }));
+        const r = await executeCommand({ kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false }, ports, makeCtx());
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+        expect(ports.github.runPublishPlan).toHaveBeenCalledTimes(1);
+        expect(ports.git.landLocalDelivery).not.toHaveBeenCalled();
+        expect(events.filter((e) => e.type === "delivery:published")).toHaveLength(1);
+        expect(events.filter((e) => e.type === "delivery:reconciled")).toHaveLength(0);
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── E2: submodule-aware local delivery (target_submodule + publish_mode:local) ─
+
+/**
+ * Build a superproject (with acceptance evidence + publish_mode:local) that
+ * embeds a real git submodule `sub` on a local integration branch
+ * `feat/contractor2.0`. Returns the pieces the e2e assertion needs.
+ */
+function initSuperprojectWithSubmoduleCycle(): {
+  root: string;
+  runtimeDir: string;
+  submoduleName: string;
+  submodulePath: string;
+  cycleWtRoot: string;
+} {
+  const subUpstream = mkdtempSync(join(tmpdir(), "roll-e2-subup-"));
+  git(subUpstream, "init", "-b", "main");
+  git(subUpstream, "config", "user.email", "roll-test@example.test");
+  git(subUpstream, "config", "user.name", "Roll Test");
+  git(subUpstream, "config", "core.hooksPath", "");
+  writeFileSync(join(subUpstream, "sub-file.txt"), "sub base\n");
+  git(subUpstream, "add", "-A");
+  git(subUpstream, "commit", "-m", "sub base");
+  git(subUpstream, "branch", "feat/contractor2.0");
+
+  const { root, runtimeDir } = initRepoWithEvidence();
+  setPublishMode(root, "local");
+  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", subUpstream, "sub"], { cwd: root });
+  const submoduleName = "sub";
+  const submodulePath = join(root, submoduleName);
+  git(submodulePath, "config", "user.email", "roll-test@example.test");
+  git(submodulePath, "config", "user.name", "Roll Test");
+  git(submodulePath, "branch", "feat/contractor2.0", "origin/feat/contractor2.0");
+  // The submodule's OWN integration branch (E1 config on the SUBMODULE tree).
+  mkdirSync(join(submodulePath, ".roll"), { recursive: true });
+  writeFileSync(join(submodulePath, ".roll", "local.yaml"), "integration_branch: feat/contractor2.0\n");
+  git(root, "add", "-A");
+  git(root, "commit", "-m", "add submodule sub");
+
+  const cycleWtRoot = join(mkdtempSync(join(tmpdir(), "roll-e2-cyc-")), "cycle");
+  return { root, runtimeDir, submoduleName, submodulePath, cycleWtRoot };
+}
+
+describe("US-E2 — submodule-aware local delivery", () => {
+  it("lands on the SUBMODULE's local integration branch; the real submodule checkout sees it advance; no push", async () => {
+    const { root, runtimeDir, submoduleName, submodulePath, cycleWtRoot } = initSuperprojectWithSubmoduleCycle();
+    try {
+      await withCleanGitEnv(async () => {
+        // Build the submodule cycle worktree via the E2 infra primitive.
+        const add = await worktreeAddInSubmodule(root, submoduleName, cycleWtRoot, "feat/contractor2.0");
+        expect(add.code).toBe(0);
+        const subWt = submoduleWorktreePath(cycleWtRoot, submoduleName);
+        writeFileSync(join(subWt, "cycle-work.txt"), "cycle in submodule\n");
+        git(subWt, "add", "-A");
+        git(subWt, "commit", "-m", "tcr: cycle work in submodule");
+        const cycleSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: subWt, encoding: "utf8" }).trim();
+
+        const branchBefore = execFileSync("git", ["rev-parse", "refs/heads/feat/contractor2.0"], { cwd: submodulePath, encoding: "utf8" }).trim();
+        expect(branchBefore).not.toBe(cycleSha);
+
+        // Ports: repoCwd is the SUPERPROJECT; worktreePath is the canonical cycle
+        // path. Delivery redirects into the submodule from ctx.targetSubmodule.
+        const { ports, events } = makePorts(runtimeDir, root, async () => {
+          throw new Error("runPublishPlan must not run in local mode");
+        });
+        (ports as { paths: { worktreePath: string } }).paths.worktreePath = cycleWtRoot;
+
+        const ctx = { ...makeCtx(), targetSubmodule: submoduleName } as CycleContext;
+        const r = await executeCommand(
+          { kind: "publish_pr", branch: "loop/cycle-20260712-000000-1", docOnly: false },
+          ports,
+          ctx,
+        );
+
+        expect(r.event).toMatchObject({ type: "published", result: { status: 0 } });
+        expect(ports.git.push).not.toHaveBeenCalled();
+        expect(ports.github.runPublishPlan).not.toHaveBeenCalled();
+
+        // The SUBMODULE's local integration branch advanced to the cycle commit —
+        // the user's REAL submodule checkout (git -C <super>/<sub>) sees it.
+        const branchAfter = execFileSync("git", ["rev-parse", "refs/heads/feat/contractor2.0"], { cwd: submodulePath, encoding: "utf8" }).trim();
+        expect(branchAfter).toBe(cycleSha);
+
+        const reconciled = events.filter((e) => e.type === "delivery:reconciled");
+        expect(reconciled).toHaveLength(1);
+        expect(reconciled[0]).toMatchObject({
+          type: "delivery:reconciled",
+          state: "delivered_local",
+          mergeCommit: cycleSha,
+        });
+        const gate = events.filter((e) => e.type === "delivery:evidence_gate");
+        expect(gate).toHaveLength(1);
+        expect(gate[0]).toMatchObject({ verdict: "earned" });
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(cycleWtRoot, { recursive: true, force: true });
     }
   });
 });

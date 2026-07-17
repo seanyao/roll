@@ -15,6 +15,7 @@
  * data-complete form.
  */
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi, buildExecutionCastProjection, type ExecutionCastRow } from "@roll/core";
+import { resolveIntegrationBranch } from "@roll/infra";
 import { type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type DeliveryLadder, parseEventLine, type StoryEvidenceFlags, type BrowserOperationsTruth, type BrowserOperationsTimeline } from "@roll/spec";
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -2341,9 +2342,12 @@ export function collectGitDossierFacts(projectPath: string): GitDossierFacts | n
 }
 
 function gitDossierLogRef(projectPath: string): string {
+  // E1: the dossier's git-log ref is the project's configured integration branch
+  // (default origin/main); falls back to HEAD when the ref does not resolve.
+  const integrationBranch = resolveIntegrationBranch(projectPath);
   try {
-    execGit(projectPath, ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"]);
-    return "origin/main";
+    execGit(projectPath, ["rev-parse", "--verify", "--quiet", `${integrationBranch}^{commit}`]);
+    return integrationBranch;
   } catch {
     return "HEAD";
   }

@@ -29,6 +29,7 @@ import {
   captureFromMarker,
   fetchRemoteBranch,
   ghRepoSlug,
+  landLocalDelivery,
   openEvidenceFrame,
   prListOpenTitles,
   prViewMergeInfo,
@@ -37,9 +38,12 @@ import {
   remoteUrl,
   runPublishPlan,
   systemClock,
+  resolveIntegrationBranch,
   worktreeAdd,
+  worktreeAddInSubmodule,
   worktreeFetchOrigin,
   worktreeRemove,
+  worktreeRemoveInSubmodule,
   worktreeResetHard,
   worktreeSubmoduleInit,
   writeHeartbeat,
@@ -167,7 +171,7 @@ export function nodePorts(opts: {
   const deliveryTruth = (): Map<string, StoryDeliveryTruth> => {
     if (deliveryTruthCache === undefined) {
       try {
-        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort);
+        const deliveries = ensureDeliveriesFresh(opts.repoCwd, deliveryFreshness, nodeExecPort, resolveIntegrationBranch(opts.repoCwd));
         // Derive `delivered` per story via the single deterministic query so the
         // verdict matches `roll truth query` exactly (FIX-906: one truth, all
         // consumers). Group by storyId first to avoid re-querying the same id.
@@ -215,6 +219,14 @@ export function nodePorts(opts: {
       async worktreeAdd(repoCwd, path, branch, base) {
         return worktreeAdd(repoCwd, path, branch, base);
       },
+      async worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base) {
+        const r = await worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base);
+        return { code: r.code, stderr: r.stderr };
+      },
+      async worktreeRemoveInSubmodule(superprojectCwd, submoduleName, submoduleWorktreePath) {
+        const r = await worktreeRemoveInSubmodule(superprojectCwd, submoduleName, submoduleWorktreePath);
+        return { code: r.code };
+      },
       async worktreeSubmoduleInit(worktreePath) {
         return worktreeSubmoduleInit(worktreePath);
       },
@@ -224,8 +236,11 @@ export function nodePorts(opts: {
       async push(repoCwd, branch) {
         return gitPush(repoCwd, branch);
       },
-      async commitsAhead(worktreeCwd) {
-        const r = await execFileAsync("git", ["rev-list", "--count", "origin/main..HEAD"], {
+      async commitsAhead(worktreeCwd, baseRef = "origin/main") {
+        // E8: count ahead of the caller's integration branch (defaults to the
+        // historical origin/main). A submodule cycle has no origin/main, so the
+        // observer callers pass resolveIntegrationBranch(execRepoCwd) instead.
+        const r = await execFileAsync("git", ["rev-list", "--count", `${baseRef}..HEAD`], {
           cwd: worktreeCwd,
           encoding: "utf8",
         }).catch(() => ({ stdout: "0" }));
@@ -243,12 +258,14 @@ export function nodePorts(opts: {
       async rescueLeaked(repoCwd, refName) {
         return rescueLeakedMain(repoCwd, refName);
       },
-      async tcrCount(worktreeCwd) {
-        // v2口径 (bin/roll:8724): git log --oneline origin/main..HEAD | grep -c ' tcr:'.
+      async tcrCount(worktreeCwd, baseRef = "origin/main") {
+        // v2口径 (bin/roll:8724): git log --oneline <baseRef>..HEAD | grep -c ' tcr:'.
+        // E8: baseRef defaults to origin/main; a submodule cycle passes the
+        // submodule's integration branch (no origin/main there).
         // FIX-1244: a git failure (missing/stale ref, gone worktree) means the
         // count is UNKNOWN — return undefined so callers never misread it as a
         // real zero (the zero-TCR self-heal gate consumes this).
-        const r = await execFileAsync("git", ["log", "--oneline", "origin/main..HEAD"], {
+        const r = await execFileAsync("git", ["log", "--oneline", `${baseRef}..HEAD`], {
           cwd: worktreeCwd,
           encoding: "utf8",
         }).catch(() => undefined);
@@ -257,12 +274,14 @@ export function nodePorts(opts: {
           .split("\n")
           .filter((l) => l.includes(" tcr:")).length;
       },
-      async recentCommits(worktreeCwd) {
+      async recentCommits(worktreeCwd, baseRef = "origin/main") {
         // The runner's OWN git observation — oldest-first so observeCommits()
         // appends events in chronological order. %ct = committer epoch seconds.
+        // E8: baseRef defaults to origin/main; a submodule cycle passes the
+        // submodule's integration branch so the observer sees the real commits.
         const r = await execFileAsync(
           "git",
-          ["log", "--reverse", "--format=%H%x09%ct%x09%s", "origin/main..HEAD"],
+          ["log", "--reverse", "--format=%H%x09%ct%x09%s", `${baseRef}..HEAD`],
           { cwd: worktreeCwd, encoding: "utf8" },
         ).catch(() => ({ stdout: "" }));
         const out: ObservedCommit[] = [];
@@ -283,15 +302,18 @@ export function nodePorts(opts: {
       async fetchRemoteBranch(repoCwd, branch) {
         return fetchRemoteBranch(repoCwd, branch);
       },
-      async branchMergedIntoMain(repoCwd, branch) {
-        return branchMergedIntoMain(repoCwd, branch);
+      async branchMergedIntoMain(repoCwd, branch, integrationBranch) {
+        return branchMergedIntoMain(repoCwd, branch, integrationBranch);
       },
-      async branchCleanlyRebasesOntoMain(repoCwd, branch) {
-        return branchCleanlyRebasesOntoMain(repoCwd, branch);
+      async branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch) {
+        return branchCleanlyRebasesOntoMain(repoCwd, branch, integrationBranch);
       },
       async resetWorktreeHard(worktreeCwd, ref, branch) {
         const r = await worktreeResetHard(worktreeCwd, ref, branch);
         return { code: r.code };
+      },
+      async landLocalDelivery(repoCwd, worktreeCwd, integrationBranch) {
+        return landLocalDelivery(repoCwd, worktreeCwd, integrationBranch);
       },
     },
     github: {

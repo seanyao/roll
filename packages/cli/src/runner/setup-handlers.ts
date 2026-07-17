@@ -24,11 +24,12 @@ import {
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
-import { isScreenLocked } from "@roll/infra";
+import { isScreenLocked, resolveIntegrationBranch } from "@roll/infra";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
+import { createSubmoduleWorktreeIfDeclared } from "./submodule-worktree.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { eventTs } from "./runner-time.js";
 import { readSkipCards } from "./skip-cards.js";
@@ -43,6 +44,7 @@ import { planAdversarial, recordExecutionProfile, routerEstMin } from "./executi
 import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 import { latestScreenLockEvent } from "./screen-lock-events.js";
+import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -229,16 +231,12 @@ export async function executeSetupCommand(
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
     case "create_worktree": {
-      // Always base the cycle worktree on origin/main (the I12 fresh-context
-      // default). RESUME-PRIOR-WORK does NOT happen here: the picker reads the
-      // backlog INSIDE the worktree (FIX-198/FIX-204C), so the story id is still
-      // UNDEFINED at create_worktree time — resolveResumeBase would early-return
-      // origin/main with no alert and resume could never engage (the FIX-284
-      // bug). The resume decision is deferred to `resume_worktree`, which fires
-      // AFTER pick_story with the real story id and re-points this worktree onto a
-      // resumable un-merged branch when one exists. Keying purely on the runs
-      // ledger + git keeps it uniform for every agent (normalize-agents thesis).
-      const base = "origin/main";
+      // RESUME-PRIOR-WORK does NOT happen here: the story id is UNDEFINED at
+      // create_worktree (the picker reads the backlog INSIDE the worktree,
+      // FIX-198/FIX-204C), so resume/submodule decisions are deferred to the
+      // post-pick steps (resume_worktree + the E2 submodule worktree) — FIX-284.
+      // E1: base = configured integration branch (default origin/main → unchanged).
+      const base = resolveIntegrationBranch(ports.repoCwd);
       const r = await ports.git.worktreeAdd(
         ports.repoCwd,
         ports.paths.worktreePath,
@@ -374,17 +372,13 @@ export async function executeSetupCommand(
           `[FIX-1232] cleaned ${deadLeases.length} dead lease(s): ${deadLeases.join(", ")}`,
         );
       }
-      // US-DELIV-005 (one-card-one-lease): consult the delivery leases derived
-      // from the event stream BEFORE picking. A card held in any lease state
-      // (in_flight / awaiting_merge / ci_red / delivered) is skipped — the
-      // default kills same-card fan-out (the ir-pipeline waste: 3 agents, 1
-      // merge, 2 discarded). `--race` (env ROLL_LOOP_RACE=1, set by
-      // `roll loop run-once --race`) is the explicit opt-in for parallel
-      // racing; the FIRST merge atomically supersedes the remaining siblings
-      // (see loop-reconcile siblingCancelEvents).
+      // US-DELIV-005: derive delivery leases before picking; --race permits
+      // parallel work, then the first merge supersedes its siblings.
       const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
       const liveClaims = readLeases(storyLeasePath(ports));
-      const activeLeases = projectDeliveryLeases(readLeaseEvents(ports.paths.eventsPath)).filter(
+      const cycleEvents = readLeaseEvents(ports.paths.eventsPath);
+      const recoveryCandidateIds = pendingRecoveryCandidateIds(cycleEvents);
+      const activeLeases = projectDeliveryLeases(cycleEvents).filter(
         // An in_flight lease with no LIVE cycle claim is a ghost (crashed
         // cycle, no cycle:end) — a legal fix-forward retry must stay pickable.
         (l) => {
@@ -423,6 +417,7 @@ export async function executeSetupCommand(
         hasOpenPr,
         hasMergedDelivery: (id) =>
           (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
+        isRecoveryCandidate: (id) => recoveryCandidateIds.has(id),
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
@@ -576,11 +571,15 @@ export async function executeSetupCommand(
         runDir: evidenceRunDir,
         ts: eventTs(ports),
       });
+      // E2: post-pick submodule worktree (fail-loud) — see submodule-worktree.ts.
+      const sub = await createSubmoduleWorktreeIfDeclared(ports, ctx, story);
+      if (sub.failed) return { event: { type: "worktree_failed" } };
       return {
         event: { type: "story_picked", storyId: story.id },
         ctxPatch: {
           evidenceRunDir,
           ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
+          ...(sub.targetSubmodule !== undefined ? { targetSubmodule: sub.targetSubmodule } : {}),
         },
       };
     }
@@ -605,8 +604,10 @@ export async function executeSetupCommand(
     // worktree carries the resume tree by the time the agent spawns. Best-effort: a
     // reset failure leaves the worktree on origin/main rather than topple the cycle.
     case "resume_worktree": {
+      // E1: resolveResumeBase returns the configured integration branch verbatim
+      // when there is no resumable prior branch → that equality is the no-op.
       const base = await resolveResumeBase(ports, cmd.storyId);
-      if (base === "origin/main" || base.trim() === "") return {};
+      if (base === resolveIntegrationBranch(ports.repoCwd) || base.trim() === "") return {};
       // `origin/<branch>` → derive the bare branch name for the worktree-local
       // fetch (the resume probes fetched it into the MAIN tree, not this worktree).
       const branch = base.startsWith("origin/") ? base.slice("origin/".length) : undefined;

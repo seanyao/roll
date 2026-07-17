@@ -226,7 +226,11 @@ export type RollEvent =
   | { type: "delivery:abandoned"; cycleId: string; storyId: string; reason: "pr_closed_unmerged"; ts: number }
   // Reconcile-from-main backfill (emitter lands with US-DELIV-002): a strong
   // signal (PR-state / patch-id) confirmed the cycle's change on main.
-  | { type: "delivery:reconciled"; cycleId: string; storyId: string; state: "delivered" | "delivered_external" | "superseded"; mergedBy: "runner" | "external"; mergeCommit: string; signal: "pr_state" | "patch_id" | "backlog_attest"; patchId?: string; ts: number }
+  // E3: `delivered_local` — a local-only delivery landed the cycle on the LOCAL
+  // integration branch (no push / no PR / no remote merge). `mergedBy:"runner"`,
+  // `mergeCommit` = the local landing SHA, `signal:"patch_id"` (the local commit
+  // identity, not a PR state).
+  | { type: "delivery:reconciled"; cycleId: string; storyId: string; state: "delivered" | "delivered_external" | "delivered_local" | "superseded"; mergedBy: "runner" | "external"; mergeCommit: string; signal: "pr_state" | "patch_id" | "backlog_attest"; patchId?: string; ts: number }
   // Alert (BC2/BC6)
   | { type: "alert:notify"; channel: string; message: string; ts: number }
   // Supervisor journal (US-OBS-048) — structured narrative of decisions,
@@ -382,9 +386,9 @@ export type RollEvent =
   // the same isolate-from-counter + PAUSE(auth)/breathe(network) path — one block
   // taxonomy for builder/reviewer/scorer (no new precheck, no probe, no cache).
   | { type: "agent:blocked"; cycleId: string; agent: string; cause: BlockCause; stage: "build" | "review" | "score"; detail: string; ts: number }
-  | { type: "rig:suspended"; cycleId?: string; agent: string; cause: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt: number; ts: number }
+  | { type: "rig:suspended"; cycleId?: string; agent: string; cause: "quota" | "auth" | "network" | "agent_stall" | "main_checkout_leak"; detail?: string; nextProbeAt: number; ts: number }
   | { type: "rig:recovered"; cycleId?: string; agent: string; detail?: string; ts: number }
-  | { type: "rig:probe"; cycleId?: string; agent: string; outcome: "live" | "still_suspended"; cause?: "quota" | "auth" | "network" | "agent_stall"; detail?: string; nextProbeAt?: number; ts: number }
+  | { type: "rig:probe"; cycleId?: string; agent: string; outcome: "live" | "still_suspended"; cause?: "quota" | "auth" | "network" | "agent_stall" | "main_checkout_leak"; detail?: string; nextProbeAt?: number; ts: number }
   // FIX-930 — failure-driven agent swap on a zero-TCR/stalled cycle: the loop
   // re-marks the story Todo and routes the NEXT untried agent (excluding the one
   // that just gave up). `attempt` is the 1-based self-heal attempt for the story.
@@ -464,6 +468,11 @@ export type RollEvent =
   // Evidence lifecycle (US-EVID-001) — the runner opened the per-cycle evidence
   // frame before spawning an agent, so later phases have a durable run dir.
   | { type: "evidence:frame-opened"; cycleId: string; storyId: string; runDir: string; ts: number }
+  // E2 (submodule-aware delivery): the picked story declared a target submodule
+  // and the cycle worktree was created INSIDE that submodule (on `base`, the
+  // submodule's integration branch). Observability of WHERE this cycle's work +
+  // delivery land — the superproject vs a named submodule.
+  | { type: "worktree:submodule"; cycleId: string; storyId: string; submodule: string; base: string; ts: number }
   // FIX-1058 — evidence-repair recovery for green PRs missing acceptance reports.
   // The repair is scoped: it only generates delivery evidence (ac-map + attest
   // report); it must not modify product code unless the evidence proves the

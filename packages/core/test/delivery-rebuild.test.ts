@@ -1954,6 +1954,45 @@ describe("ensureDeliveriesFresh — FIX-905: origin/main is authoritative", () =
     expect(freshness._files.get(HEAD)?.text.trim()).toBe(ORIGIN_SHA);
   });
 
+  it("E1: reads merges from a configured integration branch (fetch + rev-parse + log all target it)", () => {
+    const seen: string[] = [];
+    const freshness = fakeFreshnessPort({
+      [RUNS]: { text: [
+        JSON.stringify({ story_id: "FIX-903", cycle_id: "c1", status: "built", outcome: "published_pending_merge", pr_number: 898, ts: "2026-06-21T10:00:00Z" }),
+      ].join("\n"), mtime: 2000 },
+    });
+    const responses: Record<string, ExecResult> = {
+      // The integration branch is origin/dev, not origin/main.
+      [`-C ${PROJ} rev-parse --verify --quiet origin/dev`]: { stdout: ORIGIN_SHA, code: 0 },
+      [`-C ${PROJ} log --first-parent origin/dev --merges --format=%H %ct %s`]: {
+        stdout: "cfaaa33 1718885251 Merge pull request #898 from branch/fix-903",
+        code: 0,
+      },
+      [`-C ${PROJ} log --first-parent origin/dev --format=%H %ct %s`]: { stdout: "", code: 0 },
+      [`-C ${PROJ} remote get-url origin`]: { stdout: "git@github.com:seanyao/roll.git", code: 0 },
+    };
+    const exec: ExecPort = {
+      run(_tool, argv) {
+        const key = argv.join(" ");
+        seen.push(key);
+        if (key in responses) return responses[key]!;
+        const legacyKey = key.replace("--format=%x1e%H%x1f%ct%x1f%B", "--format=%H %ct %s");
+        if (legacyKey in responses) return responses[legacyKey]!;
+        return { stdout: "", code: 128 };
+      },
+    };
+
+    const result = ensureDeliveriesFresh(PROJ, freshness, exec, "origin/dev");
+    expect(result).toHaveLength(1);
+    expect(result[0].storyId).toBe("FIX-903");
+    expect(result[0].lifecycleState).toBe("done");
+    // The preflight fetch derives remote+branch from the integration branch.
+    expect(seen).toContain(`-C ${PROJ} fetch origin dev --quiet`);
+    // The rev-parse verify targets the configured branch, never origin/main.
+    expect(seen).toContain(`-C ${PROJ} rev-parse --verify --quiet origin/dev`);
+    expect(seen.some((s) => s.includes("origin/main"))).toBe(false);
+  });
+
   it("FIX-925/FIX-1266: two prNumber=0 story-only merges are collected, but neither completes a card", () => {
     // FIX-925 regression: pass (a) can parse a no-PR story-only merge and record
     // its key; pass (b) must still keep later no-PR story commits by SHA, not

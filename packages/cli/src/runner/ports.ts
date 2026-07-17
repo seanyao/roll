@@ -20,6 +20,30 @@ export interface GitPort {
   fetchOrigin(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** `_worktree_create` — STRICT add (exit code propagated). */
   worktreeAdd(repoCwd: string, path: string, branch: string, base: string): Promise<{ code: number }>;
+  /** E2: create the cycle worktree ON a git SUBMODULE of the superproject
+   *  (`git -C <super>/<sub> worktree add --detach <cycleWorktreePath>/<sub> <base>`)
+   *  so it shares the submodule's object store/refs. Validates the submodule is
+   *  declared in `.gitmodules` and initialized; STRICT — a non-zero `code` (with
+   *  a diagnostic `stderr`) fails the worktree setup honestly rather than falling
+   *  back to the superproject. Used only when the picked story has a
+   *  target_submodule; non-submodule stories never call it. */
+  worktreeAddInSubmodule(
+    superprojectCwd: string,
+    submoduleName: string,
+    cycleWorktreePath: string,
+    base: string,
+  ): Promise<{ code: number; stderr: string }>;
+  /** E5: tolerant teardown of the SIBLING submodule cycle worktree created by
+   *  worktreeAddInSubmodule. Runs `git -C <super>/<sub> worktree remove --force
+   *  <submoduleWorktreePath>` + `worktree prune` + rm the dir. Best-effort —
+   *  always code 0, so a cleanup blip never topples the cycle's terminal path.
+   *  Called only when the cycle has a target_submodule; superproject-only cycles
+   *  never invoke it. */
+  worktreeRemoveInSubmodule(
+    superprojectCwd: string,
+    submoduleName: string,
+    submoduleWorktreePath: string,
+  ): Promise<{ code: number }>;
   /** FIX-302: `_worktree_submodule_init` — `git submodule update --init
    *  --recursive` in the worktree. A fresh git worktree carries NO submodule
    *  contents (notably `skills/` is empty), so the full test can never run.
@@ -29,39 +53,60 @@ export interface GitPort {
   worktreeRemove(repoCwd: string, path: string, branch: string, bundleUnpushed?: boolean): Promise<{ code: number }>;
   /** `git push origin <branch>` (orphan push safety net). */
   push(repoCwd: string, branch: string): Promise<{ code: number }>;
-  /** `git rev-list --count origin/main..HEAD` in the worktree → commits ahead. */
-  commitsAhead(worktreeCwd: string): Promise<number>;
+  /** `git rev-list --count <baseRef>..HEAD` in the worktree → commits ahead.
+   *  E8: `baseRef` defaults to `origin/main` (byte-identical to the historical
+   *  hardcode). A submodule cycle passes the SUBMODULE's integration branch
+   *  ({@link resolveIntegrationBranch}(execRepoCwd)) — a submodule has no
+   *  `origin/main`, so the hardcode fataled → false zero. */
+  commitsAhead(worktreeCwd: string, baseRef?: string): Promise<number>;
   /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
   mainAhead(repoCwd: string): Promise<number>;
   /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),
    *  then reset main to origin/main. Returns the rescued SHA and exit code. */
   rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
-  /** FIX-208: count `tcr:` commits ahead of origin/main (v2口径:
-   *  `git log --oneline origin/main..HEAD | grep -c ' tcr:'`) in the worktree.
+  /** FIX-208: count `tcr:` commits ahead of the integration branch (v2口径:
+   *  `git log --oneline <baseRef>..HEAD | grep -c ' tcr:'`) in the worktree.
+   *  E8: `baseRef` defaults to `origin/main` (byte-identical to the historical
+   *  hardcode); a submodule cycle passes the submodule's integration branch.
    *  FIX-1244: `undefined` = could NOT determine (git error / missing ref) —
    *  callers must not collapse unknown into 0 (a false zero orphans real work). */
-  tcrCount(worktreeCwd: string): Promise<number | undefined>;
+  tcrCount(worktreeCwd: string, baseRef?: string): Promise<number | undefined>;
   /** US-LOOP-076: the runner's OWN observation of commits on the cycle branch —
-   *  `git log --format=%H%x09%ct%x09%s origin/main..HEAD` (oldest-first) in the
+   *  `git log --format=%H%x09%ct%x09%s <baseRef>..HEAD` (oldest-first) in the
    *  worktree. Feeds the agent-agnostic cycle observer so the build/TCR phase
    *  emits standard signals for EVERY agent, never by parsing agent stdout.
+   *  E8: `baseRef` defaults to `origin/main`; a submodule cycle passes the
+   *  submodule's integration branch (else the observer sees zero commits and
+   *  emits no cycle:tcr events).
    *  LENIENT: returns [] on any git error (observation must never fail a cycle). */
-  recentCommits(worktreeCwd: string): Promise<ObservedCommit[]>;
+  recentCommits(worktreeCwd: string, baseRef?: string): Promise<ObservedCommit[]>;
   /** RESUME-PRIOR-WORK: fetch a candidate prior-cycle branch from origin so its
    *  ref resolves locally. LENIENT — `fetched:false` on a missing branch. */
   fetchRemoteBranch(repoCwd: string, branch: string): Promise<{ fetched: boolean }>;
   /** RESUME-PRIOR-WORK condition (a): is `origin/<branch>` already merged into
-   *  origin/main? A merged branch has nothing to resume. */
-  branchMergedIntoMain(repoCwd: string, branch: string): Promise<boolean>;
+   *  the integration branch? A merged branch has nothing to resume.
+   *  `integrationBranch` defaults to origin/main (E1). */
+  branchMergedIntoMain(repoCwd: string, branch: string, integrationBranch?: string): Promise<boolean>;
   /** RESUME-PRIOR-WORK condition (b): does `origin/<branch>` cleanly merge with
-   *  origin/main (no conflicts)? Non-mutating `merge-tree` dry-run. */
-  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string): Promise<boolean>;
+   *  the integration branch (no conflicts)? Non-mutating `merge-tree` dry-run.
+   *  `integrationBranch` defaults to origin/main (E1). */
+  branchCleanlyRebasesOntoMain(repoCwd: string, branch: string, integrationBranch?: string): Promise<boolean>;
   /** RESUME-PRIOR-WORK re-point: fetch `<branch>` into the worktree and
    *  `git reset --hard <ref>` so the worktree's tracked tree moves onto the
    *  resume branch (called AFTER the story is picked — see `resume_worktree`).
    *  `code !== 0` ⇒ the re-point failed; the caller leaves the worktree on
    *  origin/main rather than topple the cycle. */
   resetWorktreeHard(worktreeCwd: string, ref: string, branch?: string): Promise<{ code: number }>;
+  /** E3: land the cycle worktree HEAD onto the LOCAL integration branch (no
+   *  push / PR / CI) — the `publish_mode: local` primitive. `integrationBranch`
+   *  defaults to origin/main; its `origin/` prefix is stripped to a local branch.
+   *  Returns the landing SHA, the branch landed on, how the ref moved, and a
+   *  non-zero `code` on failure (ref left unmoved). */
+  landLocalDelivery(
+    repoCwd: string,
+    worktreeCwd: string,
+    integrationBranch?: string,
+  ): Promise<{ code: number; sha: string; landedBranch: string; method: "created" | "fast_forward" | "merge"; stderr: string }>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */

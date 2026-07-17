@@ -55,6 +55,7 @@ import {
   prReady,
   prViewBotReviewState,
   releaseLock,
+  resolveIntegrationBranch,
   type GhResult,
 } from "@roll/infra";
 // US-DELIV-008: the fact-gathering primitives moved to the shared adapter so
@@ -257,7 +258,14 @@ function readAwaitingCycles(cwd: string, includeDelivered = false): CycleSnapsho
     // The periodic tick skips delivered rows after writing them back. The
     // explicit command includes them so a previously reconciled merge can
     // repair an interrupted backlog status flip.
-    if (state === "superseded" || state === "abandoned" || (!includeDelivered && (state === "delivered" || state === "delivered_external"))) {
+    // E3: `delivered_local` is terminal too (local-only landing, no PR to
+    // reconcile) — skip it exactly like the other delivered terminals.
+    if (
+      state === "superseded" ||
+      state === "abandoned" ||
+      (!includeDelivered &&
+        (state === "delivered" || state === "delivered_external" || state === "delivered_local"))
+    ) {
       continue;
     }
     const meta = cycleMeta.get(cycleId) ?? { storyId: "", branch: `loop/${cycleId}` };
@@ -421,9 +429,10 @@ export async function runReconcileTick(
 
     // L2: patch-id equivalence (skipped when L1 already fired).
     if (facts.prState !== "MERGED") {
-      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      const integrationBranch = resolveIntegrationBranch(cwd);
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch, integrationBranch);
       if (facts.branchNetPatchId !== undefined) {
-        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch, integrationBranch);
       }
     }
 
@@ -882,9 +891,10 @@ export async function loopReconcileCommand(
     // L2: patch-id equivalence (skipped when L1 already fired — it wins inside
     // reconcileDelivery anyway, and the per-branch spawns are wasted).
     if (facts.prState !== "MERGED") {
-      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch);
+      const integrationBranch = resolveIntegrationBranch(cwd);
+      facts.branchNetPatchId = branchPatchId(cwd, cyc.branch, integrationBranch);
       if (facts.branchNetPatchId !== undefined) {
-        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch);
+        facts.mainPatchIds = mainPatchIdsSinceBranch(cwd, cyc.branch, integrationBranch);
       }
     }
 

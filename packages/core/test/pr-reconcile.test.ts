@@ -57,6 +57,21 @@ describe("decidePendingPrReconcile", () => {
     });
   });
 
+  it("E1: mark_delivered fetchRef follows the configured integration branch", () => {
+    const state: PrCloudState = {
+      kind: "merged",
+      mergeCommit: "35a48c7",
+      mergedAt: "2026-06-30T13:36:48Z",
+      checkedAt: NOW,
+    };
+    expect(decidePendingPrReconcile(state, { nowIso, integrationBranch: "origin/dev" })).toEqual({
+      action: "mark_delivered",
+      mergeCommit: "35a48c7",
+      mergedAt: "2026-06-30T13:36:48Z",
+      fetchRef: "origin/dev",
+    });
+  });
+
   it("open + pending → wait with nextPollAt", () => {
     const state: PrCloudState = { kind: "open", ci: "pending", checkedAt: NOW };
     const d = decidePendingPrReconcile(state, { nowIso, pollIntervalSec: 30 });

@@ -10,6 +10,7 @@ import {
   buildHasOpenPr,
   openPrBlockReason,
   parseDependsOn,
+  parseTargetSubmodule,
   pickStory,
   prTitleReferences,
   shouldSuppressDormancy,
@@ -36,7 +37,61 @@ describe("parseDependsOn", () => {
   });
 });
 
+describe("parseTargetSubmodule — E2 per-story submodule tag", () => {
+  it("returns undefined when no tag is present", () => {
+    expect(parseTargetSubmodule("a plain description")).toBeUndefined();
+  });
+  it("extracts the submodule path from a target-submodule: tag", () => {
+    expect(parseTargetSubmodule("ship it `target-submodule:dukang-service-online`")).toBe(
+      "dukang-service-online",
+    );
+  });
+  it("coexists with a depends-on tag (independent extraction)", () => {
+    const desc = "work `depends-on:US-A` `target-submodule:dukang-service-online`";
+    expect(parseDependsOn(desc)).toEqual(["US-A"]);
+    expect(parseTargetSubmodule(desc)).toBe("dukang-service-online");
+  });
+  it("takes the first occurrence only", () => {
+    expect(parseTargetSubmodule("target-submodule:one target-submodule:two")).toBe("one");
+  });
+});
+
 describe("pickStory — status skip rules", () => {
+  it("recovery candidate alone may retry an In Progress card whose prior delivery already merged", () => {
+    const items = [item("US-RECOVER", "🔨 In Progress"), item("US-NEXT", TODO)];
+    const merged = (id: string): boolean => id === "US-RECOVER";
+
+    expect(pickStory(items, { hasMergedDelivery: merged })?.id).toBe("US-NEXT");
+    expect(
+      pickStory(items, {
+        hasMergedDelivery: merged,
+        isRecoveryCandidate: (id) => id === "US-RECOVER",
+      })?.id,
+    ).toBe("US-RECOVER");
+  });
+
+  it("recovery candidate does not reopen a different merged card", () => {
+    const items = [item("US-OTHER", "🔨 In Progress"), item("US-RECOVER", "🔨 In Progress")];
+    const merged = (): boolean => true;
+
+    expect(
+      pickStory(items, {
+        hasMergedDelivery: merged,
+        isRecoveryCandidate: (id) => id === "US-RECOVER",
+      })?.id,
+    ).toBe("US-RECOVER");
+  });
+
+  it("reports work when the only actionable row is an explicit merged-delivery recovery candidate", () => {
+    const items = [item("US-RECOVER", "🔨 In Progress")];
+    const assessment = assessBacklog(items, {
+      hasMergedDelivery: () => true,
+      isRecoveryCandidate: (id) => id === "US-RECOVER",
+    });
+
+    expect(assessment).toMatchObject({ hasWork: true, reason: "has_work" });
+  });
+
   it("skips 🚫 Hold / 🔒 Blocked / ⏸ Deferred / In Progress / Done, takes first Todo", () => {
     const items = [
       item("US-1", "🚫 Hold"),

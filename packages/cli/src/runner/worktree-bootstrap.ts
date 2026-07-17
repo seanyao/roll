@@ -47,6 +47,40 @@ export function agentWritableRoots(repoCwd: string, alertsPath: string): string[
   return roots;
 }
 
+/**
+ * E4 — the submodule-aware writable roots. A submodule cycle's agent commits its
+ * TCR work into the SUBMODULE's object store (`<super>/.git/modules/<sub>`),
+ * which is a DIFFERENT git-common-dir than the superproject's (`<super>/.git`).
+ * FIX-326's grant must therefore cover the submodule's common dir too — without
+ * it a sandboxed agent's `git write-tree`/`git commit` in the submodule worktree
+ * silently fails (the very failure FIX-326 fixed, now re-armed for submodules).
+ *
+ * Returns the superproject roots (`.roll` for evidence/backlog writes + alert dir
+ * + superproject git-common-dir) UNION the execution repo's own git-common-dir.
+ * When `execRepoCwd === repoCwd` (no submodule) this is byte-identical to
+ * {@link agentWritableRoots} (the union adds nothing new), so the existing path
+ * is unchanged.
+ */
+export function submoduleAgentWritableRoots(repoCwd: string, execRepoCwd: string, alertsPath: string): string[] {
+  const roots = agentWritableRoots(repoCwd, alertsPath);
+  if (execRepoCwd === repoCwd) return roots;
+  try {
+    const common = execFileSync(
+      "git",
+      ["-C", execRepoCwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    if (common !== "") {
+      const real = existsSync(common) ? realpathSync(common) : common;
+      if (!roots.includes(real)) roots.push(real);
+    }
+  } catch {
+    /* best-effort: same fail-loud posture as agentWritableRoots — a probe miss
+       lets the agent's submodule commit fail visibly rather than masking it. */
+  }
+  return roots;
+}
+
 export function persistWorktreeAlerts(worktreePath: string, alertsPath: string, events: EventsPort): void {
   let names: string[];
   try {
@@ -373,6 +407,35 @@ function skillsEntryCount(worktreePath: string): number {
 }
 
 /**
+ * E5 — does `<worktree>/.gitmodules` declare a submodule whose PATH is `skills`?
+ * This is the discriminator that identifies roll's OWN self-host worktree (roll
+ * embeds `skills/` as a submodule; its self-test reads each `skills/<name>`
+ * SKILL.md). Any OTHER superproject (e.g. contractor-2.0, which declares only
+ * `dukang-service-online`) returns false — its submodules must NOT be bootstrapped
+ * by the skills path.
+ *
+ * The `.gitmodules` grammar is git-config INI: each submodule is a
+ * `[submodule "<name>"]` section carrying a `path = <p>` key. We match on the
+ * declared PATH being exactly `skills` (the tracked gitlink location roll's test
+ * reads), tolerating whitespace and quoted values. A missing / unreadable file ⇒
+ * false (no skills submodule ⇒ no bootstrap).
+ */
+function declaresSkillsSubmodule(worktreePath: string): boolean {
+  const gm = join(worktreePath, ".gitmodules");
+  if (!existsSync(gm)) return false;
+  try {
+    const text = readFileSync(gm, "utf8");
+    // A `path = skills` line anywhere in .gitmodules — the value may be bare or
+    // quoted, with arbitrary surrounding whitespace. git treats the last-wins
+    // value per section, but ANY declared `skills` path means this is the roll
+    // self-host layout, which is all this guard needs to decide.
+    return /^\s*path\s*=\s*"?skills"?\s*$/m.test(text);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Populate the worktree's git SUBMODULES (notably `skills/`) BEFORE the agent
  * spawns. FIX-302 root cause: a fresh `git worktree` carries none of a parent
  * repo's submodule contents — `skills/` lands EMPTY (0 files; main has 28). The
@@ -392,6 +455,18 @@ function skillsEntryCount(worktreePath: string): number {
  * projects (no `.gitmodules`). STRICT on failure: a loud ALERT and a false
  * return let the caller stop before agent spawn with an honest terminal — never
  * an empty `skills/` where AC4 silently goes partial.
+ *
+ * E5 (real-pilot fix) — this bootstrap serves roll's OWN self-host worktree ONLY.
+ * The trigger is now "the worktree declares a `skills` submodule", NOT "any
+ * `.gitmodules` exists with an empty `skills/`". A submodule superproject that
+ * embeds OTHER submodules (e.g. contractor-2.0's `dukang-service-online`) has no
+ * `skills` submodule, so `skillsEntryCount` was permanently 0 and the old logic
+ * fired `git submodule update --init --recursive` on EVERY cycle — recursively
+ * materializing dukang against a superproject gitlink pointing at an orphan commit
+ * that neither the local nor the remote holds (`fatal: upload-pack: not our ref`),
+ * hanging create_worktree before pick_story ever ran. The declaration guard makes
+ * this a clean no-op for every non-roll project while leaving roll's self-test
+ * behavior (populate `skills/`, STRICT on failure) byte-identical.
  */
 export async function bootstrapWorktreeSkills(
   worktreePath: string,
@@ -399,8 +474,11 @@ export async function bootstrapWorktreeSkills(
   events: EventsPort,
   submoduleInit: (worktreePath: string) => Promise<{ code: number }>,
 ): Promise<boolean> {
-  // No submodules declared → nothing to populate (ordinary projects).
-  if (!existsSync(join(worktreePath, ".gitmodules"))) return true;
+  // E5: bootstrap ONLY roll's own self-host worktree (a declared `skills`
+  // submodule). Any other project — including a submodule superproject with no
+  // `skills` submodule — is a clean no-op: never recursively init foreign
+  // submodules (the real-pilot create_worktree hang).
+  if (!declaresSkillsSubmodule(worktreePath)) return true;
   // Already populated (idempotent re-entry) → skip the network round-trip.
   if (skillsEntryCount(worktreePath) > 0) return true;
   try {

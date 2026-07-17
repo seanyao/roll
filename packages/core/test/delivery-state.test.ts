@@ -31,8 +31,8 @@ function ev(event: RollEvent): RollEvent {
 const start: RollEvent = { type: "cycle:start", cycleId: CYCLE, storyId: "US-X-001", agent: "kimi", model: "m", ts: TS };
 
 describe("projectDeliveryState — US-DELIV-001", () => {
-  // ── AC1: the 8-state vocabulary is pinned verbatim (design §3.1) ───────────
-  it("the DeliveryState vocabulary is exactly the 8 design states", () => {
+  // ── AC1: the 9-state vocabulary is pinned verbatim (design §3.1 + E3) ──────
+  it("the DeliveryState vocabulary is exactly the 9 design states", () => {
     expect([...DELIVERY_STATES]).toEqual([
       "building",
       "blocked_no_evidence",
@@ -40,6 +40,7 @@ describe("projectDeliveryState — US-DELIV-001", () => {
       "ci_failed",
       "delivered",
       "delivered_external",
+      "delivered_local",
       "superseded",
       "abandoned",
     ]);
@@ -87,6 +88,16 @@ describe("projectDeliveryState — US-DELIV-001", () => {
     expect(projectDeliveryState([start, published, superseded], CYCLE)).toBe("superseded");
   });
 
+  // ── E3 (local-only delivery): a local-landed cycle reconciles to a terminal
+  // delivered_local WITHOUT a prior delivery:published (local mode never opens a
+  // PR — the evidence_gate passes, the cycle lands on the local integration
+  // branch, then reconciles straight to delivered_local). ────────────────────
+  it("delivery:reconciled{delivered_local} → delivered_local (no prior published)", () => {
+    const gate = ev({ type: "delivery:evidence_gate", cycleId: CYCLE, storyId: "US-X-001", verdict: "earned", reasons: [], ts: TS });
+    const local = ev({ type: "delivery:reconciled", cycleId: CYCLE, storyId: "US-X-001", state: "delivered_local", mergedBy: "runner", mergeCommit: "localsha", signal: "patch_id", ts: TS + 1 });
+    expect(projectDeliveryState([start, gate, local], CYCLE)).toBe("delivered_local");
+  });
+
   // ── AC2: awaiting_merge is a suspension, not a wait ───────────────────────
   it("stays awaiting_merge across unrelated events (no merge-wait, no time-based transition)", () => {
     const published = ev({ type: "delivery:published", cycleId: CYCLE, storyId: "US-X-001", branch: "b", prNumber: 42, prUrl: "u", ts: TS });
@@ -96,7 +107,7 @@ describe("projectDeliveryState — US-DELIV-001", () => {
   });
 
   // ── AC3: purity / totality / stickiness ───────────────────────────────────
-  it.each(["delivered", "delivered_external", "superseded"] as const)(
+  it.each(["delivered", "delivered_external", "delivered_local", "superseded"] as const)(
     "terminal state %s is sticky — later delivery events cannot regress it",
     (terminal) => {
       const published = ev({ type: "delivery:published", cycleId: CYCLE, storyId: "US-X-001", branch: "b", prNumber: 42, prUrl: "u", ts: TS });

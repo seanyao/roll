@@ -873,6 +873,15 @@ export interface CycleContext {
    *  every remaining Todo card requires a physical surface. The driver uses this
    *  to skip the idle counter / dormancy bootout while waiting for unlock. */
   screenLocked?: boolean;
+  /** E2 (submodule-aware delivery): the picked story's target submodule — its
+   *  declared path in the superproject's `.gitmodules` (e.g.
+   *  `dukang-service-online`). Set at pick_story from the backlog tag
+   *  (`target-submodule:`) OR spec frontmatter (`target_submodule:`). When
+   *  present, the cycle worktree is created INSIDE that submodule and the
+   *  local-delivery landing targets the submodule's local integration branch —
+   *  so the user's real submodule checkout sees the branch advance. Absent ⇒ the
+   *  cycle runs entirely against the superproject (the existing path, unchanged). */
+  targetSubmodule?: string;
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

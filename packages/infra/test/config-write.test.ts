@@ -54,6 +54,61 @@ describe("configValidate — integer range, bilingual lines (no [roll] prefix)",
   });
 });
 
+describe("configValidate — string keys (type: 'string')", () => {
+  it("accepts a git-ref-safe non-empty value", () => {
+    expect(configValidate("integration_branch", "origin/main")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "origin/release-2.0")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "main")).toEqual({ ok: true });
+    expect(configValidate("integration_branch", "upstream/feature_x.1")).toEqual({ ok: true });
+  });
+  it("does NOT apply integer validation to a string key (digits are just a valid ref)", () => {
+    expect(configValidate("integration_branch", "12345")).toEqual({ ok: true });
+  });
+  it("rejects an empty value", () => {
+    expect(configValidate("integration_branch", "")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'integration_branch' must not be empty",
+        "config：'integration_branch' 不能为空",
+      ],
+    });
+  });
+  it("rejects git-ref-unsafe characters", () => {
+    expect(configValidate("integration_branch", "origin/main; rm -rf")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'integration_branch' has unsafe characters, got 'origin/main; rm -rf'",
+        "config：'integration_branch' 含非法字符，收到 'origin/main; rm -rf'",
+      ],
+    });
+    expect(configValidate("integration_branch", "a b").ok).toBe(false);
+    expect(configValidate("integration_branch", "a~b").ok).toBe(false);
+  });
+});
+
+describe("configValidate — enum string keys (E3: publish_mode)", () => {
+  it("accepts the two allowed values", () => {
+    expect(configValidate("publish_mode", "remote")).toEqual({ ok: true });
+    expect(configValidate("publish_mode", "local")).toEqual({ ok: true });
+  });
+  it("rejects any other value with a bilingual allowed-values message", () => {
+    expect(configValidate("publish_mode", "offline")).toEqual({
+      ok: false,
+      lines: [
+        "config: 'publish_mode' must be one of remote|local, got 'offline'",
+        "config：'publish_mode' 取值须为 remote|local，收到 'offline'",
+      ],
+    });
+  });
+  it("rejects an empty value (empty is not an allowed enum member)", () => {
+    expect(configValidate("publish_mode", "").ok).toBe(false);
+  });
+  it("is case-sensitive — 'Local' / 'REMOTE' are rejected", () => {
+    expect(configValidate("publish_mode", "Local").ok).toBe(false);
+    expect(configValidate("publish_mode", "REMOTE").ok).toBe(false);
+  });
+});
+
 describe("configKeyFile — scope → backing yaml file", () => {
   it("global → rollConfigPath", () => {
     expect(configKeyFile("global")).toBe(rollConfigPath());

@@ -1,12 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  acBlockPresentInSpec,
   appendDelivery,
-  BrowserOperationLedger,
-  captureLinksFromBrowserEvents,
-  evidenceGateBeforePush,
   nodeDeliveryStore,
   planPublishDocPr,
   planPublishPr,
@@ -16,10 +12,10 @@ import {
   type PublishResult,
   type RunKey,
 } from "@roll/core";
-import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present, type EvidenceClassifierInput } from "@roll/spec";
-import { prNumberFromUrl } from "@roll/infra";
+import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
+import { prNumberFromUrl, resolvePublishMode, submoduleWorktreePath } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
-import { acMapCandidates, storySpecPath, verificationReportFresh } from "./attest-gate.js";
+import { evaluateEvidenceGate, executeLocalPublish } from "./local-publish.js";
 import { markDoneGuarded } from "./done-guard.js";
 import { addPendingPrCreate } from "./pending-pr-create.js";
 import { applyCleanupManifest, CLEANUP_TIMEOUT_MS, resolveCleanupManifest } from "./environment-cleanup.js";
@@ -55,6 +51,14 @@ export async function executeTerminalCommand(
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {
       const manualMerge = cmd.manualMerge === true || storyRequiresManualMerge(ports.repoCwd, ctx.storyId);
+      // E3: local-only delivery mode. A `publish_mode: local` project lands the
+      // cycle on its LOCAL integration branch and skips push→PR→CI→merge — but
+      // the evidence gate STILL runs (a gate-block is a fault, publish or not).
+      // Resolved from the MAIN checkout's project config (like E1's integration
+      // branch). Default `remote` ⇒ the entire block below is byte-identical.
+      if (resolvePublishMode(ports.repoCwd) === "local") {
+        return executeLocalPublish(cmd, ports, ctx, manualMerge);
+      }
       const slug = await ports.github.repoSlug(ports.repoCwd);
       if (slug === undefined) {
         // gh unavailable / no github remote → status 2 (gh-missing tier).
@@ -85,47 +89,7 @@ export async function executeTerminalCommand(
       // short-circuit above already returned for branches that have a PR.
       const gateStoryId = ctx.storyId ?? "";
       if (gateStoryId !== "" && cmd.docOnly !== true) {
-        // FIX-1256: share the "does this story owe an acceptance report?"
-        // decision with the attest gate. A card without an `**AC:**` block owes
-        // neither report nor ac-map, so the evidence gate aligns with the
-        // attest gate's "produced" verdict.
-        let acceptanceReportRequired = true;
-        const specPath = storySpecPath(ports.paths.worktreePath, gateStoryId);
-        if (specPath !== null) {
-          try {
-            acceptanceReportRequired = acBlockPresentInSpec(readFileSync(specPath, "utf8"), gateStoryId);
-          } catch {
-            /* unreadable spec → fail-closed: require evidence */
-          }
-        }
-        const gate = evidenceGateBeforePush({
-          attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
-          acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
-          acceptanceReportRequired,
-          visualEvidence: captureBridgeArtifacts(ports.paths.worktreePath, gateStoryId),
-        });
-        // Best-effort like every other appendEvent in this handler: an
-        // events-file write blip is observability loss, never a publish block.
-        try {
-          ports.events.appendEvent(ports.paths.eventsPath, {
-            type: "delivery:evidence_gate",
-            cycleId: ctx.cycleId ?? "",
-            storyId: gateStoryId,
-            verdict: gate.ok ? "earned" : "blocked",
-            reasons: gate.ok ? [] : [...gate.reasons],
-            ts: eventTs(ports),
-          });
-        } catch {
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `US-DELIV-004: delivery:evidence_gate append failed for ${gateStoryId} (cycle ${ctx.cycleId ?? "?"})`,
-          );
-        }
-        if (!gate.ok) {
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `evidence gate (US-DELIV-004): publish BLOCKED for ${gateStoryId} (cycle ${ctx.cycleId ?? "?"}) — ${gate.reasons.join("; ")} — branch NOT pushed, no PR opened (blocked_no_evidence; fail-loud, zero-TCR class)`,
-          );
+        if (!evaluateEvidenceGate(ports, ctx, gateStoryId)) {
           // FIX-908 / FIX-1256: a CI-green cycle that is only blocked by a
           // missing acceptance artifact is NOT silently unpublished. Flag the
           // result so the publish ladder classifies it as `needs_review` and
@@ -379,6 +343,24 @@ export async function executeTerminalCommand(
       // US-LOOP-095: worktreeRemove bundles unpushed detached work unless the
       // caller marks it already-on-remote (bundleUnpushed=false).
       await ports.git.worktreeRemove(ports.repoCwd, ports.paths.worktreePath, cmd.branch, cmd.bundleUnpushed);
+      // E5: a submodule cycle ALSO created a SIBLING submodule worktree
+      // (`<wt>.submodules/<sub>`, E5-B). Tear it down too, or every submodule
+      // cycle leaks that worktree + its git worktree admin metadata. BEST-EFFORT
+      // (the port is code-0-always; the try/catch is belt-and-braces): a cleanup
+      // blip must never topple the cycle's terminal path.
+      if (ctx.targetSubmodule !== undefined && ctx.targetSubmodule !== "") {
+        try {
+          await ports.git.worktreeRemoveInSubmodule(
+            ports.repoCwd,
+            ctx.targetSubmodule,
+            submoduleWorktreePath(ports.paths.worktreePath, ctx.targetSubmodule),
+          );
+        } catch {
+          /* tolerant cleanup, mirrors _worktree_cleanup — the superproject
+             worktree was already removed above; a submodule remove blip is
+             non-fatal (leaked sibling worktree at worst, never a toppled cycle). */
+        }
+      }
       return {};
 
     // events/bus appendEvent (I8 — terminal event written unconditionally).
@@ -685,22 +667,6 @@ export async function executeTerminalCommand(
       throw new Error(`executeTerminalCommand: unmapped command ${JSON.stringify(_exhaustive)}`);
     }
   }
-}
-
-/** Read only the persisted CaptureBridge artifacts offered by this story's attest path. */
-function captureBridgeArtifacts(projectPath: string, storyId: string): EvidenceClassifierInput[] {
-  const eventsPath = join(projectPath, ".roll", "browser-operations", "events.ndjson");
-  if (!existsSync(eventsPath)) return [];
-  const links = captureLinksFromBrowserEvents(new BrowserOperationLedger().read(eventsPath));
-  return links
-    .filter((link) => link.storyId === storyId)
-    .map((link) => ({
-      artifactId: link.captureRequestId,
-      provider: "roll-capture",
-      protocol: "roll.capture.v1",
-      ...(link.captureResponse !== undefined ? { captureResponse: link.captureResponse } : {}),
-      ...(link.captureDigest !== undefined ? { digest: link.captureDigest } : {}),
-    }));
 }
 
 // ── FIX-1238: in-repo layout helpers ─────────────────────────────────────────

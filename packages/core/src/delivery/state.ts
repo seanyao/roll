@@ -15,7 +15,7 @@
  *                                           card; nothing here blocks on merge)
  *   delivery:merge_attempt{ci_red}        → ci_failed
  *   delivery:reconciled{state}            → delivered / delivered_external /
- *                                           superseded
+ *                                           delivered_local / superseded
  *   delivery:abandoned                    → abandoned
  *
  * Guarantees (exhaustively unit-tested):
@@ -30,6 +30,9 @@ import type { DeliveryState, RollEvent } from "@roll/spec";
 const TERMINAL: ReadonlySet<DeliveryState> = new Set<DeliveryState>([
   "delivered",
   "delivered_external",
+  // E3: local-only delivery — a cycle landed on the local integration branch.
+  // Sticky like every other delivered terminal.
+  "delivered_local",
   "superseded",
   "abandoned",
 ]);

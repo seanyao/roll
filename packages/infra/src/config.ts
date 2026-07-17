@@ -192,6 +192,20 @@ export interface ConfigKeyRecord {
   scope: "project" | "global";
   /** `flat` or `nested:<parent>`. */
   store: string;
+  /**
+   * Value domain for validation. Absent is treated as `"int"` (the v2 registry
+   * held only integers, so the six ported keys keep integer semantics without an
+   * explicit tag). `"string"` opts a key into the non-empty git-ref-safe string
+   * validation used by {@link configValidate}.
+   */
+  type?: "int" | "string";
+  /**
+   * E3: a closed set of allowed values for a `"string"` key. When present,
+   * {@link configValidate} checks membership (case-sensitive) INSTEAD of the
+   * git-ref-safe charset check — the value must be exactly one of these tokens.
+   * Only meaningful for string keys (e.g. `publish_mode: remote|local`).
+   */
+  enum?: readonly string[];
   min: string;
   max: string;
   default: string;
@@ -210,6 +224,22 @@ export const CONFIG_KEYS: readonly ConfigKeyRecord[] = [
   { key: "loop_schedule.offset_minute", scope: "project", store: "nested:loop_schedule", min: "0", max: "59", default: "0" },
   { key: "loop_dream_hour", scope: "global", store: "flat", min: "0", max: "23", default: "3" },
   { key: "loop_dream_minute", scope: "global", store: "flat", min: "0", max: "59", default: "-" },
+  // E1: the loop's integration branch — the ref cycles rebase/merge/reset onto.
+  // A string key (not integer): non-empty + git-ref-safe. Default preserves the
+  // historical hardcoded `origin/main`, so unset = byte-identical prior behavior.
+  { key: "integration_branch", scope: "project", store: "flat", type: "string", min: "", max: "", default: "origin/main" },
+  // E3: the delivery publish mode — `remote` (default: push→PR→CI→merge) or
+  // `local` (land the cycle on the LOCAL integration branch, no push/PR/CI). An
+  // enum string key: validation checks membership in remote|local. Default
+  // `remote` keeps every existing remote delivery path byte-identical.
+  { key: "publish_mode", scope: "project", store: "flat", type: "string", enum: ["remote", "local"], min: "", max: "", default: "remote" },
+  // E6: the fallback target submodule for a submodule-superproject story that
+  // neither declares `target-submodule:` / `target_submodule:` nor unambiguously
+  // references exactly one submodule in its spec. A string key; default EMPTY
+  // (= unset → no fallback, story routes to the superproject as today). When a
+  // user sets it, it must be a git-ref-safe token (a submodule path); an empty
+  // value is treated as unset by every reader, so it never trips validation.
+  { key: "default_submodule", scope: "project", store: "flat", type: "string", min: "", max: "", default: "" },
 ];
 
 /** Project-scope yaml file — mirrors `_config_key_file project` (5786). */
@@ -317,6 +347,45 @@ export interface ConfigValidateError {
 export function configValidate(key: string, value: string): { ok: true } | ConfigValidateError {
   const rec = CONFIG_KEYS.find((r) => r.key === key);
   if (rec === undefined) return { ok: false, lines: ["", ""] };
+  // String keys (E1: integration_branch) validate as a non-empty, git-ref-safe
+  // token instead of an integer range. Safe charset mirrors the characters a git
+  // ref/refspec legitimately uses (`^[A-Za-z0-9/_.-]+$`) — this both rejects
+  // empties and blocks shell-injection into the `git` argv the ref feeds.
+  if (rec.type === "string") {
+    // E3: an enum string key validates membership in its closed value set
+    // (case-sensitive), INSTEAD of the empty/git-ref-safe checks. An empty
+    // value is simply "not a member", so it is rejected by this branch too.
+    if (rec.enum !== undefined) {
+      if (rec.enum.includes(value)) return { ok: true };
+      const allowed = rec.enum.join("|");
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' must be one of ${allowed}, got '${value}'`,
+          `config：'${key}' 取值须为 ${allowed}，收到 '${value}'`,
+        ],
+      };
+    }
+    if (value === "") {
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' must not be empty`,
+          `config：'${key}' 不能为空`,
+        ],
+      };
+    }
+    if (!/^[A-Za-z0-9/_.-]+$/.test(value)) {
+      return {
+        ok: false,
+        lines: [
+          `config: '${key}' has unsafe characters, got '${value}'`,
+          `config：'${key}' 含非法字符，收到 '${value}'`,
+        ],
+      };
+    }
+    return { ok: true };
+  }
   if (!/^-?[0-9]+$/.test(value)) {
     return {
       ok: false,

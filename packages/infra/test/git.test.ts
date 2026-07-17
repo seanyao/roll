@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   branchCleanlyRebasesOntoMain,
@@ -19,10 +20,15 @@ import {
   currentBranch,
   fetchRemoteBranch,
   isAncestor,
+  landLocalDelivery,
   lsRemote,
   mergeBase,
   projectIdentity,
+  resolveIntegrationBranch,
+  resolvePublishMode,
+  submoduleWorktreePath,
   worktreeAdd,
+  worktreeAddInSubmodule,
   worktreeRemove,
   worktreeResetHard,
 } from "../src/index.js";
@@ -249,6 +255,131 @@ describe("RESUME-PRIOR-WORK probes (un-merged audit-branch reuse)", () => {
     const r = await worktreeResetHard(clone, "origin/loop/cycle-missing", "loop/cycle-missing");
     expect(r.code).not.toBe(0);
   });
+
+  it("branchMergedIntoMain honors a custom integrationBranch (default stays origin/main)", async () => {
+    // origin has two integration branches: main (unchanged) and release, into
+    // which the cycle branch is merged. The probe must consult whichever
+    // integration branch it is told, defaulting to origin/main.
+    const { clone, cycleBranch } = setup("custom-merged", { branchFile: "feat.txt", cycleBody: "work" });
+    const originPath = W(clone, "remote", "get-url", "origin");
+    W(originPath, "branch", "release", "main");
+    W(originPath, "checkout", "-q", "release");
+    W(originPath, "merge", "-q", "--no-ff", cycleBranch, "-m", "merge into release");
+    W(originPath, "checkout", "-q", "main");
+    W(clone, "fetch", "-q", "origin");
+    await fetchRemoteBranch(clone, cycleBranch);
+    // Default (origin/main): NOT merged there.
+    expect(await branchMergedIntoMain(clone, cycleBranch)).toBe(false);
+    // Custom integration branch origin/release: IS merged there.
+    expect(await branchMergedIntoMain(clone, cycleBranch, "origin/release")).toBe(true);
+  });
+
+  it("branchCleanlyRebasesOntoMain honors a custom integrationBranch", async () => {
+    // A clean branch rebases onto whichever integration branch is named.
+    const clean = setup("custom-rebase", {
+      branchFile: "feat.txt",
+      cycleBody: "feat work",
+      mainExtra: { file: "other.txt", body: "unrelated main change" },
+    });
+    const originPath = W(clean.clone, "remote", "get-url", "origin");
+    W(originPath, "branch", "release", "main");
+    W(clean.clone, "fetch", "-q", "origin");
+    await fetchRemoteBranch(clean.clone, clean.cycleBranch);
+    expect(await branchCleanlyRebasesOntoMain(clean.clone, clean.cycleBranch, "origin/release")).toBe(true);
+  });
+});
+
+describe("resolveIntegrationBranch", () => {
+  it("defaults to origin/main when no config file exists", () => {
+    const d = tmp("rib-default");
+    expect(resolveIntegrationBranch(d)).toBe("origin/main");
+  });
+  it("returns the configured integration_branch from .roll/local.yaml", () => {
+    const d = tmp("rib-config");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "integration_branch: origin/dev\n", "utf8");
+    expect(resolveIntegrationBranch(d)).toBe("origin/dev");
+  });
+});
+
+// E6-A: smart submodule-aware defaults for integration_branch. Unset config in a
+// submodule CONTEXT (superproject with .gitmodules, OR a submodule checkout) on a
+// branch → default to that current branch. Normal repos are untouched.
+describe("resolveIntegrationBranch — E6 submodule smart default", () => {
+  it("normal repo (no .gitmodules, not a submodule) still defaults to origin/main — ZERO regression", () => {
+    // initRepo makes a plain repo on `main` with no submodule context.
+    const d = initRepo("rib-plain");
+    expect(resolveIntegrationBranch(d)).toBe("origin/main");
+  });
+
+  it("submodule SUPERPROJECT (has .gitmodules) on a branch → defaults to the current branch", () => {
+    const { superproject } = superprojectWithSubmodule("rib-super");
+    g(superproject, "checkout", "-q", "-b", "contractor2.0");
+    expect(resolveIntegrationBranch(superproject)).toBe("contractor2.0");
+  });
+
+  it("a SUBMODULE checkout (--show-superproject-working-tree non-empty) on a branch → its current branch", () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("rib-sub");
+    const submodulePath = join(superproject, submoduleName);
+    // The real user checkout of the submodule sits on its integration branch.
+    g(submodulePath, "checkout", "-q", "feat/contractor2.0");
+    expect(resolveIntegrationBranch(submodulePath)).toBe("feat/contractor2.0");
+  });
+
+  it("submodule superproject in DETACHED HEAD → falls back to origin/main (no branch to adopt)", () => {
+    const { superproject } = superprojectWithSubmodule("rib-detached");
+    g(superproject, "checkout", "-q", "--detach");
+    expect(resolveIntegrationBranch(superproject)).toBe("origin/main");
+  });
+
+  it("explicit integration_branch config still WINS over the submodule smart default (precedence intact)", () => {
+    const { superproject } = superprojectWithSubmodule("rib-explicit");
+    g(superproject, "checkout", "-q", "-b", "contractor2.0");
+    mkdirSync(join(superproject, ".roll"), { recursive: true });
+    writeFileSync(join(superproject, ".roll", "local.yaml"), "integration_branch: origin/release\n", "utf8");
+    expect(resolveIntegrationBranch(superproject)).toBe("origin/release");
+  });
+});
+
+describe("resolvePublishMode — E3", () => {
+  it("defaults to remote when no config file exists (zero regression)", () => {
+    const d = tmp("pm-default");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+  it("returns local when publish_mode: local is set", () => {
+    const d = tmp("pm-local");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "publish_mode: local\n", "utf8");
+    expect(resolvePublishMode(d)).toBe("local");
+  });
+  it("falls back to remote for any unrecognized value (never silently disables remote)", () => {
+    const d = tmp("pm-garbage");
+    mkdirSync(join(d, ".roll"), { recursive: true });
+    writeFileSync(join(d, ".roll", "local.yaml"), "publish_mode: offline\n", "utf8");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+});
+
+// E6-A: submodule superproject with UNSET publish_mode → local (remote submodule
+// delivery is not implemented; local is the only working mode). Normal repos and
+// explicit config are untouched.
+describe("resolvePublishMode — E6 submodule smart default", () => {
+  it("normal repo (no .gitmodules) still defaults to remote — ZERO regression", () => {
+    const d = initRepo("pm-plain");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+
+  it("submodule SUPERPROJECT (has .gitmodules) → defaults to local", () => {
+    const { superproject } = superprojectWithSubmodule("pm-super");
+    expect(resolvePublishMode(superproject)).toBe("local");
+  });
+
+  it("explicit publish_mode: remote config still WINS over the submodule smart default", () => {
+    const { superproject } = superprojectWithSubmodule("pm-explicit");
+    mkdirSync(join(superproject, ".roll"), { recursive: true });
+    writeFileSync(join(superproject, ".roll", "local.yaml"), "publish_mode: remote\n", "utf8");
+    expect(resolvePublishMode(superproject)).toBe("remote");
+  });
 });
 
 describe("canonicalProjectPath", () => {
@@ -295,5 +426,201 @@ describe("projectIdentity", () => {
       if (save === undefined) delete process.env["ROLL_MAIN_SLUG"];
       else process.env["ROLL_MAIN_SLUG"] = save;
     }
+  });
+});
+
+// ─── E3: landLocalDelivery — local-only landing onto the integration branch ───
+
+/** git helper for the tests (repo-local identity, no global config). */
+function g(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+}
+function sha(cwd: string, ref = "HEAD"): string {
+  return g(cwd, "rev-parse", ref);
+}
+function branchSha(repo: string, branch: string): string {
+  return g(repo, "rev-parse", `refs/heads/${branch}`);
+}
+
+/**
+ * Build a repo with `main` + a DETACHED cycle worktree branched off it, then
+ * add a cycle commit in the worktree. Returns the repo + worktree paths and the
+ * base SHA of `main`.
+ */
+async function repoWithCycleWorktree(tag: string): Promise<{ repo: string; wt: string; baseSha: string }> {
+  const repo = initRepo(tag);
+  writeFileSync(join(repo, "README.md"), "# base\n");
+  g(repo, "add", "-A");
+  g(repo, "commit", "-q", "-m", "base");
+  const baseSha = sha(repo);
+  const wtParent = tmp(`${tag}-wtside`);
+  const wt = join(wtParent, "wt");
+  const add = await worktreeAdd(repo, wt, `loop/cycle-${tag}`, "main");
+  expect(add.code).toBe(0);
+  // one cycle commit in the (detached) worktree
+  writeFileSync(join(wt, "feature.txt"), "cycle work\n");
+  g(wt, "add", "-A");
+  g(wt, "commit", "-q", "-m", "tcr: cycle work");
+  return { repo, wt, baseSha };
+}
+
+describe("landLocalDelivery — E3 local-only landing", () => {
+  it("fast-forwards the LOCAL integration branch to the cycle HEAD (strips origin/)", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-ff");
+    const cycleSha = sha(wt);
+    // integration branch expressed as origin/main → local landing branch is `main`
+    const r = await landLocalDelivery(repo, wt, "origin/main");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("main");
+    expect(r.method).toBe("fast_forward");
+    expect(r.sha).toBe(cycleSha);
+    // the LOCAL main now points at the cycle commit — no push, ref moved locally
+    expect(branchSha(repo, "main")).toBe(cycleSha);
+  });
+
+  it("creates the local integration branch when it does not exist yet", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-create");
+    const cycleSha = sha(wt);
+    const r = await landLocalDelivery(repo, wt, "integration");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("integration");
+    expect(r.method).toBe("created");
+    expect(branchSha(repo, "integration")).toBe(cycleSha);
+  });
+
+  it("merges (merge commit) when the local integration branch has diverged", async () => {
+    const { repo, wt } = await repoWithCycleWorktree("land-merge");
+    const cycleSha = sha(wt);
+    // advance LOCAL main independently so it is NOT an ancestor of the cycle HEAD
+    writeFileSync(join(repo, "other.txt"), "divergent main work\n");
+    g(repo, "add", "-A");
+    g(repo, "commit", "-q", "-m", "divergent main");
+    const mainBefore = branchSha(repo, "main");
+
+    const r = await landLocalDelivery(repo, wt, "origin/main");
+    expect(r.code).toBe(0);
+    expect(r.landedBranch).toBe("main");
+    expect(r.method).toBe("merge");
+    // a NEW merge commit whose parents include both the diverged main and the cycle HEAD
+    const mainAfter = branchSha(repo, "main");
+    expect(mainAfter).not.toBe(mainBefore);
+    expect(mainAfter).not.toBe(cycleSha);
+    const parents = g(repo, "rev-list", "--parents", "-n", "1", mainAfter).split(" ").slice(1);
+    expect(parents).toContain(mainBefore);
+    expect(parents).toContain(cycleSha);
+    // both the divergent main file and the cycle file are present in the merged tree
+    expect(g(repo, "cat-file", "-t", `${mainAfter}:other.txt`)).toBe("blob");
+    expect(g(repo, "cat-file", "-t", `${mainAfter}:feature.txt`)).toBe("blob");
+  });
+
+  it("reports a non-zero code when the worktree HEAD cannot be resolved", async () => {
+    const repo = initRepo("land-bad");
+    // point at a non-worktree dir → rev-parse HEAD fails
+    const r = await landLocalDelivery(repo, join(repo, "does-not-exist"), "origin/main");
+    expect(r.code).not.toBe(0);
+  });
+});
+
+// ─── E2: submodule-aware worktree (worktree OF a git submodule) ───────────────
+
+/**
+ * Build a superproject that embeds a real git submodule.
+ *   - `submodule` repo: standalone repo with a `feat/contractor2.0` branch.
+ *   - `superproject` repo: embeds it at path `sub` via `git submodule add`,
+ *     then commits the `.gitmodules` + gitlink.
+ * Returns the superproject path and the submodule NAME (its path in .gitmodules).
+ */
+function superprojectWithSubmodule(tag: string): { superproject: string; submoduleName: string; subUpstream: string } {
+  // The upstream the submodule is cloned from (a bare-ish local origin).
+  const subUpstream = initRepo(`${tag}-subupstream`);
+  writeFileSync(join(subUpstream, "sub-file.txt"), "sub base\n");
+  g(subUpstream, "add", "-A");
+  g(subUpstream, "commit", "-q", "-m", "sub base");
+  // Give the submodule an integration branch to land onto (feat/contractor2.0).
+  g(subUpstream, "branch", "feat/contractor2.0");
+
+  const superproject = initRepo(`${tag}-super`);
+  // `git submodule add` needs a file:// URL or path; use the local path.
+  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", subUpstream, "sub"], {
+    cwd: superproject,
+  });
+  // A real initialized submodule that the user is developing on has its
+  // integration branch as a LOCAL branch. A fresh `submodule add` only tracks it
+  // as origin/feat/contractor2.0, so materialize the local branch (mirrors the
+  // user's real dukang-service-online checkout on feat/contractor2.0).
+  const submoduleClone = join(superproject, "sub");
+  g(submoduleClone, "config", "user.email", "t@t");
+  g(submoduleClone, "config", "user.name", "t");
+  g(submoduleClone, "branch", "feat/contractor2.0", "origin/feat/contractor2.0");
+  g(superproject, "add", "-A");
+  g(superproject, "commit", "-q", "-m", "add submodule sub");
+  return { superproject, submoduleName: "sub", subUpstream };
+}
+
+describe("submoduleWorktreePath — E2 path derivation", () => {
+  // E5 (real-pilot fix): the submodule cycle worktree must NOT live UNDER the
+  // superproject cycle worktree — `<cycle>/<sub>` is exactly the superproject
+  // worktree's own submodule mount point, so `git worktree add` there collides.
+  // The path moves to a SIBLING: `<cycle>.submodules/<sub>`.
+  it("places the submodule worktree in a SIBLING dir, not under the cycle worktree (E5)", () => {
+    const cycle = "/tmp/loop/worktrees/cycle-x";
+    const p = submoduleWorktreePath(cycle, "dukang-service-online");
+    // Not a descendant of the superproject cycle worktree (no path collision).
+    expect(p.startsWith(`${cycle}/`)).toBe(false);
+    expect(p).not.toBe(join(cycle, "dukang-service-online"));
+    // Deterministic sibling formula: <cycle>.submodules/<sub>.
+    expect(p).toBe(join("/tmp/loop/worktrees", "cycle-x.submodules", "dukang-service-online"));
+  });
+
+  it("is deterministic — same inputs derive the same path (create/land/exec share it)", () => {
+    const cycle = "/tmp/loop/worktrees/cycle-42";
+    const a = submoduleWorktreePath(cycle, "sub");
+    const b = submoduleWorktreePath(cycle, "sub");
+    expect(a).toBe(b);
+  });
+});
+
+describe("worktreeAddInSubmodule — E2 worktree of a submodule", () => {
+  it("creates a DETACHED worktree ON the submodule repo, sharing its object store", async () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("subwt");
+    const wtParent = tmp("subwt-side");
+    const cycleWt = join(wtParent, "cycle");
+
+    const r = await worktreeAddInSubmodule(superproject, submoduleName, cycleWt, "feat/contractor2.0");
+    expect(r.code).toBe(0);
+
+    // The worktree lives at <cycleWt>/<submoduleName> and is a real checkout.
+    const subWt = submoduleWorktreePath(cycleWt, submoduleName);
+    expect(existsSync(join(subWt, "sub-file.txt"))).toBe(true);
+
+    // Shared object store proof: a commit made in the worktree is visible to the
+    // ACTUAL submodule checkout (git -C <super>/<sub> rev-parse) — the whole
+    // point of a worktree-of-submodule vs a sibling clone.
+    writeFileSync(join(subWt, "cycle-work.txt"), "cycle\n");
+    g(subWt, "add", "-A");
+    g(subWt, "commit", "-q", "-m", "tcr: cycle work in submodule");
+    const cycleSha = sha(subWt);
+    const submodulePath = join(superproject, submoduleName);
+    expect(g(submodulePath, "cat-file", "-t", cycleSha)).toBe("commit");
+  });
+
+  it("fails loud when the submodule is not declared in .gitmodules", async () => {
+    const repo = initRepo("subwt-missing");
+    const wt = join(tmp("subwt-missing-side"), "cycle");
+    const r = await worktreeAddInSubmodule(repo, "nonexistent-sub", wt, "main");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/submodule/i);
+  });
+
+  it("fails loud when the submodule is declared but not initialized (no gitdir)", async () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("subwt-uninit");
+    // De-init the submodule so its working tree/gitdir is gone but .gitmodules
+    // still declares it.
+    execFileSync("git", ["submodule", "deinit", "-f", submoduleName], { cwd: superproject });
+    execFileSync("rm", ["-rf", join(superproject, submoduleName)]);
+    const wt = join(tmp("subwt-uninit-side"), "cycle");
+    const r = await worktreeAddInSubmodule(superproject, submoduleName, wt, "feat/contractor2.0");
+    expect(r.code).not.toBe(0);
+    expect(r.stderr).toMatch(/initiali[sz]ed|not.*init/i);
   });
 });

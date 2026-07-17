@@ -13,6 +13,7 @@ import { parseEventLine, type RollEvent } from "@roll/spec";
 import { classifyBlockSignature } from "./agent-liveness.js";
 import { blockIfAgentCredentialsMissing } from "./agent-routing.js";
 import { buildReviewPrompt, type PairReview } from "./pairing-gate.js";
+import { resolveExecutionCwd } from "./submodule-worktree.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 
@@ -173,7 +174,9 @@ export function createCapturePeerHelpers(params: {
       // timeoutMs. Whichever loses, the cycle is never stalled.
       res = await Promise.race([
         ports.agentSpawn(peer, {
-          cwd: ports.paths.worktreePath,
+          // E4: the reviewer inspects the committed delivery, so it runs in the
+          // execution worktree (submodule cycle worktree for a submodule story).
+          cwd: resolveExecutionCwd(ports, ctx),
           skillBody: prompt,
           timeoutMs,
           bare: true, // FIX-319: review-only framing, no worker autorun directive

@@ -14,7 +14,7 @@ import {
   type GoalStatus,
   type RollGoal,
 } from "@roll/spec";
-import { acquireLock, ghRepoSlug, INNER_LOCK_STALE_SEC, isOwnerHeld, prViewMergeInfo, projectIdentity, readLockOwner, releaseLock, remoteUrl } from "@roll/infra";
+import { acquireLock, ghRepoSlug, INNER_LOCK_STALE_SEC, isOwnerHeld, prViewMergeInfo, projectIdentity, readLockOwner, releaseLock, remoteUrl, resolveIntegrationBranch } from "@roll/infra";
 import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -1414,7 +1414,7 @@ async function evaluateGoal(
   // evaluation sees EXTERNAL / manual merges — the same unified truth the
   // picker/preflight and `roll truth query` read. Best-effort: a git/IO failure
   // inside ensureDeliveriesFresh leaves the existing cache, never topples eval.
-  const deliveries = ensureDeliveriesFresh(projectPath, nodeFreshnessPort, nodeExecPort);
+  const deliveries = ensureDeliveriesFresh(projectPath, nodeFreshnessPort, nodeExecPort, resolveIntegrationBranch(projectPath));
   for (const row of rows) {
     // AC4: only pass deliveryTruth when the card has real delivery records;
     // cards with no records fall back to markdown parsing (backward compat).

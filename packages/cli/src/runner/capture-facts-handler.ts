@@ -29,7 +29,7 @@ import {
 } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { writeEvaluatorArtifact } from "./execution-profile.js";
-import { checkMainDirty } from "./main-checkout-guard.js";
+import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js";
 import {
   buildPairScorePrompt,
   diagnosePairScoreOutput,
@@ -43,7 +43,7 @@ import {
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
-import { eventTs } from "./runner-time.js";
+import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
 import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
@@ -88,7 +88,23 @@ export async function executeCaptureFactsCommand(
       } catch {
         /* drift probe is best-effort */
       }
-      const mainDirtyFiles = await checkMainDirty(ports.repoCwd);
+      // E10: symmetric completion of E7. The LIVE watchdog already diffs the
+      // main checkout against a pre-spawn baseline so only dirt the BUILDER
+      // introduced counts as a leak; this terminal capture did NOT — it reported
+      // ABSOLUTE dirt. On a submodule super-repo (permanently dirty: gitlink
+      // pointer drift, colleague WIP, untracked `wt-*/`) that made mainDirty
+      // eternally true → boundary_violation → the cycle failed with leakedCommits:0
+      // (the builder touched nothing). We now read the pre-spawn baseline the
+      // pre-spawn quarantine persisted (quarantineMainCheckoutForCycle) and count
+      // ONLY paths that appeared AFTER spawn. A missing baseline (old cycle / first
+      // run) → empty set → newDirty == the full set → byte-identical to the prior
+      // absolute-dirt behavior (clean-main projects have an empty baseline anyway,
+      // so this is a strict zero-regression widening). The protection is intact: a
+      // builder that truly writes a NEW main-checkout path still yields a non-empty
+      // newDirty → mainDirty:true.
+      const mainDirtyAll = await checkMainDirty(ports.repoCwd);
+      const mainDirtyBaseline = new Set(readMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? ""));
+      const mainDirtyFiles = mainDirtyAll.filter((path) => !mainDirtyBaseline.has(path));
       const mainDirty = mainDirtyFiles.length > 0;
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded

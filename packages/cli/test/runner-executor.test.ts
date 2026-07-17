@@ -3973,7 +3973,7 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     const base = fakePorts();
     const push = vi.fn(async () => ({ code: 0 }));
@@ -3996,12 +3996,42 @@ describe("executeCommand — command → executor mapping", () => {
     expect(gateEvents[0].verdict).toBe("earned");
   });
 
+  it("US-DELIV-004: ac-map rows that are not fully verified block publish", async () => {
+    const repo = initCleanGitRepo("roll-evidence-gate-unverified-ac-");
+    const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
+    mkdirSync(join(cardDir, "latest"), { recursive: true });
+    mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([
+      { ac: "US-RUN-001:AC1", status: "partial" },
+      { ac: "US-RUN-001:AC2", status: "missing" },
+    ]));
+    writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
+    const base = fakePorts();
+    const push = vi.fn(async () => ({ code: 0 }));
+    const runPublishPlan = vi.fn(async () => ({ status: 0 as const, prUrl: "u", ok: true }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      git: { ...base.ports.git, push },
+      github: { ...base.ports.github, prState: vi.fn(async () => "UNKNOWN"), runPublishPlan },
+    });
+
+    const result = await executeCommand({ kind: "publish_pr", branch: "b", docOnly: false }, ports, CTX);
+
+    expect(result.event).toEqual({ type: "published", result: { status: 1, manualMerge: false, gateBlocked: true } });
+    expect(push).not.toHaveBeenCalled();
+    expect(runPublishPlan).not.toHaveBeenCalled();
+    const gateEvents = (calls["event"] ?? [])
+      .map((args) => (args as unknown[])[1] as { type: string; verdict?: string; reasons?: string[] })
+      .filter((event) => event.type === "delivery:evidence_gate");
+    expect(gateEvents[0].reasons?.join("; ")).toContain("unverified acceptance criteria");
+  });
+
   it("US-DELIV-004: a gate event-write failure must NOT abort a valid publish (best-effort observability)", async () => {
     const repo = initCleanGitRepo("roll-evidence-gate-event-fail-");
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     mkdirSync(join(cardDir, CTX.cycleId), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
     const base = fakePorts();
     const push = vi.fn(async () => ({ code: 0 }));
@@ -4040,7 +4070,7 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4087,7 +4117,7 @@ describe("executeCommand — command → executor mapping", () => {
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     const runDir = join(cardDir, CTX.cycleId);
     mkdirSync(join(runDir, "screenshots"), { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4162,7 +4192,7 @@ describe("executeCommand — command → executor mapping", () => {
     execFileSync("git", ["init", "-q", "--bare"], { cwd: remote });
     const cardDir = join(repo, ".roll", "features", "uncategorized", "US-RUN-001");
     mkdirSync(cardDir, { recursive: true });
-    writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+    writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(cardDir, "latest"), { recursive: true });
     writeFileSync(join(cardDir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");
@@ -4207,7 +4237,7 @@ describe("executeCommand — command → executor mapping", () => {
     mkdirSync(dir, { recursive: true });
     const skeleton = '<html><section class="phase phase-pending" data-phase="execution"><h2>x</h2><p>e</p></section></html>';
     writeFileSync(join(dir, "index.html"), skeleton, "utf8");
-    writeFileSync(join(dir, "ac-map.json"), "[]\n");
+    writeFileSync(join(dir, "ac-map.json"), JSON.stringify([{ ac: "US-RUN-001:AC1", status: "pass" }]));
     // US-DELIV-004: the push-time evidence gate requires an attest report too.
     mkdirSync(join(dir, "latest"), { recursive: true });
     writeFileSync(join(dir, "latest", "US-RUN-001-report.html"), "<html>report</html>\n");

@@ -37,7 +37,7 @@ function initRepoWithEvidence(): { root: string; runtimeDir: string } {
   const cardDir = join(root, ".roll", "features", "uncategorized", "FIX-1214");
   const runDir = join(cardDir, "20260605-000000-1");
   mkdirSync(join(runDir, "latest"), { recursive: true });
-  writeFileSync(join(cardDir, "ac-map.json"), "[]\n");
+  writeFileSync(join(cardDir, "ac-map.json"), JSON.stringify([{ ac: "FIX-1214:AC1", status: "pass" }]));
   // US-DELIV-004: the push-time evidence gate requires an attest report too.
   mkdirSync(join(cardDir, "latest"), { recursive: true });
   writeFileSync(join(cardDir, "latest", "FIX-1214-report.html"), "<html>report</html>\n");

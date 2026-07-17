@@ -53,12 +53,18 @@ export function evaluateEvidenceGate(ports: Ports, ctx: CycleContext, gateStoryI
       /* unreadable spec → fail-closed: require evidence */
     }
   }
-  const gate = evidenceGateBeforePush({
+  const evidenceGate = evidenceGateBeforePush({
     attestReportPresent: verificationReportFresh(ports.paths.worktreePath, gateStoryId, undefined, ports.repoCwd),
     acMapPresent: acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd).some((p) => existsSync(p)),
     acceptanceReportRequired,
     visualEvidence: captureBridgeArtifacts(ports.paths.worktreePath, gateStoryId),
   });
+  const unverified = acceptanceReportRequired
+    ? unverifiedAcceptanceCriteria(acMapCandidates(ports.paths.worktreePath, gateStoryId, ports.repoCwd))
+    : [];
+  const gate = evidenceGate.ok && unverified.length === 0
+    ? evidenceGate
+    : { ok: false as const, reasons: [...(evidenceGate.ok ? [] : evidenceGate.reasons), ...unverified] };
   // Best-effort like every other appendEvent in this handler: an events-file
   // write blip is observability loss, never a publish block.
   try {
@@ -84,6 +90,29 @@ export function evaluateEvidenceGate(ports: Ports, ctx: CycleContext, gateStoryI
     return false;
   }
   return true;
+}
+
+function unverifiedAcceptanceCriteria(candidates: readonly string[]): string[] {
+  const path = candidates.find((candidate) => existsSync(candidate));
+  if (path === undefined) return [];
+
+  try {
+    const rows: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return ["ac-map has no verified acceptance criteria"];
+    }
+    const unresolved = rows.flatMap((row) => {
+      if (typeof row !== "object" || row === null) return ["ac-map contains an invalid acceptance row"];
+      const record = row as { ac?: unknown; status?: unknown };
+      const status = typeof record.status === "string" ? record.status : "missing status";
+      if (status === "pass" || status === "pass-with-evidence" || status === "readonly") return [];
+      const ac = typeof record.ac === "string" && record.ac.trim() !== "" ? record.ac : "unknown AC";
+      return [`unverified acceptance criteria: ${ac} (${status})`];
+    });
+    return unresolved;
+  } catch {
+    return ["ac-map is unreadable"];
+  }
 }
 
 /**

@@ -62,6 +62,7 @@ import {
 } from "../src/runner/index.js";
 import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
 import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
+import { writeMainDirtyBaseline } from "../src/runner/main-checkout-guard.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -1100,6 +1101,17 @@ function initCleanGitRepo(prefix: string): string {
   execFileSync("git", ["add", "README.md"], { cwd: repo });
   execFileSync("git", ["commit", "-m", "init"], { cwd: repo });
   return repo;
+}
+
+// E10: sync mirror of checkMainDirty for building a pre-spawn baseline in tests.
+// The E10 tests only dirty product files (never .roll/ or skills/), so a plain
+// porcelain parse matches checkMainDirty's output for those inputs.
+function checkMainDirtyList(repo: string): string[] {
+  return execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repo, encoding: "utf8" })
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l !== "")
+    .map((l) => (l.length > 3 ? l.slice(3).trim() : l.trim()).replace(/^"|"$/g, ""));
 }
 
 describe("executeCommand — command → executor mapping", () => {
@@ -3194,6 +3206,105 @@ describe("executeCommand — command → executor mapping", () => {
     expect(r.event).toMatchObject({ type: "facts_captured", facts: { commitsAhead: 3 } });
     expect((r.event as { facts: { mainDirty?: boolean } }).facts.mainDirty).toBeUndefined();
     expect(r.ctxPatch).not.toMatchObject({ mainDirty: true });
+  });
+
+  // E10 — capture-facts mainDirty is now DIFFED against the persisted pre-spawn
+  // baseline (symmetric with the E7 watchdog), so a submodule super-repo that was
+  // permanently dirty BEFORE the builder ran no longer boundary-violates at
+  // capture. Builds a real dirty repoCwd; the baseline file lives in the runtime
+  // dir (dirname(eventsPath)) the handler reads.
+  it("E10: capture_facts does NOT report mainDirty when the dirt was already present at pre-spawn (baseline) and the builder added nothing", async () => {
+    const repo = initCleanGitRepo("roll-e10-capture-clean-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    mkdirSync(runtimeDir, { recursive: true });
+    // Submodule super-repo shape: permanently dirty BEFORE the builder ran.
+    writeFileSync(join(repo, "submodule-drift.ts"), "export const drift = 1;\n");
+    writeFileSync(join(repo, "colleague-wip.ts"), "export const wip = 1;\n");
+    // Freeze exactly that as the pre-spawn baseline (what quarantineMainCheckoutForCycle
+    // persists at phase "pre-spawn").
+    writeMainDirtyBaseline(runtimeDir, CTX.cycleId ?? "", checkMainDirtyList(repo));
+
+    const base = fakePorts();
+    // worktreePath === repoCwd ⇒ capture-phase quarantine no-ops, so the baseline
+    // dirt survives to capture and it is the DIFF (not the quarantine) that clears
+    // mainDirty — the exact production submodule condition.
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: repo,
+        eventsPath: join(runtimeDir, "events.ndjson"),
+        alertsPath: join(runtimeDir, "alerts.log"),
+      },
+    });
+
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    const facts = (r.event as { facts: { mainDirty?: boolean; mainDirtyFiles?: string[]; attemptedCwd?: string } }).facts;
+    expect(facts.mainDirty).toBeUndefined();
+    expect(facts.mainDirtyFiles).toBeUndefined();
+    // No mainAhead/mainDirty ⇒ no boundary attribution fields either.
+    expect(facts.attemptedCwd).toBeUndefined();
+    expect(r.ctxPatch).not.toMatchObject({ mainDirty: true });
+  });
+
+  it("E10: protection intact — capture_facts STILL reports mainDirty for a path the builder introduced AFTER the pre-spawn baseline (and lists only the new path)", async () => {
+    const repo = initCleanGitRepo("roll-e10-capture-leak-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    mkdirSync(runtimeDir, { recursive: true });
+    // Pre-existing (baseline) dirt.
+    writeFileSync(join(repo, "submodule-drift.ts"), "export const drift = 1;\n");
+    writeMainDirtyBaseline(runtimeDir, CTX.cycleId ?? "", checkMainDirtyList(repo));
+    // The builder LEAKED a NEW main-checkout write after the baseline snapshot.
+    writeFileSync(join(repo, "builder-leaked.ts"), "export const leaked = 1;\n");
+
+    const base = fakePorts();
+    // worktreePath === repoCwd makes the capture-phase quarantine a no-op (the
+    // self-heal same-tree config), so checkMainDirty observes the true disk state
+    // — mirroring the production submodule case where the quarantine cannot stash
+    // gitlink drift / untracked dirs and the baseline noise survives to capture.
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: repo,
+        eventsPath: join(runtimeDir, "events.ndjson"),
+        alertsPath: join(runtimeDir, "alerts.log"),
+      },
+    });
+
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    const facts = (r.event as { facts: { mainDirty?: boolean; mainDirtyFiles?: string[]; attemptedCwd?: string } }).facts;
+    expect(facts.mainDirty).toBe(true);
+    expect(facts.mainDirtyFiles).toEqual(["builder-leaked.ts"]);
+    expect(facts.mainDirtyFiles).not.toContain("submodule-drift.ts");
+    expect(facts.attemptedCwd).toBe(repo);
+    expect(r.ctxPatch).toMatchObject({ mainDirty: true });
+  });
+
+  it("E10: zero regression — with NO persisted baseline, capture_facts falls back to absolute dirt (prior behavior)", async () => {
+    const repo = initCleanGitRepo("roll-e10-capture-nobaseline-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    mkdirSync(runtimeDir, { recursive: true });
+    // Dirty, but NO baseline file written (old cycle / first run).
+    writeFileSync(join(repo, "leaked-absolute.ts"), "export const x = 1;\n");
+
+    const base = fakePorts();
+    // worktreePath === repoCwd ⇒ capture-phase quarantine no-ops, isolating the
+    // empty-baseline fallback: newDirty == the full absolute-dirt set (prior behavior).
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: repo,
+        eventsPath: join(runtimeDir, "events.ndjson"),
+        alertsPath: join(runtimeDir, "alerts.log"),
+      },
+    });
+
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    const facts = (r.event as { facts: { mainDirty?: boolean; mainDirtyFiles?: string[] } }).facts;
+    expect(facts.mainDirty).toBe(true);
+    expect(facts.mainDirtyFiles).toEqual(["leaked-absolute.ts"]);
   });
 
   it("FIX-252: capture_facts records local main drift so zero branch commits cannot become idle", async () => {

@@ -8,11 +8,13 @@ import {
   checkMainDirty,
   detectMainCheckoutWriteProtectionResidue,
   quarantineMainCheckout,
+  readMainDirtyBaseline,
   recoverMainCheckoutWriteProtectionResidue,
   releaseMainCheckoutWriteProtection,
   repairCoreWorktreeContamination,
   withMainCheckoutWriteProtection,
   worktreeGitEnv,
+  writeMainDirtyBaseline,
 } from "../src/runner/main-checkout-guard.js";
 
 const dirs: string[] = [];
@@ -554,5 +556,41 @@ describe("FIX-1210 — config.lock sentinel blocks nested git init writes", () =
     expect(recovered.configLockRemoved).toBe(false);
     expect(recovered.foreignConfigLock).toBe(true);
     expect(readFileSync(lockPath, "utf8")).toBe("foreign git config transaction\n");
+  });
+});
+
+describe("E10 — persisted pre-spawn main-dirty baseline", () => {
+  it("writeMainDirtyBaseline persists the dirt set to <runtimeDir>/<cycleId>.main-baseline.json and readMainDirtyBaseline round-trips it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-e10-baseline-"));
+    dirs.push(dir);
+    const files = ["dukang-service-online", "service-online-webui-monorepo", "wt-fix-004/"];
+
+    writeMainDirtyBaseline(dir, "C-baseline", files);
+
+    const path = join(dir, "C-baseline.main-baseline.json");
+    expect(existsSync(path)).toBe(true);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(files);
+    expect(readMainDirtyBaseline(dir, "C-baseline")).toEqual(files);
+  });
+
+  it("readMainDirtyBaseline returns [] when the baseline file is absent (zero-regression fallback = absolute dirt)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-e10-absent-"));
+    dirs.push(dir);
+    expect(readMainDirtyBaseline(dir, "C-none")).toEqual([]);
+  });
+
+  it("readMainDirtyBaseline returns [] on malformed JSON (never throws)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "roll-e10-malformed-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "C-bad.main-baseline.json"), "{ not an array", "utf8");
+    expect(readMainDirtyBaseline(dir, "C-bad")).toEqual([]);
+  });
+
+  it("writeMainDirtyBaseline creates the runtime dir when missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-e10-mkdir-"));
+    dirs.push(root);
+    const nested = join(root, "does", "not", "exist");
+    writeMainDirtyBaseline(nested, "C-mkdir", ["a.ts"]);
+    expect(readMainDirtyBaseline(nested, "C-mkdir")).toEqual(["a.ts"]);
   });
 });

@@ -156,6 +156,60 @@ export async function checkMainDirty(repoCwd: string): Promise<string[]> {
   }
 }
 
+// ─── E10: persisted pre-spawn main-dirty baseline ────────────────────────────
+//
+// E7 taught the LIVE watchdog (startMainCheckoutLeakWatchdog) to diff every tick
+// against an IN-MEMORY snapshot of the main checkout's dirt at spawn, so only
+// paths the builder writes AFTER spawn count as a leak. The TERMINAL fact
+// capture (capture-facts-handler) is a SEPARATE code path — a different handler,
+// possibly a different process invocation — that cannot see the watchdog's
+// in-memory baseline. Left unpatched it reported ABSOLUTE dirt, so a submodule
+// super-repo (permanently dirty: gitlink pointer drift, colleague WIP, untracked
+// `wt-*/`) was always judged `mainDirty:true` at capture → boundary_violation →
+// the cycle failed even though the builder touched nothing on main.
+//
+// To give capture-facts the SAME baseline the watchdog uses, we PERSIST the
+// pre-spawn dirt to a per-cycle file under the runtime dir. capture-facts reads
+// it back and diffs, exactly mirroring the watchdog. A missing baseline (old
+// cycle / first run) degrades to an EMPTY baseline → absolute dirt → the prior
+// behavior (zero regression on clean-main projects, whose baseline is empty
+// anyway so newDirty == the full set).
+
+function mainDirtyBaselinePath(runtimeDir: string, cycleId: string): string {
+  return join(runtimeDir, `${cycleId}.main-baseline.json`);
+}
+
+/**
+ * E10: persist the pre-spawn main-checkout dirt set for a cycle so the terminal
+ * fact capture can diff against it (the watchdog's in-memory baseline is not
+ * reachable across handlers). Best-effort: a write failure must never topple the
+ * cycle — capture-facts falls back to an empty baseline (absolute dirt).
+ */
+export function writeMainDirtyBaseline(runtimeDir: string, cycleId: string, files: readonly string[]): void {
+  try {
+    const path = mainDirtyBaselinePath(runtimeDir, cycleId);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify([...files], null, 2)}\n`, "utf8");
+  } catch {
+    /* best-effort; absence degrades capture-facts to absolute dirt */
+  }
+}
+
+/**
+ * E10: read back the persisted pre-spawn baseline. Missing / unreadable /
+ * malformed → empty array (the zero-regression fallback = absolute dirt).
+ */
+export function readMainDirtyBaseline(runtimeDir: string, cycleId: string): string[] {
+  try {
+    const raw = readFileSync(mainDirtyBaselinePath(runtimeDir, cycleId), "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p): p is string => typeof p === "string");
+  } catch {
+    return [];
+  }
+}
+
 function collectProtectionEntries(repoCwd: string): ProtectionEntry[] {
   const entries: ProtectionEntry[] = [];
   const seen = new Set<string>();

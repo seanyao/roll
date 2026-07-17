@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import type { CycleContext } from "@roll/core";
 import { quarantineBundlePath, resolveIntegrationBranch } from "@roll/infra";
 import { killLiveAgents } from "./agent-spawn.js";
-import { checkMainDirty, quarantineEventToRollEvent, quarantineMainCheckout, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
+import { checkMainDirty, quarantineEventToRollEvent, quarantineMainCheckout, writeMainDirtyBaseline, type QuarantineResult, type WriteProtectionResult } from "./main-checkout-guard.js";
 import type { CleanupResult } from "./environment-cleanup.js";
 import { recordRootCauseFailure } from "./failure-attribution.js";
 import type { Ports } from "./ports.js";
@@ -111,6 +111,17 @@ export async function quarantineMainCheckoutForCycle(
     if (realpathSync(ports.repoCwd) === realpathSync(ports.paths.worktreePath)) return [];
   } catch {
     /* fall through to the guard; it handles unreadable paths as no-op */
+  }
+  // E10: at the pre-spawn phase — BEFORE the builder can touch anything — snapshot
+  // the main checkout's dirt to a per-cycle file so the terminal fact capture can
+  // diff against it (symmetric with the E7 watchdog's in-memory baseline). This is
+  // the cleanest injection point: it is the pre-spawn hook both spawn handlers
+  // already call, and it runs once per cycle. The quarantine below recomputes the
+  // dirt for its own (post-quarantine) purpose; the ONE extra `git status` here is
+  // the pre-spawn truth we must freeze before quarantine mutates the tree.
+  if (phase === "pre-spawn") {
+    const preSpawnDirty = await checkMainDirty(ports.repoCwd);
+    writeMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? "", preSpawnDirty);
   }
   const results = await quarantineMainCheckout({
     repoCwd: ports.repoCwd,

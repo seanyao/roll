@@ -394,13 +394,32 @@ persist only while the goal is unfinished. When a goal is `complete`, the next
 no scope flag, the new goal covers all eligible backlog cards; it never reuses
 the completed goal's scope.
 
-Before the first builder cycle, `roll loop go` also has a fallback check for
-leftover uncommitted Roll bootstrap artifacts such as `AGENTS.md`, `.claude/`,
-or `.roll/` metadata. Current `roll init` should already commit and push those
-Roll-owned files; if a historical or manual path still leaves only those files
-dirty, the goal pauses with `bootstrap_artifacts_unconfirmed` and prints the
-files to confirm. Commit or clean them, then run `roll loop go` again. This
-preflight does not start a cycle and does not count as no-progress.
+Before each builder cycle, `roll loop go` classifies the **complete**
+`git status` set of the main checkout (never a truncated slice) against the
+runner's per-cycle **pending-delivery evidence manifests**. Each manifest
+records the exact evidence paths and their SHA-256 hashes for a still-open
+delivery PR, written atomically under `.roll/loop/evidence-manifests/`.
+
+- **Verified** — a `.roll/**` file whose current content hashes to a value
+  recorded in a manifest. These are runner-owned artifacts (the dossier,
+  report, and screenshots of an open PR); they emit `bootstrap_artifacts_verified`
+  and never pause an unrelated eligible card.
+- **Unconfirmed** — any other `.roll/**` file (an unknown path, a hash
+  mismatch, a malformed/stale manifest, a symlink escape, or a directory).
+- **External** — any non-`.roll/**` (product-file) dirt.
+
+If the only dirt is verified evidence, the preflight proceeds. If unconfirmed
+`.roll` pollution is the only remaining dirt, the goal pauses with
+`bootstrap_artifacts_unconfirmed`, naming the exact files (verified evidence is
+never named) so you can confirm ownership: commit them to the product repo or
+`.roll/roll-meta`, ignore them by policy, or clean them and re-run. Product-file
+dirt is surfaced (not hidden) and left to the cycle. This preflight does not
+start a cycle and does not count as no-progress.
+
+Acceptance is manifest-and-hash only: there is **no** `--ignore-dirty` or
+"trust all evidence" bypass. A generic `.roll/**` path or a large status list
+can never make the gate permissive; anything the runner did not record and
+still hash-match fails closed.
 
 For the Roll repository itself, `roll loop go`, `roll loop resume`, and
 `roll loop now` print the runner binary and version before starting autonomous

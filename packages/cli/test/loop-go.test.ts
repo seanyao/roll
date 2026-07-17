@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { parsePeerReviewTranscript } from "@roll/core";
+import { buildPendingDeliveryEvidenceManifest, parsePeerReviewTranscript, writePendingDeliveryEvidenceManifest } from "@roll/core";
 import { parseGoalYaml, renderGoalYaml, type RollGoal } from "@roll/spec";
 import { classifyBootstrapArtifacts, deliveryGateStopDetails, hasSafetyPauseSince, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
 
@@ -17,6 +17,13 @@ function project(): string {
   dirs.push(p);
   mkdirSync(join(p, ".roll", "loop"), { recursive: true });
   return p;
+}
+
+function commitBacklog(p: string): void {
+  execSync("git add .roll/backlog.md && git commit -qm backlog", {
+    cwd: p,
+    env: { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.com", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.com" },
+  });
 }
 
 function capture(fn: () => Promise<number>): Promise<{ code: number; out: string; err: string }> {
@@ -232,7 +239,7 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "no_progress_breaker")).toBe(false);
   });
 
-  it("FIX-1221: tracked cycle writeback files do not trip the bootstrap preflight", async () => {
+  it("FIX-1272: manifest-verified cycle writeback files do not trip the bootstrap preflight", async () => {
     const p = project();
     execSync("git init -q", { cwd: p });
     mkdirSync(join(p, ".roll", "features", "loop-engine", "FIX-1221"), { recursive: true });
@@ -250,6 +257,22 @@ describe("US-GOAL-002 — roll loop go", () => {
     ]);
     writeFileSync(join(p, ".roll", "features.md"), "# Features\n\n- FIX-1221 Done\n");
     writeFileSync(join(p, ".roll", "features", "loop-engine", "FIX-1221", "spec.md"), "# FIX-1221\n\n- [x] AC\n");
+    // The runner records a per-cycle manifest hashing the writeback it just
+    // committed to the PR branch; the gate verifies those exact files by hash.
+    writePendingDeliveryEvidenceManifest(
+      p,
+      buildPendingDeliveryEvidenceManifest({
+        cycleId: "cycle-writeback",
+        storyId: "FIX-1221",
+        branch: "loop/cycle-writeback",
+        repositoryRoot: p,
+        files: [
+          { path: ".roll/backlog.md", kind: "dossier" },
+          { path: ".roll/features.md", kind: "dossier" },
+          { path: ".roll/features/loop-engine/FIX-1221/spec.md", kind: "dossier" },
+        ],
+      }),
+    );
     let calls = 0;
     const deps: LoopGoDeps = {
       identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
@@ -310,45 +333,233 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(classifyBootstrapArtifacts([])).toMatchObject({ kind: "none" });
   });
 
-  it("FIX-1203: bootstrap classifier ignores Roll-owned cycle evidence but still gates convention files", () => {
-    expect(
-      classifyBootstrapArtifacts([
-        ".roll/loop/runs.jsonl",
-        ".roll/loop/deliveries.jsonl",
-        ".roll/features/loop-engine/FIX-1203/20260703-010203-1/evidence.json",
-        ".roll/features/loop-engine/FIX-1203/20260703-010203-1/screenshots/proof.png",
-        ".roll/features/loop-engine/FIX-1203/ac-map.json",
-      ]),
-    ).toMatchObject({ kind: "none", files: [] });
-    expect(classifyBootstrapArtifacts([".roll/features/loop-engine/FIX-1203/latest-notes.md"])).toMatchObject({
-      kind: "bootstrap_only",
-      files: [".roll/features/loop-engine/FIX-1203/latest-notes.md"],
-    });
-    expect(classifyBootstrapArtifacts([".roll/features/loop-engine/FIX-1203/20260703-010203-1/user-patch.txt"])).toMatchObject({
-      kind: "bootstrap_only",
-      files: [".roll/features/loop-engine/FIX-1203/20260703-010203-1/user-patch.txt"],
-    });
-    expect(classifyBootstrapArtifacts(["AGENTS.md"])).toMatchObject({ kind: "bootstrap_only", files: ["AGENTS.md"] });
+  it("FIX-1272: verified pending-delivery evidence does not pause an unrelated eligible card", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    const run = ".roll/features/organization/US-ORG-004/20260703-010203-1";
+    mkdirSync(join(p, run, "screenshots"), { recursive: true });
+    writeFileSync(join(p, run, "US-ORG-004-review.html"), "<html>review</html>");
+    writeFileSync(join(p, run, "screenshots", "proof.png"), "PNGDATA");
+    writeBacklog(p, ["| [US-CAP-011](.roll/features/cap/US-CAP-011/spec.md) | cap | 📋 Todo |"]);
+    commitBacklog(p); // backlog is clean; only the untracked evidence is dirty
+    // Runner-written manifest for the still-open US-ORG-004 PR evidence.
+    writePendingDeliveryEvidenceManifest(
+      p,
+      buildPendingDeliveryEvidenceManifest({
+        cycleId: "cycle-org",
+        storyId: "US-ORG-004",
+        branch: "loop/cycle-org",
+        repositoryRoot: p,
+        files: [
+          { path: `${run}/US-ORG-004-review.html`, kind: "report" },
+          { path: `${run}/screenshots/proof.png`, kind: "screenshot" },
+        ],
+      }),
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_400 + calls,
+      nowIso: () => `2026-06-11T10:03:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-CAP-011", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1); // US-CAP-011 dispatched, not paused
+    expect(r.out).not.toContain("bootstrap_artifacts_unconfirmed");
+    const events = readEvents(p);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "bootstrap_artifacts_verified")).toBe(true);
+    expect(events.some((e) => e.type === "goal:gate_tripped" && e.reason === "bootstrap_artifacts_unconfirmed")).toBe(false);
   });
 
-  it("FIX-1221: bootstrap classifier ignores modified cycle writeback paths but keeps untracked convention files gated", () => {
-    expect(
-      classifyBootstrapArtifacts([
-        { status: " M", path: ".roll/features/loop-engine/FIX-1221/spec.md" },
-        { status: " M", path: ".roll/backlog.md" },
-        { status: " M", path: ".roll/features.md" },
-      ]),
-    ).toMatchObject({ kind: "none", files: [] });
-    expect(
-      classifyBootstrapArtifacts([
-        { status: "??", path: ".roll/features/loop-engine/FIX-1221/spec.md" },
-        { status: "??", path: ".roll/backlog.md" },
-        { status: "??", path: ".roll/features.md" },
-      ]),
-    ).toMatchObject({
-      kind: "bootstrap_only",
-      files: [".roll/features/loop-engine/FIX-1221/spec.md", ".roll/backlog.md", ".roll/features.md"],
+  it("FIX-1272: an unmanifested .roll file pauses even beside verified evidence, and is named", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    const run = ".roll/features/organization/US-ORG-004/20260703-010203-1";
+    mkdirSync(join(p, run), { recursive: true });
+    writeFileSync(join(p, run, "US-ORG-004-review.html"), "<html/>");
+    writeFileSync(join(p, ".roll", "features", "organization", "US-ORG-004", "manual.txt"), "hand-written");
+    writeBacklog(p, ["| [US-CAP-011](.roll/features/cap/US-CAP-011/spec.md) | cap | 📋 Todo |"]);
+    commitBacklog(p);
+    writePendingDeliveryEvidenceManifest(
+      p,
+      buildPendingDeliveryEvidenceManifest({
+        cycleId: "cycle-org",
+        storyId: "US-ORG-004",
+        branch: "loop/cycle-org",
+        repositoryRoot: p,
+        files: [{ path: `${run}/US-ORG-004-review.html`, kind: "report" }],
+      }),
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_500,
+      nowIso: () => "2026-06-11T10:04:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "US-CAP-011", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0); // paused, not dispatched
+    expect(r.out).toContain("bootstrap_artifacts_unconfirmed");
+    expect(r.out).toContain(".roll/features/organization/US-ORG-004/manual.txt");
+    // The verified review file is NOT listed as unconfirmed.
+    expect(r.out).not.toContain("US-ORG-004-review.html");
+  });
+
+  it("FIX-1272: product dirt beyond a 50-item display cap is not hidden (full-list classification)", async () => {
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    // 60 verified evidence files ...
+    const run = ".roll/features/x/run";
+    mkdirSync(join(p, run), { recursive: true });
+    const evFiles: Array<{ path: string; kind: "evidence" }> = [];
+    for (let i = 0; i < 60; i += 1) {
+      const rel = `${run}/f${i}.json`;
+      writeFileSync(join(p, rel), `data-${i}`);
+      evFiles.push({ path: rel, kind: "evidence" });
+    }
+    // ... plus a product file that the old .slice(0,50) would have hidden.
+    mkdirSync(join(p, "src"), { recursive: true });
+    writeFileSync(join(p, "src", "late.ts"), "export const late = 1;\n");
+    writeBacklog(p, ["| [FIX-X](.roll/features/x/spec.md) | x | 📋 Todo |"]);
+    commitBacklog(p);
+    writePendingDeliveryEvidenceManifest(
+      p,
+      buildPendingDeliveryEvidenceManifest({
+        cycleId: "cycle-x",
+        storyId: "FIX-X",
+        branch: "loop/cycle-x",
+        repositoryRoot: p,
+        files: evFiles,
+      }),
+    );
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_600 + calls,
+      nowIso: () => `2026-06-11T10:05:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 1;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-X", "--max-cycles", "1"], deps));
+
+    // Product dirt is present → mixed → the cycle runs (not a bootstrap pause),
+    // and the classifier saw src/late.ts despite it being the 61st dirty entry.
+    expect(r.code).toBe(0);
+    expect(calls).toBe(1);
+    expect(r.out).not.toContain("bootstrap_artifacts_unconfirmed");
+  });
+
+  it("FIX-1272: an --ignore-dirty style flag never bypasses the gate", async () => {
+    // No trust-all switch exists: an unknown/permissive flag must not make the
+    // gate accept unmanifested .roll pollution. The card still pauses.
+    const p = project();
+    execSync("git init -q", { cwd: p });
+    mkdirSync(join(p, ".roll", "features", "x"), { recursive: true });
+    writeFileSync(join(p, ".roll", "features", "x", "unowned.txt"), "junk");
+    writeBacklog(p, ["| [FIX-X](.roll/features/x/spec.md) | x | 📋 Todo |"]);
+    commitBacklog(p);
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700,
+      nowIso: () => "2026-06-11T10:06:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+    const r = await capture(() =>
+      loopGoCommand(["--worker", "--cards", "FIX-X", "--max-cycles", "1", "--ignore-dirty", "--trust-all"], deps),
+    );
+    expect(calls).toBe(0);
+    expect(r.out).toContain("bootstrap_artifacts_unconfirmed");
+    expect(r.out).toContain("no --ignore-dirty or trust-all bypass");
+  });
+
+  it("FIX-1272: only manifest-hash-verified Roll evidence is accepted; a generic .roll path stays gated", () => {
+    const p = project();
+    const relEvidence = ".roll/features/loop-engine/FIX-1272/20260703-010203-1/evidence.json";
+    const relPng = ".roll/features/loop-engine/FIX-1272/20260703-010203-1/screenshots/proof.png";
+    mkdirSync(join(p, ".roll", "features", "loop-engine", "FIX-1272", "20260703-010203-1", "screenshots"), { recursive: true });
+    writeFileSync(join(p, relEvidence), '{"ok":true}');
+    writeFileSync(join(p, relPng), "PNGDATA");
+    const manifest = buildPendingDeliveryEvidenceManifest({
+      cycleId: "c1",
+      storyId: "FIX-1272",
+      branch: "loop/cycle-c1",
+      repositoryRoot: p,
+      files: [
+        { path: relEvidence, kind: "evidence" },
+        { path: relPng, kind: "screenshot" },
+      ],
     });
+
+    // Verified evidence does not appear in `files` and does not pause.
+    expect(classifyBootstrapArtifacts([relEvidence, relPng], [manifest], p)).toMatchObject({
+      kind: "none",
+      files: [],
+    });
+
+    // A generic .roll path with NO manifest entry fails closed (scorer focus).
+    expect(classifyBootstrapArtifacts([".roll/features/loop-engine/FIX-1272/manual.txt"], [manifest], p)).toMatchObject({
+      kind: "bootstrap_only",
+      files: [".roll/features/loop-engine/FIX-1272/manual.txt"],
+    });
+
+    // Tampering after the manifest (hash mismatch) fails closed.
+    writeFileSync(join(p, relEvidence), "TAMPERED");
+    expect(classifyBootstrapArtifacts([relEvidence], [manifest], p)).toMatchObject({
+      kind: "bootstrap_only",
+      files: [relEvidence],
+    });
+
+    expect(classifyBootstrapArtifacts(["AGENTS.md"], [manifest], p)).toMatchObject({ kind: "bootstrap_only", files: ["AGENTS.md"] });
+  });
+
+  it("FIX-1272: a mixed checkout reports verified + external and is not called bootstrap-only", () => {
+    const p = project();
+    const rel = ".roll/features/loop-engine/FIX-1272/run/report.html";
+    mkdirSync(join(p, ".roll", "features", "loop-engine", "FIX-1272", "run"), { recursive: true });
+    writeFileSync(join(p, rel), "<html/>");
+    writeFileSync(join(p, "package.json"), "{}\n");
+    const manifest = buildPendingDeliveryEvidenceManifest({
+      cycleId: "c1",
+      storyId: "FIX-1272",
+      branch: "loop/cycle-c1",
+      repositoryRoot: p,
+      files: [{ path: rel, kind: "report" }],
+    });
+    const c = classifyBootstrapArtifacts([rel, "package.json"], [manifest], p);
+    expect(c.kind).toBe("mixed");
+    expect(c.verified).toEqual([rel]);
+    expect(c.external).toEqual(["package.json"]);
   });
 
   it("runs cycles back-to-back until a pause marker, then pauses the goal at the cycle boundary", async () => {

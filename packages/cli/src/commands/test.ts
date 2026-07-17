@@ -502,12 +502,32 @@ export function testCommand(args: string[]): number {
   if (plan.mode === "changed" && isNoTestsFoundOutput(primary.output)) {
     infoErr("test gate: changed-test mode matched 0 tests → running full suite (conservative fallback)");
     const full = runForward("npm", ["test"]);
-    if (full.status === 0 && plan.writesProof) writeTestProof(cwd, "full", "npm test");
-    return full.status;
+    return finishGate(cwd, "full", "npm test", full, plan.writesProof);
   }
 
-  if (primary.status === 0 && plan.writesProof) {
-    writeTestProof(cwd, plan.mode, ["npm", ...npmArgv].join(" "));
+  return finishGate(cwd, plan.mode, ["npm", ...npmArgv].join(" "), primary, plan.writesProof);
+}
+
+/**
+ * Complete the gate for a run: mint the proof ONLY when the command really
+ * executed tests and returned zero. A non-zero exit fails as-is; a run that
+ * reported zero test files (even one that exits 0 via `--passWithNoTests`) is
+ * NOT an honest green — it verified nothing — so it fails loud instead of
+ * minting a fabricated proof (FIX-1274 scorer guarantee).
+ */
+function finishGate(
+  cwd: string,
+  mode: GateMode,
+  command: string,
+  run: { status: number; output: string },
+  writesProof: boolean,
+): number {
+  if (run.status !== 0) return run.status;
+  if (isNoTestsFoundOutput(run.output)) {
+    err("roll test: the test command reported no test files — nothing was verified");
+    process.stderr.write("  a green gate requires at least one executed test; add tests or scope the run\n");
+    return 1;
   }
-  return primary.status;
+  if (writesProof) writeTestProof(cwd, mode, command);
+  return 0;
 }

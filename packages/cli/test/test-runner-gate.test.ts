@@ -298,6 +298,17 @@ describe("FIX-1274 roll test gate — no proof without a real green", () => {
     expect(existsSync(proofPath(fx.proj))).toBe(false);
   });
 
+  it("a full run that reports zero test files cannot mint a proof even when it exits 0", () => {
+    // Models `vitest run --passWithNoTests` with no tests at all: exit 0 but
+    // nothing was verified. roll must fail loud, not fabricate a green.
+    const shim = 'echo "No test files found, exiting with code 0"; exit 0';
+    const fx = fixture({ testScript: "vitest run --passWithNoTests", npmShim: shim }); // undetected version → full
+    const r = runRollTest(fx);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("no test files");
+    expect(existsSync(proofPath(fx.proj))).toBe(false);
+  });
+
   it("an unknown-option failure cannot mint a proof", () => {
     const shim = 'echo "CACError: Unknown option \\`--bogus\\`" >&2; exit 1';
     const fx = fixture({ testScript: "vitest run", vitestVersion: "3.2.7", npmShim: shim });

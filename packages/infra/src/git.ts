@@ -41,7 +41,7 @@
  * wrappers (mirroring bash `|| true` paths) swallow failures exactly where the
  * oracle does, and say so.
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -65,6 +65,59 @@ const execFileAsync = promisify(execFile);
 export const DEFAULT_INTEGRATION_BRANCH = "origin/main";
 
 /**
+ * E6 — run `git <args>` in `cwd` SYNCHRONOUSLY, returning trimmed stdout, or
+ * `undefined` on ANY failure (non-zero exit, missing git, not a repo). Used only
+ * by the smart-default probes below, which stay synchronous to preserve the
+ * resolvers' sync signatures (every caller reads them synchronously). Failure is
+ * never fatal — a probe miss simply falls the resolver back to its historical
+ * default, so a non-git dir / detached HEAD / old git can only ever DEGRADE to
+ * the prior behavior, never break.
+ */
+function gitProbe(cwd: string, args: readonly string[]): string | undefined {
+  try {
+    return execFileSync("git", [...args], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * E6 — is `projectRoot` in a SUBMODULE CONTEXT? True when EITHER holds:
+ *   - it is a submodule SUPERPROJECT — a `.gitmodules` file exists at its root
+ *     (it embeds one or more submodules); OR
+ *   - it is ITSELF a submodule checkout — `git -C <root> rev-parse
+ *     --show-superproject-working-tree` prints a non-empty path (git only emits
+ *     that for a working tree nested inside a superproject).
+ *
+ * A plain repo (no `.gitmodules`, not nested in a superproject) is NEITHER, so
+ * the smart defaults never fire for it — the zero-regression guarantee. Detection
+ * is git-native and failure-tolerant (a missing git / non-repo returns false).
+ */
+function inSubmoduleContext(projectRoot: string): boolean {
+  if (existsSync(join(projectRoot, ".gitmodules"))) return true;
+  const superWorkingTree = gitProbe(projectRoot, [
+    "rev-parse",
+    "--show-superproject-working-tree",
+  ]);
+  return superWorkingTree !== undefined && superWorkingTree !== "";
+}
+
+/**
+ * E6 — the current branch of `projectRoot`, or `undefined` when it is DETACHED
+ * (git prints the literal `HEAD`) or the probe fails. `--abbrev-ref HEAD` is the
+ * same query {@link currentBranch} uses; the detached sentinel `HEAD` is mapped
+ * to `undefined` so the caller falls back rather than adopting a bogus ref.
+ */
+function currentBranchSync(projectRoot: string): string | undefined {
+  const branch = gitProbe(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  return branch !== undefined && branch !== "" && branch !== "HEAD" ? branch : undefined;
+}
+
+/**
  * E1: resolve the loop's integration branch — the ref cycles rebase/merge/reset
  * onto. Reads the project-scope `integration_branch` config key (default
  * `origin/main`). The registry key is relative-path-based
@@ -72,6 +125,17 @@ export const DEFAULT_INTEGRATION_BRANCH = "origin/main";
  * specific project tree's config, mirroring how repo-visibility joins its
  * `projectCwd` with the local config path. A missing key / file falls back to
  * {@link DEFAULT_INTEGRATION_BRANCH}, so callers never observe an empty ref.
+ *
+ * E6 — SMART SUBMODULE DEFAULT: when `integration_branch` is UNSET (the config
+ * resolves from the `default` layer) AND `projectRoot` is in a submodule context
+ * ({@link inSubmoduleContext}) AND it is on a branch (not detached), the default
+ * becomes that CURRENT branch instead of `origin/main`. This makes a submodule
+ * superproject (e.g. contractor-2.0 on `contractor2.0`) and each of its submodules
+ * (each on its own working branch) self-configure their integration branch with
+ * ZERO config — the runner already calls this with the submodule path (E2/E4/E5).
+ * An EXPLICIT config value still wins (precedence unbroken), and a plain repo is
+ * untouched (falls straight through to `origin/main`). Detection is pure resolver
+ * logic — it writes NO files.
  *
  * @param projectRoot absolute path to the project tree whose `.roll/local.yaml`
  *                    should be read. Omitted → the cwd-relative default path
@@ -82,6 +146,17 @@ export function resolveIntegrationBranch(projectRoot?: string): string {
     projectRoot === undefined ? projectConfigPath() : join(projectRoot, projectConfigPath());
   const resolved = configResolve("integration_branch", { project });
   const value = resolved?.[0]?.trim();
+  const source = resolved?.[1];
+  // Explicit config (any layer other than the registry default) always wins.
+  if (source !== undefined && source !== "default" && value !== undefined && value !== "") {
+    return value;
+  }
+  // Unset → try the submodule smart default before the historical fallback.
+  const root = projectRoot ?? process.cwd();
+  if (inSubmoduleContext(root)) {
+    const branch = currentBranchSync(root);
+    if (branch !== undefined) return branch;
+  }
   return value !== undefined && value !== "" ? value : DEFAULT_INTEGRATION_BRANCH;
 }
 
@@ -101,6 +176,15 @@ export const DEFAULT_PUBLISH_MODE: PublishMode = "remote";
  * `remote` — a corrupt/hand-edited file can never silently disable remote
  * delivery; it can only fall back to the safe default.
  *
+ * E6 — SMART SUBMODULE DEFAULT: when `publish_mode` is UNSET (resolved from the
+ * `default` layer) AND `projectRoot` is in a submodule context
+ * ({@link inSubmoduleContext}), the default becomes `local`. Remote submodule
+ * delivery (push→PR→CI against a submodule) is not implemented, so `local` (land
+ * the cycle on the submodule's local integration branch) is the ONLY working mode
+ * there — defaulting to it makes a submodule superproject deliver with zero config.
+ * An EXPLICIT `remote` still wins, and a plain repo is untouched (defaults to
+ * `remote`, byte-identical). Writes NO files.
+ *
  * @param projectRoot absolute path to the project tree whose `.roll/local.yaml`
  *                    should be read. Omitted → the cwd-relative default path.
  */
@@ -108,7 +192,16 @@ export function resolvePublishMode(projectRoot?: string): PublishMode {
   const project =
     projectRoot === undefined ? projectConfigPath() : join(projectRoot, projectConfigPath());
   const resolved = configResolve("publish_mode", { project });
-  return resolved?.[0]?.trim() === "local" ? "local" : DEFAULT_PUBLISH_MODE;
+  const value = resolved?.[0]?.trim();
+  const source = resolved?.[1];
+  // Explicit config always wins (any value other than `local` → `remote`).
+  if (source !== undefined && source !== "default") {
+    return value === "local" ? "local" : DEFAULT_PUBLISH_MODE;
+  }
+  // Unset → a submodule superproject / submodule checkout defaults to local.
+  const root = projectRoot ?? process.cwd();
+  if (inSubmoduleContext(root)) return "local";
+  return DEFAULT_PUBLISH_MODE;
 }
 
 /** Result of a raw git invocation. */

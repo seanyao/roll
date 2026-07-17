@@ -302,6 +302,45 @@ describe("resolveIntegrationBranch", () => {
   });
 });
 
+// E6-A: smart submodule-aware defaults for integration_branch. Unset config in a
+// submodule CONTEXT (superproject with .gitmodules, OR a submodule checkout) on a
+// branch → default to that current branch. Normal repos are untouched.
+describe("resolveIntegrationBranch — E6 submodule smart default", () => {
+  it("normal repo (no .gitmodules, not a submodule) still defaults to origin/main — ZERO regression", () => {
+    // initRepo makes a plain repo on `main` with no submodule context.
+    const d = initRepo("rib-plain");
+    expect(resolveIntegrationBranch(d)).toBe("origin/main");
+  });
+
+  it("submodule SUPERPROJECT (has .gitmodules) on a branch → defaults to the current branch", () => {
+    const { superproject } = superprojectWithSubmodule("rib-super");
+    g(superproject, "checkout", "-q", "-b", "contractor2.0");
+    expect(resolveIntegrationBranch(superproject)).toBe("contractor2.0");
+  });
+
+  it("a SUBMODULE checkout (--show-superproject-working-tree non-empty) on a branch → its current branch", () => {
+    const { superproject, submoduleName } = superprojectWithSubmodule("rib-sub");
+    const submodulePath = join(superproject, submoduleName);
+    // The real user checkout of the submodule sits on its integration branch.
+    g(submodulePath, "checkout", "-q", "feat/contractor2.0");
+    expect(resolveIntegrationBranch(submodulePath)).toBe("feat/contractor2.0");
+  });
+
+  it("submodule superproject in DETACHED HEAD → falls back to origin/main (no branch to adopt)", () => {
+    const { superproject } = superprojectWithSubmodule("rib-detached");
+    g(superproject, "checkout", "-q", "--detach");
+    expect(resolveIntegrationBranch(superproject)).toBe("origin/main");
+  });
+
+  it("explicit integration_branch config still WINS over the submodule smart default (precedence intact)", () => {
+    const { superproject } = superprojectWithSubmodule("rib-explicit");
+    g(superproject, "checkout", "-q", "-b", "contractor2.0");
+    mkdirSync(join(superproject, ".roll"), { recursive: true });
+    writeFileSync(join(superproject, ".roll", "local.yaml"), "integration_branch: origin/release\n", "utf8");
+    expect(resolveIntegrationBranch(superproject)).toBe("origin/release");
+  });
+});
+
 describe("resolvePublishMode — E3", () => {
   it("defaults to remote when no config file exists (zero regression)", () => {
     const d = tmp("pm-default");
@@ -318,6 +357,28 @@ describe("resolvePublishMode — E3", () => {
     mkdirSync(join(d, ".roll"), { recursive: true });
     writeFileSync(join(d, ".roll", "local.yaml"), "publish_mode: offline\n", "utf8");
     expect(resolvePublishMode(d)).toBe("remote");
+  });
+});
+
+// E6-A: submodule superproject with UNSET publish_mode → local (remote submodule
+// delivery is not implemented; local is the only working mode). Normal repos and
+// explicit config are untouched.
+describe("resolvePublishMode — E6 submodule smart default", () => {
+  it("normal repo (no .gitmodules) still defaults to remote — ZERO regression", () => {
+    const d = initRepo("pm-plain");
+    expect(resolvePublishMode(d)).toBe("remote");
+  });
+
+  it("submodule SUPERPROJECT (has .gitmodules) → defaults to local", () => {
+    const { superproject } = superprojectWithSubmodule("pm-super");
+    expect(resolvePublishMode(superproject)).toBe("local");
+  });
+
+  it("explicit publish_mode: remote config still WINS over the submodule smart default", () => {
+    const { superproject } = superprojectWithSubmodule("pm-explicit");
+    mkdirSync(join(superproject, ".roll"), { recursive: true });
+    writeFileSync(join(superproject, ".roll", "local.yaml"), "publish_mode: remote\n", "utf8");
+    expect(resolvePublishMode(superproject)).toBe("remote");
   });
 });
 

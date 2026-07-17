@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { parseBacklog, type CycleContext } from "@roll/core";
+import {
+  buildPendingDeliveryEvidenceManifest,
+  parseBacklog,
+  writePendingDeliveryEvidenceManifest,
+  type CycleContext,
+  type ManifestFileKind,
+} from "@roll/core";
 import { checkImageEvidenceAllowed, imageEvidencePathsInWorkingTree } from "@roll/infra";
 import { cardArchiveDir } from "../lib/archive.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
@@ -157,6 +163,80 @@ function rollEvidenceLayout(repoCwd: string): RollEvidenceLayout {
   }
 }
 
+/** Classify an evidence file into a manifest kind by name/location. */
+function evidenceKindFor(relPath: string): ManifestFileKind {
+  const lower = relPath.toLowerCase();
+  if (lower.includes("/screenshots/") || /\.(png|jpe?g|gif|webp)$/.test(lower)) return "screenshot";
+  if (lower.endsWith("-review.html") || lower.endsWith("-report.html") || lower.endsWith("report.html") || lower.endsWith("review.html")) {
+    return "report";
+  }
+  if (lower.endsWith(".html") || lower.endsWith(".md")) return "dossier";
+  return "evidence";
+}
+
+/** Recursively enumerate every regular file under `dir` (absolute paths). */
+function listFilesRecursive(dir: string): string[] {
+  const out: string[] = [];
+  let entries: import("node:fs").Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFilesRecursive(abs));
+    else if (entry.isFile()) out.push(abs);
+  }
+  return out;
+}
+
+/**
+ * FIX-1272: record an immutable per-cycle manifest of the exact pending-delivery
+ * evidence (path + SHA-256) the runner just committed to the delivery branch.
+ * The in-repo evidence physically lives in the MAIN checkout's working tree but
+ * is committed only to the PR branch, so it stays dirty on `main` while the PR
+ * is open. The manifest lets the loop's bootstrap gate confirm these files are
+ * runner-owned and NOT pause an unrelated eligible card. Best-effort: a failed
+ * manifest write must never block delivery (the gate simply fails closed).
+ */
+function recordPendingDeliveryManifest(ports: Ports, ctx: CycleContext, storyId: string, runDir: string, acMap: string): void {
+  try {
+    // A schema-valid manifest requires a non-empty cycle id, branch, and story.
+    if (ctx.cycleId === "" || (ctx.branch ?? "") === "" || storyId === "" || !existsSync(runDir)) return;
+    const candidates: Array<{ path: string; kind: ManifestFileKind }> = [];
+    const toRel = (abs: string): string => relative(ports.repoCwd, abs).split("\\").join("/");
+    if (existsSync(acMap)) candidates.push({ path: toRel(acMap), kind: "evidence" });
+    for (const abs of listFilesRecursive(runDir)) {
+      const rel = toRel(abs);
+      candidates.push({ path: rel, kind: evidenceKindFor(rel) });
+    }
+    // FIX-1272: the in-repo layout also stages the cycle's status-flip writeback
+    // (backlog/features/spec) onto the PR branch, leaving those tracked files
+    // modified on main. Record them so a legitimate status flip is verified and
+    // does not trip the bootstrap gate on the next cycle.
+    for (const writeback of [
+      join(ports.repoCwd, ".roll", "backlog.md"),
+      join(ports.repoCwd, ".roll", "features.md"),
+      join(cardArchiveDir(ports.repoCwd, storyId), "spec.md"),
+    ]) {
+      if (existsSync(writeback)) candidates.push({ path: toRel(writeback), kind: "dossier" });
+    }
+    if (candidates.length === 0) return;
+    const manifest = buildPendingDeliveryEvidenceManifest({
+      cycleId: ctx.cycleId,
+      storyId,
+      branch: ctx.branch,
+      repositoryRoot: ports.repoCwd,
+      files: candidates,
+    });
+    if (manifest.files.length === 0) return;
+    writePendingDeliveryEvidenceManifest(ports.repoCwd, manifest);
+  } catch {
+    /* best-effort: the gate fails closed if the manifest is missing */
+  }
+}
+
 async function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: string): Promise<boolean> {
   const cardDir = cardArchiveDir(ports.repoCwd, storyId);
   const acMap = acMapPath(ports.repoCwd, storyId);
@@ -219,11 +299,15 @@ async function commitInRepoEvidence(ports: Ports, ctx: CycleContext, storyId: st
       cwd: ports.repoCwd,
       encoding: "utf8",
     }).trim();
-    if (dirty === "") return true;
+    if (dirty === "") {
+      recordPendingDeliveryManifest(ports, ctx, storyId, runDir, acMap);
+      return true;
+    }
     execFileSync("git", [...gitTarget, "commit", "-m", `chore: attach acceptance evidence for ${storyId}`], {
       cwd: ports.repoCwd,
       stdio: "ignore",
     });
+    recordPendingDeliveryManifest(ports, ctx, storyId, runDir, acMap);
     return true;
   } catch (e) {
     ports.events.appendAlert(ports.paths.alertsPath, `Roll-Evidence publish blocked for ${storyId}: in-repo evidence commit failed — ${String(e)}`);

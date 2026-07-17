@@ -1,4 +1,4 @@
-import { EventBus, parseBacklog, ensureDeliveriesFresh, nodeExecPort, queryStoryDelivery, type AuditPrEvidence, type FreshnessPort, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
+import { EventBus, parseBacklog, ensureDeliveriesFresh, nodeExecPort, queryStoryDelivery, assessBootstrapArtifacts, readPendingDeliveryEvidenceManifests, type AuditPrEvidence, type FreshnessPort, type PendingDeliveryEvidenceManifest, type StoryDeliveryTruth, type StoryTruth } from "@roll/core";
 import {
   GOAL_REVIEW_MODES,
   GOAL_SCHEMA_VERSION,
@@ -316,13 +316,18 @@ function gitDirtyPaths(projectPath: string): BootstrapArtifactInput[] {
     stdio: ["ignore", "pipe", "ignore"],
   });
   if (result.status !== 0) return [];
+  // FIX-1272: classify the COMPLETE dirty-path set. The old `.slice(0, 50)`
+  // truncated the list BEFORE classification, hiding product-file dirt (and
+  // extra evidence) past the cap. Display output may cap paths, but the gate
+  // must never decide from a truncated status list. `.roll/loop/**` is the
+  // loop's own churning runtime state (events, goal, runs.jsonl, and the
+  // evidence manifests themselves) — excluded here so it never counts as dirt.
   return String(result.stdout ?? "")
     .split("\n")
     .map((line) => line.trimEnd())
     .filter((line) => line.trim() !== "")
     .map(parsePorcelainEntry)
-    .filter((entry) => entry.path !== ".roll/loop" && !entry.path.startsWith(".roll/loop/"))
-    .slice(0, 50);
+    .filter((entry) => entry.path !== ".roll/loop" && !entry.path.startsWith(".roll/loop/"));
 }
 
 function isBootstrapArtifactPath(path: string): boolean {
@@ -332,85 +337,101 @@ function isBootstrapArtifactPath(path: string): boolean {
   return false;
 }
 
-function isRollEvidenceRunDir(part: string): boolean {
-  return /^\d{8}-\d{6}(?:-.+)?$/.test(part) || /^\d{4}-\d{2}-\d{2}T/.test(part) || part.startsWith("cycle-");
-}
-
-function isRollGeneratedEvidenceFile(parts: readonly string[], cardRootLength: number): boolean {
-  const tail = parts[parts.length - 1] ?? "";
-  if (parts.length === cardRootLength + 1 && tail === "ac-map.json") return true;
-  const bucket = parts[cardRootLength] ?? "";
-  const isGeneratedBucket = bucket === "latest" || isRollEvidenceRunDir(bucket);
-  if (!isGeneratedBucket) return false;
-  const rel = parts.slice(cardRootLength + 1);
-  if (rel.length === 1) return ["ac-map.json", "evidence.json", "report.html", "review.html"].includes(rel[0] ?? "");
-  if (rel.length >= 2 && rel[0] === "screenshots") return true;
-  return false;
-}
-
-function isRollOwnedGeneratedPath(path: string): boolean {
-  if (path.startsWith(".roll/loop/")) return true;
-  if (path.startsWith(".roll/reports/")) return true;
-  if (path === ".roll/runs.jsonl" || path === ".roll/deliveries.jsonl") return true;
-  if (path === ".roll/loop/runs.jsonl" || path === ".roll/loop/deliveries.jsonl") return true;
-  if (!path.startsWith(".roll/features/")) return false;
-  const parts = path.split("/");
-  if (parts.length < 5) return false;
-  return isRollGeneratedEvidenceFile(parts, 4);
-}
-
 function bootstrapArtifactPath(input: BootstrapArtifactInput): string {
   return typeof input === "string" ? input : input.path;
 }
 
-function bootstrapArtifactStatus(input: BootstrapArtifactInput): string | undefined {
-  return typeof input === "string" ? undefined : input.status;
+export interface BootstrapArtifactClassification {
+  /** none = nothing to gate on; bootstrap_only = pure un-owned .roll/convention
+   *  pollution (pause); mixed = real product dirt is present (let the cycle
+   *  handle it, do not pause on the bootstrap preflight). */
+  kind: "none" | "bootstrap_only" | "mixed";
+  /** Every dirty path that is NOT a verified runner-owned artifact. */
+  files: string[];
+  /** Runner-owned artifacts confirmed against a manifest by SHA-256. */
+  verified: string[];
+  /** Unverified `.roll/**` paths — unknown control-plane pollution. */
+  unconfirmed: string[];
+  /** Non-`.roll/**` paths — product-file dirt (never manifest-verifiable). */
+  external: string[];
 }
 
-function isCycleWritebackPath(path: string): boolean {
-  if (path === ".roll/backlog.md" || path === ".roll/features.md") return true;
-  return path.startsWith(".roll/features/") && path.endsWith("/spec.md");
+/**
+ * FIX-1272: classify the COMPLETE dirty-path set against the runner-written
+ * pending-delivery evidence manifests. The ONLY way a `.roll` path is treated
+ * as owned is an exact manifest entry whose current SHA-256 still matches — no
+ * path-shape allow-list, no "trust all" switch. Verified artifacts are removed
+ * from `files`, so a checkout that holds only verified evidence for an open PR
+ * does not pause an unrelated eligible card.
+ */
+export function classifyBootstrapArtifacts(
+  paths: readonly BootstrapArtifactInput[],
+  manifests: readonly PendingDeliveryEvidenceManifest[] = [],
+  repositoryRoot: string = process.cwd(),
+): BootstrapArtifactClassification {
+  const dirty = paths.map(bootstrapArtifactPath).filter((p) => p.trim() !== "");
+  const assessment = assessBootstrapArtifacts(dirty, manifests, repositoryRoot);
+  const verifiedSet = new Set(assessment.verified);
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const p of dirty) {
+    if (verifiedSet.has(p) || seen.has(p)) continue;
+    seen.add(p);
+    files.push(p);
+  }
+  if (files.length === 0) {
+    return { kind: "none", files: [], verified: [...assessment.verified], unconfirmed: [], external: [] };
+  }
+  // Real product dirt present ⇒ mixed: the cycle (not this preflight) owns it.
+  const kind = files.every(isBootstrapArtifactPath) ? "bootstrap_only" : "mixed";
+  return {
+    kind,
+    files,
+    verified: [...assessment.verified],
+    unconfirmed: [...assessment.unconfirmed],
+    external: [...assessment.external],
+  };
 }
 
-function isModifiedCycleWriteback(input: BootstrapArtifactInput): boolean {
-  const status = bootstrapArtifactStatus(input);
-  if (status === undefined) return false;
-  if (!isCycleWritebackPath(bootstrapArtifactPath(input))) return false;
-  return status.includes("M") && !/[?ADRCU]/.test(status);
-}
-
-export function classifyBootstrapArtifacts(paths: readonly BootstrapArtifactInput[]): { kind: "none" | "bootstrap_only" | "mixed"; files: string[] } {
-  const files = paths
-    .filter((input) => bootstrapArtifactPath(input).trim() !== "")
-    .filter((input) => !isRollOwnedGeneratedPath(bootstrapArtifactPath(input)))
-    .filter((input) => !isModifiedCycleWriteback(input))
-    .map(bootstrapArtifactPath);
-  if (files.length === 0) return { kind: "none", files: [] };
-  return files.every(isBootstrapArtifactPath) ? { kind: "bootstrap_only", files } : { kind: "mixed", files };
-}
-
-function bootstrapArtifactsMessage(files: readonly string[]): string {
+function bootstrapArtifactsMessage(files: readonly string[], verified: readonly string[] = []): string {
   const shown = files.slice(0, 12).join(", ");
   const more = files.length > 12 ? `, ... +${files.length - 12} more` : "";
   const reasonLine = `ALERT reason: bootstrap_artifacts_unconfirmed (${files.length} unconfirmed bootstrap artifact${files.length === 1 ? "" : "s"})`;
+  // FIX-1272: name how many artifacts WERE accepted, so operators can see the
+  // gate is not all-or-nothing — verified runner evidence passed, only these
+  // could not be confirmed.
+  const verifiedNote =
+    verified.length > 0
+      ? `  (${verified.length} runner-owned artifact${verified.length === 1 ? "" : "s"} verified by manifest hash and allowed through)`
+      : "";
+  const verifiedNoteZh =
+    verified.length > 0
+      ? `  （另有 ${verified.length} 个 runner 生成的产物已通过 manifest 哈希校验放行）`
+      : "";
   return [
     "roll loop go: bootstrap_artifacts_unconfirmed",
     `  ${reasonLine}`,
     `  files: ${shown}${more}`,
-    "  These files define project conventions/backlog metadata. Confirm their ownership before running builders:",
+    ...(verifiedNote ? [verifiedNote] : []),
+    "  Only runner-written evidence recorded in a per-cycle manifest (path + SHA-256) is trusted;",
+    "  these files matched no manifest, so confirm their ownership before running builders:",
     "  - commit them to the product repo if they are product truth",
     "  - commit private Roll metadata inside .roll/roll-meta when applicable",
     "  - ignore/externalize them by project policy",
     "  - or clean them up and re-run init/design",
+    "  There is no --ignore-dirty or trust-all bypass by design.",
     "  Then rerun: roll loop go",
     "",
     "roll loop go: bootstrap_artifacts_unconfirmed",
     `  ${reasonLine}`,
-    "  这些文件定义项目约定/backlog 元数据。先确认归属，再启动 builder：",
+    ...(verifiedNoteZh ? [verifiedNoteZh] : []),
+    "  只有 runner 写入、按 cycle 记录了 manifest（路径 + SHA-256）的证据才会被信任；",
+    "  以下文件没有匹配任何 manifest，先确认归属，再启动 builder：",
     "  - 属于产品事实就提交到产品仓",
     "  - 属于私有 Roll 元数据就提交到 .roll/roll-meta",
     "  - 按项目约定 ignore/外置",
     "  - 或清理后重跑 init/design",
+    "  设计上没有 --ignore-dirty 或 trust-all 的绕过开关。",
     "  然后再运行：roll loop go",
     "",
   ].join("\n");
@@ -1976,7 +1997,32 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         break;
       }
 
-      const bootstrap = classifyBootstrapArtifacts(gitDirtyPaths(id.path));
+      // FIX-1272: classify the COMPLETE dirty-path set against the runner's
+      // pending-delivery evidence manifests. Verified runner-owned artifacts
+      // (a still-open PR's dossier/report/screenshots) never pause an unrelated
+      // eligible card; only unknown/unverified pollution does.
+      const bootstrap = classifyBootstrapArtifacts(
+        gitDirtyPaths(id.path),
+        readPendingDeliveryEvidenceManifests(id.path),
+        id.path,
+      );
+      if (bootstrap.verified.length > 0) {
+        appendGoalGate(
+          bus,
+          evPath,
+          sid,
+          "progress",
+          "audit",
+          "bootstrap_artifacts_verified",
+          {
+            verified: bootstrap.verified.join(", "),
+            verifiedCount: bootstrap.verified.length,
+            unconfirmedCount: bootstrap.unconfirmed.length,
+            externalCount: bootstrap.external.length,
+          },
+          deps.nowSec(),
+        );
+      }
       if (bootstrap.kind === "bootstrap_only") {
         stopReason = "bootstrap_artifacts_unconfirmed";
         const reasonLine = `ALERT reason: bootstrap_artifacts_unconfirmed (${bootstrap.files.length} unconfirmed bootstrap artifact${bootstrap.files.length === 1 ? "" : "s"})`;
@@ -1987,10 +2033,17 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
           "progress",
           "paused",
           stopReason,
-          { reasonLine, files: bootstrap.files.join(", "), count: bootstrap.files.length },
+          {
+            reasonLine,
+            files: bootstrap.files.join(", "),
+            count: bootstrap.files.length,
+            unconfirmed: bootstrap.unconfirmed.join(", "),
+            external: bootstrap.external.join(", "),
+            verifiedCount: bootstrap.verified.length,
+          },
           deps.nowSec(),
         );
-        process.stdout.write(bootstrapArtifactsMessage(bootstrap.files));
+        process.stdout.write(bootstrapArtifactsMessage(bootstrap.files, bootstrap.verified));
         goal = pauseGoal(id.path, bus, stopReason, deps.nowIso(), deps.nowSec()) ?? goal;
         break;
       }

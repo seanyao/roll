@@ -435,6 +435,38 @@ export async function worktreeAddInSubmodule(
 }
 
 /**
+ * E5 — remove the SUBMODULE cycle worktree created by {@link worktreeAddInSubmodule}.
+ * The submodule worktree is registered against the SUBMODULE repo
+ * (`<superprojectCwd>/<submoduleName>`), so its admin metadata + `git worktree
+ * remove` must run there — removing it via the superproject would not find the
+ * registration. Mirrors {@link worktreeRemove}'s tolerant teardown:
+ *   1. `git -C <sub> worktree remove --force <submoduleWorktreePath>` (lenient),
+ *   2. `rm -rf <submoduleWorktreePath>` (lenient),
+ *   3. `git -C <sub> worktree prune --expire now` (reclaim admin metadata).
+ * ALWAYS returns code 0 — terminal cleanup is best-effort and must never topple a
+ * cycle. (No unpushed-bundle step: E3 local-delivery already advanced the
+ * submodule's local integration branch to the cycle HEAD before cleanup, so the
+ * work is reachable; the superproject-side {@link worktreeRemove} still bundles
+ * for the remote-publish path.)
+ *
+ * @param superprojectCwd       the outer super-repo embedding the submodule.
+ * @param submoduleName         the submodule's declared `.gitmodules` path.
+ * @param submoduleWorktreePath the sibling worktree dir to remove
+ *                              ({@link submoduleWorktreePath}).
+ */
+export async function worktreeRemoveInSubmodule(
+  superprojectCwd: string,
+  submoduleName: string,
+  submoduleWorktreePath: string,
+): Promise<GitResult> {
+  const submoduleCwd = join(superprojectCwd, submoduleName);
+  const r = await git(["worktree", "remove", "--force", submoduleWorktreePath], submoduleCwd); // lenient
+  rmSyncQuiet(submoduleWorktreePath);
+  await git(["worktree", "prune", "--expire", "now"], submoduleCwd); // lenient
+  return { code: 0, stdout: r.stdout, stderr: r.stderr };
+}
+
+/**
  * RESUME-PRIOR-WORK: re-point an ALREADY-created cycle worktree's TRACKED tree to
  * a resume ref. The worktree was created on `origin/main` (the fresh-context
  * default) BEFORE the story was picked; once the picker has named the story, the

@@ -33,6 +33,17 @@ export interface GitPort {
     cycleWorktreePath: string,
     base: string,
   ): Promise<{ code: number; stderr: string }>;
+  /** E5: tolerant teardown of the SIBLING submodule cycle worktree created by
+   *  worktreeAddInSubmodule. Runs `git -C <super>/<sub> worktree remove --force
+   *  <submoduleWorktreePath>` + `worktree prune` + rm the dir. Best-effort —
+   *  always code 0, so a cleanup blip never topples the cycle's terminal path.
+   *  Called only when the cycle has a target_submodule; superproject-only cycles
+   *  never invoke it. */
+  worktreeRemoveInSubmodule(
+    superprojectCwd: string,
+    submoduleName: string,
+    submoduleWorktreePath: string,
+  ): Promise<{ code: number }>;
   /** FIX-302: `_worktree_submodule_init` — `git submodule update --init
    *  --recursive` in the worktree. A fresh git worktree carries NO submodule
    *  contents (notably `skills/` is empty), so the full test can never run.

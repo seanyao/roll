@@ -43,6 +43,7 @@ import {
   worktreeAddInSubmodule,
   worktreeFetchOrigin,
   worktreeRemove,
+  worktreeRemoveInSubmodule,
   worktreeResetHard,
   worktreeSubmoduleInit,
   writeHeartbeat,
@@ -221,6 +222,10 @@ export function nodePorts(opts: {
       async worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base) {
         const r = await worktreeAddInSubmodule(superprojectCwd, submoduleName, cycleWorktreePath, base);
         return { code: r.code, stderr: r.stderr };
+      },
+      async worktreeRemoveInSubmodule(superprojectCwd, submoduleName, submoduleWorktreePath) {
+        const r = await worktreeRemoveInSubmodule(superprojectCwd, submoduleName, submoduleWorktreePath);
+        return { code: r.code };
       },
       async worktreeSubmoduleInit(worktreePath) {
         return worktreeSubmoduleInit(worktreePath);

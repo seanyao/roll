@@ -57,6 +57,41 @@ describe("parseTargetSubmodule — E2 per-story submodule tag", () => {
 });
 
 describe("pickStory — status skip rules", () => {
+  it("recovery candidate alone may retry an In Progress card whose prior delivery already merged", () => {
+    const items = [item("US-RECOVER", "🔨 In Progress"), item("US-NEXT", TODO)];
+    const merged = (id: string): boolean => id === "US-RECOVER";
+
+    expect(pickStory(items, { hasMergedDelivery: merged })?.id).toBe("US-NEXT");
+    expect(
+      pickStory(items, {
+        hasMergedDelivery: merged,
+        isRecoveryCandidate: (id) => id === "US-RECOVER",
+      })?.id,
+    ).toBe("US-RECOVER");
+  });
+
+  it("recovery candidate does not reopen a different merged card", () => {
+    const items = [item("US-OTHER", "🔨 In Progress"), item("US-RECOVER", "🔨 In Progress")];
+    const merged = (): boolean => true;
+
+    expect(
+      pickStory(items, {
+        hasMergedDelivery: merged,
+        isRecoveryCandidate: (id) => id === "US-RECOVER",
+      })?.id,
+    ).toBe("US-RECOVER");
+  });
+
+  it("reports work when the only actionable row is an explicit merged-delivery recovery candidate", () => {
+    const items = [item("US-RECOVER", "🔨 In Progress")];
+    const assessment = assessBacklog(items, {
+      hasMergedDelivery: () => true,
+      isRecoveryCandidate: (id) => id === "US-RECOVER",
+    });
+
+    expect(assessment).toMatchObject({ hasWork: true, reason: "has_work" });
+  });
+
   it("skips 🚫 Hold / 🔒 Blocked / ⏸ Deferred / In Progress / Done, takes first Todo", () => {
     const items = [
       item("US-1", "🚫 Hold"),

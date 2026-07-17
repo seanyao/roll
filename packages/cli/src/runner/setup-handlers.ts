@@ -44,6 +44,7 @@ import { planAdversarial, recordExecutionProfile, routerEstMin } from "./executi
 import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 import { latestScreenLockEvent } from "./screen-lock-events.js";
+import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -371,17 +372,13 @@ export async function executeSetupCommand(
           `[FIX-1232] cleaned ${deadLeases.length} dead lease(s): ${deadLeases.join(", ")}`,
         );
       }
-      // US-DELIV-005 (one-card-one-lease): consult the delivery leases derived
-      // from the event stream BEFORE picking. A card held in any lease state
-      // (in_flight / awaiting_merge / ci_red / delivered) is skipped — the
-      // default kills same-card fan-out (the ir-pipeline waste: 3 agents, 1
-      // merge, 2 discarded). `--race` (env ROLL_LOOP_RACE=1, set by
-      // `roll loop run-once --race`) is the explicit opt-in for parallel
-      // racing; the FIRST merge atomically supersedes the remaining siblings
-      // (see loop-reconcile siblingCancelEvents).
+      // US-DELIV-005: derive delivery leases before picking; --race permits
+      // parallel work, then the first merge supersedes its siblings.
       const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
       const liveClaims = readLeases(storyLeasePath(ports));
-      const activeLeases = projectDeliveryLeases(readLeaseEvents(ports.paths.eventsPath)).filter(
+      const cycleEvents = readLeaseEvents(ports.paths.eventsPath);
+      const recoveryCandidateIds = pendingRecoveryCandidateIds(cycleEvents);
+      const activeLeases = projectDeliveryLeases(cycleEvents).filter(
         // An in_flight lease with no LIVE cycle claim is a ghost (crashed
         // cycle, no cycle:end) — a legal fix-forward retry must stay pickable.
         (l) => {
@@ -420,6 +417,7 @@ export async function executeSetupCommand(
         hasOpenPr,
         hasMergedDelivery: (id) =>
           (ports.mergedDelivery?.(id) ?? false) || hasMergedDelivery(pickRunRows, id),
+        isRecoveryCandidate: (id) => recoveryCandidateIds.has(id),
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),

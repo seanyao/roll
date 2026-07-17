@@ -2071,6 +2071,24 @@ describe("executeCommand — command → executor mapping", () => {
       expect(r.event).toEqual({ type: "no_story" });
     });
 
+    it("picks only an explicitly re-armed merged In Progress card", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "roll-recovery-pick-"));
+      execDirs.push(dir);
+      const eventsPath = join(dir, "events.ndjson");
+      writeFileSync(
+        eventsPath,
+        `${JSON.stringify({ type: "goal:recovery", decision: "allowed", actor: "owner", storyId: "FIX-EXT-1", reason: "repair evidence", noProgressCycles: 0, ts: 1 })}\n`,
+      );
+      const { ports } = fakePorts({
+        paths: { ...fakePorts().ports.paths, eventsPath },
+        backlog: { read: () => [{ id: "FIX-EXT-1", desc: "est_min:5", status: "🔨 In Progress" }] },
+        mergedDelivery: (id) => id === "FIX-EXT-1",
+      });
+
+      const r = await executeCommand({ kind: "pick_story" }, ports, CTX);
+      expect(r.event).toEqual({ type: "story_picked", storyId: "FIX-EXT-1" });
+    });
+
     it("preflight flips an externally-merged 📋 Todo card to ✅ Done via the unified truth", async () => {
       const markStatus = vi.fn();
       const { ports, calls } = fakePorts({

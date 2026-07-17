@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { submoduleWorktreePath } from "@roll/infra";
 import type { Ports } from "../src/runner/ports.js";
 import {
   createSubmoduleWorktreeIfDeclared,
@@ -126,8 +127,10 @@ describe("resolveExecutionCwd (E4)", () => {
 
   it("routes into the submodule cycle worktree when a target submodule is declared", () => {
     const { ports: p } = ports(mkdtempSync(join(tmpdir(), "roll-e4-")));
+    // E5: the submodule cycle worktree is the SIBLING <cycle>.submodules/<sub>,
+    // never <cycle>/<sub> (which is the superproject worktree's own mount point).
     expect(resolveExecutionCwd(p, { targetSubmodule: "dukang-service-online" })).toBe(
-      join(p.paths.worktreePath, "dukang-service-online"),
+      submoduleWorktreePath(p.paths.worktreePath, "dukang-service-online"),
     );
   });
 });

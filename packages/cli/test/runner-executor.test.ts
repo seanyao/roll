@@ -1478,7 +1478,7 @@ describe("executeCommand — command → executor mapping", () => {
     );
     expect(r.ctxPatch?.tcrCount).toBe(7);
     // observed the agent's commits in the submodule cycle worktree, not /rt/wt.
-    expect(seen).toEqual([join("/rt/wt", "dukang-service-online")]);
+    expect(seen).toEqual([submoduleWorktreePath("/rt/wt", "dukang-service-online")]);
   });
 
   it("E4: measure_worktree stays on the superproject worktree with no targetSubmodule (zero regression)", async () => {
@@ -1518,7 +1518,7 @@ describe("executeCommand — command → executor mapping", () => {
       ports,
       { ...CTX, targetSubmodule: "dukang-service-online" },
     );
-    const sub = join("/rt/wt", "dukang-service-online");
+    const sub = submoduleWorktreePath("/rt/wt", "dukang-service-online");
     // The runner's git observation of the agent's delivery routes into the submodule.
     expect(commitsAheadCwd).toEqual([sub]);
     expect(tcrCwd).toEqual([sub]);

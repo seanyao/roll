@@ -999,6 +999,7 @@ describe("FIX-211 — Done ≡ merged: no publish-time 抢跑 on the gitignored 
     });
 
     expect(result.terminal).toBe("published"); // FIX-244: publish-ok = PR open, merge pending
+    expect(result.state.ctx.publishConfirmed).toBe(true);
     const backlog = readFileSync(backlogPath, "utf8");
     expect(backlog).toContain("✅ Done");
     expect(backlog).not.toContain("🔨 In Progress");

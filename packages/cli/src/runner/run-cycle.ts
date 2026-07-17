@@ -281,6 +281,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     failureClass: next.failureClass ?? live.failureClass,
     rootCauseKey: next.rootCauseKey ?? live.rootCauseKey,
     agentTimedOut: next.agentTimedOut ?? live.agentTimedOut,
+    publishConfirmed: next.publishConfirmed ?? live.publishConfirmed,
   };
 }
 

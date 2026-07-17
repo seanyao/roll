@@ -4592,7 +4592,7 @@ describe("executeCommand — command → executor mapping", () => {
   // ── FIX-295 AC-FIX1: done ≡ merged — a `done`/`published` terminal flips the
   // backlog card ONLY on confirmed MERGED evidence; a cycle that opened a PR but
   // did not merge (committed-but-unmerged) leaves the card NOT Done. ───────────
-  it("FIX-295 (AC-FIX1): append_run `done` flips Done ONLY when the PR is MERGED", async () => {
+  it("FIX-295 (AC-FIX1): a cycle-published PR flips Done when it is MERGED", async () => {
     const markStatus = vi.fn();
     const { ports, calls } = fakePorts({
       backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
@@ -4601,7 +4601,7 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42" },
+      { ...CTX, tcrCount: 0, publishConfirmed: true },
     );
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
     expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");

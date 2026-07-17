@@ -844,6 +844,10 @@ export interface CycleContext {
   /** US-TRUTH-001: the cycle's published PR url, patched by the publish_pr
    *  executor — feeds the terminal event's pr fact. Absent ⇒ no publish. */
   prUrl?: string;
+  /** The publish executor confirmed that this cycle's branch reached a PR.
+   *  Kept separately from prUrl because adoption of an agent-opened PR can
+   *  prove the branch state without returning a URL. */
+  publishConfirmed?: boolean;
   /** FIX-304: the story's backlog status captured at pick time, BEFORE this
    *  cycle flipped it to 🔨 In Progress. The terminal uses it to UNDO a
    *  PREMATURE ✅ Done the agent wrote (via the symlinked .roll backlog) when
@@ -1374,7 +1378,10 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
             failureClass: "harness",
             rootCauseKey: "harness:agent_internal",
           }
-        : state.ctx;
+        : status === "published" && event.facts.commitsAhead > 0 &&
+            (event.facts.prState === "OPEN" || event.facts.prState === "MERGED")
+          ? { ...state.ctx, publishConfirmed: true }
+          : state.ctx;
       const next = { ...state, phase: "reconcile" as CyclePhase, captured: event.facts, ctx: nextCtx };
       const bFacts = builderFinalizationFacts(state.ctx, event.facts);
       const verdict = finalizeBuilder(bFacts);
@@ -1518,7 +1525,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           // published/done: work is on the remote (or ff-merged) → skip the bundle.
           { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch, bundleUnpushed: false },
         ];
-        return terminate({ ...state, phase: "cleanup" }, status, extra);
+        return terminate({
+          ...state,
+          phase: "cleanup",
+          ctx: event.result.degraded === true
+            ? state.ctx
+            : { ...state.ctx, publishConfirmed: true },
+        }, status, extra);
       }
       if (status === "orphan") {
         // Commits pushed for audit; worktree cleaned (bin/roll:9333).

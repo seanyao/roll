@@ -455,9 +455,7 @@ export async function executeTerminalCommand(
       if (
         (cmd.status === "done" || cmd.status === "published") &&
         terminalStoryId !== "" &&
-        (ctx.tcrCount ?? 0) > 0 &&
-        ctx.prUrl !== undefined &&
-        ctx.prUrl !== ""
+        (ctx.publishConfirmed === true || (ctx.prUrl !== undefined && ctx.prUrl !== ""))
       ) {
         // US-TRUTH-015 AC2: use prMergeInfo for both the state check AND the
         // mergedAt/mergeCommit facts (one gh call, not two).

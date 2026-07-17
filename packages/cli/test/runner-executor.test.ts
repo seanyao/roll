@@ -4447,11 +4447,48 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      CTX,
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42" },
     );
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
     expect(markStatus).toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
     expect((calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n")).toContain("evidence_debt");
+  });
+
+  it("does not credit a merged PR when this cycle has zero TCR commits", async () => {
+    const markStatus = vi.fn();
+    const prMergeInfo = vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }));
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prMergeInfo },
+    });
+
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, tcrCount: 0, preCycleStatus: "📋 Todo" },
+    );
+
+    expect(prMergeInfo).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done · evidence_debt");
+  });
+
+  it("does not credit an older merged PR when this cycle did not publish one", async () => {
+    const markStatus = vi.fn();
+    const prMergeInfo = vi.fn(async () => ({ state: "MERGED", mergedAt: "2026-06-21T00:00:00Z", mergeCommit: "abc123def456" }));
+    const { ports } = fakePorts({
+      backlog: { read: vi.fn(() => [{ id: "US-RUN-001", desc: "", status: "🔨 In Progress" }]), markStatus },
+      github: { ...fakePorts().ports.github, prMergeInfo },
+    });
+
+    await executeCommand(
+      { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
+      ports,
+      { ...CTX, tcrCount: 1, preCycleStatus: "📋 Todo" },
+    );
+
+    expect(prMergeInfo).not.toHaveBeenCalled();
+    expect(markStatus).not.toHaveBeenCalled();
   });
 
   it("FIX-295 (AC-FIX1): a delivered cycle whose PR is still OPEN does NOT flip Done", async () => {
@@ -4527,7 +4564,7 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      { ...CTX, preCycleStatus: "📋 Todo" },
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42", preCycleStatus: "📋 Todo" },
     );
     // No false-Done left behind; the row is reverted to its pre-cycle Todo.
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");
@@ -4571,7 +4608,7 @@ describe("executeCommand — command → executor mapping", () => {
     await executeCommand(
       { kind: "append_run", status: "done", outcome: "delivered", cycleId: CTX.cycleId },
       ports,
-      { ...CTX, preCycleStatus: "📋 Todo" },
+      { ...CTX, tcrCount: 1, prUrl: "https://github.com/o/r/pull/42", preCycleStatus: "📋 Todo" },
     );
     // Legacy merged rows with no evidence directory are allowed but explicitly marked as debt.
     expect(markStatus).not.toHaveBeenCalledWith("/repo", "US-RUN-001", "✅ Done");

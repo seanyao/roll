@@ -452,7 +452,13 @@ export async function executeTerminalCommand(
         }
       }
       let terminalMerged = false;
-      if ((cmd.status === "done" || cmd.status === "published") && terminalStoryId !== "") {
+      if (
+        (cmd.status === "done" || cmd.status === "published") &&
+        terminalStoryId !== "" &&
+        (ctx.tcrCount ?? 0) > 0 &&
+        ctx.prUrl !== undefined &&
+        ctx.prUrl !== ""
+      ) {
         // US-TRUTH-015 AC2: use prMergeInfo for both the state check AND the
         // mergedAt/mergeCommit facts (one gh call, not two).
         const mergeInfo = await ports.github.prMergeInfo(ports.repoCwd, ctx.branch).catch(() => undefined);

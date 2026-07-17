@@ -2230,7 +2230,171 @@ describe("attestCommand — US-EVID-030 CapturePlanner seam", () => {
     expect(code).toBe(0);
     const manifest = JSON.parse(
       readFileSync(join(proj, ".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03", "evidence.json"), "utf8"),
-    ) as { capture_receipts?: unknown };
+    ) as { capture_receipts?: unknown; evidence_health?: unknown };
     expect(manifest.capture_receipts ?? []).toEqual([]);
+    // US-EVID-031 — additive/default-off: no v2 surface ⇒ no evidence_health key.
+    expect(manifest.evidence_health).toBeUndefined();
+  });
+});
+
+describe("attestCommand — US-EVID-031 EvidenceHealth separation (AC2/AC3/AC5/AC6)", () => {
+  const PNG_HEADER = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const SURFACE = "http://localhost:3000/team";
+  const RUN_DIR_PARTS = [".roll", "features", "demo", "FIX-300", "2026-06-06T01-02-03"] as const;
+
+  /** A lane that writes a real PNG and returns a taken receipt (optionally poisoned). */
+  function takenLane(source: CaptureLanePort["source"], seed: number, over: (i: CaptureIntentV2) => Partial<CaptureReceiptV2> = () => ({})): CaptureLanePort {
+    return {
+      source,
+      async run(intent: CaptureIntentV2): Promise<CaptureReceiptV2> {
+        mkdirSync(dirname(intent.out), { recursive: true });
+        const bytes = Buffer.from([...PNG_HEADER, seed]);
+        writeFileSync(intent.out, bytes);
+        const captureClass = source === "roll-capture-window" ? "physical" : "rendered";
+        return {
+          protocol: ROLL_CAPTURE_PROTOCOL_V2,
+          requestId: intent.requestId,
+          storyId: intent.storyId,
+          runId: intent.runId,
+          surfaceId: intent.surface.id,
+          source,
+          captureClass,
+          state: "taken",
+          screenshotPath: intent.out,
+          sha256: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+          ...(captureClass === "rendered" ? { finalUrl: intent.surface.id } : {}),
+          ...(captureClass === "physical" && intent.target !== undefined ? { target: intent.target } : {}),
+          responsePath: `${intent.out}.response.json`,
+          startedAt: "2026-07-18T10:00:01.000+08:00",
+          finishedAt: "2026-07-18T10:00:02.000+08:00",
+          ...over(intent),
+        };
+      },
+    };
+  }
+
+  /** A lane that fails for host reasons (infrastructure). */
+  function throwingLane(source: CaptureLanePort["source"]): CaptureLanePort {
+    return {
+      source,
+      run() {
+        return Promise.reject(new Error("Capture.app not running"));
+      },
+    };
+  }
+
+  function capturedStderr<T>(fn: () => Promise<T>): Promise<{ code: T; stderr: string }> {
+    const o = process.stdout.write.bind(process.stdout);
+    const e = process.stderr.write.bind(process.stderr);
+    let stderr = "";
+    // @ts-expect-error capture-only
+    process.stdout.write = (): boolean => true;
+    // @ts-expect-error capture-only
+    process.stderr.write = (s: string): boolean => {
+      stderr += String(s);
+      return true;
+    };
+    return fn()
+      .then((code) => ({ code, stderr }))
+      .finally(() => {
+        process.stdout.write = o;
+        process.stderr.write = e;
+      });
+  }
+
+  type HealthManifest = {
+    evidence_health?: Array<{ surfaceId: string; visual: string; delivery: string; category: string; blocksGate: boolean; reschedulesBuild: boolean; markedDegraded: boolean }>;
+  };
+
+  function readHealth(proj: string): HealthManifest["evidence_health"] {
+    const m = JSON.parse(readFileSync(join(proj, ...RUN_DIR_PARTS, "evidence.json"), "utf8")) as HealthManifest;
+    return m.evidence_health;
+  }
+  function readReport(proj: string): string {
+    return readFileSync(join(proj, ...RUN_DIR_PARTS, "FIX-300-report.html"), "utf8");
+  }
+
+  it("verified: both lanes taken ⇒ evidence_health=verified, renders both provenance labels under the shared surface (AC6)", async () => {
+    const proj = project();
+    const surface = { declaredUrl: SURFACE, expectedAcIds: ["FIX-300:AC1"], windowApp: "Google Chrome", windowTitle: "团队管理" };
+    const { code, stderr } = await capturedStderr(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { root: join(proj, ".roll", "capture-gateway"), captureSurfaces: [{ surface, lanes: [takenLane("roll-capture-window", 1), takenLane("playwright-rendered", 2)] }] },
+        }),
+      ),
+    );
+    expect(code).toBe(0);
+    const health = readHealth(proj)!;
+    expect(health).toHaveLength(1);
+    expect(health[0]!.visual).toBe("verified");
+    expect(health[0]!.category).toBe("evidence-verified");
+    expect(health[0]!.blocksGate).toBe(false);
+    // AC6: one physical + one rendered under the shared surface, with provenance.
+    const html = readReport(proj);
+    expect(html).toContain("Visual evidence by surface");
+    expect(html).toContain("Roll Capture · physical");
+    expect(html).toContain("Playwright · rendered");
+    expect(html).toContain('data-class="physical"');
+    expect(html).toContain('data-class="rendered"');
+    // AC5: the distinct signal reaches loop status (stderr).
+    expect(stderr).toContain("evidence-health");
+    expect(stderr).toContain("evidence-verified");
+  });
+
+  it("degraded-infrastructure: all lanes fail for host reasons ⇒ publishes (exit 0), NOT rebuilt, visibly marked (AC2)", async () => {
+    const proj = project();
+    const surface = { declaredUrl: SURFACE, expectedAcIds: ["FIX-300:AC1"], windowApp: "Google Chrome" };
+    const { code, stderr } = await capturedStderr(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { root: join(proj, ".roll", "capture-gateway"), captureSurfaces: [{ surface, lanes: [throwingLane("roll-capture-window"), throwingLane("playwright-rendered")] }] },
+        }),
+      ),
+    );
+    // AC2: a broken capture machine does NOT fail the delivery (attest exits 0).
+    expect(code).toBe(0);
+    const health = readHealth(proj)!;
+    expect(health[0]!.visual).toBe("degraded-infrastructure");
+    expect(health[0]!.category).toBe("evidence-degradation");
+    expect(health[0]!.delivery).toBe("passed"); // delivery independent of the machine
+    expect(health[0]!.reschedulesBuild).toBe(false); // never rebuild a completed story
+    expect(health[0]!.markedDegraded).toBe(true);
+    // Visibly marked in the report.
+    const html = readReport(proj);
+    expect(html).toContain("vh-degraded");
+    // AC5: distinct degradation signal in loop status.
+    expect(stderr).toContain("evidence-degradation");
+  });
+
+  it("invalid-target: a poisoned lane stays BLOCKING even beside a valid image on the SAME surface (AC3, scorer_focus)", async () => {
+    const proj = project();
+    const surface = { declaredUrl: SURFACE, expectedAcIds: ["FIX-300:AC1"], windowApp: "Google Chrome", windowTitle: "团队管理" };
+    // physical lane captures validly; rendered lane lands on a login page (poisoned).
+    const poisonedRendered = takenLane("playwright-rendered", 3, () => ({ finalUrl: "http://localhost:3000/login" }));
+    const { code, stderr } = await capturedStderr(() =>
+      inDir(proj, () =>
+        attestCommand(["FIX-300"], {
+          now: () => T0,
+          run: quietRun,
+          ghProbe: () => Promise.resolve(false),
+          rollCapture: { root: join(proj, ".roll", "capture-gateway"), captureSurfaces: [{ surface, lanes: [takenLane("roll-capture-window", 1), poisonedRendered] }] },
+        }),
+      ),
+    );
+    expect(code).toBe(0); // attest still renders the evidence; the GATE blocks on visual
+    const health = readHealth(proj)!;
+    // The coexisting valid physical image does NOT flip the surface to verified.
+    expect(health[0]!.visual).toBe("invalid-target");
+    expect(health[0]!.category).toBe("evidence-contract-failure");
+    expect(health[0]!.blocksGate).toBe(true);
+    // AC5: the contract-failure signal reaches loop status.
+    expect(stderr).toContain("evidence-contract-failure");
   });
 });

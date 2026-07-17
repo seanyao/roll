@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { CaptureIntentV2, CaptureReceiptV2 } from "@roll/spec";
+import type { EvidenceHealthFact } from "@roll/core";
 import { gh, ghAvailable } from "./github.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -73,6 +74,13 @@ export interface EvidenceManifest {
    * class, PNG digest, and surface/AC binding across the package boundary.
    */
   capture_receipts: CaptureReceiptFact[];
+  /**
+   * US-EVID-031 — resolved visual-evidence health per declared surface, kept
+   * SEPARATE from the delivery verdict so a broken capture machine cannot force a
+   * completed story to be rebuilt (AC5, machine-readable). Additive: legacy
+   * readers ignore this key; absent when no v2 surface was declared.
+   */
+  evidence_health?: EvidenceHealthFact[];
 }
 
 /**
@@ -130,6 +138,8 @@ export interface CollectOptions {
   captureCommand?: CaptureCommandFact | null;
   /** US-PHYSICAL-009 — accepted v2 receipt facts to freeze into the manifest. */
   captureReceipts?: readonly CaptureReceiptFact[];
+  /** US-EVID-031 — resolved visual-evidence health per declared surface. */
+  evidenceHealth?: readonly EvidenceHealthFact[];
 }
 
 /**
@@ -284,6 +294,9 @@ export async function collectEvidence(opts: CollectOptions): Promise<EvidenceMan
     captures: [...(opts.captures ?? [])],
     capture_command: opts.captureCommand ?? null,
     capture_receipts: [...(opts.captureReceipts ?? [])],
+    ...(opts.evidenceHealth !== undefined && opts.evidenceHealth.length > 0
+      ? { evidence_health: [...opts.evidenceHealth] }
+      : {}),
   };
 }
 

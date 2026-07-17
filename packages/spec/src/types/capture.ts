@@ -444,9 +444,27 @@ export interface CaptureReceiptV2 {
   finishedAt: string;
 }
 
+/**
+ * The four visual-evidence states (US-EVID-031). They are SEPARATE from the
+ * delivery verdict: a broken capture machine (`degraded-infrastructure`) must
+ * never force a completed story to be rebuilt, while a missing contract
+ * (`absent-contract`) or a poisoned lane (`invalid-target`) still fails loudly.
+ */
+export type EvidenceVisualState = "verified" | "degraded-infrastructure" | "invalid-target" | "absent-contract";
+
+export const EVIDENCE_VISUAL_STATES: readonly EvidenceVisualState[] = [
+  "verified",
+  "degraded-infrastructure",
+  "invalid-target",
+  "absent-contract",
+];
+
+/** The two visual states that BLOCK the gate as loud evidence/contract failures. */
+export const EVIDENCE_BLOCKING_VISUAL_STATES: readonly EvidenceVisualState[] = ["invalid-target", "absent-contract"];
+
 export interface EvidenceHealth {
   delivery: "passed" | "failed";
-  visual: "verified" | "degraded-infrastructure" | "invalid-target" | "absent-contract";
+  visual: EvidenceVisualState;
   acceptedReceiptIds: string[];
   attempts: string[];
 }

@@ -369,6 +369,73 @@ describe("CapturePlanner — one surface cannot leak evidence to an unrelated AC
   });
 });
 
+// ── US-EVID-031 — failureKind classification (poisoned vs broken machine) ─────
+
+describe("CapturePlanner.run — classifies failureKind for the EvidenceHealth resolver (US-EVID-031)", () => {
+  it("a poisoned lane (login/foreign redirect) is tagged failureKind=invalid-target", async () => {
+    const store = new FakeReceiptStore();
+    const planner = new CapturePlanner();
+    const surface: DeclaredSurface = { declaredUrl: TEAM, expectedAcIds: ["AC2"] };
+    const rendered = recordingLane("playwright-rendered", async (i) => takenReceipt(i, { finalUrl: "http://localhost:3000/login" }));
+    const result = await planner.capture(surface, ctx(), [rendered], store);
+    const fact = result.attempts[0]!;
+    expect(fact.state).toBe("failed");
+    expect(fact.failureKind).toBe("invalid-target");
+    expect(fact.accepted).toBe(false);
+  });
+
+  it("a forged digest (invalid taken receipt) is tagged failureKind=invalid-target", async () => {
+    const store = new FakeReceiptStore();
+    const planner = new CapturePlanner();
+    const surface: DeclaredSurface = { declaredUrl: TEAM, expectedAcIds: ["AC2"] };
+    const rendered = recordingLane("playwright-rendered", async (i) => takenReceipt(i, { sha256: "sha256:not-a-real-digest" }));
+    const result = await planner.capture(surface, ctx(), [rendered], store);
+    const fact = result.attempts[0]!;
+    expect(fact.state).toBe("failed");
+    expect(fact.failureKind).toBe("invalid-target");
+  });
+
+  it("a THROWING lane is tagged failureKind=infrastructure", async () => {
+    const store = new FakeReceiptStore();
+    const planner = new CapturePlanner();
+    const surface: DeclaredSurface = { declaredUrl: TEAM, expectedAcIds: ["AC2"], windowApp: "Google Chrome" };
+    const physical = recordingLane("roll-capture-window", async () => {
+      throw new Error("Capture.app not running");
+    });
+    const rendered = recordingLane("playwright-rendered", async (i) => takenReceipt(i));
+    const result = await planner.capture(surface, ctx(), [physical, rendered], store);
+    const physFact = result.attempts.find((a) => a.source === "roll-capture-window")!;
+    const rendFact = result.attempts.find((a) => a.source === "playwright-rendered")!;
+    expect(physFact.state).toBe("failed");
+    expect(physFact.failureKind).toBe("infrastructure");
+    // The accepted taken image carries NO failureKind.
+    expect(rendFact.state).toBe("taken");
+    expect(rendFact.failureKind).toBeUndefined();
+  });
+
+  it("a TIMED-OUT lane is tagged failureKind=infrastructure", async () => {
+    const store = new FakeReceiptStore();
+    const planner = new CapturePlanner();
+    const surface: DeclaredSurface = { declaredUrl: TEAM, expectedAcIds: ["AC2"], windowApp: "Google Chrome" };
+    const policyCtx = ctx({ policy: { ...DEFAULT_CAPTURE_POLICY, timeoutMs: 20 } });
+    const physical = recordingLane("roll-capture-window", () => new Promise<CaptureReceiptV2>(() => {}));
+    const result = await planner.capture(surface, policyCtx, [physical], store);
+    const fact = result.attempts.find((a) => a.source === "roll-capture-window")!;
+    expect(fact.state).toBe("timeout");
+    expect(fact.failureKind).toBe("infrastructure");
+  });
+
+  it("a missing executor (no lane injected) is tagged failureKind=infrastructure (skipped)", async () => {
+    const store = new FakeReceiptStore();
+    const planner = new CapturePlanner();
+    const surface: DeclaredSurface = { declaredUrl: TEAM, expectedAcIds: ["AC2"] };
+    const result = await planner.capture(surface, ctx(), [], store);
+    const fact = result.attempts[0]!;
+    expect(fact.state).toBe("skipped");
+    expect(fact.failureKind).toBe("infrastructure");
+  });
+});
+
 // ── plan validity guard ──────────────────────────────────────────────────────
 
 describe("CapturePlanner.plan — derives only valid intents", () => {

@@ -2423,3 +2423,90 @@ describe("E9: runAttestGate resolves the spec from specRepoCwd (design truth)", 
     expect(viaLive.reasons[0]).toMatch(/no AC block/i);
   });
 });
+
+// ── US-EVID-031 — the gate separates delivery from visual-evidence health ─────
+describe("runAttestGate — EvidenceHealth separation (US-EVID-031)", () => {
+  const SURFACE = "http://localhost:3000/team";
+
+  function healthFact(over: Record<string, unknown>): Record<string, unknown> {
+    return {
+      surfaceId: SURFACE,
+      delivery: "passed",
+      visual: "verified",
+      acceptedReceiptIds: [],
+      attempts: [],
+      category: "evidence-verified",
+      blocksGate: false,
+      reschedulesBuild: false,
+      markedDegraded: false,
+      evidenceOnlyRepair: false,
+      reason: "verified",
+      ...over,
+    };
+  }
+
+  it("invalid-target BLOCKS the gate as an evidence failure (hard)", () => {
+    const wt = withReport("US-EVID-031-INVALID", 2000);
+    withPeerScore(wt, "US-EVID-031-INVALID", 8, "good", "c-inv");
+    writeEvidenceJson(wt, "US-EVID-031-INVALID", {
+      evidence_health: [healthFact({ visual: "invalid-target", category: "evidence-contract-failure", blocksGate: true, reason: "a lane reached login" })],
+    });
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "US-EVID-031-INVALID", "c-inv", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toMatch(/invalid-target/);
+    expect(alerts.some((a) => a.includes("BLOCKED"))).toBe(true);
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("absent-contract BLOCKS the gate as a design/execution failure (hard)", () => {
+    const wt = withReport("US-EVID-031-ABSENT", 2000);
+    writeEvidenceJson(wt, "US-EVID-031-ABSENT", {
+      evidence_health: [healthFact({ surfaceId: null, visual: "absent-contract", category: "evidence-contract-failure", blocksGate: true, reason: "no declared surface" })],
+    });
+    const { s } = sinks();
+    const r = runAttestGate(wt, "US-EVID-031-ABSENT", "c-abs", "hard", 1000, s);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toMatch(/absent-contract/);
+  });
+
+  it("degraded-infrastructure does NOT block or reschedule — publishes with a visible alert (AC2)", () => {
+    const wt = withReport("US-EVID-031-DEGRADED", 2000);
+    withPeerScore(wt, "US-EVID-031-DEGRADED", 8, "good", "c-deg");
+    writeEvidenceJson(wt, "US-EVID-031-DEGRADED", {
+      screenshots: ["screenshots/p.png"],
+      evidence_health: [healthFact({ visual: "degraded-infrastructure", category: "evidence-degradation", blocksGate: false, markedDegraded: true, reason: "only host failures" })],
+    });
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, "US-EVID-031-DEGRADED", "c-deg", "hard", 1000, s);
+    // A broken capture machine never fails the completed story.
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    // But it IS visibly surfaced (degraded, not silently green).
+    expect(alerts.some((a) => a.includes("DEGRADED"))).toBe(true);
+  });
+
+  it("verified evidence_health does not block and emits no evidence alert", () => {
+    const wt = withReport("US-EVID-031-VERIFIED", 2000);
+    withPeerScore(wt, "US-EVID-031-VERIFIED", 8, "good", "c-ver");
+    writeEvidenceJson(wt, "US-EVID-031-VERIFIED", {
+      screenshots: ["screenshots/p.png"],
+      evidence_health: [healthFact({ visual: "verified" })],
+    });
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, "US-EVID-031-VERIFIED", "c-ver", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts.some((a) => a.includes("DEGRADED") || a.includes("BLOCKED"))).toBe(false);
+  });
+
+  it("legacy story with no evidence_health is unaffected (additive)", () => {
+    const wt = withReport("US-EVID-031-LEGACY", 2000);
+    withPeerScore(wt, "US-EVID-031-LEGACY", 8, "good", "c-leg");
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, "US-EVID-031-LEGACY", "c-leg", "hard", 1000, s);
+    expect(r.verdict).toBe("produced");
+    expect(alerts.some((a) => a.includes("DEGRADED") || a.includes("visual evidence"))).toBe(false);
+  });
+});

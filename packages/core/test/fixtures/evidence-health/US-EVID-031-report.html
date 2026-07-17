@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>US-DEMO-042 — Acceptance Review Page · 验收 Review Page</title>
+<title>US-EVID-031 — Acceptance Review Page · 验收 Review Page</title>
 <style>
 
 :root { color-scheme: light; --bg:#eef1f5; --bg-raise:#fff; --fg:#161b26; --muted:#525c6e; --line:#e0e5ee; --accent:#2d54e8; --grain:transparent; --pass:#178a52; --info:#2d54e8; --warn:#c77d12; --claim:#c77d12; --fail:#d23b3b; --block:#7048bc; --teal:#0d9488; --serif:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; --sans:"IBM Plex Sans","IBM Plex Sans SC",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
@@ -202,82 +202,44 @@ table.ov-table th { color:var(--muted); font-weight:600; font-family:var(--serif
 </nav>
 <header class="doc">
 <p class="kicker">Roll · <span class="lang-en">Acceptance Review Page</span><span class="lang-zh">验收 Review Page</span></p>
-<h1>US-DEMO-042 — Global git install channel</h1>
-<p class="meta"><code>US-DEMO-042</code> · <span class="lang-en">generated</span><span class="lang-zh">生成于</span> 2026-07-15T00:00:00Z · Gate: PASS</p>
+<h1>US-EVID-031 — Visual evidence by surface (fixture)</h1>
+<p class="meta"><code>US-EVID-031</code> · <span class="lang-en">generated</span><span class="lang-zh">生成于</span> 2026-07-18T00:00:00Z · Gate: PASS</p>
 <div class="seal" aria-hidden="true"><span>ROLL</span>验讫</div>
 </header>
 
 <section id="execution-cast" class="execution-cast"><h2>🎭 <span class="lang-en">Execution Cast</span><span class="lang-zh">执行阵容</span></h2>
 <p class="text-muted"><span class="lang-en">Role summary unavailable — cycle did not produce a role cast.</span><span class="lang-zh">角色摘要不可用——cycle 未产生角色阵容。</span></p></section>
-<p><span class="badge s-pass">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span> × 2</span> <span class="badge s-claimed">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span> × 2</span></p>
-<section class="outward-verification">
-<h2><span class="lang-en">Outward verification</span><span class="lang-zh">外部行为验证</span></h2>
-<p class="ov-banner ov-banner-warn">⚠ <span class="lang-en">Outward verification incomplete — the AC(s) below are NOT green acceptance.</span><span class="lang-zh">外部行为验证未完成——下列 AC 不构成绿色验收。</span></p>
-<table class="ov-table"><thead><tr><th>AC</th><th><span class="lang-en">Mode</span><span class="lang-zh">模式</span></th><th><span class="lang-en">Result</span><span class="lang-zh">结果</span></th></tr></thead>
-<tbody><tr class="ov-row ov-simulation">
-<td><code>US-DEMO-042:AC3</code></td>
-<td>external-smoke</td>
-<td class="ov-result"><span class="ov-status">🟧 verified-in-simulation — simulation only, NOT accepted</span><div class="ov-meta">env <code>release</code> · <code>npm pack &amp;&amp; tar tf *.tgz</code></div><div class="ov-detail">local simulation passed but no external smoke results exist — this is not a positive verification</div></td>
-</tr>
-<tr class="ov-row ov-unverified">
-<td><code>US-DEMO-042:AC4</code></td>
-<td>external-smoke</td>
-<td class="ov-result"><span class="ov-status">🟥 UNVERIFIED — external smoke not run</span><div class="ov-meta">env <code>release</code> · <code>npm i -g github:owner/repo#&lt;commit&gt; &amp;&amp; repo --version</code></div><div class="ov-detail">no smoke results available for environment &quot;release&quot; and no local simulation evidence</div></td>
-</tr>
-<tr class="ov-row ov-verified">
-<td><code>US-DEMO-042:AC5</code></td>
-<td>external-smoke</td>
-<td class="ov-result"><span class="ov-status">✅ VERIFIED (external smoke)</span><div class="ov-meta">env <code>release</code> · <code>repo --version</code></div><div class="ov-detail">smoke passed</div></td>
-</tr>
-<tr class="ov-row ov-unverified">
-<td><code>US-DEMO-042:AC6</code></td>
-<td>owner-attested</td>
-<td class="ov-result"><span class="ov-status">🟥 UNVERIFIED — owner attestation pending</span><div class="ov-meta">ref <code>https://github.com/owner/repo/issues/1343</code></div><div class="ov-detail">manual OAuth callback verification at issue #1343 is pending</div></td>
-</tr></tbody></table>
-</section>
-<section class="ac s-pass" id="US-DEMO-042:AC1">
-<h3><span class="badge">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span></span> <code>US-DEMO-042:AC1</code></h3>
-<p class="ac-text">The command parser accepts the new --channel flag.</p>
+<p><span class="badge s-pass">🟩 <span class="lang-en">Pass with Evidence</span><span class="lang-zh">证据通过</span> × 2</span></p>
 
-<div class="ev ev-test-pass">cli parser suite green</div>
+<section class="ac s-pass" id="US-EVID-031:AC4">
+<h3><span class="badge">🟩 <span class="lang-en">Pass with Evidence</span><span class="lang-zh">证据通过</span></span> <code>US-EVID-031:AC4</code></h3>
+<p class="ac-text">render every accepted image with provenance</p>
+
+<div class="ev ev-commit">tcr</div>
 
 </section>
-<section class="ac s-claimed" id="US-DEMO-042:AC3">
-<h3><span class="badge">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span></span> <code>US-DEMO-042:AC3</code></h3>
-<p class="ac-text">npm pack produces a tarball with the documented bin entry.</p>
-<p class="note">verified-in-simulation only — npm pack passed, but no external install smoke ran.</p>
-<div class="ev ev-test-pass">npm pack simulation</div>
+<section class="ac s-pass" id="US-EVID-031:AC6">
+<h3><span class="badge">🟩 <span class="lang-en">Pass with Evidence</span><span class="lang-zh">证据通过</span></span> <code>US-EVID-031:AC6</code></h3>
+<p class="ac-text">one physical and one rendered under a shared surface</p>
 
-</section>
-<section class="ac s-claimed" id="US-DEMO-042:AC4">
-<h3><span class="badge">🟧 <span class="lang-en">Claimed</span><span class="lang-zh">仅声明</span></span> <code>US-DEMO-042:AC4</code></h3>
-<p class="ac-text">npm i -g github:owner/repo#&lt;commit&gt; installs and starts in a clean directory.</p>
-<p class="note">external release smoke has not run in this environment.</p>
-
-
-</section>
-<section class="ac s-pass" id="US-DEMO-042:AC5">
-<h3><span class="badge">✅ <span class="lang-en">Pass</span><span class="lang-zh">通过</span></span> <code>US-DEMO-042:AC5</code></h3>
-<p class="ac-text">The published CLI prints its version on first run.</p>
-
-<div class="ev ev-test-pass">release smoke: r --version → 3.715.0</div>
+<div class="ev ev-commit">tcr</div>
 
 </section>
 
 
-
+<section class="capture-surfaces"><h2><span class="lang-en">Visual evidence by surface</span><span class="lang-zh">按 surface 的视觉证据</span></h2>
+<section class="capture-surface vh-verified" data-visual="verified"><h3><a href="http://localhost:3000/team"><code>http://localhost:3000/team</code></a> <span class="vh-badge vh-verified">🟢 <span class="lang-en">Verified</span><span class="lang-zh">已验证</span></span></h3><p class="cs-acs"><span class="lang-en">Backs</span><span class="lang-zh">支撑</span>: <code>AC2</code> · <code>AC3</code></p><div class="cs-figs"><figure class="shot cs-fig" data-source="roll-capture-window" data-class="physical"><a href="screenshots/team-physical.png"><img src="screenshots/team-physical.png" alt="Roll Capture · physical · http://localhost:3000/team" loading="lazy"></a><figcaption><b>Roll Capture · physical · http://localhost:3000/team</b> · <span class="lang-en">physical</span><span class="lang-zh">实拍</span> · <a href="screenshots/team-physical.png.response.json"><span class="lang-en">receipt</span><span class="lang-zh">回执</span></a><br><span class="cs-hash" title="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</span></figcaption></figure>
+<figure class="shot cs-fig" data-source="playwright-rendered" data-class="rendered"><a href="screenshots/team-rendered.png"><img src="screenshots/team-rendered.png" alt="Playwright · rendered · http://localhost:3000/team" loading="lazy"></a><figcaption><b>Playwright · rendered · http://localhost:3000/team</b> · <span class="lang-en">rendered</span><span class="lang-zh">渲染</span> · <a href="screenshots/team-rendered.png.response.json"><span class="lang-en">receipt</span><span class="lang-zh">回执</span></a><br><span class="cs-hash" title="sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb">sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</span></figcaption></figure></div></section>
+</section>
 
 
 
 <section class="closing">
-<h2><span class="lang-en">Quality gate</span><span class="lang-zh">质量门禁</span></h2>
-<p class="facts">TCR commits: <b>4</b> · CI: <b>success</b> · test-pass: <b>12s ago</b></p>
 <section class="evidence-index"><h2><span class="lang-en">Evidence index</span><span class="lang-zh">证据索引</span></h2>
 <table class="ev-index"><thead><tr><th>Kind</th><th>Label</th><th>Locator</th></tr></thead>
-<tbody><tr><td><code>test-pass</code></td><td>cli parser suite green</td><td>—</td></tr>
-<tr><td><code>test-pass</code></td><td>npm pack simulation</td><td>—</td></tr>
-<tr><td><code>test-pass</code></td><td>release smoke: r --version → 3.715.0</td><td>—</td></tr></tbody></table></section>
+<tbody><tr><td><code>commit</code></td><td>tcr</td><td>—</td></tr>
+<tr><td><code>commit</code></td><td>tcr</td><td>—</td></tr></tbody></table></section>
 </section>
-<footer>Roll · <span class="lang-en">Acceptance Review Page</span><span class="lang-zh">验收 Review Page</span> · <code>US-DEMO-042</code></footer>
+<footer>Roll · <span class="lang-en">Acceptance Review Page</span><span class="lang-zh">验收 Review Page</span> · <code>US-EVID-031</code></footer>
 </body>
 </html>

@@ -31,6 +31,10 @@ import {
   CapturePlanner,
   captureReceiptEvidenceRef,
   classifyCaptureReceiptV2,
+  resolveEvidenceHealth,
+  evidenceHealthFact,
+  evidenceGateDecision,
+  evidenceSignalLabel,
   renderReport,
   ansiPre,
   buildExecutionCastProjection,
@@ -46,9 +50,13 @@ import {
   type AcStatus,
   type BeforeAfterPair,
   type CaptureLanePort,
+  type CaptureRunResult,
+  type CaptureSurfaceReport,
+  type CaptureSurfaceImage,
   type CardContext,
   type DeclaredSurface,
   type DocGapWarning,
+  type EvidenceHealthFact,
   type EvidenceRef,
   type PhysicalCaptureReportEntry,
   type ProcessArchive,
@@ -108,7 +116,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { basename, dirname, extname, join, relative } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { cardArchiveDir, epicFromFeaturePath, findFeatureFile, findFeatureFiles, reportFileName, reviewFileName } from "../lib/archive.js";
 import { currentLang } from "./agent-list.js";
@@ -324,6 +332,31 @@ const execFileAsync = promisify(execFile);
 
 function warn(msg: string): void {
   process.stderr.write(`[roll] attest WARN: ${msg}\n`);
+}
+
+/**
+ * US-EVID-031 — turn a retained (taken) v2 receipt into one CaptureSurfaceImage
+ * with its provenance, physical/rendered class, hash, and a linked receipt. The
+ * PNG + receipt paths are rewritten run-relative so the report is offline-openable.
+ */
+function surfaceImageFromReceipt(receipt: CaptureReceiptV2, runDir: string): CaptureSurfaceImage {
+  const ref = captureReceiptEvidenceRef(receipt);
+  const label = ref?.label ?? `${receipt.captureClass === "physical" ? "Roll Capture · physical" : "Playwright · rendered"} · ${receipt.surfaceId}`;
+  const receiptHref =
+    receipt.responsePath !== undefined && receipt.responsePath !== ""
+      ? isAbsolute(receipt.responsePath)
+        ? relative(runDir, receipt.responsePath)
+        : receipt.responsePath
+      : undefined;
+  return {
+    source: receipt.source,
+    captureClass: receipt.captureClass,
+    label,
+    ...(ref?.href !== undefined ? { href: ref.href } : {}),
+    ...(receipt.sha256 !== undefined ? { sha256: receipt.sha256 } : {}),
+    ...(receiptHref !== undefined ? { receiptHref } : {}),
+    requestId: receipt.requestId,
+  };
 }
 
 function handoffLines(lang: Lang, reviewPath: string, legacyReportPath: string): string[] {
@@ -1592,12 +1625,18 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   // into one CaptureSet (durable store), and fold accepted images into the
   // manifest + report. Additive/default-off; ROLL_NO_SCREENCAP never gates it.
   const captureSurfaces = deps.rollCapture?.captureSurfaces ?? [];
+  // US-EVID-031 — retain each surface's declaration + run result so, once the
+  // delivery verdict is known, the EvidenceHealth resolver can separate delivery
+  // correctness from visual-evidence health (degraded ≠ rebuild; poisoned/absent
+  // block loudly) and the report can render every image under its shared surface.
+  const captureRuns: { surface: DeclaredSurface; result: CaptureRunResult }[] = [];
   if (captureSurfaces.length > 0) {
     const captureRoot = deps.rollCapture?.root ?? process.env["ROLL_CAPTURE_HOME"] ?? defaultRollCaptureRoot();
     const store = new RollCaptureReceiptStore({ root: captureRoot });
     const planner = new CapturePlanner({ now: () => now });
     for (const { surface, lanes } of captureSurfaces) {
       const result = await planner.capture(surface, { storyId, runId: basename(runDir), runDir, projectRoot: projectPath }, lanes, store);
+      captureRuns.push({ surface, result });
       for (const p of result.persisted) {
         captureReceiptFacts.push(
           captureReceiptFact(p.receipt, p.intent, { runDir, accepted: p.receipt.state === "taken", captureSetId: p.captureSetId }),
@@ -1629,7 +1668,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     captureCommand: commandFact,
     ...(captureReceiptFacts.length > 0 ? { captureReceipts: captureReceiptFacts } : {}),
   });
-  writeEvidenceJson(manifest, runDir);
+  // US-EVID-031 — `evidence_health` is folded into the manifest below, AFTER the
+  // per-AC items resolve the delivery verdict, so the write is deferred to keep
+  // delivery correctness and visual health as ONE consistent machine-readable fact.
 
   // intent map (AI layer) → report items; absent ⇒ honest all-Claimed.
   // Read-compat (US-META-001): prefer the card folder under the worktree, then
@@ -1743,6 +1784,39 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     };
   });
 
+  // US-EVID-031 — resolve visual-evidence health per declared surface, kept
+  // STRICTLY separate from the delivery verdict. Delivery correctness is the
+  // product/AC result (a `fail` item); a broken capture machine never flips it.
+  // degraded-infrastructure publishes visibly marked and is NOT rebuilt;
+  // invalid-target / absent-contract BLOCK loudly. The three distinct signals
+  // land in the machine-readable manifest (evidence_health), the report, and
+  // loop status.
+  const deliveryVerdict: "passed" | "failed" = items.some((i) => i.status === "fail") ? "failed" : "passed";
+  const evidenceHealthFacts: EvidenceHealthFact[] = [];
+  const captureSurfaceReports: CaptureSurfaceReport[] = [];
+  for (const { surface, result } of captureRuns) {
+    const health = resolveEvidenceHealth({ delivery: deliveryVerdict, contractDeclared: true, run: result });
+    const fact = evidenceHealthFact(result.surfaceId, health);
+    evidenceHealthFacts.push(fact);
+    const decision = evidenceGateDecision(health);
+    const images: CaptureSurfaceImage[] = result.taken.map((t) => surfaceImageFromReceipt(t.receipt, runDir));
+    captureSurfaceReports.push({
+      surfaceId: result.surfaceId ?? surface.declaredUrl,
+      visual: health.visual,
+      acIds: [...surface.expectedAcIds],
+      images,
+      ...(health.visual !== "verified" ? { reason: decision.reason } : {}),
+    });
+    // AC5 — surface the distinct signal to loop status (delivery failure vs
+    // evidence degradation vs evidence contract failure). Bilingual, one line each.
+    const label = evidenceSignalLabel(fact.category);
+    warn(`evidence-health ${fact.surfaceId ?? "(no surface)"} → ${fact.category} [visual=${fact.visual} delivery=${fact.delivery} blocks=${fact.blocksGate} rebuild=${fact.reschedulesBuild}]`);
+    warn(`evidence-signal(en): ${label.en}`);
+    warn(`evidence-signal(zh): ${label.zh}`);
+  }
+  if (evidenceHealthFacts.length > 0) manifest.evidence_health = evidenceHealthFacts;
+  writeEvidenceJson(manifest, runDir);
+
   const age = manifest.test_pass.present
     ? manifest.test_pass.age_seconds >= 0
       ? `${manifest.test_pass.age_seconds}s ago`
@@ -1798,6 +1872,7 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
     ...(reviewScoreTrend !== undefined ? { reviewScoreTrend } : {}),
     ...(selfCaptures.length > 0 ? { selfCaptures } : {}),
     ...(physicalCaptureReports.length > 0 ? { physicalCaptures: physicalCaptureReports } : {}),
+    ...(captureSurfaceReports.length > 0 ? { captureSurfaces: captureSurfaceReports } : {}),
     ...(captureFacts.some((x) => !x.taken && x.skipped !== undefined)
       ? { captureSkips: captureFacts.filter((x) => !x.taken && x.skipped !== undefined).map((x) => ({ kind: x.kind, out: x.out, skipped: x.skipped ?? "" })) }
       : {}),

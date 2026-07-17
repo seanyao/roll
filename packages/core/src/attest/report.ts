@@ -21,7 +21,7 @@
  * Deletion-not-placeholder: the screenshot <figure> renders ONLY when a
  * screenshot evidence ref exists (no placeholder image, no warning text — D6).
  */
-import { type CaptureReceiptV2, type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type OutwardVerificationStatus } from "@roll/spec";
+import { type CaptureReceiptV2, type CaptureClass, type CaptureSource, type EvidenceVisualState, type CycleRoleSummary, type CycleRoleName, type CycleRoleAttemptState, type OutwardVerificationStatus } from "@roll/spec";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "../html/chrome.js";
 import { ANSI_CSS } from "./ansi-html.js";
 import { buildExecutionCastProjection, type ExecutionCastRow } from "./execution-cast.js";
@@ -195,6 +195,44 @@ export interface PhysicalCaptureReportEntry {
   annotation?: CaptureAnnotation;
 }
 
+/**
+ * US-EVID-031 — one accepted (or legacy) capture image beneath a shared surface.
+ * Every retained image is rendered with its provenance, physical/rendered class,
+ * hash, and a link to its receipt; NO image is hidden merely because a
+ * higher-preference lane failed (AC4).
+ */
+export interface CaptureSurfaceImage {
+  source: CaptureSource;
+  captureClass: CaptureClass;
+  /** Provenance label, e.g. `Roll Capture · physical` / `Playwright · rendered`. */
+  label: string;
+  /** Run-relative href to the PNG (`screenshots/*.png`). */
+  href?: string;
+  /** PNG digest (`sha256:…`). */
+  sha256?: string;
+  /** Run-relative href to the receipt (`*.response.json`) — the linked receipt. */
+  receiptHref?: string;
+  requestId: string;
+  /** Legacy captures stay visible + labelled legacy; never promoted (builder_notes). */
+  legacy?: boolean;
+}
+
+/**
+ * US-EVID-031 — a declared visual surface with its resolved visual-evidence
+ * health and every retained image mapped to it. One physical AND one rendered
+ * image can sit under the same declared surface (AC6).
+ */
+export interface CaptureSurfaceReport {
+  surfaceId: string;
+  /** The resolved 4-state visual health (AC1/AC5). */
+  visual: EvidenceVisualState;
+  /** The ACs this surface backs. */
+  acIds: readonly string[];
+  images: CaptureSurfaceImage[];
+  /** Why the surface is degraded / blocked (rendered when non-verified). */
+  reason?: string;
+}
+
 export interface ReportInput {
   storyId: string;
   title: string;
@@ -239,6 +277,10 @@ export interface ReportInput {
   captureSkips?: CaptureSkipReportEntry[];
   /** US-PHYSICAL-004 — physical.screenshot provider status chain. */
   physicalCaptures?: PhysicalCaptureReportEntry[];
+  /** US-EVID-031 — declared capture surfaces with resolved visual health and every
+   *  retained image (physical + rendered) mapped to a shared surface. Absent/empty
+   *  ⇒ section trimmed (legacy stories render nothing). */
+  captureSurfaces?: CaptureSurfaceReport[];
   /** US-SKILL-030 — design-contract-vs-delivered evidence delta from the spec's
    *  Evaluation contract block. Empty string or absent => section trimmed
    *  (legacy specs degrade gracefully). */
@@ -544,6 +586,62 @@ function physicalCaptureBlock(entries: ReportInput["physicalCaptures"]): string 
     })
     .join("\n");
   return `<section class="physical-captures"><h2>physical.screenshot</h2>\n${rows}\n</section>`;
+}
+
+// US-EVID-031 — visual-health badge copy per resolved state (AC5: the three
+// distinct signals are visibly rendered, not just verified vs not).
+const VISUAL_BADGE: Record<EvidenceVisualState, { icon: string; en: string; zh: string; cls: string }> = {
+  verified: { icon: "🟢", en: "Verified", zh: "已验证", cls: "vh-verified" },
+  "degraded-infrastructure": { icon: "🟠", en: "Evidence degraded (infrastructure)", zh: "证据降级（基础设施）", cls: "vh-degraded" },
+  "invalid-target": { icon: "⛔", en: "Invalid target (blocked)", zh: "目标非法（受阻）", cls: "vh-blocked" },
+  "absent-contract": { icon: "🟥", en: "Absent contract (blocked)", zh: "契约缺失（受阻）", cls: "vh-blocked" },
+};
+
+/**
+ * US-EVID-031 — render every declared capture surface with its resolved visual
+ * health and EVERY retained image (physical + rendered) beneath the shared
+ * surface, each with provenance, class, hash, and a linked receipt (AC4/AC6).
+ * A lower-preference image is never hidden because a higher one failed. Legacy
+ * images stay visible and labelled legacy (builder_notes). Absent ⇒ trimmed.
+ */
+function captureSurfacesBlock(surfaces: ReportInput["captureSurfaces"]): string {
+  if (surfaces === undefined || surfaces.length === 0) return "";
+  const rows = surfaces
+    .map((s) => {
+      const badge = VISUAL_BADGE[s.visual];
+      const acs = s.acIds.length > 0 ? `<p class="cs-acs">${bi("Backs", "支撑")}: ${s.acIds.map((a) => `<code>${esc(a)}</code>`).join(" · ")}</p>` : "";
+      const reason = s.visual !== "verified" && s.reason !== undefined && s.reason !== "" ? `<p class="cs-reason">${esc(s.reason)}</p>` : "";
+      const figs =
+        s.images.length > 0
+          ? `<div class="cs-figs">${s.images.map(captureSurfaceFigure).join("\n")}</div>`
+          : `<p class="note">${bi("No image retained for this surface.", "该 surface 无留存图像。")}</p>`;
+      return (
+        `<section class="capture-surface ${badge.cls}" data-visual="${esc(s.visual)}">` +
+        `<h3><a href="${esc(s.surfaceId)}"><code>${esc(s.surfaceId)}</code></a> ` +
+        `<span class="vh-badge ${badge.cls}">${badge.icon} ${bi(badge.en, badge.zh)}</span></h3>` +
+        `${acs}${reason}${figs}</section>`
+      );
+    })
+    .join("\n");
+  return `<section class="capture-surfaces"><h2>${bi("Visual evidence by surface", "按 surface 的视觉证据")}</h2>\n${rows}\n</section>`;
+}
+
+/** One image figure under a surface: provenance + class + hash + linked receipt. */
+function captureSurfaceFigure(img: CaptureSurfaceImage): string {
+  const cls = img.captureClass === "physical" ? bi("physical", "实拍") : bi("rendered", "渲染");
+  const legacy = img.legacy === true ? ` <span class="cs-legacy">${bi("legacy", "历史")}</span>` : "";
+  const shot =
+    img.href !== undefined
+      ? `<a href="${esc(img.href)}"><img src="${esc(img.href)}" alt="${esc(img.label)}" loading="lazy"></a>`
+      : `<p class="note">${bi("image not retained", "图像未留存")}</p>`;
+  const hash = img.sha256 !== undefined ? `<span class="cs-hash" title="${esc(img.sha256)}">${esc(img.sha256)}</span>` : "";
+  const receipt = img.receiptHref !== undefined ? ` · <a href="${esc(img.receiptHref)}">${bi("receipt", "回执")}</a>` : "";
+  return (
+    `<figure class="shot cs-fig" data-source="${esc(img.source)}" data-class="${esc(img.captureClass)}">` +
+    `${shot}` +
+    `<figcaption><b>${esc(img.label)}</b>${legacy} · ${cls}${receipt}${hash !== "" ? `<br>${hash}` : ""}</figcaption>` +
+    `</figure>`
+  );
 }
 
 /**
@@ -898,6 +996,19 @@ details.reviewscore ul { margin:8px 0 4px; padding-left:18px; }
 .physical-capture { margin:8px 0; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 .physical-capture summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 .physical-links { font-size:12.5px; color:var(--muted); }
+section.capture-surfaces { margin-top:24px; }
+.capture-surface { margin:12px 0; border:1px solid var(--line); border-left-width:4px; border-radius:6px; padding:8px 14px; }
+.capture-surface.vh-verified { border-left-color:var(--pass); }
+.capture-surface.vh-degraded { border-left-color:var(--warn); }
+.capture-surface.vh-blocked { border-left-color:var(--fail); }
+.capture-surface h3 { margin:0 0 6px; font-size:14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.vh-badge { display:inline-block; padding:1px 8px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line); }
+.vh-badge.vh-verified { color:var(--pass); } .vh-badge.vh-degraded { color:var(--warn); } .vh-badge.vh-blocked { color:var(--fail); }
+.cs-acs, .cs-reason { color:var(--muted); font-size:12.5px; margin:2px 0; }
+.cs-figs { display:flex; flex-wrap:wrap; gap:12px; }
+figure.cs-fig { flex:1 1 280px; margin:8px 0; }
+figure.cs-fig .cs-hash { font-family:var(--mono); font-size:11px; color:var(--muted); word-break:break-all; }
+.cs-legacy { display:inline-block; padding:0 6px; border-radius:4px; font-size:11px; border:1px solid var(--line); color:var(--muted); }
 details.tech { margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; padding:6px 12px; background:color-mix(in srgb, var(--fg) 3%, transparent); }
 details.tech summary { cursor:pointer; color:var(--muted); font-size:12.5px; font-weight:600; }
 details.tech[open] summary { margin-bottom:6px; }
@@ -972,6 +1083,7 @@ ${outwardVerificationBlock(input.outwardVerification)}
 ${items.map(acSection).join("\n")}
 ${beforeAfterBlock(input.beforeAfter, input.afterOnly)}
 ${selfCaptureBlock(input.selfCaptures)}
+${captureSurfacesBlock(input.captureSurfaces)}
 ${physicalCaptureBlock(input.physicalCaptures)}
 ${captureSkipBlock(input.captureSkips)}
 ${processTraceBlock(input.process)}

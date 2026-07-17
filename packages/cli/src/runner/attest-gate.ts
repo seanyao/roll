@@ -42,7 +42,7 @@ import { hasVisualEvidenceAc } from "../lib/design-visual-evidence.js";
 import { evidenceDeltaSummary, evidenceModeExemptsScreenshot, evidenceModeForSpec, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { evaluateReviewScoreGate } from "../lib/review-score.js";
-import { captureFailures } from "./captured-evidence.js";
+import { captureFailures, evidenceHealthReadouts } from "./captured-evidence.js";
 
 export type AttestMode = "soft" | "hard";
 
@@ -1439,6 +1439,32 @@ export function runAttestGate(
       /* drift alert is best-effort; it never affects the verdict */
     }
     alertCaptureFailures(worktreeCwd, storyId, cycleId, sinks, scoreRepoCwd);
+    // US-EVID-031 — separate delivery correctness from visual-evidence health.
+    // A poisoned lane (invalid-target) or a missing/bypassed contract
+    // (absent-contract) BLOCKS as a loud evidence/contract failure. A broken
+    // capture machine (degraded-infrastructure) is only ALERTED — never blocked,
+    // never rescheduled — so a completed story is not repeatedly rebuilt. Additive:
+    // fires only when the run manifest carries a v2 `evidence_health` fact.
+    {
+      const evHealthGate = evidenceHealthGate(worktreeCwd, storyId, scoreRepoCwd);
+      for (const degraded of evHealthGate.degraded) {
+        sinks.alert(
+          `attest gate (${mode}): visual evidence DEGRADED (infrastructure) for ${storyId} — ${degraded.surfaceId ?? "(no surface)"}: ${degraded.reason} — published without rebuild; repair by an evidence-only rerun — cycle ${cycleId}`,
+        );
+      }
+      if (evHealthGate.blocking.length > 0) {
+        const reasons = evHealthGate.blocking.map(
+          (b) => `visual evidence ${b.visual} for ${storyId} (${b.surfaceId ?? "no surface"}): ${b.reason}`,
+        );
+        const blocked = mode === "hard";
+        sinks.alert(
+          `attest gate (${mode}): visual evidence BLOCKED (${storyId}) — ${evHealthGate.blocking.map((b) => `${b.visual}@${b.surfaceId ?? "no-surface"}`).join(", ")}; a login/redirect/wrong-target/corrupt/forged capture or a missing/bypassed capture contract is never promoted to evidence — cycle ${cycleId}` +
+            (blocked ? " — BLOCKED (hard mode); story not marked Done" : ""),
+        );
+        sinks.event({ cycleId, verdict: "skipped", reasons });
+        return { verdict: "skipped", mode, reasons, blocked };
+      }
+    }
     // FIX-339 (复核 #1) — a deliverable_cmd outside the roll read-only allowlist
     // is rejected BEFORE anything else: the spec asked the attest lane to run a
     // non-roll command or a state-changing roll subcommand (agent-controlled
@@ -1600,6 +1626,30 @@ export function runAttestGate(
       /* sinks are best-effort here — the fail-closed verdict still returns */
     }
     return { verdict: "skipped", mode, reasons, blocked };
+  }
+}
+
+/**
+ * US-EVID-031 — split the run's per-surface visual-evidence health into the
+ * BLOCKING facts (invalid-target / absent-contract) and the non-blocking DEGRADED
+ * facts (a broken capture machine). Pure read of the run manifest; empty for a
+ * legacy story with no v2 `evidence_health` fact.
+ */
+function evidenceHealthGate(
+  worktreeCwd: string,
+  storyId: string,
+  persistentCwd?: string,
+): { blocking: ReturnType<typeof evidenceHealthReadouts>; degraded: ReturnType<typeof evidenceHealthReadouts> } {
+  try {
+    const report = existingReport(worktreeCwd, storyId, persistentCwd);
+    if (report === null) return { blocking: [], degraded: [] };
+    const readouts = evidenceHealthReadouts(dirname(report));
+    return {
+      blocking: readouts.filter((r) => r.blocksGate),
+      degraded: readouts.filter((r) => r.markedDegraded && !r.blocksGate),
+    };
+  } catch {
+    return { blocking: [], degraded: [] };
   }
 }
 

@@ -4,6 +4,9 @@
  * single-file self-containment, and the 5-level badge ladder.
  */
 import { describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ansiPre } from "../src/attest/ansi-html.js";
 import { enforceRedLine, renderReport, type AcReportItem } from "../src/attest/report.js";
 import { bi } from "../src/html/chrome.js";
@@ -689,5 +692,127 @@ describe("US-ATTEST-017 — outward verification is never silently green", () =>
     });
     expect(html).not.toContain("<script>x</script>");
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
+  });
+});
+
+// ── US-EVID-031 — visual evidence by surface (AC4, AC6) ──────────────────────
+describe("US-EVID-031 — capture surfaces render every image with provenance (AC4/AC6)", () => {
+  const TEAM = "http://localhost:3000/team";
+  const surfaceReport: import("../src/attest/report.js").CaptureSurfaceReport = {
+    surfaceId: TEAM,
+    visual: "verified",
+    acIds: ["AC2", "AC3"],
+    images: [
+      {
+        source: "roll-capture-window",
+        captureClass: "physical",
+        label: "Roll Capture · physical · " + TEAM,
+        href: "screenshots/team-physical.png",
+        sha256: "sha256:" + "a".repeat(64),
+        receiptHref: "screenshots/team-physical.png.response.json",
+        requestId: "US-X-001-run1-team-roll-capture-window",
+      },
+      {
+        source: "playwright-rendered",
+        captureClass: "rendered",
+        label: "Playwright · rendered · " + TEAM,
+        href: "screenshots/team-rendered.png",
+        sha256: "sha256:" + "b".repeat(64),
+        receiptHref: "screenshots/team-rendered.png.response.json",
+        requestId: "US-X-001-run1-team-playwright-rendered",
+      },
+    ],
+  };
+
+  it("renders BOTH a physical AND a rendered image mapped to the shared declared surface (AC6)", () => {
+    const html = renderReport({ ...BASE, items: [item({ status: "pass", evidence: [{ kind: "commit", label: "c" }] })], captureSurfaces: [surfaceReport] });
+    // The shared surface heading appears once.
+    expect(html).toContain(TEAM);
+    // Both provenance labels are present.
+    expect(html).toContain("Roll Capture · physical");
+    expect(html).toContain("Playwright · rendered");
+    // Both images are attached (not hidden because one lane was lower-preference).
+    expect(html).toContain("screenshots/team-physical.png");
+    expect(html).toContain("screenshots/team-rendered.png");
+    // Each image links its receipt + shows its hash (AC4).
+    expect(html).toContain("team-physical.png.response.json");
+    expect(html).toContain("team-rendered.png.response.json");
+    expect(html).toContain("sha256:" + "a".repeat(64));
+    expect(html).toContain("sha256:" + "b".repeat(64));
+    // provenance class markers.
+    expect(html).toContain('data-class="physical"');
+    expect(html).toContain('data-class="rendered"');
+  });
+
+  it("does NOT hide a lower-preference rendered image when the physical lane failed (AC4)", () => {
+    // Physical lane produced no image (host failure) but rendered still captured.
+    const degraded: import("../src/attest/report.js").CaptureSurfaceReport = {
+      surfaceId: TEAM,
+      visual: "verified",
+      acIds: ["AC2"],
+      images: [
+        {
+          source: "playwright-rendered",
+          captureClass: "rendered",
+          label: "Playwright · rendered · " + TEAM,
+          href: "screenshots/team-rendered.png",
+          sha256: "sha256:" + "c".repeat(64),
+          requestId: "rend",
+        },
+      ],
+    };
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], captureSurfaces: [degraded] });
+    expect(html).toContain("screenshots/team-rendered.png");
+    expect(html).toContain("Playwright · rendered");
+  });
+
+  it("shows a visible degraded / blocked badge for non-verified surfaces (AC5)", () => {
+    const degraded = { ...surfaceReport, visual: "degraded-infrastructure" as const, images: [], reason: "all lanes attempted; only host failures" };
+    const blocked = { ...surfaceReport, visual: "invalid-target" as const, reason: "a lane reached login" };
+    const degradedHtml = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], captureSurfaces: [degraded] });
+    const blockedHtml = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], captureSurfaces: [blocked] });
+    expect(degradedHtml).toContain("vh-degraded");
+    expect(degradedHtml).toContain("all lanes attempted; only host failures");
+    expect(blockedHtml).toContain("vh-blocked");
+    expect(blockedHtml).toContain("a lane reached login");
+  });
+
+  it("labels a legacy image as legacy and keeps it visible (builder_notes)", () => {
+    const withLegacy: import("../src/attest/report.js").CaptureSurfaceReport = {
+      ...surfaceReport,
+      images: [{ source: "legacy-native", captureClass: "physical", label: "legacy shot", href: "screenshots/old.png", requestId: "legacy-1", legacy: true }],
+    };
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })], captureSurfaces: [withLegacy] });
+    expect(html).toContain("screenshots/old.png");
+    expect(html).toContain("legacy");
+  });
+
+  it("trims the section entirely when no capture surface is present", () => {
+    const html = renderReport({ ...BASE, items: [item({ evidence: [{ kind: "commit", label: "c" }] })] });
+    expect(html).not.toContain("Visual evidence by surface");
+  });
+
+  it("writes a rendered acceptance-report fixture showing both provenance labels under a shared surface (AC4/AC6 visual substitute)", () => {
+    const html = renderReport({
+      storyId: "US-EVID-031",
+      title: "US-EVID-031 — Visual evidence by surface (fixture)",
+      generatedAt: "2026-07-18T00:00:00Z",
+      items: [
+        item({ id: "US-EVID-031:AC4", text: "render every accepted image with provenance", status: "pass-with-evidence", evidence: [{ kind: "commit", label: "tcr" }] }),
+        item({ id: "US-EVID-031:AC6", text: "one physical and one rendered under a shared surface", status: "pass-with-evidence", evidence: [{ kind: "commit", label: "tcr" }] }),
+      ],
+      captureSurfaces: [surfaceReport],
+    });
+    const outDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "evidence-health");
+    mkdirSync(outDir, { recursive: true });
+    const fixturePath = join(outDir, "US-EVID-031-report.html");
+    writeFileSync(fixturePath, html);
+    // The fixture is a self-contained, single HTML file with both labels + images.
+    expect(html).toContain("Roll Capture · physical");
+    expect(html).toContain("Playwright · rendered");
+    expect(html).toContain('data-class="physical"');
+    expect(html).toContain('data-class="rendered"');
+    expect(html).not.toContain("http://localhost:3000/team.png"); // no bogus asset
+    expect(existsSync(fixturePath)).toBe(true);
   });
 });

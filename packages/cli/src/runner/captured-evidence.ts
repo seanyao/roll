@@ -38,6 +38,25 @@ interface Manifest {
   screenshots?: unknown;
   texts?: unknown;
   capture_receipts?: unknown;
+  evidence_health?: unknown;
+}
+
+/**
+ * US-EVID-031 — one surface's resolved visual-evidence health, read back from the
+ * run manifest's `evidence_health`. Delivery correctness and visual health are
+ * SEPARATE facts: `blocksGate` marks the loud evidence/contract failures
+ * (invalid-target / absent-contract); `markedDegraded` is a broken machine that
+ * publishes without a rebuild.
+ */
+export interface EvidenceHealthReadout {
+  surfaceId: string | null;
+  visual: string;
+  delivery: string;
+  category: string;
+  blocksGate: boolean;
+  reschedulesBuild: boolean;
+  markedDegraded: boolean;
+  reason: string;
 }
 
 function readManifest(runDir: string): Manifest | null {
@@ -130,6 +149,33 @@ export function capturedReceiptRefs(runDir: string): CapturedRef[] {
           ? `Playwright · rendered${surface !== undefined ? ` · ${surface}` : ""}`
           : (surface ?? "capture");
     out.push({ kind: "screenshot", ref, label });
+  }
+  return out;
+}
+
+/**
+ * US-EVID-031 — read the resolved per-surface visual-evidence health from the run
+ * manifest. Pure read; empty when no v2 surface was declared (legacy stories).
+ */
+export function evidenceHealthReadouts(runDir: string): EvidenceHealthReadout[] {
+  const m = readManifest(runDir);
+  if (m === null || !Array.isArray(m.evidence_health)) return [];
+  const out: EvidenceHealthReadout[] = [];
+  for (const raw of m.evidence_health) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const row = raw as Record<string, unknown>;
+    const visual = rowStr(row, "visual");
+    if (visual === undefined) continue;
+    out.push({
+      surfaceId: rowStr(row, "surfaceId") ?? null,
+      visual,
+      delivery: rowStr(row, "delivery") ?? "passed",
+      category: rowStr(row, "category") ?? "",
+      blocksGate: row["blocksGate"] === true,
+      reschedulesBuild: row["reschedulesBuild"] === true,
+      markedDegraded: row["markedDegraded"] === true,
+      reason: rowStr(row, "reason") ?? "",
+    });
   }
   return out;
 }

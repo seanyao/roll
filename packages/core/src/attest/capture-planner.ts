@@ -130,6 +130,18 @@ export interface CaptureRequestedFact {
   requestedAt: string;
 }
 
+/**
+ * How a non-taken lane failed (US-EVID-031). This is the DETERMINISTIC signal the
+ * EvidenceHealth resolver reads to tell a poisoned lane apart from a broken machine:
+ *   - `infrastructure` — a host/provider/tooling failure, timeout, or skip. No
+ *     valid image, but nothing was poisoned. Contributes to `degraded-infrastructure`.
+ *   - `invalid-target` — the executor produced a receipt that FAILED validation:
+ *     a login page, unapproved redirect, wrong target, corrupt image, or forged
+ *     receipt. This BLOCKS as an evidence failure and can never become verified.
+ * Absent on a `taken` (accepted) attempt.
+ */
+export type CaptureFailureKind = "infrastructure" | "invalid-target";
+
 /** Durable terminal fact for one dispatched lane. */
 export interface CaptureAttemptFact {
   event: "finished";
@@ -140,6 +152,8 @@ export interface CaptureAttemptFact {
   source: CaptureSource;
   captureClass: CaptureClass;
   state: CaptureReceiptState;
+  /** Present only for a non-taken attempt (US-EVID-031). */
+  failureKind?: CaptureFailureKind;
   reason?: string;
   /** Digest of the taken artifact (only present when `state === "taken"`). */
   sha256?: string;
@@ -235,6 +249,8 @@ export interface CaptureRunResult {
 interface LaneAttempt {
   lane: PlannedLane;
   receiptToPersist: CaptureReceiptV2;
+  /** Set when the receipt to persist is non-taken (US-EVID-031). */
+  failureKind?: CaptureFailureKind;
   startedAt: string;
   finishedAt: string;
 }
@@ -429,8 +445,14 @@ export class CapturePlanner {
     const executor = lanes.find((l) => l.source === lane.source);
 
     let receiptToPersist: CaptureReceiptV2;
+    // US-EVID-031 — classify WHY a lane did not yield a valid image. Every path
+    // except a validated `taken` is either an infrastructure failure or a poisoned
+    // (invalid-target) receipt; the resolver reads this to keep a broken machine
+    // (degraded) apart from a poisoned target (blocking).
+    let failureKind: CaptureFailureKind | undefined;
     if (executor === undefined) {
       receiptToPersist = this.terminalReceipt(lane, "skipped", `no capture lane executor injected for source "${lane.source}"`, startedAt);
+      failureKind = "infrastructure";
     } else {
       // A never-rejecting settle wrapper so a timeout win cannot leave a floating
       // rejection, and so a hung executor cannot block the sibling lane (AC2).
@@ -442,24 +464,32 @@ export class CapturePlanner {
 
       if (raced.timedOut) {
         receiptToPersist = this.terminalReceipt(lane, "timeout", `capture lane "${lane.source}" timed out after ${lane.intent.timeoutMs}ms`, startedAt);
+        failureKind = "infrastructure";
       } else if (!raced.value.ok) {
         receiptToPersist = this.terminalReceipt(lane, "failed", `capture lane "${lane.source}" threw: ${errorMessage(raced.value.error)}`, startedAt);
+        failureKind = "infrastructure";
       } else {
         const produced = raced.value.value;
         // Reuse the shared validator (AC3: login/foreign redirect + forgery rejection).
         const validation = validateCaptureReceiptV2(produced, lane.intent);
         if (validation.ok) {
           receiptToPersist = produced;
+          // A produced-and-valid receipt may still be a host-reported non-taken
+          // terminal (failed/skipped/timeout): that is an infrastructure gap, not
+          // a poisoned target.
+          failureKind = produced.state === "taken" ? undefined : "infrastructure";
         } else {
-          // An invalid executor receipt (bad target / redirect / forged digest) is
-          // NOT accepted; we durably record a failed attempt with the reason, and
-          // we NEVER delete or reuse any artifact the lane may have written.
+          // An invalid executor receipt (bad target / redirect / forged digest /
+          // corrupt image) is NOT accepted; we durably record a failed attempt with
+          // the reason, never delete or reuse any artifact the lane may have written,
+          // and mark it invalid-target so it BLOCKS and can never read as verified.
           receiptToPersist = this.terminalReceipt(lane, "failed", validation.errors.join("; "), startedAt);
+          failureKind = "invalid-target";
         }
       }
     }
 
-    return { lane, receiptToPersist, startedAt, finishedAt: this.now().toISOString() };
+    return { lane, receiptToPersist, ...(failureKind !== undefined ? { failureKind } : {}), startedAt, finishedAt: this.now().toISOString() };
   }
 
   /** Persist one attempted lane (serialized) and build its terminal fact. */
@@ -469,7 +499,7 @@ export class CapturePlanner {
     expectedAcIds: readonly string[],
     store: CaptureReceiptStorePort,
   ): Promise<{ fact: CaptureAttemptFact; persistedAttempt: PersistedAttempt | null }> {
-    const { lane, receiptToPersist, startedAt, finishedAt } = attempt;
+    const { lane, receiptToPersist, failureKind, startedAt, finishedAt } = attempt;
     const persistResult = await store.persistReceipt(lane.intent, receiptToPersist);
 
     let persist: CaptureAttemptFact["persist"];
@@ -502,6 +532,7 @@ export class CapturePlanner {
       source: lane.source,
       captureClass: lane.captureClass,
       state: effectiveReceipt.state,
+      ...(effectiveReceipt.state !== "taken" && failureKind !== undefined ? { failureKind } : {}),
       ...(effectiveReceipt.reason !== undefined ? { reason: effectiveReceipt.reason } : persistResult.status === "rejected" ? { reason: persistResult.reason } : {}),
       ...(effectiveReceipt.sha256 !== undefined ? { sha256: effectiveReceipt.sha256 } : {}),
       ...(effectiveReceipt.screenshotPath !== undefined ? { screenshotPath: effectiveReceipt.screenshotPath } : {}),

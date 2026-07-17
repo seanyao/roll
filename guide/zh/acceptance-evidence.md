@@ -239,6 +239,81 @@ Terminal.app Screen Recording 就绪度时，用 `roll doctor --tools`。`roll i
 机器级 Agents 页面（`.roll/features/agents.html`）也显示同一块工具状态，方便
 审阅者区分证据采集问题来自机器配置，而不是 story 代码。
 
+## Best-effort 截图、证据健康与修复
+
+视觉证据是一种 **best-effort（尽力而为）** 的交付能力：每个声明的视觉面都会经由
+每条合格截图通道尝试采集，截图服务的故障绝不会被误判为产品回归。交付正确性与
+视觉证据健康是**两件独立的事实**。
+
+### 来源标签
+
+每张被接受的图像都带有产出它的通道：
+
+- **Roll Capture · physical（物理）**——由 Roll Capture.app 对你真实终端或应用
+  窗口拍摄的物理截图。它证明屏幕上呈现了什么；它绝不声称自己无法观测到的 URL。
+- **Playwright · rendered（渲染）**——`finalUrl` 经批准的重定向归一化后等于声明
+  目标面的渲染回执。绑定目标的渲染回执是合格的视觉证据——不同于诊断截图。
+
+绑定目标的渲染回执可以独立满足视觉 AC。物理 Roll Capture 图像是满足视觉 AC 的一种
+合格来源；绑定目标的渲染回执是另一种同样合格的来源。
+
+### 四种视觉状态
+
+| 状态 | 含义 | 闸动作 |
+|------|------|--------|
+| `verified` | 至少一张有效且绑定目标的图像（物理或渲染） | 正常发布 |
+| `degraded-infrastructure` | 每条配置通道都已尝试；只发生宿主/供应方/工具类故障 | 发布并显式标记降级；**不重建**——可由仅证据重跑修复 |
+| `invalid-target` | 某条通道到达登录页、未批准重定向、错误目标、损坏图像或伪造回执 | 作为证据失败拦截；修复目标/配置 |
+| `absent-contract` | 无声明面、无计划尝试，或规划器被绕过 | 作为设计/执行失败拦截 |
+
+`degraded-infrastructure` 有意不等于绿色截图结论。它把代码交付与损坏的证据机器
+分开，使同一个已完成的故事不会被反复重建。
+
+### 隐私边界
+
+- 回执绝不包含凭据、cookie、DOM 转储或网络响应体。
+- 窗口捕获默认限定窗口范围；目标缺失产生带类型的失败，绝不静默扩大为全屏。
+- `ROLL_NO_SCREENCAP=1` 只禁用 Runner 直接的原生 `screencapture` / AppleScript
+  路径，不会关闭 Roll Capture 网关请求或 Playwright 渲染尝试。
+
+### 仅证据修复
+
+`degraded-infrastructure` 交付可以在不重开构建的情况下修复：
+
+```bash
+roll capture repair <story-id>
+```
+
+它**只**重跑截图通道并重新解析证据健康，绝不触碰 TCR / 构建周期，绝不重开已完成
+的交付。对失败交付或任何非降级状态，它会拒绝（同样不重建）。结果为 `verified`
+时发布新采集的图像；仍为降级时保持可发布并标记降级。
+
+### 启用 best-effort 截图
+
+新视觉故事的默认值是 `best_effort`。既有项目保留其已记录的策略，直到一次显式、
+能力感知、可回退的迁移显式启用它：
+
+```bash
+roll capture migrate            # 仅在 v2 网关与渲染器都就绪时启用 best_effort
+roll capture migrate --dry-run  # 只预览不写入
+roll capture migrate --revert   # 恢复此前记录的策略
+```
+
+迁移是幂等的。只有在 v2 Roll Capture 网关**和**浏览器渲染器**都**就绪时才启用
+`best_effort`；否则保留既有策略并给出显式原因（`provider_v2_unavailable` /
+`renderer_unavailable`）——绝不猜测回落，绝不强制翻转既有项目。
+
+### 就绪度
+
+`roll doctor`（以及 `roll capture status` 与 `roll loop status --capture`）会报告
+v2 网关就绪度、渲染器就绪度与有效截图策略——每项都带可执行原因：
+
+```bash
+roll doctor              # 含 “Capture policy readiness / 截图策略就绪度” 一节
+roll capture status      # 同样的就绪度，独立呈现（机器读取加 --json）
+roll loop status --capture
+```
+
 ## Review Score 折叠区
 
 `.roll/notes/` 里存在该 story 的评审分条目时，报告底部出现折叠的

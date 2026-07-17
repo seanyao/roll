@@ -16,8 +16,10 @@ Roll 可以驱动一个**受管、隔离的 Chrome（经真实的 `chrome-devtoo
 - 它们**不是安装器**。Roll 绝不往你的产品仓 `package.json` 加依赖，也绝不擅自
   开启你自己（owner）Chrome 的远程调试。`setup` 只在你确认后写入一份机器级配置。
 - 它们的产物**不是视觉验收证据**。受管诊断截图或交互式 owner 运行结果只能证明
-  页面动作成功，不能满足故事的视觉验收（visual AC）。只有 **Roll Capture**
-  （对你真实终端/应用的物理截图）才满足视觉验收——见[验收证据](acceptance-evidence.md)。
+  页面动作成功，不能满足故事的视觉验收（visual AC）。在 best-effort 截图下，
+  视觉 AC 由任一有效且绑定目标的图像满足：**Roll Capture · 物理**（对真实终端/
+  应用的物理截图），或 **Playwright · 渲染**（`finalUrl` 等于声明目标面的渲染回执）；
+  两者都合格，绑定目标的渲染回执不同于诊断截图——见[验收证据](acceptance-evidence.md)。
 
 ---
 
@@ -490,14 +492,18 @@ This interactive result does not make CI pass and is not background automation.
 
 受管浏览器诊断与交互式 owner 运行结果**仅为诊断 / 仅为 manual-attest**。每次
 run 报告都重复这句：*诊断通过不等于视觉验收证据*。诊断截图或交互结果会被归类
-为诊断产物，而非视觉验收产物，因此绝不可能伪造故事的视觉验收。故事需要视觉
-验收时，请用 **Roll Capture**——对真实终端/应用的物理截图——只有它满足该要求。
-见[验收证据](acceptance-evidence.md)。
+为诊断产物，而非视觉验收产物，因此绝不可能伪造故事的视觉验收。
+
+在 best-effort 截图下，视觉 AC 由任一有效且绑定目标的图像满足：
+**Roll Capture · 物理**（对真实终端/应用的物理截图），或 **Playwright · 渲染**
+（`finalUrl` 等于声明目标面的渲染回执）；两者都合格。物理图像绝不声称它无法观测到的
+`finalUrl`。见[验收证据](acceptance-evidence.md)。
 
 当 `roll attest` 收到物理捕获响应时，会把已验证的 CaptureBridge link 写入
 `.roll/browser-operations/events.ndjson`。doctor、truth 与 dossier 都读取这条持久化
-事实：通过验证的 `roll.capture.v1` 物理捕获可以满足视觉 AC，而 Playwright 与 DevTools
-诊断仍不具资格。没有已落盘的 link 时，capture truth 诚实保持 unknown，dossier 也不会
+事实：通过验证的 `roll.capture.v1` 物理捕获可以满足视觉 AC，绑定目标的
+`roll.capture.v2` 渲染回执同样可以；只有未绑定目标的 Playwright 与 DevTools*诊断*仍
+不具资格。没有已落盘的 link 时，capture truth 诚实保持 unknown，dossier 也不会
 凭空生成捕获事件。
 
 ---

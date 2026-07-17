@@ -24,6 +24,7 @@ import { isRollAuxiliarySkillTarget } from "./setup-shared.js";
 import { collectExternalTools, renderExternalToolDoctorSection, type ExternalToolState } from "../lib/external-tools.js";
 import { collectToolReadinessDoctorRows, renderToolReadinessDoctorSection } from "../lib/tool-readiness-doctor.js";
 import { collectBrowserEnvironmentReadiness, renderBrowserReadinessDoctorRow } from "../lib/browser-readiness-doctor.js";
+import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
 import { collectBrowserTruth } from "../lib/browser-truth-collect.js";
 import { renderBrowserTruthDoctorRow } from "../lib/browser-truth-surface.js";
 import { detectDesignHandoff, renderDesignNudge } from "../lib/onboard-nudge.js";
@@ -78,6 +79,7 @@ function emit(line: string): void {
 interface DoctorDeps {
   externalTools?: () => readonly ExternalToolState[];
   browserReadiness?: () => ReturnType<typeof collectBrowserEnvironmentReadiness>;
+  capturePolicyReadiness?: () => CapturePolicyReadiness;
 }
 
 function terminalScreenRecordingPreflight(state: ExternalToolState | undefined): {
@@ -802,6 +804,11 @@ export function doctorCommand(args: string[], deps: DoctorDeps = {}): number {
   // Same three-lane shape but projected from persisted ledger facts — no live probe.
   const browserTruth = collectBrowserTruth({ projectPath: process.cwd() });
   for (const l of renderBrowserTruthDoctorRow(browserTruth)) emit(l);
+
+  // US-EVID-032: capture-policy readiness — v2 gateway + renderer readiness and
+  // the effective capture policy, each with an actionable reason (AC4).
+  const capturePolicyReadiness = deps.capturePolicyReadiness?.() ?? collectCapturePolicyReadiness({ projectRoot: process.cwd() });
+  for (const l of renderCapturePolicyReadinessDoctorSection(capturePolicyReadiness)) emit(l);
 
   if (toolsOnly) {
     // US-INIT-003c: `roll doctor --tools` prints a focused Terminal.app Screen

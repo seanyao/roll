@@ -87,6 +87,7 @@ import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { toolCommand } from "./tool.js";
+import { captureCommand, CAPTURE_USAGE } from "./capture.js";
 import { TRUTH_USAGE, truthCommand } from "./truth.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
@@ -198,6 +199,10 @@ export function registerAll(): void {
     help:
       "Usage: roll browser <setup|doctor|run|interactive|update>\n  setup --dry-run previews machine config + preflight; setup --confirm writes ~/.roll/browser-operations.yaml; doctor [--json] reports lane readiness and doctor --probe runs a real chrome-devtools-mcp session end-to-end; run --story <id> --url <target> [--action …] runs one policy-gated managed operation through the real pinned MCP lane with a temporary Chrome profile (diagnostic-only output; --fixture is a test-only fake-target seam, never a fallback); interactive requires an attached TTY and one owner approval before connecting to an already-open loopback Chrome endpoint for one typed low-risk action; update [--check|--apply --confirm] manages transport version.\n浏览器操作依赖预检与体检；setup --dry-run 只预览不写入，doctor 报告 managed/interactive/capture 就绪度、doctor --probe 起真实 chrome-devtools-mcp 会话做端到端活体验证，run --story --url 经策略闸走真实固定版本 MCP 通道对目标跑一次受管操作（临时 Chrome 档案，输出仅诊断；--fixture 是仅测试的假目标接缝，不是回落），interactive 必须附着 TTY 并逐次由 owner 批准，才可连接已开启的本机 Chrome 调试端点执行一个低风险 typed 动作；update 管理传输版本。",
   });
+  // US-EVID-032: `capture` — capture-policy migration (best_effort, capability
+  // gated + reversible), evidence-only repair (never reopens the build), and
+  // readiness status (v2 gateway + renderer + effective policy).
+  registerPorted("capture", (args) => captureCommand(args), { help: CAPTURE_USAGE });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });
@@ -426,6 +431,12 @@ export function registerAll(): void {
   // v2 tmux outer/inner pair, whitelisted in AGENTS.md). Bare `roll loop`
   // defaults to status (mirrors the v2 `${1:-status}`).
   registerPorted("loop", (args) => {
+    // US-EVID-032: `loop status --capture` exposes v2 gateway + renderer
+    // readiness and the effective capture policy (AC4). Additive flag — the
+    // default `loop status` dashboard output is unchanged.
+    if ((args[0] === undefined || args[0] === "status") && args.includes("--capture")) {
+      return captureCommand(["status", ...args.slice(1).filter((a) => a !== "--capture")]);
+    }
     if (args[0] === undefined || args[0] === "status") return dashboardCommand(args.slice(1));
     // `loop eval` / `loop story`: read-face commands (US-PORT-007) — thin TS
     // readers over the same cycle pipeline `loop status` owns. No bash fallback.

@@ -3098,6 +3098,65 @@ describe("executeCommand — command → executor mapping", () => {
     expect(execFileSync("git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: wt, encoding: "utf8" }).trim()).toBe("0");
   });
 
+  it("E4 (end-to-end): capture_facts observes a REAL tcr commit made in the submodule worktree, not the empty superproject worktree", async () => {
+    // Build a real superproject worktree with a nested repo standing in for the
+    // submodule, plus the submodule cycle worktree subdir (submoduleWorktreePath).
+    const superWt = realpathSync(mkdtempSync(join(tmpdir(), "roll-e4-e2e-super-")));
+    execDirs.push(superWt);
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: superWt });
+    execFileSync("git", ["config", "user.email", "t@e.test"], { cwd: superWt });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: superWt });
+    writeFileSync(join(superWt, "README.md"), "# super\n");
+    execFileSync("git", ["add", "."], { cwd: superWt });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: superWt });
+    execFileSync("git", ["branch", "-f", "origin/main"], { cwd: superWt }); // local ref standing in for origin/main
+
+    const sub = "dukang-service-online";
+    const subWt = join(superWt, sub);
+    mkdirSync(subWt, { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: subWt });
+    execFileSync("git", ["config", "user.email", "t@e.test"], { cwd: subWt });
+    execFileSync("git", ["config", "user.name", "t"], { cwd: subWt });
+    writeFileSync(join(subWt, "svc.txt"), "base\n");
+    execFileSync("git", ["add", "."], { cwd: subWt });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: subWt });
+    execFileSync("git", ["branch", "-f", "origin/main"], { cwd: subWt });
+    // The agent's delivery: ONE tcr commit, landed ONLY in the submodule worktree.
+    writeFileSync(join(subWt, "svc.txt"), "delivered\n");
+    execFileSync("git", ["add", "."], { cwd: subWt });
+    execFileSync("git", ["commit", "-q", "-m", "tcr: submodule delivery"], { cwd: subWt });
+
+    // Real-git-backed observation ports (mirror the FIX-1237 count() pattern).
+    const count = (cwd: string, range: string): number =>
+      Number(execFileSync("git", ["rev-list", "--count", range], { cwd, encoding: "utf8" }).trim());
+    const tcr = (cwd: string): number =>
+      execFileSync("git", ["log", "--oneline", "origin/main..HEAD"], { cwd, encoding: "utf8" })
+        .split("\n")
+        .filter((l) => l.includes(" tcr:")).length;
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: superWt,
+      paths: { ...base.ports.paths, worktreePath: superWt, eventsPath: join(superWt, "events.ndjson"), alertsPath: join(superWt, "alerts.log") },
+      git: {
+        ...base.ports.git,
+        commitsAhead: vi.fn(async (cwd: string) => count(cwd, "origin/main..HEAD")),
+        mainAhead: vi.fn(async () => 0),
+        tcrCount: vi.fn(async (cwd: string) => tcr(cwd)),
+      },
+    });
+
+    // Submodule cycle → observes the submodule worktree → sees the tcr commit.
+    const rSub = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, targetSubmodule: sub });
+    expect((rSub.event as { facts: { commitsAhead: number } }).facts.commitsAhead).toBe(1);
+    expect(rSub.ctxPatch?.tcrCount).toBe(1);
+
+    // Superproject cycle (same repo) → observes the SUPERPROJECT worktree, whose
+    // HEAD carries no delivery → 0 (proves the routing, not a global count).
+    const rSuper = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    expect((rSuper.event as { facts: { commitsAhead: number } }).facts.commitsAhead).toBe(0);
+    expect(rSuper.ctxPatch?.tcrCount).toBe(0);
+  });
+
   it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {
     const { ports, calls } = fakePorts({
       git: {

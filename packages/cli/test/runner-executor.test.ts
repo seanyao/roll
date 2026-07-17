@@ -60,6 +60,7 @@ import {
   detectAgyInternalFailure,
 } from "../src/runner/index.js";
 import { suspendRig } from "../src/runner/agent-liveness.js";
+import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -2496,6 +2497,89 @@ describe("executeCommand — command → executor mapping", () => {
       if (previousPoll === undefined) delete process.env["ROLL_MAIN_LEAK_POLL_MS"];
       else process.env["ROLL_MAIN_LEAK_POLL_MS"] = previousPoll;
     }
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // E7 — main-checkout leak watchdog must DIFF against a startup baseline, not
+  // fire on absolute dirt. On a submodule super-repo the main checkout is
+  // permanently dirty (gitlink pointer drift, colleague WIP, untracked wt-*/),
+  // so the pre-diff watchdog SIGKILL'd every builder on its first tick.
+  // ══════════════════════════════════════════════════════════════════════════
+  describe("E7 startMainCheckoutLeakWatchdog — baseline-diff (no false SIGKILL on a dirty super-repo)", () => {
+    function watchdogPorts(repo: string): { ports: Ports; calls: Record<string, unknown[]> } {
+      const wt = join(repo, ".roll", "loop", "wt");
+      mkdirSync(wt, { recursive: true });
+      const base = fakePorts();
+      return fakePorts({
+        repoCwd: repo,
+        clock: () => 1000,
+        paths: {
+          ...base.ports.paths,
+          worktreePath: wt,
+          eventsPath: join(repo, ".roll", "loop", "events.ndjson"),
+          alertsPath: join(repo, ".roll", "loop", "alerts.log"),
+        },
+      });
+    }
+
+    /** Poll until `predicate()` or the deadline; the watchdog ticks async. */
+    async function until(predicate: () => boolean, ms = 2000): Promise<void> {
+      const deadline = Date.now() + ms;
+      while (!predicate() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    it("A-regression: a PRE-existing dirty super-repo with NO new writes never fires or kills", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-preexisting-");
+      // Ancestral dirt present BEFORE the watchdog starts (the super-repo shape).
+      writeFileSync(join(repo, "ancestral-submodule-drift.ts"), "export const drift = 1;\n");
+      writeFileSync(join(repo, "untracked-wt-noise.ts"), "export const noise = 1;\n");
+      const { ports } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      // Give the baseline snapshot + several ticks time to run against static dirt.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(0);
+      expect(detected).toBe(false);
+      expect(files).toEqual([]);
+    });
+
+    it("A-protection: a NEW dirty path added AFTER baseline fires + kills with only the delta", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-newwrite-");
+      writeFileSync(join(repo, "ancestral-submodule-drift.ts"), "export const drift = 1;\n");
+      const { ports, calls } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      // Let the baseline settle (it captures the ancestral dirt), THEN leak a new path.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      writeFileSync(join(repo, "agent-leaked-new.ts"), "export const leaked = 1;\n");
+      await until(() => kills > 0);
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(1);
+      expect(detected).toBe(true);
+      // Only the DELTA — never the ancestral baseline entry.
+      expect(files).toEqual(["agent-leaked-new.ts"]);
+      const mainDirty = (calls["event"] ?? [])
+        .map((a) => (a as unknown[])[1] as RollEvent)
+        .find((e) => e.type === "sandbox:main_dirty");
+      expect(mainDirty).toMatchObject({ phase: "active-spawn", files: ["agent-leaked-new.ts"] });
+    });
+
+    it("A-zero-regression: an empty baseline (ordinary repo) + a new write fires exactly like before", async () => {
+      const repo = initCleanGitRepo("roll-leak-baseline-empty-");
+      const { ports } = watchdogPorts(repo);
+      let kills = 0;
+      const wd = startMainCheckoutLeakWatchdog(ports, CTX, { pollMs: 10, kill: () => (kills += 1, 1) });
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      writeFileSync(join(repo, "leaked-on-clean-repo.ts"), "export const leaked = 1;\n");
+      await until(() => kills > 0);
+      const { detected, files } = await wd.stop();
+      expect(kills).toBe(1);
+      expect(detected).toBe(true);
+      expect(files).toEqual(["leaked-on-clean-repo.ts"]);
+    });
   });
 
   it("US-OBS-028: spawn_agent persists normalized pi tool signals for replay", async () => {

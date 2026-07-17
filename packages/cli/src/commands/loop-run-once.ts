@@ -12,7 +12,7 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, normalizeAgentScopeConfig, parseBacklog, parsePolicy, readRouteSlot, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatus, normalizeAgentScopeConfig, parseBacklog, parsePolicy, readRouteSlot, removeLease, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
 import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
@@ -218,6 +218,14 @@ export function cycleSignalTeardown(
       );
     } catch {
       /* best-effort */
+    }
+    const terminalStoryId = ctx.storyId ?? "";
+    if (terminalStoryId !== "") {
+      try {
+        removeLease(join(dirname(paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
+      } catch {
+        /* lease cleanup must never block signal teardown */
+      }
     }
     try {
       releaseLock(paths.lockPath);

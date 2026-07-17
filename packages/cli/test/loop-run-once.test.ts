@@ -672,6 +672,31 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     expect(events).toContain('"agent":"pi"');
   });
 
+  it("releases the cycle lease when an owned cycle is terminated", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { paths: p, rt } = teardownFixture("owned-lease");
+    const cycleId = "20260606-040000-9005";
+    writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
+    writeFileSync(
+      p.eventsPath,
+      JSON.stringify({ type: "cycle:start", cycleId, storyId: "FIX-LEASE", agent: "pi", model: "", ts: 1 }) + "\n",
+      "utf8",
+    );
+    writeFileSync(
+      join(rt, "story-leases.json"),
+      JSON.stringify({ "FIX-LEASE": { pid: process.pid, claimedAt: 1780680000000, source: "cycle" } }) + "\n",
+      "utf8",
+    );
+
+    cycleSignalTeardown(p, cycleId, `loop/cycle-${cycleId}`, "SIGTERM", {
+      killAgents: () => 0,
+      exit: () => undefined,
+      now: () => 1780680123,
+    });
+
+    expect(existsSync(join(rt, "story-leases.json"))).toBe(false);
+  });
+
   it("foreign lock (skip-on-contention path): touches NOTHING, still exits with the signal code", async () => {
     const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
     const { paths: p } = teardownFixture("foreign");

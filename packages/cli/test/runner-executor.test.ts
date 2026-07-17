@@ -16,7 +16,8 @@ import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { submoduleAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
-import { evaluateReviewScoreGate, readLatestStoryPeerScore } from "../src/lib/review-score.js";
+import { evaluateReviewScoreGate, readLatestStoryPeerScore, writeReviewScoreNote } from "../src/lib/review-score.js";
+import { buildLowScoreFixForwardPrompt } from "../src/runner/project-map.js";
 import {
   AGENT_ARGV_TODO,
   AUTORUN_DIRECTIVE,
@@ -5271,6 +5272,31 @@ describe("FIX-338 — project-map injection (Phase B 杠杆2, DEFAULT-OFF)", () 
     const missing = join(tmpdir(), "roll-projmap-does-not-exist-xyz");
     expect(buildProjectMap(missing, "FIX-1")).toBe("");
     expect(maybeInjectProjectMap("BODY", missing, true, "FIX-1")).toBe("BODY");
+  });
+});
+
+describe("FIX-386 — low-score recovery context", () => {
+  it("uses the current worktree and never tells a reverted delivery to reuse its old branch", () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-low-score-recovery-")));
+    execDirs.push(repo);
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    writeReviewScoreNote(repo, {
+      skill: "roll-build",
+      story: "US-RETRY-001",
+      score: 2,
+      verdict: "regression",
+      rationale: "Fixture assertions no longer match the current base.",
+      scoring: "pair",
+      scoredBy: "codex",
+      sessionId: "reviewer-session",
+    });
+
+    const prompt = buildLowScoreFixForwardPrompt(repo, "US-RETRY-001");
+
+    expect(prompt).toContain("Do not create, checkout, rename, or switch branches.");
+    expect(prompt).toContain("current worktree and current base");
+    expect(prompt).not.toContain("SAME branch");
+    expect(prompt).not.toContain("EXISTING branch");
   });
 });
 

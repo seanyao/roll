@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.717.1 — 2026-07-17
+
 ### 新功能
 - `roll agent disable/enable` 一键把不靠谱的 agent 撤出或放回派工池 (US-AGENT-050) `[loop]`
   <!-- evidence: .roll/features/agent-scope/US-AGENT-050/latest/US-AGENT-050-report.html -->

@@ -82,6 +82,16 @@ describe("pickStory — status skip rules", () => {
     ).toBe("US-RECOVER");
   });
 
+  it("reports work when the only actionable row is an explicit merged-delivery recovery candidate", () => {
+    const items = [item("US-RECOVER", "🔨 In Progress")];
+    const assessment = assessBacklog(items, {
+      hasMergedDelivery: () => true,
+      isRecoveryCandidate: (id) => id === "US-RECOVER",
+    });
+
+    expect(assessment).toMatchObject({ hasWork: true, reason: "has_work" });
+  });
+
   it("skips 🚫 Hold / 🔒 Blocked / ⏸ Deferred / In Progress / Done, takes first Todo", () => {
     const items = [
       item("US-1", "🚫 Hold"),

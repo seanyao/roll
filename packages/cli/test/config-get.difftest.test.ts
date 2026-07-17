@@ -134,6 +134,7 @@ describe("frozen: roll config (read) render", () => {
         loop_dream_minute              = -        (default)
         integration_branch             = origin/main (default)
         publish_mode                   = remote   (default)
+        default_submodule              =          (default)
       ",
       }
     `);

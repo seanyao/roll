@@ -2280,3 +2280,115 @@ describe("FIX-1256 — attest gate and evidence gate agree on AC/no-AC stories",
     expect(evidence.ok).toBe(false);
   });
 });
+
+// ── E9 (PR9): attest resolves the SPEC from the live design-truth checkout ─────
+//
+// The picker/designer read the story spec from the live main checkout
+// (`storySpecPath(ports.repoCwd, id)`), but the attest gate historically read it
+// from the cycle WORKTREE snapshot. For a project that TRACKS `.roll` (a
+// committed backlog.md), `linkRollIntoWorktree` keeps the checked-out (committed)
+// `.roll` in the worktree instead of symlinking to the live tree — so an
+// as-yet-UNCOMMITTED spec exists only in the live checkout and is ABSENT from the
+// worktree snapshot. The gate then fatally mis-read the story as "not found".
+//
+// The fix threads an explicit `specRepoCwd` (design truth) into runAttestGate,
+// decoupled from the evidence/score cwd. It defaults to `worktreeCwd` so every
+// pre-existing caller/test is byte-identical (a project that does NOT track
+// `.roll` has `worktreePath/.roll` symlinked to `repoCwd/.roll` — same bytes
+// either way; equivalence, not change). When the spec lives ONLY in the live
+// checkout, the gate must resolve it from `specRepoCwd`.
+describe("E9: runAttestGate resolves the spec from specRepoCwd (design truth)", () => {
+  /** Write a story spec into an INDEPENDENT live-checkout root (the design truth
+   *  tree). Returns the root; mirrors the worktree card layout used elsewhere. */
+  function liveSpec(storyId: string, specText: string): string {
+    const repoCwd = tmp("live-spec");
+    const dir = join(repoCwd, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return repoCwd;
+  }
+
+  it("spec ONLY in specRepoCwd (not the worktree snapshot): the gate reads it and honors `no AC block`", () => {
+    // The worktree carries a fresh report + ac-map but NO spec.md — exactly the
+    // committed-`.roll` snapshot of a cycle whose new spec is still uncommitted.
+    // The uncommitted spec lives ONLY in the live checkout, and it declares NO AC
+    // block. Reading the spec from specRepoCwd MUST surface `storyHasAcBlock ===
+    // false` → an early, un-blocked `produced` ("no AC block; report not required").
+    const storyId = "FIX-E9-NOAC";
+    const wt = withReport(storyId, 2000);
+    const repoCwd = liveSpec(storyId, `---\nid: ${storyId}\n---\n# ${storyId}\n\nChore, no acceptance criteria.\n`);
+    const { events, s } = sinks();
+    // scoreRepoCwd stays the worktree (evidence/score semantics unchanged); the
+    // NEW trailing specRepoCwd routes spec resolution to the live checkout.
+    const r = runAttestGate(wt, storyId, "c-e9-noac", "hard", 1000, s, wt, "", 0, repoCwd);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(r.reasons[0]).toMatch(/no AC block/i);
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("the SAME spec, resolved from the worktree (default), is NOT found → different (report-path) verdict", () => {
+    // Control: with specRepoCwd defaulted to the worktree (no spec there), the
+    // gate cannot see the `no AC block` spec, so it does NOT take the early
+    // produced path — it falls through to the report/score path (FIX-343: no
+    // fresh peer score for this cycle → skipped/blocked). This is the pre-fix
+    // behaviour that the specRepoCwd routing corrects for tracked-`.roll` projects.
+    const storyId = "FIX-E9-NOAC-CTL";
+    const wt = withReport(storyId, 2000);
+    liveSpec(storyId, `---\nid: ${storyId}\n---\n# ${storyId}\n\nChore, no acceptance criteria.\n`);
+    const { s } = sinks();
+    const r = runAttestGate(wt, storyId, "c-e9-noac-ctl", "hard", 1000, s); // default specRepoCwd = worktree
+    expect(r.reasons[0]).not.toMatch(/no AC block/i);
+  });
+
+  it("spec ONLY in specRepoCwd carries a non-allowlisted deliverable_cmd → gate blocks on it (security floor reads live spec)", () => {
+    // A deliverable_cmd security violation declared in the (uncommitted) live spec
+    // must be enforced even though the worktree snapshot has no spec at all.
+    const storyId = "FIX-E9-CMD";
+    const wt = withReport(storyId, 2000);
+    const repoCwd = liveSpec(
+      storyId,
+      `---\nid: ${storyId}\ndeliverable_cmd: rm -rf /tmp/pwned\n---\n# ${storyId}\n\n**AC:**\n- [ ] does a thing\n`,
+    );
+    const { alerts, s } = sinks();
+    const r = runAttestGate(wt, storyId, "c-e9-cmd", "hard", 1000, s, wt, "", 0, repoCwd);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toMatch(/deliverable_cmd/i);
+    expect(alerts[0]).toContain("BLOCKED");
+  });
+
+  it("the non-allowlisted deliverable_cmd is INVISIBLE when spec is read from the worktree (default) → no cmd block", () => {
+    // Control: the same violation is unreadable when spec resolution stays on the
+    // worktree (snapshot without the uncommitted spec). The gate never blocks on
+    // deliverable_cmd — the exact tracked-`.roll` gap the fix closes.
+    const storyId = "FIX-E9-CMD-CTL";
+    const wt = withReport(storyId, 2000);
+    liveSpec(
+      storyId,
+      `---\nid: ${storyId}\ndeliverable_cmd: rm -rf /tmp/pwned\n---\n# ${storyId}\n\n**AC:**\n- [ ] does a thing\n`,
+    );
+    const { s } = sinks();
+    const r = runAttestGate(wt, storyId, "c-e9-cmd-ctl", "hard", 1000, s); // default specRepoCwd = worktree
+    expect(r.reasons[0] ?? "").not.toMatch(/deliverable_cmd/i);
+  });
+
+  it("spec present in BOTH trees (the non-tracked-`.roll` symlink case): behaviour is unchanged", () => {
+    // For a project that does NOT track `.roll`, the worktree `.roll` is a symlink
+    // to the live `.roll`, so the spec is present (identically) in both. Passing
+    // specRepoCwd === worktree or a copy of the same spec MUST land the identical
+    // verdict — equivalence, zero regression.
+    const storyId = "FIX-E9-BOTH";
+    const wt = withReport(storyId, 2000);
+    // stage the SAME no-AC spec inside the worktree tree too.
+    const wtSpecDir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(wtSpecDir, { recursive: true });
+    writeFileSync(join(wtSpecDir, "spec.md"), `---\nid: ${storyId}\n---\n# ${storyId}\n\nChore, no AC.\n`);
+    const repoCwd = liveSpec(storyId, `---\nid: ${storyId}\n---\n# ${storyId}\n\nChore, no AC.\n`);
+    const viaWorktree = runAttestGate(wt, storyId, "c-e9-both", "hard", 1000, sinks().s);
+    const viaLive = runAttestGate(wt, storyId, "c-e9-both", "hard", 1000, sinks().s, wt, "", 0, repoCwd);
+    expect(viaLive.verdict).toBe(viaWorktree.verdict);
+    expect(viaLive.blocked).toBe(viaWorktree.blocked);
+    expect(viaLive.reasons[0]).toMatch(/no AC block/i);
+  });
+});

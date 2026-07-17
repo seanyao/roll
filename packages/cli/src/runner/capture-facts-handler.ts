@@ -526,9 +526,18 @@ export async function executeCaptureFactsCommand(
           // (as well as the superproject `.roll`). No targetSubmodule ⇒ exactly
           // agentWritableRoots(ports.repoCwd, …), unchanged.
           writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
-          // Attest render reads the card's `.roll` evidence/spec (symlinked into the
-          // superproject worktree only) → stays on ports.paths.worktreePath.
-          renderAttest: () => ports.attest.render(ports.paths.worktreePath, storyId, ctx.evidenceRunDir ?? ""),
+          // E9 (PR9): the attest RENDER reads the story SPEC (design truth) to build
+          // the acceptance report, so it must render from the LIVE `.roll`
+          // (ports.repoCwd) — the same tree the picker/designer read
+          // (`storySpecPath(ports.repoCwd, id)`). Rendering from the worktree
+          // snapshot fataled ("story not found") on a project that TRACKS `.roll`
+          // whenever the new spec was still uncommitted (linkRollIntoWorktree keeps
+          // the committed snapshot, not a symlink). For a NON-tracked-`.roll`
+          // project the worktree `.roll` is symlinked to repoCwd's `.roll`, so this
+          // is byte-identical. Evidence output still lands under the card's `.roll`
+          // per the existing archive convention (the gate reads it worktree-first,
+          // repoCwd-fallback), so the render output location is unchanged.
+          renderAttest: () => ports.attest.render(ports.repoCwd, storyId, ctx.evidenceRunDir ?? ""),
           appendEvent: (event) => ports.events.appendEvent(ports.paths.eventsPath, event),
           now: () => eventTs(ports),
         });
@@ -580,6 +589,14 @@ export async function executeCaptureFactsCommand(
           ports.repoCwd,
           ctx.builderSessionId ?? "",
           attestRenderExitCode,
+          // E9 (PR9): resolve the SPEC (design truth) from the LIVE `.roll`
+          // (ports.repoCwd), aligning attest with the picker/designer
+          // (`storySpecPath(ports.repoCwd, id)`). This is the spec-resolution cwd
+          // ONLY — evidence/score keep the worktree/scoreRepoCwd semantics above.
+          // A tracked-`.roll` project's uncommitted spec is otherwise invisible in
+          // the worktree snapshot (mis-read as "not found"); a non-tracked project's
+          // worktree `.roll` is symlinked to repoCwd's, so this is byte-identical.
+          ports.repoCwd,
         );
         if (res.verdict === "skipped") {
           applyCorrectionAction({

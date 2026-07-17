@@ -3422,7 +3422,11 @@ describe("executeCommand — command → executor mapping", () => {
       { ...CTX, evidenceRunDir: "/frame" },
     );
 
-    expect(ports.attest.render).toHaveBeenCalledWith("/rt/wt", "US-RUN-001", "/frame");
+    // E9 (PR9): the attest RENDER reads the story SPEC (design truth) to build the
+    // report, so it now renders from the LIVE `.roll` (repoCwd = "/repo"), the same
+    // tree the picker/designer read — NOT the worktree snapshot ("/rt/wt"), whose
+    // committed `.roll` lacks an uncommitted spec on a tracked-`.roll` project.
+    expect(ports.attest.render).toHaveBeenCalledWith("/repo", "US-RUN-001", "/frame");
     expect(order.indexOf("attest:render")).toBeGreaterThanOrEqual(0);
     expect(order.indexOf("attest:gate")).toBeGreaterThan(order.indexOf("attest:render"));
   });

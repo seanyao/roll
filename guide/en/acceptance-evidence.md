@@ -336,6 +336,26 @@ use the restricted local lane:
 roll capture local-window --story FIX-005 --url http://127.0.0.1:4173/team
 ```
 
+For a synthetic local UI that needs a visible state change before capture, add a
+restricted `--prepare` JSON list:
+
+```bash
+roll capture local-window --story FIX-1435 --url http://127.0.0.1:4173/ \
+  --prepare '[{"kind":"click","selector":"#synthetic-checkbox"},{"kind":"wait","ms":300},{"kind":"scroll","selector":"#synthetic-result"}]'
+```
+
+`--prepare` permits only bounded `click`, `fill`, `wait`, and `scroll` actions.
+Unknown fields or action kinds, arbitrary JavaScript, navigation, and excessive
+lists or waits are rejected before Chrome launches. The temporary DevTools
+session locates the wrapper's declared loopback frame, performs only fixed UI
+operations in that frame, and verifies the frame remains on the same loopback
+origin after every action. A prepare failure sends no capture request.
+
+This is not general browser automation: it cannot use an owner profile, read or
+write cookies or storage, open remote URLs, or export browser data. `fill`
+rejects password controls and must be used only for non-sensitive synthetic
+local values; never place credentials or personal data in a command line.
+
 It accepts only loopback HTTP(S) pages. Roll starts a disposable Chrome profile
 and a nonce-titled local wrapper window, asks Roll Capture.app for that exact
 window title, then closes the wrapper, Chrome, and profile. It never opens a

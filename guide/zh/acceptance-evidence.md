@@ -284,6 +284,22 @@ Terminal.app Screen Recording 就绪度时，用 `roll doctor --tools`。`roll i
 roll capture local-window --story FIX-005 --url http://127.0.0.1:4173/team
 ```
 
+合成本地 UI 需要在截图前产生可见状态变化时，可加受限的 `--prepare` JSON 列表：
+
+```bash
+roll capture local-window --story FIX-1435 --url http://127.0.0.1:4173/ \
+  --prepare '[{"kind":"click","selector":"#synthetic-checkbox"},{"kind":"wait","ms":300},{"kind":"scroll","selector":"#synthetic-result"}]'
+```
+
+`--prepare` 只允许有上限的 `click`、`fill`、`wait` 与 `scroll`。未知字段或动作种类、
+任意 JavaScript、导航、超量动作或等待都会在 Chrome 启动前被拒绝。临时 DevTools 会定位
+wrapper 声明的 loopback frame，只在该 frame 执行固定 UI 操作，并在每一步后校验 frame
+仍处于同一 loopback origin。准备动作失败时不会发送截图请求。
+
+这不是通用浏览器自动化：它不能使用 owner profile，不能读写 cookie 或 storage，不能打开
+远程 URL，也不能导出浏览器数据。`fill` 会拒绝 password 控件，且只能填写不敏感的本地
+合成值；绝不能在命令行传入凭据或个人信息。
+
 它只接受 loopback HTTP(S) 页面。Roll 会启动一次性 Chrome profile 和带 nonce 标题
 的本地 wrapper 窗口，要求 Roll Capture.app 只截该精确标题窗口，随后关闭 wrapper、
 Chrome 与 profile。它不会打开远程 URL、连接 owner Chrome profile，也不会回退为全屏

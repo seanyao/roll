@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      chromium-bidi:
+        specifier: ^12.0.0
+        version: 12.1.0(devtools-protocol@0.0.1663043)
+      playwright-core:
+        specifier: 1.61.1
+        version: 1.61.1
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
@@ -58,10 +65,25 @@ importers:
       '@roll/spec':
         specifier: workspace:*
         version: link:../spec
+      chromium-bidi:
+        specifier: ^12.0.0
+        version: 12.1.0(devtools-protocol@0.0.1663043)
+      playwright-core:
+        specifier: 1.61.1
+        version: 1.61.1
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.1
+      esbuild:
+        specifier: 0.28.0
+        version: 0.28.0
+      react:
+        specifier: 19.2.4
+        version: 19.2.4
+      react-dom:
+        specifier: 19.2.4
+        version: 19.2.4(react@19.2.4)
 
   packages/spec:
     devDependencies:
@@ -441,12 +463,20 @@ packages:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
 
+  chromium-bidi@12.1.0:
+    resolution: {integrity: sha512-jJnmyKjAvFYJjt0e16cLlKXlbvYsMKnc/OCZWQNez4BT6cT3MJgPKbCbi4ahAHZAsQ5jUYHqiQlMwZlyYXLKCQ==}
+    peerDependencies:
+      devtools-protocol: '*'
+
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  devtools-protocol@0.0.1663043:
+    resolution: {integrity: sha512-33aOY3ZnBP1dgZsshgaL+/XlsQleiFZgyUaDtdZkEa1nbZhVY1MoDeWjk+wxg25fU924l1ZJfoGNmjjeA/5s1w==}
 
   es-module-lexer@2.1.0:
     resolution: {integrity: sha512-n27zTYMjYu1aj4MjCWzSP7G9r75utsaoc8m61weK+W8JMBGGQybd43GstCXZ3WNmSFtGT9wi59qQTW6mhTR5LQ==}
@@ -583,6 +613,9 @@ packages:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
 
+  mitt@3.0.1:
+    resolution: {integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==}
+
   nanoid@3.3.12:
     resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -601,14 +634,31 @@ packages:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
 
+  playwright-core@1.61.1:
+    resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
+
+  react-dom@19.2.4:
+    resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
+    peerDependencies:
+      react: ^19.2.4
+
+  react@19.2.4:
+    resolution: {integrity: sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ==}
+    engines: {node: '>=0.10.0'}
 
   rolldown@1.0.3:
     resolution: {integrity: sha512-i00lAJ2ks1BYr7rjNjKC7BcqAS7nVfiT3QX1SI5aY+AFHblCmaUf9OE9dbdzDvW6dJxbi2ZCZiy9v3CcwOiX3g==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
+
+  scheduler@0.27.0:
+    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   semver@7.8.3:
     resolution: {integrity: sha512-wnilbGyMxzbY7dNOl7jpKbLSjcfeweJWU5j4+u5qW+6/wuGD9KzIGOyZnQVSBM9E7DtWaaH3CyHkppYrKYoxwg==}
@@ -746,6 +796,9 @@ packages:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
     hasBin: true
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -1012,9 +1065,17 @@ snapshots:
 
   chai@6.2.2: {}
 
+  chromium-bidi@12.1.0(devtools-protocol@0.0.1663043):
+    dependencies:
+      devtools-protocol: 0.0.1663043
+      mitt: 3.0.1
+      zod: 3.25.76
+
   convert-source-map@2.0.0: {}
 
   detect-libc@2.1.2: {}
+
+  devtools-protocol@0.0.1663043: {}
 
   es-module-lexer@2.1.0: {}
 
@@ -1142,6 +1203,8 @@ snapshots:
     dependencies:
       semver: 7.8.3
 
+  mitt@3.0.1: {}
+
   nanoid@3.3.12: {}
 
   obug@2.1.1: {}
@@ -1152,11 +1215,20 @@ snapshots:
 
   picomatch@4.0.4: {}
 
+  playwright-core@1.61.1: {}
+
   postcss@8.5.15:
     dependencies:
       nanoid: 3.3.12
       picocolors: 1.1.1
       source-map-js: 1.2.1
+
+  react-dom@19.2.4(react@19.2.4):
+    dependencies:
+      react: 19.2.4
+      scheduler: 0.27.0
+
+  react@19.2.4: {}
 
   rolldown@1.0.3:
     dependencies:
@@ -1178,6 +1250,8 @@ snapshots:
       '@rolldown/binding-wasm32-wasi': 1.0.3
       '@rolldown/binding-win32-arm64-msvc': 1.0.3
       '@rolldown/binding-win32-x64-msvc': 1.0.3
+
+  scheduler@0.27.0: {}
 
   semver@7.8.3: {}
 
@@ -1255,3 +1329,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@3.25.76: {}

@@ -11,10 +11,15 @@
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1"
+    "@types/node": "^25.9.1",
+    "esbuild": "0.28.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
   },
   "dependencies": {
     "@roll/core": "workspace:*",
-    "@roll/spec": "workspace:*"
+    "@roll/spec": "workspace:*",
+    "chromium-bidi": "^12.0.0",
+    "playwright-core": "1.61.1"
   }
 }

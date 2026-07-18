@@ -15,6 +15,7 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
+      "**/*.live.test.ts",
       ".roll/loop/worktrees/**",
     ],
   },

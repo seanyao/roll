@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium, type Browser, type CDPSession, type Frame, type Locator, type Page } from "playwright-core";
 import {
   validateRollCaptureRequestV1,
   type RollCaptureRequestV1,
@@ -74,6 +75,12 @@ export interface ControlledPreparePort {
 
 export interface ControlledPrepareDeps {
   connect(socketUrl: string): Promise<CdpSession>;
+  sleep(ms: number): Promise<void>;
+}
+
+export interface ControlledPlaywrightPrepareDeps {
+  connectOverCDP(endpoint: string): Promise<Browser>;
+  connectCdp(socketUrl: string): Promise<CdpSession>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -262,8 +269,204 @@ function defaultControlledLocalPageCaptureDeps(): ControlledLocalPageCaptureDeps
 
 function defaultControlledPreparePort(): ControlledPreparePort {
   return {
-    run: (input) => runControlledPrepareActions(input),
+    run: (input) => runPlaywrightControlledPrepareActions(input),
   };
+}
+
+/**
+ * The public prepare schema remains closed. Playwright attaches only to the
+ * disposable loopback Chrome launched by this capture path and resolves one
+ * exact page/frame already discovered for the capture, never an owner window.
+ */
+export async function runPlaywrightControlledPrepareActions(
+  input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] },
+  deps: ControlledPlaywrightPrepareDeps = {
+    connectOverCDP: (endpoint) => chromium.connectOverCDP(endpoint),
+    connectCdp: openLoopbackCdpSession,
+    sleep: sleepForPrepare,
+  },
+): Promise<void> {
+  if (loopbackOrigin(input.targetUrl) === undefined) throw new Error("controlled prepare target must remain loopback");
+  const endpoint = devToolsHttpEndpoint(input.page.webSocketDebuggerUrl);
+  if (endpoint === undefined) throw new Error("controlled prepare DevTools endpoint must remain loopback");
+  const identity = await captureDiscoveredDevToolsFrameIdentity(input.page, input.targetUrl, deps.connectCdp);
+  let browser: Browser | undefined;
+  try {
+    browser = await deps.connectOverCDP(endpoint);
+    let target = await waitForPlaywrightPrepareTarget(browser, input.page.url, input.targetUrl, deps.sleep, identity);
+    if (target === undefined) throw new Error("controlled prepare original DevTools frame identity was not found before action");
+    for (const action of input.actions) {
+      if (action.kind === "wait") {
+        await deps.sleep(action.ms);
+      } else if (action.kind === "click") {
+        const locator = await visibleLocator(target.frame, action.selector);
+        if ((await locator.getAttribute("type"))?.toLowerCase() === "checkbox") {
+          const initiallyChecked = await locator.isChecked();
+          await locator.click();
+          if (await locator.isChecked() === initiallyChecked) {
+            await closePlaywrightBrowser(browser);
+            browser = await deps.connectOverCDP(endpoint);
+            await deps.sleep(500);
+            target = await waitForPlaywrightPrepareTarget(browser, input.page.url, input.targetUrl, deps.sleep, identity);
+            if (target === undefined) throw new Error("controlled prepare original DevTools frame identity was not found after reconnect");
+            const recovered = await visibleLocator(target.frame, action.selector);
+            if (initiallyChecked) await recovered.uncheck(); else await recovered.check();
+            if (await recovered.isChecked() === initiallyChecked) throw new Error("controlled prepare checkbox recovery did not change state");
+          }
+        } else {
+          await locator.click();
+        }
+      } else if (action.kind === "fill") {
+        const locator = await visibleLocator(target.frame, action.selector);
+        await assertSafePrepareFillTarget(locator);
+        await locator.fill(action.value);
+      } else {
+        await (await visibleLocator(target.frame, action.selector)).scrollIntoViewIfNeeded();
+      }
+      if (target.frame.isDetached() || target.frame.url() !== input.targetUrl) {
+        throw new Error("controlled prepare action left the original loopback target frame");
+      }
+    }
+  } finally {
+    if (browser !== undefined) await closePlaywrightBrowser(browser);
+  }
+}
+
+interface PlaywrightPrepareTarget {
+  page: Page;
+  frame: Frame;
+}
+
+interface DevToolsFrameIdentity {
+  targetId: string;
+  frameId: string;
+  targetUrl: string;
+}
+
+async function captureDiscoveredDevToolsFrameIdentity(
+  page: ControlledPage,
+  targetUrl: string,
+  connect: (socketUrl: string) => Promise<CdpSession>,
+): Promise<DevToolsFrameIdentity> {
+  const targetId = devToolsTargetId(page.webSocketDebuggerUrl);
+  if (targetId === undefined) throw new Error("controlled prepare DevTools page identity is invalid");
+  const session = await connect(page.webSocketDebuggerUrl);
+  try {
+    const frameId = await exactFrameIdFromSession(session, targetUrl);
+    if (frameId === undefined) throw new Error("controlled prepare discovered DevTools frame identity was not found");
+    return { targetId, frameId, targetUrl };
+  } finally {
+    await closePrepareSession(session);
+  }
+}
+
+async function waitForPlaywrightPrepareTarget(
+  browser: Browser,
+  pageUrl: string,
+  targetUrl: string,
+  sleep: (ms: number) => Promise<void>,
+  identity?: DevToolsFrameIdentity,
+): Promise<PlaywrightPrepareTarget | undefined> {
+  for (let attempt = 0; attempt < PREPARE_FRAME_ATTEMPTS; attempt += 1) {
+    const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url() === pageUrl);
+    if (pages.length > 1) throw new Error("controlled prepare found multiple exact capture pages");
+    const [page] = pages;
+    if (page !== undefined) {
+      const frames = page.frames().filter((frame) => frame.url() === targetUrl);
+      if (frames.length > 1) throw new Error("controlled prepare requires exactly one original target frame");
+      if (frames.length === 1) {
+        const [frame] = frames;
+        if (frame !== undefined && (identity === undefined || await matchesDevToolsFrameIdentity(page, identity))) return { page, frame };
+      }
+    }
+    await sleep(PREPARE_FRAME_INTERVAL_MS);
+  }
+  return undefined;
+}
+
+async function matchesDevToolsFrameIdentity(page: Page, identity: DevToolsFrameIdentity): Promise<boolean> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    return await targetIdFromSession(session) === identity.targetId && await exactFrameIdFromSession(session, identity.targetUrl) === identity.frameId;
+  } finally {
+    await detachPlaywrightSession(session);
+  }
+}
+
+async function targetIdFromSession(session: CDPSession): Promise<string | undefined> {
+  const result = await session.send("Target.getTargetInfo") as { targetInfo?: { targetId?: unknown } };
+  return typeof result.targetInfo?.targetId === "string" ? result.targetInfo.targetId : undefined;
+}
+
+async function exactFrameIdFromSession(session: Pick<CdpSession, "send"> | Pick<CDPSession, "send">, targetUrl: string): Promise<string | undefined> {
+  const result = await session.send("Page.getFrameTree") as { frameTree?: unknown };
+  const frames = matchingFrameIds(result.frameTree, targetUrl);
+  if (frames.length > 1) throw new Error("controlled prepare requires exactly one original DevTools frame");
+  return frames[0];
+}
+
+function matchingFrameIds(value: unknown, targetUrl: string): string[] {
+  if (typeof value !== "object" || value === null) return [];
+  const tree = value as { frame?: { id?: unknown; url?: unknown }; childFrames?: unknown };
+  const found = typeof tree.frame?.id === "string" && tree.frame.url === targetUrl ? [tree.frame.id] : [];
+  if (!Array.isArray(tree.childFrames)) return found;
+  return tree.childFrames.flatMap((child) => matchingFrameIds(child, targetUrl)).concat(found);
+}
+
+function devToolsTargetId(socketUrl: string): string | undefined {
+  try {
+    const parsed = new URL(socketUrl);
+    const match = /^\/devtools\/page\/([^/]+)$/.exec(parsed.pathname);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+async function detachPlaywrightSession(session: CDPSession): Promise<void> {
+  try {
+    await session.detach();
+  } catch {
+    // Detach is best effort; the disposable Chrome lifecycle remains owned by the caller.
+  }
+}
+
+async function closePlaywrightBrowser(browser: Browser): Promise<void> {
+  try {
+    await browser.close();
+  } catch {
+    // Closing a CDP attachment detaches it; the disposable Chrome stays alive for Roll Capture.
+  }
+}
+
+async function visibleLocator(frame: Frame, selector: string): Promise<Locator> {
+  const first = frame.locator(selector).first();
+  try {
+    await first.waitFor({ state: "visible", timeout: PREPARE_FRAME_ATTEMPTS * PREPARE_FRAME_INTERVAL_MS });
+  } catch {
+    throw new Error(`prepare selector did not resolve to a visible element: ${selector}`);
+  }
+  if (!await first.isVisible()) throw new Error("prepare selector is not visible");
+  return first;
+}
+
+async function assertSafePrepareFillTarget(locator: Locator): Promise<void> {
+  const tagName = await locator.evaluate((element) => element.tagName.toLowerCase());
+  if (tagName !== "input" && tagName !== "textarea") throw new Error("prepare fill target must be an input or textarea");
+  if (await locator.getAttribute("contenteditable") !== null) throw new Error("prepare does not fill contenteditable fields");
+  if (tagName === "input" && (await locator.getAttribute("type"))?.toLowerCase() === "password") {
+    throw new Error("prepare does not fill password fields");
+  }
+}
+
+function devToolsHttpEndpoint(socketUrl: string): string | undefined {
+  try {
+    const parsed = new URL(socketUrl);
+    if (parsed.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsed.hostname)) return undefined;
+    return `http://${parsed.host}`;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runControlledPrepareActions(

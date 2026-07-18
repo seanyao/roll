@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   captureControlledLocalPage,
   captureControlledLocalWindow,
+  runPlaywrightControlledPrepareActions,
   runControlledPrepareActions,
   type ControlledLocalPageCaptureDeps,
   type ControlledLocalWindowCaptureDeps,
@@ -19,6 +20,55 @@ const request = {
   timeoutMs: 5_000,
   createdAt: "2026-07-18T00:00:00.000Z",
 };
+
+function pageWithDevToolsIdentity(input: {
+  url: string;
+  targetId: string;
+  frameId: string;
+  targetUrl: string;
+  frames: () => unknown[];
+  locator?: unknown;
+}) {
+  const session = {
+    send: vi.fn(async (method: string) => {
+      if (method === "Target.getTargetInfo") return { targetInfo: { targetId: input.targetId } };
+      if (method === "Page.getFrameTree") {
+        return {
+          frameTree: {
+            frame: { id: "wrapper-frame", url: input.url },
+            childFrames: [{ frame: { id: input.frameId, url: input.targetUrl } }],
+          },
+        };
+      }
+      return {};
+    }),
+    detach: vi.fn(async () => undefined),
+  };
+  return {
+    url: () => input.url,
+    frames: input.frames,
+    locator: input.locator,
+    context: () => ({ newCDPSession: vi.fn(async () => session) }),
+    session,
+  };
+}
+
+function discoveredFrameIdentitySession(frameId: string, targetUrl = "http://127.0.0.1:4173/team") {
+  return {
+    send: vi.fn(async (method: string) => {
+      if (method === "Page.getFrameTree") {
+        return {
+          frameTree: {
+            frame: { id: "wrapper-frame", url: "http://127.0.0.1:4888/" },
+            childFrames: [{ frame: { id: frameId, url: targetUrl } }],
+          },
+        };
+      }
+      return {};
+    }),
+    close: vi.fn(async () => undefined),
+  };
+}
 
 function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {}): ControlledLocalWindowCaptureDeps {
   return {
@@ -61,6 +111,245 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
 }
 
 describe("FIX-005 controlled local window capture", () => {
+  it("locks Playwright preparation to one exact discovered page and original target frame", async () => {
+    const click = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
+        click,
+      }),
+    }));
+    const wrapper = { url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator };
+    const target = { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator };
+    const otherSameOriginPage = { url: () => "http://127.0.0.1:4173/other", frames: () => [{ url: () => "http://127.0.0.1:4173/team", locator }] };
+    const page = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [wrapper, target],
+    });
+    const browser = {
+      contexts: () => [{ pages: () => [page, otherSameOriginPage] }],
+      close,
+    };
+
+    await runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn(async () => browser as never),
+      connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never),
+      sleep: vi.fn(async () => undefined),
+    });
+
+    expect(locator).toHaveBeenCalledWith("#synthetic-checkbox");
+    expect(click).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("repairs only a checkbox click that failed to update controlled state", async () => {
+    const click = vi.fn(async () => undefined);
+    const check = vi.fn(async () => undefined);
+    const isChecked = vi.fn(async () => false).mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => "checkbox"),
+        isChecked,
+        click,
+        check,
+      }),
+    }));
+    const page = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const browser = {
+      contexts: () => [{ pages: () => [page] }],
+      close: vi.fn(async () => undefined),
+    };
+
+    await runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn(async () => browser as never),
+      connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never),
+      sleep: vi.fn(async () => undefined),
+    });
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(check).toHaveBeenCalledOnce();
+    expect(browser.close).toHaveBeenCalledTimes(2);
+    expect(page.session.detach).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a same-URL replacement before the first locator action", async () => {
+    const click = vi.fn(async () => undefined);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
+        click,
+      }),
+    }));
+    const replacement = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "replacement-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const browser = { contexts: () => [{ pages: () => [replacement] }], close: vi.fn(async () => undefined) };
+
+    await expect(runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn(async () => browser as never),
+      connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never),
+      sleep: vi.fn(async () => undefined),
+    })).rejects.toThrow("original DevTools frame identity");
+
+    expect(locator).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(browser.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a same-URL replacement frame during checkbox recovery", async () => {
+    const click = vi.fn(async () => undefined);
+    const check = vi.fn(async () => undefined);
+    const isChecked = vi.fn(async () => false);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => "checkbox"),
+        isChecked,
+        click,
+        check,
+      }),
+    }));
+    const original = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const replacement = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "replacement-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const firstBrowser = { contexts: () => [{ pages: () => [original] }], close: vi.fn(async () => undefined) };
+    const recoveryBrowser = { contexts: () => [{ pages: () => [replacement] }], close: vi.fn(async () => undefined) };
+
+    await expect(runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn().mockResolvedValueOnce(firstBrowser as never).mockResolvedValueOnce(recoveryBrowser as never),
+      connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never),
+      sleep: vi.fn(async () => undefined),
+    })).rejects.toThrow("original DevTools frame identity");
+
+    expect(check).not.toHaveBeenCalled();
+    expect(firstBrowser.close).toHaveBeenCalledOnce();
+    expect(recoveryBrowser.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects duplicate or same-origin replacement target frames before requesting pixels", async () => {
+    const stableLocator = () => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
+        click: vi.fn(async () => undefined),
+      }),
+    });
+    const duplicateBrowser = {
+      contexts: () => [{ pages: () => [{
+        url: () => "http://127.0.0.1:4888/",
+        frames: () => [
+          { url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: stableLocator },
+        ],
+      }] }],
+      close: vi.fn(async () => undefined),
+    };
+    const replacedFrameUrl = vi.fn(() => "http://127.0.0.1:4173/team").mockReturnValueOnce("http://127.0.0.1:4173/team").mockReturnValueOnce("http://127.0.0.1:4173/replaced");
+    const replacementPage = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [
+          { url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: stableLocator },
+          { url: replacedFrameUrl, isDetached: () => false, locator: stableLocator },
+      ],
+    });
+    const replacementBrowser = {
+      contexts: () => [{ pages: () => [replacementPage] }],
+      close: vi.fn(async () => undefined),
+    };
+    const input = {
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }] as const,
+    };
+
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => duplicateBrowser as never), connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("exactly one original target frame");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => replacementBrowser as never), connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("left the original loopback target frame");
+  });
+
+  it("rejects password, contenteditable, and non-input textarea fills", async () => {
+    const locatorFor = (tagName: string, attributes: Record<string, string | null>) => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async (name: string) => attributes[name] ?? null),
+        evaluate: vi.fn(async () => tagName.toLowerCase()),
+        fill: vi.fn(async () => undefined),
+      }),
+    });
+    const browserFor = (locator: ReturnType<typeof locatorFor>) => ({
+      contexts: () => [{ pages: () => [pageWithDevToolsIdentity({
+        url: "http://127.0.0.1:4888/",
+        targetId: "controlled",
+        frameId: "original-target-frame",
+        targetUrl: "http://127.0.0.1:4173/team",
+        frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: () => locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: () => locator }],
+      })] }],
+      close: vi.fn(async () => undefined),
+    });
+    const input = {
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "fill", selector: "#synthetic", value: "synthetic" }] as const,
+    };
+
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("INPUT", { type: "password" })) as never), connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("password fields");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("INPUT", { contenteditable: "true" })) as never), connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("contenteditable");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("DIV", {})) as never), connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("input or textarea");
+  });
+
   it("uses physical pointer input for a loopback React checkbox, then runs fixed wait and scroll operations", async () => {
     let frameTreeCalls = 0;
     const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {

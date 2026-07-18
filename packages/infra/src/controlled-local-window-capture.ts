@@ -284,15 +284,30 @@ export async function runPlaywrightControlledPrepareActions(
   if (loopbackOrigin(input.targetUrl) === undefined) throw new Error("controlled prepare target must remain loopback");
   const endpoint = devToolsHttpEndpoint(input.page.webSocketDebuggerUrl);
   if (endpoint === undefined) throw new Error("controlled prepare DevTools endpoint must remain loopback");
-  const browser = await deps.connectOverCDP(endpoint);
-  try {
-    const frame = await waitForPlaywrightPrepareFrame(browser, input.page.url, input.targetUrl, deps.sleep);
-    if (frame === undefined) throw new Error("controlled prepare target frame was not found");
-    for (const action of input.actions) {
-      if (action.kind === "wait") {
-        await deps.sleep(action.ms);
-      } else if (action.kind === "click") {
-        await (await visibleLocator(frame, action.selector)).click();
+  let browser = await deps.connectOverCDP(endpoint);
+  let frame = await waitForPlaywrightPrepareFrame(browser, input.page.url, input.targetUrl, deps.sleep);
+  if (frame === undefined) throw new Error("controlled prepare target frame was not found");
+  for (const action of input.actions) {
+    if (action.kind === "wait") {
+      await deps.sleep(action.ms);
+    } else if (action.kind === "click") {
+      const locator = await visibleLocator(frame, action.selector);
+      if ((await locator.getAttribute("type"))?.toLowerCase() === "checkbox") {
+        const initiallyChecked = await locator.isChecked();
+        await locator.click();
+        if (await locator.isChecked() === initiallyChecked) {
+          await browser.close();
+          browser = await deps.connectOverCDP(endpoint);
+          await deps.sleep(500);
+          frame = await waitForPlaywrightPrepareFrame(browser, input.page.url, input.targetUrl, deps.sleep);
+          if (frame === undefined) throw new Error("controlled prepare target frame was not found after reconnect");
+          const recovered = await visibleLocator(frame, action.selector);
+          if (initiallyChecked) await recovered.uncheck(); else await recovered.check();
+          if (await recovered.isChecked() === initiallyChecked) throw new Error("controlled prepare checkbox recovery did not change state");
+        }
+      } else {
+        await locator.click();
+      }
       } else if (action.kind === "fill") {
         const locator = await visibleLocator(frame, action.selector);
         await assertSafePrepareFillTarget(locator);
@@ -303,9 +318,6 @@ export async function runPlaywrightControlledPrepareActions(
       if (frame.url() !== input.targetUrl) {
         throw new Error("controlled prepare action left the original loopback target frame");
       }
-    }
-  } finally {
-    await closePlaywrightBrowserQuietly(browser);
   }
 }
 
@@ -356,14 +368,6 @@ function devToolsHttpEndpoint(socketUrl: string): string | undefined {
     return `http://${parsed.host}`;
   } catch {
     return undefined;
-  }
-}
-
-async function closePlaywrightBrowserQuietly(browser: Browser): Promise<void> {
-  try {
-    await browser.close();
-  } catch {
-    // Chrome/profile cleanup remains authoritative for the disposable process.
   }
 }
 

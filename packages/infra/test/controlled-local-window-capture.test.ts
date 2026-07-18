@@ -69,6 +69,7 @@ describe("FIX-005 controlled local window capture", () => {
       first: () => ({
         waitFor: vi.fn(async () => undefined),
         isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
         click,
       }),
     }));
@@ -88,7 +89,39 @@ describe("FIX-005 controlled local window capture", () => {
 
     expect(locator).toHaveBeenCalledWith("#synthetic-checkbox");
     expect(click).toHaveBeenCalledOnce();
-    expect(close).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it("repairs only a checkbox click that failed to update controlled state", async () => {
+    const click = vi.fn(async () => undefined);
+    const check = vi.fn(async () => undefined);
+    const isChecked = vi.fn(async () => false).mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => "checkbox"),
+        isChecked,
+        click,
+        check,
+      }),
+    }));
+    const browser = {
+      contexts: () => [{ pages: () => [{
+        url: () => "http://127.0.0.1:4888/",
+        frames: () => [{ url: () => "http://127.0.0.1:4888/", locator }, { url: () => "http://127.0.0.1:4173/team", locator }],
+      }] }],
+      close: vi.fn(async () => undefined),
+    };
+
+    await runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, { connectOverCDP: vi.fn(async () => browser as never), sleep: vi.fn(async () => undefined) });
+
+    expect(click).toHaveBeenCalledOnce();
+    expect(check).toHaveBeenCalledOnce();
   });
 
   it("rejects duplicate or same-origin replacement target frames before requesting pixels", async () => {
@@ -96,6 +129,7 @@ describe("FIX-005 controlled local window capture", () => {
       first: () => ({
         waitFor: vi.fn(async () => undefined),
         isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
         click: vi.fn(async () => undefined),
       }),
     });

@@ -8,7 +8,7 @@ import { build } from "esbuild";
 import { chromium } from "playwright-core";
 import { describe, expect, it } from "vitest";
 import { SystemChromeLauncher } from "../../src/browser-operations/managed-chrome-adapter.js";
-import { captureControlledLocalWindow, type ControlledPage } from "../../src/controlled-local-window-capture.js";
+import { captureControlledLocalPage, type ControlledPage } from "../../src/controlled-local-window-capture.js";
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
@@ -59,11 +59,10 @@ describe("FIX-1440 real controlled React preparation", () => {
     let discovered: ControlledPage | undefined;
     let physicalRequestObserved = false;
     try {
-      const result = await captureControlledLocalWindow({
+      const result = await captureControlledLocalPage({
         projectRoot: temporaryRoot,
         url: targetUrl,
         prepare: [{ kind: "click", selector: "#synthetic-checkbox" }],
-        windowTitle: "Roll Capture FIX-1440 live-synthetic",
         request: {
           protocol: "roll.capture.v1",
           requestId: "fix-1440-live-synthetic",
@@ -94,6 +93,21 @@ describe("FIX-1440 real controlled React preparation", () => {
             return discovered;
           },
         },
+        wrappers: {
+          open: async () => {
+            const title = "Roll Capture FIX-1440 live-synthetic";
+            const wrapper = createServer((_request, response) => {
+              response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+              response.end(`<!doctype html><title>${title}</title><iframe src="${targetUrl}" style="width:100%;height:100%;border:0"></iframe>`);
+            });
+            const wrapperAddress = await listenLoopback(wrapper);
+            return {
+              url: `http://127.0.0.1:${wrapperAddress.port}/`,
+              windowTitle: title,
+              close: async () => { await closeServer(wrapper); },
+            };
+          },
+        },
         prepare: {
           run: async (input) => {
             const module = await import("../../src/controlled-local-window-capture.js");
@@ -106,10 +120,12 @@ describe("FIX-1440 real controlled React preparation", () => {
             const endpoint = new URL(discovered.webSocketDebuggerUrl);
             const browser = await chromium.connectOverCDP(`http://${endpoint.host}`);
             try {
-              const page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === targetUrl);
+              const page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === discovered.url);
               if (page === undefined) throw new Error("Live controlled-capture gate lost its disposable page after Playwright detach.");
-              expect(await page.locator("#synthetic-checkbox").isChecked()).toBe(true);
-              expect(await page.locator("#synthetic-result").textContent()).toBe("React state: selected");
+              const targetFrame = page.frames().find((frame) => frame.url() === targetUrl);
+              if (targetFrame === undefined) throw new Error("Live controlled-capture gate lost its exact original target frame.");
+              expect(await targetFrame.locator("#synthetic-checkbox").isChecked()).toBe(true);
+              expect(await targetFrame.locator("#synthetic-result").textContent()).toBe("React state: selected");
               const health = await fetch(`http://${endpoint.host}/json/version`);
               expect(health.status).toBe(200);
               physicalRequestObserved = true;
@@ -133,7 +149,7 @@ describe("FIX-1440 real controlled React preparation", () => {
             },
           }),
         },
-        sleep: async (ms) => { await new Promise<void>((resolve) => setTimeout(resolve, Math.min(ms, 100))); },
+        sleep: async (ms) => { await new Promise<void>((resolve) => setTimeout(resolve, ms)); },
       });
 
       if (result.status !== "taken") throw new Error(`Live controlled-capture gate failed: ${result.reason ?? result.status}`);

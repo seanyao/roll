@@ -21,6 +21,38 @@ const request = {
   createdAt: "2026-07-18T00:00:00.000Z",
 };
 
+function pageWithDevToolsIdentity(input: {
+  url: string;
+  targetId: string;
+  frameId: string;
+  targetUrl: string;
+  frames: () => unknown[];
+  locator?: unknown;
+}) {
+  const session = {
+    send: vi.fn(async (method: string) => {
+      if (method === "Target.getTargetInfo") return { targetInfo: { targetId: input.targetId } };
+      if (method === "Page.getFrameTree") {
+        return {
+          frameTree: {
+            frame: { id: "wrapper-frame", url: input.url },
+            childFrames: [{ frame: { id: input.frameId, url: input.targetUrl } }],
+          },
+        };
+      }
+      return {};
+    }),
+    detach: vi.fn(async () => undefined),
+  };
+  return {
+    url: () => input.url,
+    frames: input.frames,
+    locator: input.locator,
+    context: () => ({ newCDPSession: vi.fn(async () => session) }),
+    session,
+  };
+}
+
 function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {}): ControlledLocalWindowCaptureDeps {
   return {
     chrome: {
@@ -74,7 +106,7 @@ describe("FIX-005 controlled local window capture", () => {
       }),
     }));
     const wrapper = { url: () => "http://127.0.0.1:4888/", frames: () => [] };
-    const target = { url: () => "http://127.0.0.1:4173/team", locator };
+    const target = { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator };
     const otherSameOriginPage = { url: () => "http://127.0.0.1:4173/other", frames: () => [{ url: () => "http://127.0.0.1:4173/team", locator }] };
     const browser = {
       contexts: () => [{ pages: () => [{ url: () => "http://127.0.0.1:4888/", frames: () => [wrapper, target] }, otherSameOriginPage] }],
@@ -89,7 +121,7 @@ describe("FIX-005 controlled local window capture", () => {
 
     expect(locator).toHaveBeenCalledWith("#synthetic-checkbox");
     expect(click).toHaveBeenCalledOnce();
-    expect(close).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("repairs only a checkbox click that failed to update controlled state", async () => {
@@ -106,11 +138,15 @@ describe("FIX-005 controlled local window capture", () => {
         check,
       }),
     }));
+    const page = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
     const browser = {
-      contexts: () => [{ pages: () => [{
-        url: () => "http://127.0.0.1:4888/",
-        frames: () => [{ url: () => "http://127.0.0.1:4888/", locator }, { url: () => "http://127.0.0.1:4173/team", locator }],
-      }] }],
+      contexts: () => [{ pages: () => [page] }],
       close: vi.fn(async () => undefined),
     };
 
@@ -122,6 +158,53 @@ describe("FIX-005 controlled local window capture", () => {
 
     expect(click).toHaveBeenCalledOnce();
     expect(check).toHaveBeenCalledOnce();
+    expect(browser.close).toHaveBeenCalledTimes(2);
+    expect(page.session.detach).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a same-URL replacement frame during checkbox recovery", async () => {
+    const click = vi.fn(async () => undefined);
+    const check = vi.fn(async () => undefined);
+    const isChecked = vi.fn(async () => false);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => "checkbox"),
+        isChecked,
+        click,
+        check,
+      }),
+    }));
+    const original = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const replacement = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "replacement-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const firstBrowser = { contexts: () => [{ pages: () => [original] }], close: vi.fn(async () => undefined) };
+    const recoveryBrowser = { contexts: () => [{ pages: () => [replacement] }], close: vi.fn(async () => undefined) };
+
+    await expect(runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn().mockResolvedValueOnce(firstBrowser as never).mockResolvedValueOnce(recoveryBrowser as never),
+      sleep: vi.fn(async () => undefined),
+    })).rejects.toThrow("original DevTools frame identity");
+
+    expect(check).not.toHaveBeenCalled();
+    expect(firstBrowser.close).toHaveBeenCalledOnce();
+    expect(recoveryBrowser.close).toHaveBeenCalledOnce();
   });
 
   it("rejects duplicate or same-origin replacement target frames before requesting pixels", async () => {
@@ -137,9 +220,9 @@ describe("FIX-005 controlled local window capture", () => {
       contexts: () => [{ pages: () => [{
         url: () => "http://127.0.0.1:4888/",
         frames: () => [
-          { url: () => "http://127.0.0.1:4888/", locator: stableLocator },
-          { url: () => "http://127.0.0.1:4173/team", locator: stableLocator },
-          { url: () => "http://127.0.0.1:4173/team", locator: stableLocator },
+          { url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: stableLocator },
         ],
       }] }],
       close: vi.fn(async () => undefined),
@@ -149,8 +232,8 @@ describe("FIX-005 controlled local window capture", () => {
       contexts: () => [{ pages: () => [{
         url: () => "http://127.0.0.1:4888/",
         frames: () => [
-          { url: () => "http://127.0.0.1:4888/", locator: stableLocator },
-          { url: replacedFrameUrl, locator: stableLocator },
+          { url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: stableLocator },
+          { url: replacedFrameUrl, isDetached: () => false, locator: stableLocator },
         ],
       }] }],
       close: vi.fn(async () => undefined),
@@ -178,7 +261,7 @@ describe("FIX-005 controlled local window capture", () => {
     const browserFor = (locator: ReturnType<typeof locatorFor>) => ({
       contexts: () => [{ pages: () => [{
         url: () => "http://127.0.0.1:4888/",
-        frames: () => [{ url: () => "http://127.0.0.1:4888/", locator: () => locator }, { url: () => "http://127.0.0.1:4173/team", locator: () => locator }],
+        frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator: () => locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator: () => locator }],
       }] }],
       close: vi.fn(async () => undefined),
     });

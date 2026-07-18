@@ -276,6 +276,19 @@ Terminal.app Screen Recording 就绪度时，用 `roll doctor --tools`。`roll i
 - `ROLL_NO_SCREENCAP=1` 只禁用 Runner 直接的原生 `screencapture` / AppleScript
   路径，不会关闭 Roll Capture 网关请求或 Playwright 渲染尝试。
 
+### 受控本地窗口截图
+
+物理网页证据需要浏览器窗口、但当前没有安全目标窗口时，使用受限的本地通道：
+
+```bash
+roll capture local-window --story FIX-005 --url http://127.0.0.1:4173/team
+```
+
+它只接受 loopback HTTP(S) 页面。Roll 会启动一次性 Chrome profile 和带 nonce 标题
+的本地 wrapper 窗口，要求 Roll Capture.app 只截该精确标题窗口，随后关闭 wrapper、
+Chrome 与 profile。它不会打开远程 URL、连接 owner Chrome profile，也不会回退为全屏
+截图。JSON 结果会给出物理回执与精确 selector。
+
 ### 仅证据修复
 
 `degraded-infrastructure` 交付可以在不重开构建的情况下修复：

@@ -327,6 +327,21 @@ story is never repeatedly rebuilt.
   AppleScript path. It does not disable the Roll Capture gateway request or the
   Playwright rendered attempt.
 
+### Controlled local-window capture
+
+When a physical web receipt needs a browser window but no safe window exists,
+use the restricted local lane:
+
+```bash
+roll capture local-window --story FIX-005 --url http://127.0.0.1:4173/team
+```
+
+It accepts only loopback HTTP(S) pages. Roll starts a disposable Chrome profile
+and a nonce-titled local wrapper window, asks Roll Capture.app for that exact
+window title, then closes the wrapper, Chrome, and profile. It never opens a
+remote URL, connects to an owner Chrome profile, or falls back to a full-screen
+capture. The JSON result includes the physical receipt and exact selector.
+
 ### Evidence-only repair
 
 A `degraded-infrastructure` delivery can be repaired without reopening the build:

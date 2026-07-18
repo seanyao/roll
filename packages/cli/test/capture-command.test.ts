@@ -145,3 +145,69 @@ describe("roll capture status (AC4)", () => {
     expect(parsed.migration.reasonCode).toBe("gateway-and-renderer-ready");
   });
 });
+
+describe("FIX-005 roll capture local-window", () => {
+  it("derives a project-local output and reports a verifiable nonce-selected receipt", async () => {
+    const root = tmpProject();
+    const localWindow = vi.fn(async () => ({
+      status: "taken" as const,
+      path: join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-example.png"),
+      selector: { appName: "Google Chrome" as const, windowTitle: "Roll Capture FIX-005 generated-nonce" },
+    }));
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-005", "--run", "run-a",
+      "--url", "http://127.0.0.1:4173/team", "--json",
+    ], { captureLocalWindow: localWindow } as never);
+    out.restore();
+
+    expect(code).toBe(0);
+    expect(localWindow).toHaveBeenCalledWith(expect.objectContaining({
+      projectRoot: root,
+      url: "http://127.0.0.1:4173/team",
+      request: expect.objectContaining({
+        storyId: "FIX-005",
+        runId: "run-a",
+        kind: "web",
+        out: expect.stringMatching(new RegExp(`^${join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-")}[^/]+\\.png$`)),
+      }),
+    }));
+    expect(JSON.parse(out.text())).toMatchObject({
+      status: "taken",
+      selector: { windowTitle: "Roll Capture FIX-005 generated-nonce" },
+    });
+  });
+
+  it("rejects a remote page before the controlled capture lane starts", async () => {
+    const root = tmpProject();
+    const localWindow = vi.fn();
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-005", "--url", "https://example.com/team",
+    ], { captureLocalWindow: localWindow } as never);
+    out.restore();
+
+    expect(code).toBe(1);
+    expect(localWindow).not.toHaveBeenCalled();
+    expect(out.text()).toContain("loopback");
+  });
+
+  it("uses a different artifact path for each retry in the same run", async () => {
+    const root = tmpProject();
+    const requests: string[] = [];
+    const localWindow = vi.fn(async (input: { request: { out: string } }) => {
+      requests.push(input.request.out);
+      return { status: "skipped" as const, reason: "fixture host unavailable" };
+    });
+    const args = ["local-window", "--project", root, "--story", "FIX-005", "--run", "retry-run", "--url", "http://127.0.0.1:4173/team"];
+    const first = captureStdout();
+    await captureCommand(args, { captureLocalWindow: localWindow } as never);
+    first.restore();
+    const second = captureStdout();
+    await captureCommand(args, { captureLocalWindow: localWindow } as never);
+    second.restore();
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).not.toBe(requests[1]);
+  });
+});

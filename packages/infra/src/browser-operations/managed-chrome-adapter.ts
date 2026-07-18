@@ -51,9 +51,18 @@ export interface ChromeProcess {
   kill(): Promise<void>;
 }
 
+export interface ChromeLaunchOptions {
+  profileDir: string;
+  remoteDebuggingPort: number;
+  /** Default managed diagnostics remain headless; physical capture opts in explicitly. */
+  visibility?: "headless" | "visible";
+  /** Only used for a visible, isolated capture window. */
+  initialUrl?: string;
+}
+
 /** Launches a Chrome instance bound to a temporary profile and debug port. */
 export interface ChromeLauncher {
-  launch(options: { profileDir: string; remoteDebuggingPort: number }): Promise<ChromeProcess>;
+  launch(options: ChromeLaunchOptions): Promise<ChromeProcess>;
 }
 
 /** A single CDP session. */
@@ -131,22 +140,9 @@ export interface PerformanceProfileOutcome {
 export class SystemChromeLauncher implements ChromeLauncher {
   constructor(private readonly chromeExecutable: string = defaultChromeExecutable()) {}
 
-  async launch(options: { profileDir: string; remoteDebuggingPort: number }): Promise<ChromeProcess> {
+  async launch(options: ChromeLaunchOptions): Promise<ChromeProcess> {
     const { spawn } = await import("node:child_process");
-    const args = [
-      `--user-data-dir=${options.profileDir}`,
-      `--remote-debugging-port=${options.remoteDebuggingPort}`,
-      "--headless=new",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-default-apps",
-      "--disable-background-networking",
-      "--disable-sync",
-      "--disable-extensions",
-      "--disable-popup-blocking",
-      "--disable-features=Translate",
-      "about:blank",
-    ];
+    const args = chromeLaunchArgs(options);
     const child = spawn(this.chromeExecutable, args, { detached: false });
     if (child.pid === undefined) {
       throw new Error(`Failed to spawn Chrome from ${this.chromeExecutable}`);
@@ -169,6 +165,28 @@ export class SystemChromeLauncher implements ChromeLauncher {
       },
     };
   }
+}
+
+/**
+ * Chrome arguments are deterministic so the controlled-capture path can prove
+ * that it never inherits the owner's profile or enables extensions.
+ */
+export function chromeLaunchArgs(options: ChromeLaunchOptions): string[] {
+  const visible = options.visibility === "visible";
+  return [
+    `--user-data-dir=${options.profileDir}`,
+    `--remote-debugging-port=${options.remoteDebuggingPort}`,
+    ...(visible ? [] : ["--headless=new"]),
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-default-apps",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--disable-extensions",
+    "--disable-popup-blocking",
+    "--disable-features=Translate",
+    visible ? `--app=${options.initialUrl ?? "about:blank"}` : "about:blank",
+  ];
 }
 
 function defaultChromeExecutable(): string {

@@ -188,11 +188,11 @@ describe("FIX-1231 — codex git isolation", () => {
   });
 });
 
-describe("FIX-1257 — cursor worktree leak: builder pool downgraded to peer/score only", () => {
+describe("cursor is a builder again (reverses the FIX-1257 config-only downgrade)", () => {
   const projectAgentsYaml = fileURLToPath(new URL("../../../.roll/agents.yaml", import.meta.url));
   // .roll/ is the nested PRIVATE roll-meta repo — absent in CI checkouts. The
-  // downgrade lives in config (deliberately not code), so these assertions can
-  // only run where that config exists; skipping elsewhere is honest.
+  // pool membership lives in config (deliberately not code), so these assertions
+  // can only run where that config exists; skipping elsewhere is honest.
   const hasProjectConfig = existsSync(projectAgentsYaml);
 
   function poolAgents(yaml: string, role: "execute" | "evaluate"): string[] {
@@ -204,12 +204,12 @@ describe("FIX-1257 — cursor worktree leak: builder pool downgraded to peer/sco
       .filter((s) => s !== "");
   }
 
-  it.skipIf(!hasProjectConfig)("project agents.yaml excludes cursor from the builder (execute) pool", () => {
+  it.skipIf(!hasProjectConfig)("project agents.yaml includes cursor in the builder (execute) pool", () => {
     const yaml = readFileSync(projectAgentsYaml, "utf8");
     const builders = poolAgents(yaml, "execute");
     expect(builders).toContain("codex");
     expect(builders).toContain("claude");
-    expect(builders).not.toContain("cursor");
+    expect(builders).toContain("cursor");
   });
 
   it.skipIf(!hasProjectConfig)("project agents.yaml keeps cursor in the peer/score (evaluate) pool", () => {

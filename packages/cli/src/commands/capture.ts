@@ -156,6 +156,8 @@ async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Pro
   } else {
     process.stdout.write([
       `local-window capture: ${result.status}`,
+      "  browser extension: not used",
+      "  privacy: loopback-only synthetic target in a temporary profile",
       ...(result.selector === undefined ? [] : [`  selector: ${result.selector.appName} · ${result.selector.windowTitle}`]),
       ...(result.path === undefined ? [] : [`  screenshot: ${result.path}`]),
       ...(result.response?.responsePath === undefined ? [] : [`  receipt: ${result.response.responsePath}`]),

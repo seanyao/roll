@@ -111,6 +111,52 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
 }
 
 describe("FIX-005 controlled local window capture", () => {
+  it("waits for the original DevTools frame identity before attaching Playwright", async () => {
+    const click = vi.fn(async () => undefined);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => null),
+        click,
+      }),
+    }));
+    const page = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const browser = { contexts: () => [{ pages: () => [page] }], close: vi.fn(async () => undefined) };
+    let discoveryAttempts = 0;
+    const discovery = {
+      send: vi.fn(async (method: string) => {
+        if (method !== "Page.getFrameTree") return {};
+        discoveryAttempts += 1;
+        return discoveryAttempts === 1
+          ? { frameTree: { frame: { id: "wrapper-frame", url: "http://127.0.0.1:4888/" } } }
+          : { frameTree: { frame: { id: "wrapper-frame", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "original-target-frame", url: "http://127.0.0.1:4173/team" } }] } };
+      }),
+      close: vi.fn(async () => undefined),
+    };
+    const sleep = vi.fn(async () => undefined);
+
+    await runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn(async () => browser as never),
+      connectCdp: vi.fn(async () => discovery as never),
+      sleep,
+    });
+
+    expect(discovery.send).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(100);
+    expect(click).toHaveBeenCalledOnce();
+  });
+
   it("locks Playwright preparation to one exact discovered page and original target frame", async () => {
     const click = vi.fn(async () => undefined);
     const close = vi.fn(async () => undefined);
@@ -416,7 +462,7 @@ describe("FIX-005 controlled local window capture", () => {
     }, { connect: vi.fn(async () => ({ send, close: vi.fn(async () => undefined) })), sleep: vi.fn(async () => undefined) })).rejects.toThrow("left the original loopback origin");
   });
 
-  it("keeps ordinary managed Chrome headless and makes only the dedicated capture process visible", () => {
+  it("keeps ordinary managed Chrome headless and makes only the dedicated capture process visible and extension-free", () => {
     const headless = chromeLaunchArgs({ profileDir: "/tmp/default", remoteDebuggingPort: 9222 });
     const visible = chromeLaunchArgs({
       profileDir: "/tmp/capture",
@@ -431,6 +477,7 @@ describe("FIX-005 controlled local window capture", () => {
     expect(visible).toContain("--app=http://127.0.0.1:4173/team");
     expect(visible).toContain("--user-data-dir=/tmp/capture");
     expect(visible).toContain("--disable-extensions");
+    expect(visible).toContain("--disable-component-extensions-with-background-pages");
   });
 
   it("rejects a non-loopback URL before Chrome or Roll Capture can touch it", async () => {

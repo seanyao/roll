@@ -10,7 +10,7 @@ import { captureControlledLocalPage } from "../../src/controlled-local-window-ca
 
 const PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
-describe("FIX-1440 real controlled React preparation", () => {
+describe("FIX-1444 extension-free controlled local capture", () => {
   it("captures a default-wrapper physical receipt for a checked synthetic React control", async () => {
     if (process.env.ROLL_BROWSER_LIVE !== "1") {
       throw new Error("Live controlled-capture gate UNAVAILABLE — set ROLL_BROWSER_LIVE=1 on a desktop Chrome host.");
@@ -51,12 +51,12 @@ describe("FIX-1440 real controlled React preparation", () => {
         return;
       }
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      response.end('<!doctype html><title>FIX-1440 synthetic React</title><div id="root"></div><script src="/app.js"></script>');
+      response.end('<!doctype html><title>FIX-1444 synthetic React</title><div id="root"></div><script src="/app.js"></script>');
     });
     const address = await listenLoopback(server);
-    const temporaryRoot = await mkdtemp(join(tmpdir(), "roll-fix-1440-project-"));
+    const temporaryRoot = await mkdtemp(join(tmpdir(), "roll-fix-1444-project-"));
     const targetUrl = `http://127.0.0.1:${address.port}/`;
-    const requestId = `fix-1440-live-synthetic-${randomUUID()}`;
+    const requestId = `fix-1444-live-synthetic-${randomUUID()}`;
     try {
       const result = await captureControlledLocalPage({
         projectRoot: temporaryRoot,
@@ -65,17 +65,17 @@ describe("FIX-1440 real controlled React preparation", () => {
         request: {
           protocol: "roll.capture.v1",
           requestId,
-          storyId: "FIX-1440",
+          storyId: "FIX-1444",
           runId: "live-synthetic",
           kind: "web",
-          out: join(temporaryRoot, ".roll", "features", "capture-tool", "FIX-1440", "screenshots", "live.png"),
+          out: join(temporaryRoot, ".roll", "features", "capture-tool", "FIX-1444", "screenshots", "live.png"),
           timeoutMs: 15_000,
           createdAt: "2026-07-18T00:00:00.000Z",
         },
       });
 
       if (result.status !== "taken") throw new Error(`Live controlled-capture gate failed: ${result.reason ?? result.status}`);
-      expect(result.path).toBe(join(temporaryRoot, ".roll", "features", "capture-tool", "FIX-1440", "screenshots", "live.png"));
+      expect(result.path).toBe(join(temporaryRoot, ".roll", "features", "capture-tool", "FIX-1444", "screenshots", "live.png"));
       expect(result.response?.host.appName).toBe("Roll Capture.app");
       expect(result.response?.host.version).not.toBe("test");
       expect(result.response?.responsePath).toBeTruthy();
@@ -88,18 +88,18 @@ describe("FIX-1440 real controlled React preparation", () => {
       expect(receipt.status).toBe("taken");
       expect(receipt.screenshotPath).toBe(result.path);
       const evidence = {
-        evidence: "FIX-1440 physical default-wrapper receipt",
+        evidence: "FIX-1444 physical extension-free default-wrapper receipt",
         screenshotSha256: createHash("sha256").update(screenshot).digest("hex"),
       };
       const evidenceDirectory = process.env.ROLL_CAPTURE_EVIDENCE_DIR;
       if (evidenceDirectory !== undefined) {
         await mkdir(evidenceDirectory, { recursive: true });
-        await copyFile(result.path, join(evidenceDirectory, "roll-capture-react-controlled-local-synthetic.png"));
+        await copyFile(result.path, join(evidenceDirectory, "roll-capture-fix-1444-local-synthetic.png"));
         await writeFile(join(evidenceDirectory, "receipt-sanitized.json"), JSON.stringify({
           protocol: result.response?.protocol,
           requestId: result.response?.requestId,
           status: result.response?.status,
-          screenshotPath: "roll-capture-react-controlled-local-synthetic.png",
+          screenshotPath: "roll-capture-fix-1444-local-synthetic.png",
           host: result.response?.host,
           ...evidence,
         }, null, 2) + "\n", "utf8");

@@ -289,7 +289,7 @@ export async function runPlaywrightControlledPrepareActions(
   if (loopbackOrigin(input.targetUrl) === undefined) throw new Error("controlled prepare target must remain loopback");
   const endpoint = devToolsHttpEndpoint(input.page.webSocketDebuggerUrl);
   if (endpoint === undefined) throw new Error("controlled prepare DevTools endpoint must remain loopback");
-  const identity = await captureDiscoveredDevToolsFrameIdentity(input.page, input.targetUrl, deps.connectCdp);
+  const identity = await captureDiscoveredDevToolsFrameIdentity(input.page, input.targetUrl, deps.connectCdp, deps.sleep);
   let browser: Browser | undefined;
   try {
     browser = await deps.connectOverCDP(endpoint);
@@ -347,17 +347,31 @@ async function captureDiscoveredDevToolsFrameIdentity(
   page: ControlledPage,
   targetUrl: string,
   connect: (socketUrl: string) => Promise<CdpSession>,
+  sleep: (ms: number) => Promise<void>,
 ): Promise<DevToolsFrameIdentity> {
   const targetId = devToolsTargetId(page.webSocketDebuggerUrl);
   if (targetId === undefined) throw new Error("controlled prepare DevTools page identity is invalid");
   const session = await connect(page.webSocketDebuggerUrl);
   try {
-    const frameId = await exactFrameIdFromSession(session, targetUrl);
+    const frameId = await waitForExactDevToolsFrameId(session, targetUrl, sleep);
     if (frameId === undefined) throw new Error("controlled prepare discovered DevTools frame identity was not found");
     return { targetId, frameId, targetUrl };
   } finally {
     await closePrepareSession(session);
   }
+}
+
+async function waitForExactDevToolsFrameId(
+  session: Pick<CdpSession, "send">,
+  targetUrl: string,
+  sleep: (ms: number) => Promise<void>,
+): Promise<string | undefined> {
+  for (let attempt = 0; attempt < PREPARE_FRAME_ATTEMPTS; attempt += 1) {
+    const frameId = await exactFrameIdFromSession(session, targetUrl);
+    if (frameId !== undefined) return frameId;
+    if (attempt + 1 < PREPARE_FRAME_ATTEMPTS) await sleep(PREPARE_FRAME_INTERVAL_MS);
+  }
+  return undefined;
 }
 
 async function waitForPlaywrightPrepareTarget(

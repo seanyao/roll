@@ -149,7 +149,8 @@ async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Pro
     process.stdout.write([
       `local-window capture: ${result.status}`,
       ...(result.selector === undefined ? [] : [`  selector: ${result.selector.appName} · ${result.selector.windowTitle}`]),
-      ...(result.path === undefined ? [] : [`  receipt: ${result.path}`]),
+      ...(result.path === undefined ? [] : [`  screenshot: ${result.path}`]),
+      ...(result.response?.responsePath === undefined ? [] : [`  receipt: ${result.response.responsePath}`]),
       ...(result.reason === undefined ? [] : [`  reason: ${result.reason}`]),
     ].join("\n") + "\n");
   }

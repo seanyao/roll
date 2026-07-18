@@ -152,6 +152,7 @@ describe("FIX-005 roll capture local-window", () => {
     const localWindow = vi.fn(async () => ({
       status: "taken" as const,
       path: join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-example.png"),
+      response: { responsePath: "/tmp/controlled-window-response.json" },
       selector: { appName: "Google Chrome" as const, windowTitle: "Roll Capture FIX-005 generated-nonce" },
     }));
     const out = captureStdout();
@@ -174,8 +175,32 @@ describe("FIX-005 roll capture local-window", () => {
     }));
     expect(JSON.parse(out.text())).toMatchObject({
       status: "taken",
+      path: join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-example.png"),
+      response: { responsePath: "/tmp/controlled-window-response.json" },
       selector: { windowTitle: "Roll Capture FIX-005 generated-nonce" },
     });
+  });
+
+  it("labels the screenshot and Roll Capture receipt as separate paths", async () => {
+    const root = tmpProject();
+    const screenshotPath = join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-example.png");
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-005", "--run", "run-a",
+      "--url", "http://127.0.0.1:4173/team",
+    ], {
+      captureLocalWindow: vi.fn(async () => ({
+        status: "taken" as const,
+        path: screenshotPath,
+        response: { responsePath: "/tmp/controlled-window-response.json" },
+      })),
+    } as never);
+    out.restore();
+
+    expect(code).toBe(0);
+    expect(out.text()).toContain(`screenshot: ${screenshotPath}`);
+    expect(out.text()).toContain("receipt: /tmp/controlled-window-response.json");
+    expect(out.text()).not.toContain(`receipt: ${screenshotPath}`);
   });
 
   it("rejects a remote page before the controlled capture lane starts", async () => {

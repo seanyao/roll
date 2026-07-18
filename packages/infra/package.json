@@ -19,6 +19,7 @@
   "dependencies": {
     "@roll/core": "workspace:*",
     "@roll/spec": "workspace:*",
+    "chromium-bidi": "^12.0.0",
     "playwright-core": "1.61.1"
   }
 }

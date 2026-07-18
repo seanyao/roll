@@ -30,6 +30,14 @@
   "bin": {
     "roll": "dist/roll.mjs"
   },
+  "dependencies": {
+    "chromium-bidi": "^12.0.0",
+    "playwright-core": "1.61.1"
+  },
+  "bundledDependencies": [
+    "chromium-bidi",
+    "playwright-core"
+  ],
   "license": "MIT",
   "author": "Sean Yao <sean.dlut@gmail.com>",
   "files": [

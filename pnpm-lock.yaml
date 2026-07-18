@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      chromium-bidi:
+        specifier: ^12.0.0
+        version: 12.1.0(devtools-protocol@0.0.1663043)
+      playwright-core:
+        specifier: 1.61.1
+        version: 1.61.1
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
@@ -58,6 +65,9 @@ importers:
       '@roll/spec':
         specifier: workspace:*
         version: link:../spec
+      chromium-bidi:
+        specifier: ^12.0.0
+        version: 12.1.0(devtools-protocol@0.0.1663043)
       playwright-core:
         specifier: 1.61.1
         version: 1.61.1
@@ -453,12 +463,20 @@ packages:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
     engines: {node: '>=18'}
 
+  chromium-bidi@12.1.0:
+    resolution: {integrity: sha512-jJnmyKjAvFYJjt0e16cLlKXlbvYsMKnc/OCZWQNez4BT6cT3MJgPKbCbi4ahAHZAsQ5jUYHqiQlMwZlyYXLKCQ==}
+    peerDependencies:
+      devtools-protocol: '*'
+
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  devtools-protocol@0.0.1663043:
+    resolution: {integrity: sha512-33aOY3ZnBP1dgZsshgaL+/XlsQleiFZgyUaDtdZkEa1nbZhVY1MoDeWjk+wxg25fU924l1ZJfoGNmjjeA/5s1w==}
 
   es-module-lexer@2.1.0:
     resolution: {integrity: sha512-n27zTYMjYu1aj4MjCWzSP7G9r75utsaoc8m61weK+W8JMBGGQybd43GstCXZ3WNmSFtGT9wi59qQTW6mhTR5LQ==}
@@ -594,6 +612,9 @@ packages:
   make-dir@4.0.0:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
+
+  mitt@3.0.1:
+    resolution: {integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==}
 
   nanoid@3.3.12:
     resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
@@ -775,6 +796,9 @@ packages:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
     engines: {node: '>=8'}
     hasBin: true
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -1041,9 +1065,17 @@ snapshots:
 
   chai@6.2.2: {}
 
+  chromium-bidi@12.1.0(devtools-protocol@0.0.1663043):
+    dependencies:
+      devtools-protocol: 0.0.1663043
+      mitt: 3.0.1
+      zod: 3.25.76
+
   convert-source-map@2.0.0: {}
 
   detect-libc@2.1.2: {}
+
+  devtools-protocol@0.0.1663043: {}
 
   es-module-lexer@2.1.0: {}
 
@@ -1171,6 +1203,8 @@ snapshots:
     dependencies:
       semver: 7.8.3
 
+  mitt@3.0.1: {}
+
   nanoid@3.3.12: {}
 
   obug@2.1.1: {}
@@ -1295,3 +1329,5 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  zod@3.25.76: {}

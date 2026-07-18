@@ -16,8 +16,8 @@
  *   1. `npm pack` the repo root → triggers prepack (`pnpm -r build && pnpm
  *      bundle`) and emits the same tarball `npm publish` would.
  *   2. `npm install --offline <tarball>` into a throwaway prefix. The tarball
- *      has zero runtime deps (esbuild is a devDep, everything else is inlined),
- *      so the install never reaches the registry.
+ *      bundles its Playwright runtime closure, so the install never reaches the
+ *      registry.
  *   3. Run the INSTALLED bin shim for one TS command that reads packaged data
  *      (`prices show` → lib/prices/*.json), one pure-TS command (`config
  *      --list`), and one public utility command (`help`, `--version`). Assert each
@@ -110,6 +110,11 @@ describe("npm pack → install → run (release packaging)", () => {
       expect(existsSync(bin), `installed bin shim missing at ${bin}`).toBe(true);
       expect(existsSync(join(pkgRoot, "dist", "postinstall.mjs")), "postinstall bundle missing from package").toBe(true);
       expect(existsSync(join(pkgRoot, "scripts", "postinstall-roll-capture.mjs")), "postinstall wrapper missing from package").toBe(true);
+      expect(existsSync(join(pkgRoot, "node_modules", "playwright-core", "index.js")), "Playwright runtime missing from package").toBe(true);
+      expect(
+        existsSync(join(pkgRoot, "node_modules", "chromium-bidi", "lib", "cjs", "bidiMapper", "BidiMapper.js")),
+        "Playwright BiDi runtime missing from package",
+      ).toBe(true);
 
       const postinstallBundle = join(pkgRoot, "dist", "postinstall.mjs");
       renameSync(postinstallBundle, `${postinstallBundle}.missing`);

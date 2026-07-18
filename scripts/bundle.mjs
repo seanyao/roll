@@ -29,6 +29,10 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const common = {
   bundle: true,
+  // Playwright Core executes optional platform-specific code at runtime. Keep
+  // it outside the CLI bundle, but ship its complete runtime closure in the
+  // npm tarball via root bundledDependencies.
+  external: ["chromium-bidi", "playwright-core"],
   platform: "node",
   format: "esm",
   target: "node22",

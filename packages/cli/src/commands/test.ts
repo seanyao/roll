@@ -523,7 +523,16 @@ function finishGate(
   writesProof: boolean,
 ): number {
   if (run.status !== 0) return run.status;
-  if (isNoTestsFoundOutput(run.output)) {
+  // FIX-1274's zero-test rejection guards the raw-vitest changed/full modes,
+  // where "no test files" means nothing was verified (a fabricated green). Roll's
+  // OWN `--affected` wrapper (test-ts.sh) is different by design: it runs
+  // `vitest --changed --passWithNoTests`, so a change covered by no test — or, in
+  // a cycle worktree, a change already committed (nothing in the working tree for
+  // `--changed` to match) — is an HONEST green; the wrapper writes its own proof
+  // and CI's full `npm test` is the real cross-package gate. Applying the
+  // zero-test hard-fail to `affected` broke every loop delivery (the deliverable_cmd
+  // `roll test` failed inside every cycle worktree → attest exit 3 → no publish).
+  if (mode !== "affected" && isNoTestsFoundOutput(run.output)) {
     err("roll test: the test command reported no test files — nothing was verified");
     process.stderr.write("  a green gate requires at least one executed test; add tests or scope the run\n");
     return 1;

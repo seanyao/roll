@@ -329,6 +329,20 @@ describe("FIX-1274 roll test gate — wrapper parity + diagnostics", () => {
     expect(existsSync(proofPath(fx.proj))).toBe(false);
   });
 
+  it("FIX-1454: the --affected wrapper reporting zero changed tests stays green (loop worktree)", () => {
+    // Roll's wrapper runs `vitest --changed --passWithNoTests`. In a cycle
+    // worktree the builder's change is already committed, so `--changed` matches
+    // 0 tests and the wrapper prints "No test files found" yet exits 0 (honest
+    // green — CI's full suite is the real gate). The zero-test hard-fail (FIX-1274)
+    // must NOT apply to the wrapper's `affected` mode, or every loop delivery's
+    // attest capture-command (`roll test`) fails with exit 3 and nothing publishes.
+    const shim = 'case "$*" in *--affected*) echo "No test files found, exiting with code 0"; echo "TS suites green (scope: affected)"; exit 0 ;; *) exit 4 ;; esac';
+    const fx = fixture({ testScript: "bash scripts/test-ts.sh", npmShim: shim });
+    const r = runRollTest(fx);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain("nothing was verified");
+  });
+
   it("a package.json with no test script fails loud with a structured diagnostic", () => {
     const fx = fixture({ npmShim: "echo should-not-run; exit 0" }); // no testScript
     const r = runRollTest(fx);

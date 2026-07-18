@@ -338,3 +338,53 @@ describe("worked pending-PR behavior (git-status shaped)", () => {
     expect(dirty.unconfirmed).toEqual([".roll/features/organization/US-ORG-004/manual.txt"]);
   });
 });
+
+describe("FIX-1455 — sanctioned append-only runtime ledger coexists with the gate", () => {
+  const LEDGER = ".roll/browser-operations/events.ndjson";
+
+  it("accepts a valid ndjson browser ledger as runtimeLedger, not unconfirmed", () => {
+    write(LEDGER, '{"e":"approve"}\n{"e":"capture"}\n');
+    const a = assessBootstrapArtifacts([LEDGER], [], root);
+    expect(a.runtimeLedger).toEqual([LEDGER]);
+    expect(a.unconfirmed).toEqual([]);
+    expect(a.verified).toEqual([]);
+  });
+
+  it("accepts an empty ledger (freshly created)", () => {
+    write(LEDGER, "");
+    const a = assessBootstrapArtifacts([LEDGER], [], root);
+    expect(a.runtimeLedger).toEqual([LEDGER]);
+    expect(a.unconfirmed).toEqual([]);
+  });
+
+  it("rejects a malformed/replaced ledger (non-ndjson) as unconfirmed", () => {
+    write(LEDGER, '{"e":"ok"}\nnot json at all\n');
+    const a = assessBootstrapArtifacts([LEDGER], [], root);
+    expect(a.runtimeLedger).toEqual([]);
+    expect(a.unconfirmed).toEqual([LEDGER]);
+  });
+
+  it("still fails an unrelated unknown .roll file while accepting the ledger", () => {
+    write(LEDGER, '{"e":"approve"}\n');
+    write(".roll/features/x/pollution.txt", "junk");
+    const a = assessBootstrapArtifacts([LEDGER, ".roll/features/x/pollution.txt"], [], root);
+    expect(a.runtimeLedger).toEqual([LEDGER]);
+    expect(a.unconfirmed).toEqual([".roll/features/x/pollution.txt"]);
+  });
+
+  it("does not widen to a sibling under browser-operations/ (exact path only)", () => {
+    write(".roll/browser-operations/other.ndjson", '{"e":"x"}\n');
+    const a = assessBootstrapArtifacts([".roll/browser-operations/other.ndjson"], [], root);
+    expect(a.runtimeLedger).toEqual([]);
+    expect(a.unconfirmed).toEqual([".roll/browser-operations/other.ndjson"]);
+  });
+
+  it("rejects a symlinked ledger (no escape via the sanctioned path)", () => {
+    mkdirSync(join(root, ".roll", "browser-operations"), { recursive: true });
+    writeFileSync(join(root, "outside.ndjson"), '{"e":"x"}\n', "utf8");
+    symlinkSync(join(root, "outside.ndjson"), join(root, LEDGER));
+    const a = assessBootstrapArtifacts([LEDGER], [], root);
+    expect(a.runtimeLedger).toEqual([]);
+    expect(a.unconfirmed).toEqual([LEDGER]);
+  });
+});

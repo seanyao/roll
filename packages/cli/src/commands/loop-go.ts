@@ -350,6 +350,8 @@ export interface BootstrapArtifactClassification {
   files: string[];
   /** Runner-owned artifacts confirmed against a manifest by SHA-256. */
   verified: string[];
+  /** FIX-1455: sanctioned append-only runtime ledgers (valid ndjson) — owned, never pauses. */
+  runtimeLedger: string[];
   /** Unverified `.roll/**` paths — unknown control-plane pollution. */
   unconfirmed: string[];
   /** Non-`.roll/**` paths — product-file dirt (never manifest-verifiable). */
@@ -371,16 +373,18 @@ export function classifyBootstrapArtifacts(
 ): BootstrapArtifactClassification {
   const dirty = paths.map(bootstrapArtifactPath).filter((p) => p.trim() !== "");
   const assessment = assessBootstrapArtifacts(dirty, manifests, repositoryRoot);
-  const verifiedSet = new Set(assessment.verified);
+  // FIX-1455: a valid sanctioned runtime ledger is owned exactly like a
+  // manifest-verified artifact — removed from `files` so it never pauses the gate.
+  const ownedSet = new Set([...assessment.verified, ...assessment.runtimeLedger]);
   const seen = new Set<string>();
   const files: string[] = [];
   for (const p of dirty) {
-    if (verifiedSet.has(p) || seen.has(p)) continue;
+    if (ownedSet.has(p) || seen.has(p)) continue;
     seen.add(p);
     files.push(p);
   }
   if (files.length === 0) {
-    return { kind: "none", files: [], verified: [...assessment.verified], unconfirmed: [], external: [] };
+    return { kind: "none", files: [], verified: [...assessment.verified], runtimeLedger: [...assessment.runtimeLedger], unconfirmed: [], external: [] };
   }
   // Real product dirt present ⇒ mixed: the cycle (not this preflight) owns it.
   const kind = files.every(isBootstrapArtifactPath) ? "bootstrap_only" : "mixed";
@@ -388,6 +392,7 @@ export function classifyBootstrapArtifacts(
     kind,
     files,
     verified: [...assessment.verified],
+    runtimeLedger: [...assessment.runtimeLedger],
     unconfirmed: [...assessment.unconfirmed],
     external: [...assessment.external],
   };

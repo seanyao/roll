@@ -52,10 +52,53 @@ export interface PendingDeliveryEvidenceManifest {
 export interface BootstrapArtifactAssessment {
   /** Runner-owned files whose current content matches a valid manifest. */
   readonly verified: readonly DirtyPath[];
+  /**
+   * FIX-1455: a SANCTIONED append-only runtime ledger (an exact allow-listed
+   * path) whose current content still validates as newline-delimited JSON. It is
+   * expected to change as normal owner-approved evidence is appended, so it does
+   * not pause the gate — but the exception is bounded to the exact path AND to a
+   * valid ndjson shape, so a replaced or corrupted ledger falls through to
+   * `unconfirmed`. This is NOT a trust-all or ignore-dirty bypass.
+   */
+  readonly runtimeLedger: readonly DirtyPath[];
   /** `.roll/**` paths that could NOT be confirmed as runner-owned. */
   readonly unconfirmed: readonly DirtyPath[];
   /** Non-`.roll/**` paths (product-file dirt); never verifiable via a manifest. */
   readonly external: readonly DirtyPath[];
+}
+
+/**
+ * FIX-1455: exact, sanctioned append-only runtime ledgers. Membership is by
+ * WHOLE-PATH equality only — never a prefix or glob — so the exception can never
+ * widen to arbitrary `.roll/**` content. Currently just the browser
+ * approval/audit ledger, which legitimately grows as evidence is collected.
+ */
+export const SANCTIONED_RUNTIME_LEDGERS: ReadonlySet<string> = new Set([
+  ".roll/browser-operations/events.ndjson",
+]);
+
+/**
+ * Validate that a file is well-formed newline-delimited JSON: every non-empty
+ * line parses as JSON. An empty file is valid (a freshly-created ledger). A
+ * single malformed line rejects the whole file (fail closed), so a replaced or
+ * corrupted ledger is never waved through as a runtime ledger.
+ */
+export function isValidNdjsonLedger(absPath: string): boolean {
+  let text: string;
+  try {
+    text = readFileSync(absPath, "utf8");
+  } catch {
+    return false;
+  }
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      JSON.parse(line);
+    } catch {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Control-plane directory that holds per-cycle evidence manifests. */
@@ -214,6 +257,7 @@ export function assessBootstrapArtifacts(
   }
 
   const verified: DirtyPath[] = [];
+  const runtimeLedger: DirtyPath[] = [];
   const unconfirmed: DirtyPath[] = [];
   const external: DirtyPath[] = [];
   const seen = new Set<string>();
@@ -226,6 +270,21 @@ export function assessBootstrapArtifacts(
     // Product-file dirt can never be verified by a manifest.
     if (!isRollControlPlanePath(path)) {
       external.push(path);
+      continue;
+    }
+
+    // FIX-1455: an EXACT sanctioned append-only runtime ledger (e.g. the browser
+    // approval/audit ledger) is expected to grow with normal evidence. Accept it
+    // ONLY when it is a safe regular file inside the repo AND still validates as
+    // ndjson; a replaced / corrupted / symlinked ledger falls through to
+    // `unconfirmed`. Bounded to the exact path — never a prefix, glob, or bypass.
+    if (SANCTIONED_RUNTIME_LEDGERS.has(path)) {
+      const ledgerAbs = safeRegularFileInside(repositoryRoot, path);
+      if (ledgerAbs !== undefined && isValidNdjsonLedger(ledgerAbs)) {
+        runtimeLedger.push(path);
+      } else {
+        unconfirmed.push(path);
+      }
       continue;
     }
 
@@ -251,7 +310,7 @@ export function assessBootstrapArtifacts(
     verified.push(path);
   }
 
-  return { verified, unconfirmed, external };
+  return { verified, runtimeLedger, unconfirmed, external };
 }
 
 export interface BuildManifestInput {

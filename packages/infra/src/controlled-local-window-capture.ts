@@ -80,6 +80,7 @@ export interface ControlledPrepareDeps {
 
 export interface ControlledPlaywrightPrepareDeps {
   connectOverCDP(endpoint: string): Promise<Browser>;
+  connectCdp(socketUrl: string): Promise<CdpSession>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -279,18 +280,21 @@ function defaultControlledPreparePort(): ControlledPreparePort {
  */
 export async function runPlaywrightControlledPrepareActions(
   input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] },
-  deps: ControlledPlaywrightPrepareDeps = { connectOverCDP: (endpoint) => chromium.connectOverCDP(endpoint), sleep: sleepForPrepare },
+  deps: ControlledPlaywrightPrepareDeps = {
+    connectOverCDP: (endpoint) => chromium.connectOverCDP(endpoint),
+    connectCdp: openLoopbackCdpSession,
+    sleep: sleepForPrepare,
+  },
 ): Promise<void> {
   if (loopbackOrigin(input.targetUrl) === undefined) throw new Error("controlled prepare target must remain loopback");
   const endpoint = devToolsHttpEndpoint(input.page.webSocketDebuggerUrl);
   if (endpoint === undefined) throw new Error("controlled prepare DevTools endpoint must remain loopback");
-  const expectedTargetId = devToolsTargetId(input.page.webSocketDebuggerUrl);
-  if (expectedTargetId === undefined) throw new Error("controlled prepare DevTools page identity is invalid");
+  const identity = await captureDiscoveredDevToolsFrameIdentity(input.page, input.targetUrl, deps.connectCdp);
   let browser: Browser | undefined;
   try {
     browser = await deps.connectOverCDP(endpoint);
-    let target = await waitForPlaywrightPrepareTarget(browser, input.page.url, input.targetUrl, deps.sleep);
-    if (target === undefined) throw new Error("controlled prepare target frame was not found");
+    let target = await waitForPlaywrightPrepareTarget(browser, input.page.url, input.targetUrl, deps.sleep, identity);
+    if (target === undefined) throw new Error("controlled prepare original DevTools frame identity was not found before action");
     for (const action of input.actions) {
       if (action.kind === "wait") {
         await deps.sleep(action.ms);
@@ -300,7 +304,6 @@ export async function runPlaywrightControlledPrepareActions(
           const initiallyChecked = await locator.isChecked();
           await locator.click();
           if (await locator.isChecked() === initiallyChecked) {
-            const identity = await captureDevToolsFrameIdentity(target.page, input.targetUrl, expectedTargetId);
             await closePlaywrightBrowser(browser);
             browser = await deps.connectOverCDP(endpoint);
             await deps.sleep(500);
@@ -340,6 +343,23 @@ interface DevToolsFrameIdentity {
   targetUrl: string;
 }
 
+async function captureDiscoveredDevToolsFrameIdentity(
+  page: ControlledPage,
+  targetUrl: string,
+  connect: (socketUrl: string) => Promise<CdpSession>,
+): Promise<DevToolsFrameIdentity> {
+  const targetId = devToolsTargetId(page.webSocketDebuggerUrl);
+  if (targetId === undefined) throw new Error("controlled prepare DevTools page identity is invalid");
+  const session = await connect(page.webSocketDebuggerUrl);
+  try {
+    const frameId = await exactFrameIdFromSession(session, targetUrl);
+    if (frameId === undefined) throw new Error("controlled prepare discovered DevTools frame identity was not found");
+    return { targetId, frameId, targetUrl };
+  } finally {
+    await closePrepareSession(session);
+  }
+}
+
 async function waitForPlaywrightPrepareTarget(
   browser: Browser,
   pageUrl: string,
@@ -364,19 +384,6 @@ async function waitForPlaywrightPrepareTarget(
   return undefined;
 }
 
-async function captureDevToolsFrameIdentity(page: Page, targetUrl: string, expectedTargetId: string): Promise<DevToolsFrameIdentity> {
-  const session = await page.context().newCDPSession(page);
-  try {
-    const targetId = await targetIdFromSession(session);
-    if (targetId !== expectedTargetId) throw new Error("controlled prepare original DevTools target identity changed");
-    const frameId = await exactFrameIdFromSession(session, targetUrl);
-    if (frameId === undefined) throw new Error("controlled prepare original DevTools frame identity was not found");
-    return { targetId, frameId, targetUrl };
-  } finally {
-    await detachPlaywrightSession(session);
-  }
-}
-
 async function matchesDevToolsFrameIdentity(page: Page, identity: DevToolsFrameIdentity): Promise<boolean> {
   const session = await page.context().newCDPSession(page);
   try {
@@ -391,7 +398,7 @@ async function targetIdFromSession(session: CDPSession): Promise<string | undefi
   return typeof result.targetInfo?.targetId === "string" ? result.targetInfo.targetId : undefined;
 }
 
-async function exactFrameIdFromSession(session: CDPSession, targetUrl: string): Promise<string | undefined> {
+async function exactFrameIdFromSession(session: Pick<CdpSession, "send"> | Pick<CDPSession, "send">, targetUrl: string): Promise<string | undefined> {
   const result = await session.send("Page.getFrameTree") as { frameTree?: unknown };
   const frames = matchingFrameIds(result.frameTree, targetUrl);
   if (frames.length > 1) throw new Error("controlled prepare requires exactly one original DevTools frame");

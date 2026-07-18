@@ -98,6 +98,9 @@ describe("roll capture migrate (AC1)", () => {
 
 describe("roll capture repair (AC2)", () => {
   it("refuses a non-degraded record and never rebuilds", async () => {
+    const saveLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
     const root = tmpProject();
     const healthPath = evidenceHealthFactPath(root, "US-X-1");
     mkdirSync(join(root, ".roll", "features", "_evidence-health"), { recursive: true });
@@ -108,6 +111,10 @@ describe("roll capture repair (AC2)", () => {
     expect(code).toBe(1);
     expect(out.text()).toContain("reopenedBuild=false");
     expect(out.text()).toContain("not evidence-only repairable");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
   });
 
   it("runs an evidence-only repair for a degraded record without reopening the build", async () => {
@@ -184,39 +191,53 @@ describe("FIX-005 roll capture local-window", () => {
   it("labels the screenshot and Roll Capture receipt as separate paths", async () => {
     const root = tmpProject();
     const screenshotPath = join(root, ".roll", "captures", "controlled-local", "FIX-005", "run-a", "controlled-window-example.png");
-    const out = captureStdout();
-    const code = await captureCommand([
-      "local-window", "--project", root, "--story", "FIX-005", "--run", "run-a",
-      "--url", "http://127.0.0.1:4173/team",
-    ], {
-      captureLocalWindow: vi.fn(async () => ({
-        status: "taken" as const,
-        path: screenshotPath,
-        response: { responsePath: "/tmp/controlled-window-response.json" },
-      })),
-    } as never);
-    out.restore();
+    const saveLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand([
+        "local-window", "--project", root, "--story", "FIX-005", "--run", "run-a",
+        "--url", "http://127.0.0.1:4173/team",
+      ], {
+        captureLocalWindow: vi.fn(async () => ({
+          status: "taken" as const,
+          path: screenshotPath,
+          response: { responsePath: "/tmp/controlled-window-response.json" },
+        })),
+      } as never);
+      out.restore();
 
-    expect(code).toBe(0);
-    expect(out.text()).toContain(`screenshot: ${screenshotPath}`);
-    expect(out.text()).toContain("receipt: /tmp/controlled-window-response.json");
-    expect(out.text()).not.toContain(`receipt: ${screenshotPath}`);
+      expect(code).toBe(0);
+      expect(out.text()).toContain(`screenshot: ${screenshotPath}`);
+      expect(out.text()).toContain("receipt: /tmp/controlled-window-response.json");
+      expect(out.text()).not.toContain(`receipt: ${screenshotPath}`);
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
   });
 
   it("uses the controlled Roll Capture lane when the browser extension is unavailable", async () => {
     const root = tmpProject();
     const localWindow = vi.fn(async () => ({ status: "taken" as const }));
-    const out = captureStdout();
-    const code = await captureCommand([
-      "local-window", "--project", root, "--story", "FIX-1444", "--run", "extension-unavailable",
-      "--url", "http://127.0.0.1:4173/synthetic",
-    ], { captureLocalWindow: localWindow } as never);
-    out.restore();
+    const saveLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand([
+        "local-window", "--project", root, "--story", "FIX-1444", "--run", "extension-unavailable",
+        "--url", "http://127.0.0.1:4173/synthetic",
+      ], { captureLocalWindow: localWindow } as never);
+      out.restore();
 
-    expect(code).toBe(0);
-    expect(localWindow).toHaveBeenCalledOnce();
-    expect(out.text()).toContain("browser extension: not used");
-    expect(out.text()).toContain("privacy: loopback-only synthetic target in a temporary profile");
+      expect(code).toBe(0);
+      expect(localWindow).toHaveBeenCalledOnce();
+      expect(out.text()).toContain("browser extension: not used");
+      expect(out.text()).toContain("privacy: loopback-only synthetic target in a temporary profile");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
   });
 
   it("rejects a remote page before the controlled capture lane starts", async () => {
@@ -285,5 +306,196 @@ describe("FIX-005 roll capture local-window", () => {
     expect(code).toBe(1);
     expect(localWindow).not.toHaveBeenCalled();
     expect(out.text()).toContain("prepare");
+  });
+});
+
+describe("FIX-1453 — roll capture i18n (AC1/AC2/AC3)", () => {
+  it("prints Chinese when ROLL_LANG=zh (AC2)", async () => {
+    const root = tmpProject();
+    const saveLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "zh";
+    try {
+      // status (non-JSON)
+      let out = captureStdout();
+      let code = await captureCommand(["status", "--project", root], {
+        readiness: () => readiness(),
+      });
+      out.restore();
+      expect(code).toBe(0);
+      const zhStatus = out.text();
+      expect(zhStatus).toContain("截图策略就绪度");
+      expect(zhStatus).not.toContain("Capture policy readiness");
+
+      // local-window result
+      const localWindow = vi.fn(async () => ({
+        status: "taken" as const,
+        path: "/tmp/test.png",
+      }));
+      out = captureStdout();
+      code = await captureCommand([
+        "local-window", "--project", root, "--story", "FIX-1453",
+        "--url", "http://127.0.0.1:4173/team",
+      ], { captureLocalWindow: localWindow } as never);
+      out.restore();
+      expect(code).toBe(0);
+      const zhLocal = out.text();
+      expect(zhLocal).toContain("截图");
+      expect(zhLocal).toContain("浏览器扩展");
+      expect(zhLocal).toContain("隐私");
+      expect(zhLocal).not.toContain("browser extension: not used");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+  });
+
+  it("prints English when ROLL_LANG=en (AC2)", async () => {
+    const root = tmpProject();
+    const saveLang = process.env["ROLL_LANG"];
+    process.env["ROLL_LANG"] = "en";
+    try {
+      // status (non-JSON)
+      let out = captureStdout();
+      let code = await captureCommand(["status", "--project", root], {
+        readiness: () => readiness(),
+      });
+      out.restore();
+      expect(code).toBe(0);
+      const enStatus = out.text();
+      expect(enStatus).toContain("Capture policy readiness");
+      expect(enStatus).not.toContain("截图策略就绪度");
+
+      // local-window result
+      const localWindow = vi.fn(async () => ({
+        status: "taken" as const,
+        path: "/tmp/test.png",
+      }));
+      out = captureStdout();
+      code = await captureCommand([
+        "local-window", "--project", root, "--story", "FIX-1453",
+        "--url", "http://127.0.0.1:4173/team",
+      ], { captureLocalWindow: localWindow } as never);
+      out.restore();
+      expect(code).toBe(0);
+      const enLocal = out.text();
+      expect(enLocal).toContain("local-window capture");
+      expect(enLocal).toContain("browser extension");
+      expect(enLocal).toContain("privacy");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+  });
+
+  it("usage text is single-language (AC1 — no dual-line mixing)", async () => {
+    const saveLang = process.env["ROLL_LANG"];
+    // Test EN first: no Chinese should appear
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand([]);
+      out.restore();
+      expect(code).toBe(0);
+      const enUsage = out.text();
+      expect(enUsage).toContain("Usage: roll capture");
+      expect(enUsage).not.toContain("截图策略迁移");
+      expect(enUsage).not.toContain("用法");
+      // Ensure no dual-line: EN line directly followed by ZH line
+      const lines = enUsage.split("\n").filter((l) => l.trim() !== "");
+      const zhLines = lines.filter((l) => /[\u4e00-\u9fff]/.test(l));
+      expect(zhLines).toHaveLength(0);
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+
+    // Test ZH: no English rows should appear (excluding arg names like --json)
+    process.env["ROLL_LANG"] = "zh";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand([]);
+      out.restore();
+      expect(code).toBe(0);
+      const zhUsage = out.text();
+      expect(zhUsage).toContain("用法");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+  });
+
+  it("migrate output is localized (AC1)", async () => {
+    const root = tmpProject("acceptance:\n  screenshot_exempt_epics: [foo]\n");
+    const saveLang = process.env["ROLL_LANG"];
+
+    process.env["ROLL_LANG"] = "zh";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand(["migrate", "--project", root, "--dry-run"], {
+        readiness: () => readiness(),
+      });
+      out.restore();
+      expect(code).toBe(0);
+      const zhMigrate = out.text();
+      expect(zhMigrate).toContain("capture migrate");
+      expect(zhMigrate).toContain("dry-run");
+      expect(zhMigrate).toContain("未写入");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+
+    process.env["ROLL_LANG"] = "en";
+    try {
+      const out = captureStdout();
+      const code = await captureCommand(["migrate", "--project", root, "--dry-run"], {
+        readiness: () => readiness(),
+      });
+      out.restore();
+      expect(code).toBe(0);
+      const enMigrate = out.text();
+      expect(enMigrate).toContain("capture migrate");
+      expect(enMigrate).toContain("dry-run; not written");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+  });
+
+  it("unknown subcommand error is localized", async () => {
+    const saveLang = process.env["ROLL_LANG"];
+
+    process.env["ROLL_LANG"] = "zh";
+    try {
+      let buf = "";
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+        buf += String(chunk);
+        return true;
+      });
+      const code = await captureCommand(["bogus"]);
+      spy.mockRestore();
+      expect(code).toBe(1);
+      expect(buf).toContain("未知");
+      expect(buf).toContain("bogus");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
+
+    process.env["ROLL_LANG"] = "en";
+    try {
+      let buf = "";
+      const spy = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+        buf += String(chunk);
+        return true;
+      });
+      const code = await captureCommand(["bogus"]);
+      spy.mockRestore();
+      expect(code).toBe(1);
+      expect(buf).toContain("unknown 'roll capture' subcommand: bogus");
+    } finally {
+      if (saveLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saveLang;
+    }
   });
 });

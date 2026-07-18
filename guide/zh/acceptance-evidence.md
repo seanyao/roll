@@ -292,10 +292,11 @@ roll capture local-window --story FIX-1435 --url http://127.0.0.1:4173/ \
 ```
 
 `--prepare` 只允许有上限的 `click`、`fill`、`wait` 与 `scroll`。未知字段或动作种类、
-任意 JavaScript、导航、超量动作或等待都会在 Chrome 启动前被拒绝。临时 DevTools 会定位
-wrapper 声明的 loopback frame，只在该 frame 执行固定 UI 操作，并在每一步后校验 frame
-仍处于同一 loopback origin。`click` 会定位可见元素，并通过一次性 Chrome 发出有界的真实
-指针按下/抬起事件，使受控 React 输入走正常 UI 事件路径。准备动作失败时不会发送截图请求。
+任意 JavaScript、导航、超量动作或等待都会在 Chrome 启动前被拒绝。临时 Playwright 连接只会
+附着到一次性 loopback Chrome，精确定位已发现页面及其唯一的原始目标 frame，并在每一步后
+校验该 frame 仍处于同一精确 URL。连接随后只断开，不会关闭待截图窗口。`click` 通过浏览器
+UI 路径定位可见元素，使受控 React 输入走正常事件路径。准备动作失败时不会发送截图请求。
+`fill` 只接受非 password 的 `input` 与 `textarea`，contenteditable 目标会被拒绝。
 
 这不是通用浏览器自动化：它不能使用 owner profile，也不能打开远程 URL。prepare API 不
 暴露 cookie 或 storage 的读写、导入或导出操作，也不会注入凭据；目标本地应用本身的正常
@@ -306,6 +307,13 @@ UI 交互仍按原样运行。`fill` 会拒绝 password 控件，且只能填写
 的本地 wrapper 窗口，要求 Roll Capture.app 只截该精确标题窗口，随后关闭 wrapper、
 Chrome 与 profile。它不会打开远程 URL、连接 owner Chrome profile，也不会回退为全屏
 截图。JSON 结果会给出物理回执与精确 selector。
+
+真实本地受控输入回归为显式选启，因为它会打开可见的一次性 Chrome 窗口；它只提供临时合成
+React 页面，桌面 Chrome 宿主不可用时会失败并明确说明：
+
+```bash
+ROLL_BROWSER_LIVE=1 pnpm test:controlled-capture-live
+```
 
 ### 仅证据修复
 

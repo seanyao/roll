@@ -346,13 +346,15 @@ roll capture local-window --story FIX-1435 --url http://127.0.0.1:4173/ \
 
 `--prepare` permits only bounded `click`, `fill`, `wait`, and `scroll` actions.
 Unknown fields or action kinds, arbitrary JavaScript, navigation, and excessive
-lists or waits are rejected before Chrome launches. The temporary DevTools
-session locates the wrapper's declared loopback frame, performs only fixed UI
-operations in that frame, and verifies the frame remains on the same loopback
-origin after every action. `click` resolves a visible element and sends bounded
-physical pointer press/release events through the disposable Chrome instance,
-so controlled React inputs receive their normal UI event path. A prepare failure
-sends no capture request.
+lists or waits are rejected before Chrome launches. A temporary Playwright
+connection attaches only to the disposable loopback Chrome, resolves exactly
+the already-discovered page and its one exact original target frame, and verifies
+that frame remains at that exact URL after every action. The connection then
+detaches without closing the capture window. `click` resolves a visible element
+through the browser UI path, so controlled React inputs receive their normal
+event path. A prepare failure sends no capture request. `fill` accepts only
+non-password `input` and `textarea` controls; contenteditable targets are
+rejected.
 
 This is not general browser automation: it cannot use an owner profile or open
 remote URLs. The prepare API exposes no cookie or storage read/write/import/
@@ -366,6 +368,14 @@ and a nonce-titled local wrapper window, asks Roll Capture.app for that exact
 window title, then closes the wrapper, Chrome, and profile. It never opens a
 remote URL, connects to an owner Chrome profile, or falls back to a full-screen
 capture. The JSON result includes the physical receipt and exact selector.
+
+The real local controlled-input regression is opt-in because it opens a visible
+disposable Chrome window; it serves only a temporary synthetic React page and
+fails loud when the desktop Chrome host is unavailable:
+
+```bash
+ROLL_BROWSER_LIVE=1 pnpm test:controlled-capture-live
+```
 
 ### Evidence-only repair
 

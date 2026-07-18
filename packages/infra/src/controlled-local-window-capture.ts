@@ -18,6 +18,8 @@ import { RollCaptureProvider, type RollCaptureProviderPort } from "./roll-captur
 const CHROME_APP_NAME = "Google Chrome";
 const PAGE_DISCOVERY_ATTEMPTS = 40;
 const PAGE_DISCOVERY_INTERVAL_MS = 200;
+const PREPARE_FRAME_ATTEMPTS = 40;
+const PREPARE_FRAME_INTERVAL_MS = 100;
 const WINDOW_TITLE_SETTLE_MS = 3_000;
 
 export interface ControlledLocalWindowCaptureInput {
@@ -68,6 +70,11 @@ export type ControlledPrepareAction =
 
 export interface ControlledPreparePort {
   run(input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] }): Promise<void>;
+}
+
+export interface ControlledPrepareDeps {
+  connect(socketUrl: string): Promise<CdpSession>;
+  sleep(ms: number): Promise<void>;
 }
 
 export interface ControlledPagePort {
@@ -255,37 +262,51 @@ function defaultControlledLocalPageCaptureDeps(): ControlledLocalPageCaptureDeps
 
 function defaultControlledPreparePort(): ControlledPreparePort {
   return {
-    async run({ page, targetUrl, actions }) {
-      const cdp = await openLoopbackCdpSession(page.webSocketDebuggerUrl);
-      try {
-        await cdp.send("Runtime.enable");
-        await cdp.send("Page.enable");
-        const targetOrigin = loopbackOrigin(targetUrl);
-        if (targetOrigin === undefined) throw new Error("controlled prepare target must remain loopback");
-        let frameId = await findInitialPrepareFrame(cdp, targetUrl);
-        if (frameId === undefined) throw new Error("controlled prepare target frame was not found");
-        for (const action of actions) {
-          if (action.kind === "wait") {
-            await sleepForPrepare(action.ms);
-          } else {
-            const contextId = await isolatedFrameContext(cdp, frameId);
-            if (action.kind === "click") await evaluatePrepare(cdp, contextId, clickPrepareExpression(action.selector));
-            if (action.kind === "fill") await evaluatePrepare(cdp, contextId, fillPrepareExpression(action.selector, action.value));
-            if (action.kind === "scroll") await evaluatePrepare(cdp, contextId, scrollPrepareExpression(action.selector));
-          }
-          frameId = await findCurrentPrepareFrame(cdp, targetOrigin);
-          if (frameId === undefined) throw new Error("controlled prepare action left the original loopback origin");
-        }
-      } finally {
-        await closePrepareSession(cdp);
-      }
-    },
+    run: (input) => runControlledPrepareActions(input),
   };
+}
+
+export async function runControlledPrepareActions(
+  input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] },
+  deps: ControlledPrepareDeps = { connect: openLoopbackCdpSession, sleep: sleepForPrepare },
+): Promise<void> {
+  const cdp = await deps.connect(input.page.webSocketDebuggerUrl);
+  try {
+    await cdp.send("Runtime.enable");
+    await cdp.send("Page.enable");
+    const targetOrigin = loopbackOrigin(input.targetUrl);
+    if (targetOrigin === undefined) throw new Error("controlled prepare target must remain loopback");
+    let frameId = await waitForInitialPrepareFrame(cdp, input.targetUrl, deps.sleep);
+    if (frameId === undefined) throw new Error("controlled prepare target frame was not found");
+    for (const action of input.actions) {
+      if (action.kind === "wait") {
+        await deps.sleep(action.ms);
+      } else {
+        const contextId = await isolatedFrameContext(cdp, frameId);
+        if (action.kind === "click") await evaluatePrepare(cdp, contextId, clickPrepareExpression(action.selector));
+        if (action.kind === "fill") await evaluatePrepare(cdp, contextId, fillPrepareExpression(action.selector, action.value));
+        if (action.kind === "scroll") await evaluatePrepare(cdp, contextId, scrollPrepareExpression(action.selector));
+      }
+      frameId = await findCurrentPrepareFrame(cdp, targetOrigin);
+      if (frameId === undefined) throw new Error("controlled prepare action left the original loopback origin");
+    }
+  } finally {
+    await closePrepareSession(cdp);
+  }
 }
 
 async function findInitialPrepareFrame(cdp: CdpSession, targetUrl: string): Promise<string | undefined> {
   const tree = await cdp.send("Page.getFrameTree") as { frameTree?: unknown };
   return findFrame(tree.frameTree, (url) => url === targetUrl);
+}
+
+async function waitForInitialPrepareFrame(cdp: CdpSession, targetUrl: string, sleep: (ms: number) => Promise<void>): Promise<string | undefined> {
+  for (let attempt = 0; attempt < PREPARE_FRAME_ATTEMPTS; attempt += 1) {
+    const frameId = await findInitialPrepareFrame(cdp, targetUrl);
+    if (frameId !== undefined) return frameId;
+    await sleep(PREPARE_FRAME_INTERVAL_MS);
+  }
+  return undefined;
 }
 
 async function findCurrentPrepareFrame(cdp: CdpSession, targetOrigin: string): Promise<string | undefined> {

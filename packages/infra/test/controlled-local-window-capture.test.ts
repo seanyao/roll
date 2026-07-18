@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   captureControlledLocalPage,
   captureControlledLocalWindow,
+  runControlledPrepareActions,
   type ControlledLocalPageCaptureDeps,
   type ControlledLocalWindowCaptureDeps,
   type ControlledPrepareAction,
@@ -60,6 +61,41 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
 }
 
 describe("FIX-005 controlled local window capture", () => {
+  it("waits for the loopback React frame and runs only fixed click, wait, and scroll operations", async () => {
+    let frameTreeCalls = 0;
+    const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+      if (method === "Page.getFrameTree") {
+        frameTreeCalls += 1;
+        return frameTreeCalls === 1
+          ? { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" } } }
+          : { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "react", url: "http://127.0.0.1:4173/" } }] } };
+      }
+      if (method === "Page.createIsolatedWorld") return { executionContextId: 17 };
+      if (method === "Runtime.evaluate") return {};
+      return {};
+    });
+    const close = vi.fn(async () => undefined);
+    const sleep = vi.fn(async () => undefined);
+
+    await runControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/",
+      actions: [
+        { kind: "click", selector: "#synthetic-checkbox" },
+        { kind: "wait", ms: 125 },
+        { kind: "scroll", selector: "#synthetic-result" },
+      ],
+    }, { connect: vi.fn(async () => ({ send, close })), sleep });
+
+    expect(sleep).toHaveBeenCalledWith(100);
+    expect(sleep).toHaveBeenCalledWith(125);
+    expect(send).toHaveBeenCalledWith("Page.createIsolatedWorld", { frameId: "react", grantUniveralAccess: false });
+    const expressions = send.mock.calls.filter(([method]) => method === "Runtime.evaluate").map(([, params]) => String((params as { expression: string }).expression));
+    expect(expressions).toEqual(expect.arrayContaining([expect.stringContaining("#synthetic-checkbox"), expect.stringContaining("#synthetic-result")]));
+    expect(expressions.join("\n")).not.toContain("document.cookie");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("keeps ordinary managed Chrome headless and makes only the dedicated capture process visible", () => {
     const headless = chromeLaunchArgs({ profileDir: "/tmp/default", remoteDebuggingPort: 9222 });
     const visible = chromeLaunchArgs({

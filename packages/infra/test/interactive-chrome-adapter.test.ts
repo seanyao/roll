@@ -104,6 +104,44 @@ describe("US-BROW-008b InteractiveChromeAdapter", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
+  it("fills through the native value setter so React controlled inputs receive onChange (#1446)", async () => {
+    const evaluated: string[] = [];
+    const send = vi.fn(async (method: string, params?: { expression?: string }) => {
+      if (method === "Runtime.evaluate") {
+        if (typeof params?.expression === "string" && params.expression.includes("querySelector")) {
+          evaluated.push(params.expression);
+        }
+        return { result: { value: "https://app.example.test/account" } };
+      }
+      return {};
+    });
+    const adapter = new InteractiveChromeAdapter(deps({
+      connect: async () => ({ send, close: vi.fn(async () => undefined) }),
+    }));
+
+    const result = await adapter.execute({
+      lease: lease(),
+      origin: "https://app.example.test",
+      action: { kind: "fill", selector: "#name", value: "Ada" },
+    });
+
+    expect(result).toMatchObject({ kind: "completed", ciPassed: false });
+    const fillExpr = evaluated.find((e) => e.includes('"Ada"'));
+    expect(fillExpr).toBeDefined();
+    // Must drive the native prototype setter, NOT a bare `el.value =` (which
+    // leaves React's value tracker in lockstep and drops onChange).
+    expect(fillExpr).toContain("Object.getOwnPropertyDescriptor");
+    expect(fillExpr).toContain(".prototype");
+    // The native prototype setter must be the PRIMARY path (a bare `el.value =`
+    // may remain only as a guarded fallback, never before the setter call).
+    const setterAt = fillExpr!.indexOf("setter.call(el");
+    const bareAt = fillExpr!.indexOf('el.value = "Ada"');
+    expect(setterAt).toBeGreaterThanOrEqual(0);
+    if (bareAt >= 0) expect(setterAt).toBeLessThan(bareAt);
+    // Still dispatches a bubbling input event so the framework observes the change.
+    expect(fillExpr).toContain('new Event("input", { bubbles: true })');
+  });
+
   it("has no typed credential, storage, or network-body action surface", () => {
     const action: Parameters<InteractiveChromeAdapter["execute"]>[0]["action"] = { kind: "fill", selector: "#name", value: "Ada" };
     expect(action).toEqual({ kind: "fill", selector: "#name", value: "Ada" });

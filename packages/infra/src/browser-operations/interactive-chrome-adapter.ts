@@ -150,7 +150,13 @@ function clickExpression(selector: string): string {
 }
 
 function fillExpression(selector: string, value: string): string {
-  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error("selector not found"); if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new Error("selector is not fillable"); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); })()`;
+  // React (and other controlled-input frameworks) install a value tracker and
+  // override the element's `value` setter. A bare `el.value = x` advances that
+  // tracker in lockstep, so the subsequent `input` event looks like a no-op and
+  // `onChange` never fires — the typed value is lost on submit (#1446). Driving
+  // the NATIVE prototype setter leaves the tracker stale, so the bubbling
+  // `input` event makes React observe the change exactly as user typing would.
+  return `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) throw new Error("selector not found"); if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new Error("selector is not fillable"); const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const setter = Object.getOwnPropertyDescriptor(proto, "value") && Object.getOwnPropertyDescriptor(proto, "value").set; if (setter) { setter.call(el, ${JSON.stringify(value)}); } else { el.value = ${JSON.stringify(value)}; } el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); })()`;
 }
 
 function result(status: BrowserActionResult["status"], redactedSummary: string): BrowserActionResult {

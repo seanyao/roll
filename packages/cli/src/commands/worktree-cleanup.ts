@@ -50,6 +50,20 @@ export interface CleanupCandidate {
   reason: "disposable_candidate";
 }
 
+/**
+ * FIX-1454: a standalone ephemeral branch (NOT attached to any worktree) whose
+ * commits are verifiably merged, so deleting the ref safely reduces the canary
+ * count. Bounded exactly like a worktree candidate: audit-derived, revalidated
+ * before deletion, fail-closed on any mismatch.
+ */
+export interface CleanupBranchCandidate {
+  branch: string;
+  /** Ref SHA the plan observed; `--apply` refuses if the fresh ref differs. */
+  expectedSha: string;
+  /** How the merge was proven: ancestor or squash-merged (`git branch --merged`). */
+  mergeKind: "ancestor" | "pr_merged";
+}
+
 /** A worktree the plan leaves untouched, with the audit disposition that spared it. */
 export interface PreservedRecord {
   path: string;
@@ -70,8 +84,10 @@ export interface WorktreeCleanupPlan {
   countedBranches: readonly string[];
   /** Every loop worktree dir the canary counts, with its audit disposition. */
   countedWorktrees: readonly { path: string; disposition: string }[];
-  /** The MINIMAL, deterministic set needed to clear pressure. */
+  /** The MINIMAL, deterministic set of worktrees needed to clear pressure. */
   candidates: readonly CleanupCandidate[];
+  /** FIX-1454: MINIMAL, deterministic set of merged standalone branches to delete. */
+  branchCandidates: readonly CleanupBranchCandidate[];
   /** Everything the plan will NOT remove, with the disposition that spared it. */
   preserved: readonly PreservedRecord[];
 }
@@ -89,12 +105,21 @@ export interface CleanupRefusal {
   reason: string;
 }
 
+/** FIX-1454: outcome of one standalone-branch deletion under apply. */
+export interface BranchRemoval {
+  branch: string;
+  expectedSha: string;
+  mergeKind: "ancestor" | "pr_merged";
+}
+
 export interface WorktreeCleanupResult {
   schema: 1;
   dryRun: boolean;
   /** Candidates that revalidated and were removed (or WOULD be, under dry-run). */
   removed: CleanupRemoval[];
-  /** Candidates that failed fresh revalidation — fail-loud, no substitution. */
+  /** FIX-1454: standalone branches that revalidated and were deleted (or WOULD be). */
+  branchesRemoved: BranchRemoval[];
+  /** Candidates (worktree or branch) that failed fresh revalidation — fail-loud, no substitution. */
   refused: CleanupRefusal[];
   /** The plan's preserved set, carried through verbatim (never removed). */
   preserved: PreservedRecord[];
@@ -117,15 +142,65 @@ export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
   );
 }
 
+/** Refs the branch-recovery path must never delete, regardless of merge state. */
+const PROTECTED_BRANCHES = new Set(["main", "master", "HEAD"]);
+
+/**
+ * FIX-1454: injectable git/PR probes for standalone-branch recovery. Real
+ * implementations shell out to git + gh; tests inject fakes. Every probe is
+ * read-only — nothing here mutates a ref.
+ */
+export interface StandaloneBranchDeps {
+  /** Loop-worktree branches currently attached to a worktree (never deletable). */
+  attachedBranches: ReadonlySet<string>;
+  /** Current HEAD branch name, or null when detached. */
+  currentBranch: string | null;
+  /** Resolve a local branch ref to its SHA, or null if the ref is missing. */
+  refSha: (branch: string) => string | null;
+  /**
+   * Verifiable merge evidence for a standalone branch: `ancestor` when its tip
+   * is contained in the integration branch, `pr_merged` when a merged GitHub PR
+   * exists for it. `null` = NOT verifiably merged → never a candidate (fail closed).
+   */
+  branchMerge: (branch: string, sha: string) => "ancestor" | "pr_merged" | null;
+}
+
+/**
+ * FIX-1454: resolve the standalone ephemeral branches that are safe to delete —
+ * counted by the canary, NOT attached to any worktree, not the current/protected
+ * branch, and verifiably merged. Pure w.r.t. the injected probes; deterministic
+ * (sorted). Returns a candidate per safe branch with its observed SHA + evidence.
+ */
+export function resolveStandaloneMergedBranches(
+  audit: WorktreeAuditOutput,
+  deps: StandaloneBranchDeps,
+): CleanupBranchCandidate[] {
+  const out: CleanupBranchCandidate[] = [];
+  for (const branch of [...audit.ephemeralBranches].sort()) {
+    if (PROTECTED_BRANCHES.has(branch)) continue;
+    if (deps.attachedBranches.has(branch)) continue; // a worktree pins it — worktree path owns it
+    if (deps.currentBranch !== null && branch === deps.currentBranch) continue; // never the checked-out branch
+    const sha = deps.refSha(branch);
+    if (sha === null || sha === "") continue; // ambiguous/missing ref → fail closed
+    const mergeKind = deps.branchMerge(branch, sha);
+    if (mergeKind === null) continue; // not verifiably merged → preserve
+    out.push({ branch, expectedSha: sha, mergeKind });
+  }
+  return out;
+}
+
 /**
  * Build the minimal, deterministic cleanup plan from a FRESH audit. The plan
- * removes ONLY audit-proven `disposable_candidate` loop worktrees, and only as
- * many (lowest-path-first) as are needed to bring the canary total back under
- * `threshold`. It never selects a path for being old or merely counted.
+ * removes ONLY audit-proven `disposable_candidate` loop worktrees plus (FIX-1454)
+ * verifiably-merged standalone ephemeral branches, and only as many
+ * (worktrees lowest-path-first, then branches by name) as are needed to bring the
+ * canary total back under `threshold`. It never selects a path/ref for being old
+ * or merely counted.
  */
 export function planWorktreeCleanup(
   audit: WorktreeAuditOutput,
   threshold: number,
+  standaloneMergedBranches: readonly CleanupBranchCandidate[] = [],
 ): WorktreeCleanupPlan {
   const loopWorktrees = audit.records.filter((r) => r.owner === "loop");
   const canaryTotal = audit.ephemeralBranches.length + loopWorktrees.length;
@@ -136,10 +211,16 @@ export function planWorktreeCleanup(
     .filter(isSafelyDisposable)
     .sort((a, b) => a.path.localeCompare(b.path));
 
-  // Take the MINIMUM needed to clear pressure (never more). If already under
-  // threshold, the minimal set is empty even though disposables may exist.
-  const needed = excess > 0 ? Math.min(excess, pool.length) : 0;
-  const chosen = pool.slice(0, needed);
+  const branchPool = [...standaloneMergedBranches].sort((a, b) => a.branch.localeCompare(b.branch));
+
+  // Take the MINIMUM needed to clear pressure (never more). Worktrees first
+  // (lowest-path), then merged standalone branches — each removal drops the
+  // canary total by one. If already under threshold, the minimal set is empty
+  // even though disposables/merged branches exist.
+  const excessN = excess > 0 ? excess : 0;
+  const chosen = pool.slice(0, Math.min(excessN, pool.length));
+  const remainingExcess = excessN - chosen.length;
+  const chosenBranches = branchPool.slice(0, Math.min(remainingExcess, branchPool.length));
   const chosenPaths = new Set(chosen.map((r) => r.path));
 
   const candidates: CleanupCandidate[] = chosen.map((r) => ({
@@ -166,10 +247,11 @@ export function planWorktreeCleanup(
     generatedAt: audit.generatedAt,
     threshold,
     canaryTotal,
-    projectedTotal: canaryTotal - candidates.length,
+    projectedTotal: canaryTotal - candidates.length - chosenBranches.length,
     countedBranches: [...audit.ephemeralBranches],
     countedWorktrees,
     candidates,
+    branchCandidates: chosenBranches,
     preserved,
   };
 }
@@ -188,10 +270,34 @@ export interface ApplyCleanupOptions {
   audit?: () => WorktreeAuditOutput;
   /** Remove one worktree via git + prune registration. Injectable for tests. */
   removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+  /**
+   * FIX-1454: fresh standalone-branch probes, called immediately before EVERY
+   * branch deletion so a ref/merge/attach change between plan and apply is caught.
+   * Required (only) when the plan carries branchCandidates.
+   */
+  freshBranchDeps?: () => StandaloneBranchDeps;
+  /** FIX-1454: delete one local branch via `git branch -D`. Injectable for tests. */
+  removeBranch?: (repositoryRoot: string, branch: string) => { ok: boolean; detail: string };
   /** Structured event sink (defaults to no-op; the CLI wires events.ndjson). */
   emit?: (event: RollEvent) => void;
   nowISO?: () => string;
   nowMs?: () => number;
+}
+
+function defaultRemoveBranch(repositoryRoot: string, branch: string): { ok: boolean; detail: string } {
+  try {
+    // -D (not -d): the ref is only deleted after a fresh revalidation proved it
+    // merged + unattached + at the expected sha, so a forced ref delete is safe
+    // and squash-merge tolerant. Only the ref is removed; no commits are lost
+    // (they live on the integration branch).
+    execFileSync("git", ["-C", repositoryRoot, "branch", "-D", branch], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+  return { ok: true, detail: "" };
 }
 
 function defaultRemoveWorktree(repositoryRoot: string, path: string): { ok: boolean; detail: string } {
@@ -236,10 +342,12 @@ export async function applyWorktreeCleanup(
   const auditFn =
     options.audit ?? (() => auditWorktrees({ repoRoot: repositoryRoot, home: homedir() }));
   const removeFn = options.removeWorktree ?? defaultRemoveWorktree;
+  const removeBranchFn = options.removeBranch ?? defaultRemoveBranch;
   const emit = options.emit ?? (() => {});
   const nowMs = options.nowMs ?? (() => Date.now());
 
   const removed: CleanupRemoval[] = [];
+  const branchesRemoved: BranchRemoval[] = [];
   const refused: CleanupRefusal[] = [];
 
   for (const candidate of plan.candidates) {
@@ -306,10 +414,44 @@ export async function applyWorktreeCleanup(
     });
   }
 
+  // FIX-1454: standalone merged branches — revalidate each against FRESH probes
+  // (ref sha unchanged, still merged, not attached, not current/protected) before
+  // deleting the ref. Any mismatch is a fail-loud refusal; no substitution.
+  if (plan.branchCandidates.length > 0) {
+    const freshBranchDeps = options.freshBranchDeps;
+    for (const bc of plan.branchCandidates) {
+      const refuseB = (reason: string): void => {
+        refused.push({ path: `branch:${bc.branch}`, reason });
+        emit({ type: "worktree_cleanup_refused", path: `branch:${bc.branch}`, reason, ts: nowMs() });
+      };
+      if (freshBranchDeps === undefined) {
+        refuseB("no-revalidation: fresh branch probes unavailable");
+        continue;
+      }
+      const bd = freshBranchDeps();
+      if (PROTECTED_BRANCHES.has(bc.branch)) { refuseB("protected: refusing to delete a protected branch"); continue; }
+      if (bd.currentBranch !== null && bd.currentBranch === bc.branch) { refuseB("current: branch is checked out"); continue; }
+      if (bd.attachedBranches.has(bc.branch)) { refuseB("attached: a worktree now pins this branch"); continue; }
+      const sha = bd.refSha(bc.branch);
+      if (sha === null || sha === "") { refuseB("missing: branch ref no longer exists"); continue; }
+      if (sha !== bc.expectedSha) { refuseB(`changed-ref: expected ${bc.expectedSha}, found ${sha}`); continue; }
+      const mk = bd.branchMerge(bc.branch, sha);
+      if (mk === null) { refuseB("not-merged: fresh check no longer proves a merge"); continue; }
+
+      const removalB: BranchRemoval = { branch: bc.branch, expectedSha: bc.expectedSha, mergeKind: mk };
+      if (options.dryRun) { branchesRemoved.push(removalB); continue; }
+      const r = removeBranchFn(repositoryRoot, bc.branch);
+      if (!r.ok) { refuseB(`delete-failed: ${r.detail}`); continue; }
+      branchesRemoved.push(removalB);
+      emit({ type: "worktree_cleanup_applied", path: `branch:${bc.branch}`, expectedHead: bc.expectedSha, branch: bc.branch, ts: nowMs() });
+    }
+  }
+
   return {
     schema: 1,
     dryRun: options.dryRun,
     removed,
+    branchesRemoved,
     refused,
     preserved: [...plan.preserved],
   };
@@ -396,14 +538,15 @@ function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): 
   for (const w of plan.countedWorktrees) lines.push(`  ${rel(w.path)}  [${w.disposition}]`);
   lines.push("");
 
-  if (plan.candidates.length === 0) {
+  if (plan.candidates.length === 0 && plan.branchCandidates.length === 0) {
     if (plan.canaryTotal <= plan.threshold) {
       lines.push("No cleanup needed — canary count is already within threshold.");
     } else {
       lines.push(
         "No disposable candidates — every counted worktree is preserved " +
-          "(unpublished / dirty / active / external). Canary pressure cannot be " +
-          "cleared by cleanup; inspect the preserved worktrees manually.",
+          "(unpublished / dirty / active / external) and no counted standalone branch " +
+          "is verifiably merged. Canary pressure cannot be cleared by cleanup; " +
+          "inspect the preserved worktrees/branches manually.",
       );
     }
     lines.push("");
@@ -413,7 +556,10 @@ function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): 
   lines.push(`minimal candidate set (${plan.canaryTotal} → ${plan.projectedTotal})`);
   for (const c of plan.candidates) {
     const tags = [c.branch, c.cycleId].filter(Boolean).join(" ");
-    lines.push(`  ${rel(c.path)}${tags ? "  " + tags : ""}  [disposable_candidate]`);
+    lines.push(`  worktree ${rel(c.path)}${tags ? "  " + tags : ""}  [disposable_candidate]`);
+  }
+  for (const b of plan.branchCandidates) {
+    lines.push(`  branch   ${b.branch}  ${b.expectedSha.slice(0, 9)}  [merged: ${b.mergeKind}]`);
   }
   lines.push("");
 
@@ -430,8 +576,13 @@ function renderResultHuman(result: WorktreeCleanupResult): string {
   lines.push("Worktree cleanup (apply)");
   lines.push("");
   if (result.removed.length > 0) {
-    lines.push(`removed (${result.removed.length})`);
+    lines.push(`removed worktrees (${result.removed.length})`);
     for (const r of result.removed) lines.push(`  ${rel(r.path)}  ${r.expectedHead}`);
+    lines.push("");
+  }
+  if (result.branchesRemoved.length > 0) {
+    lines.push(`removed branches (${result.branchesRemoved.length})`);
+    for (const b of result.branchesRemoved) lines.push(`  ${b.branch}  ${b.expectedSha.slice(0, 9)}  [${b.mergeKind}]`);
     lines.push("");
   }
   if (result.refused.length > 0) {
@@ -439,11 +590,12 @@ function renderResultHuman(result: WorktreeCleanupResult): string {
     for (const r of result.refused) lines.push(`  ${rel(r.path)}  ${r.reason}`);
     lines.push("");
   }
-  if (result.removed.length === 0 && result.refused.length === 0) {
+  const anyRemoved = result.removed.length > 0 || result.branchesRemoved.length > 0;
+  if (!anyRemoved && result.refused.length === 0) {
     lines.push("Nothing to remove — no revalidated candidates.");
     lines.push("");
   }
-  if (result.removed.length > 0) {
+  if (anyRemoved) {
     lines.push("Resume the loop explicitly when ready: roll loop resume");
     lines.push("");
   }
@@ -456,8 +608,11 @@ export const CLEANUP_USAGE =
   "Usage: roll worktree cleanup [--dry-run | --apply] [--json] [--repo <path>]\n" +
   "  Safely recover from branch/worktree canary pressure using the worktree\n" +
   "  audit as the SOLE authority. Removes ONLY inactive, merged, clean\n" +
-  "  `disposable_candidate` loop worktrees — never a path that is merely old or\n" +
-  "  counted, and never a preserved (unpublished / dirty / active / external) one.\n" +
+  "  `disposable_candidate` loop worktrees, plus (FIX-1454) standalone ephemeral\n" +
+  "  branches that are verifiably merged (ancestor of the integration branch or a\n" +
+  "  merged GitHub PR) and attached to no worktree — never a path/ref that is\n" +
+  "  merely old or counted, and never a preserved (unpublished / dirty / active /\n" +
+  "  external / current / protected / unmerged) one.\n" +
   "\n" +
   "  Always dry-run first. Default (no flag) is --dry-run.\n" +
   "  --dry-run  print counted refs/dirs, audit dispositions, and the minimal\n" +
@@ -475,6 +630,80 @@ export const CLEANUP_USAGE =
 function resolveThreshold(): number {
   const parsed = parseInt(process.env["ROLL_BRANCH_CANARY_MAX"] ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BRANCH_CANARY_MAX;
+}
+
+function gitCap(repoRoot: string, args: string[]): string {
+  return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+}
+
+/** FIX-1454: real git+gh probes for standalone-branch recovery over `repoRoot`. */
+export function buildStandaloneBranchDeps(
+  repoRoot: string,
+  audit: WorktreeAuditOutput,
+  integrationBranch: string,
+): StandaloneBranchDeps {
+  const attachedBranches = new Set(
+    audit.records
+      .filter((r) => r.owner === "loop" && typeof r.branch === "string" && r.branch !== "")
+      .map((r) => (r.branch as string).replace(/^refs\/heads\//, "")),
+  );
+  let currentBranch: string | null = null;
+  try {
+    currentBranch = gitCap(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"]).trim() || null;
+  } catch {
+    currentBranch = null; // detached HEAD — no current branch to protect
+  }
+  return {
+    attachedBranches,
+    currentBranch,
+    refSha: (branch) => {
+      try {
+        return gitCap(repoRoot, ["rev-parse", "--verify", `refs/heads/${branch}`]).trim() || null;
+      } catch {
+        return null;
+      }
+    },
+    branchMerge: (branch) => {
+      // 1. Fast git-level ancestor check (real merge / fast-forward).
+      try {
+        execFileSync("git", ["-C", repoRoot, "merge-base", "--is-ancestor", branch, integrationBranch], { stdio: "ignore" });
+        return "ancestor";
+      } catch {
+        /* not an ancestor */
+      }
+      // 2. Squash-safe: git lists it under --merged.
+      try {
+        for (const line of gitCap(repoRoot, ["branch", "--merged", integrationBranch]).split("\n")) {
+          if (line.replace(/^[*+]?\s+/, "").trim() === branch) return "pr_merged";
+        }
+      } catch {
+        /* ignore */
+      }
+      // 3. Verifiable merged GitHub PR (covers squash merges with a new commit).
+      try {
+        const n = execFileSync(
+          "gh",
+          ["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", "length"],
+          { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+        ).trim();
+        if (parseInt(n, 10) > 0) return "pr_merged";
+      } catch {
+        /* gh unavailable / no merged PR → not verifiably merged */
+      }
+      return null;
+    },
+  };
+}
+
+function resolveIntegrationForCleanup(repoRoot: string): string {
+  try {
+    const head = gitCap(repoRoot, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]).trim();
+    const short = head.replace(/^origin\//, "");
+    if (short !== "") return short;
+  } catch {
+    /* fall through */
+  }
+  return "main";
 }
 
 export async function worktreeCleanupCommand(
@@ -511,7 +740,15 @@ export async function worktreeCleanupCommand(
   };
 
   const threshold = resolveThreshold();
-  const plan = planWorktreeCleanup(auditWorktrees(fullDeps), threshold);
+  const integrationBranch = fullDeps.integrationBranch ?? resolveIntegrationForCleanup(repoRoot);
+  const auditNow = auditWorktrees(fullDeps);
+  // FIX-1454: real git+gh probes; a git/gh hiccup yields zero branch candidates
+  // (fail closed — never guess a branch is merged).
+  const standaloneBranches = resolveStandaloneMergedBranches(
+    auditNow,
+    buildStandaloneBranchDeps(repoRoot, auditNow, integrationBranch),
+  );
+  const plan = planWorktreeCleanup(auditNow, threshold, standaloneBranches);
 
   if (!apply) {
     // Dry-run (default): report only, never mutate git state.
@@ -540,6 +777,11 @@ export async function worktreeCleanupCommand(
     repositoryRoot: repoRoot,
     dryRun: false,
     audit: () => auditWorktrees(fullDeps),
+    // FIX-1454: fresh branch probes for per-branch revalidation before deletion.
+    freshBranchDeps: () => {
+      const fresh = auditWorktrees(fullDeps);
+      return buildStandaloneBranchDeps(repoRoot, fresh, integrationBranch);
+    },
     ...(deps?.removeWorktree ? { removeWorktree: deps.removeWorktree } : {}),
     emit,
     ...(deps?.nowMs ? { nowMs: deps.nowMs } : {}),
@@ -552,5 +794,6 @@ export async function worktreeCleanupCommand(
   }
   // Non-zero only when every attempted removal was refused — a partial success
   // (some removed, some refused) still returns 0 so the operator sees progress.
-  return result.removed.length === 0 && result.refused.length > 0 ? 1 : 0;
+  const anyRemoved = result.removed.length > 0 || result.branchesRemoved.length > 0;
+  return !anyRemoved && result.refused.length > 0 ? 1 : 0;
 }

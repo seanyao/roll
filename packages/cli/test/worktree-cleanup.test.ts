@@ -22,7 +22,10 @@ import {
   formatCanaryTripReport,
   isSafelyDisposable,
   planWorktreeCleanup,
+  resolveStandaloneMergedBranches,
   worktreeCleanupCommand,
+  type CleanupBranchCandidate,
+  type StandaloneBranchDeps,
 } from "../src/commands/worktree-cleanup.js";
 
 // ─── fixtures ─────────────────────────────────────────────────────────────
@@ -581,3 +584,110 @@ function gitMock(state: { branches: string[]; worktrees: WtFixture[] }): (args: 
     return "";
   };
 }
+
+// ─── FIX-1454: standalone merged-branch recovery ────────────────────────────
+
+describe("FIX-1454 resolveStandaloneMergedBranches", () => {
+  const baseDeps = (over: Partial<StandaloneBranchDeps> = {}): StandaloneBranchDeps => ({
+    attachedBranches: new Set<string>(),
+    currentBranch: null,
+    refSha: (b) => `sha-${b}`,
+    branchMerge: () => "pr_merged",
+    ...over,
+  });
+
+  it("returns merged standalone branches as candidates with sha + evidence", () => {
+    const audit = auditOf([], ["loop/cycle-a", "loop/cycle-b"]);
+    const out = resolveStandaloneMergedBranches(audit, baseDeps());
+    expect(out).toEqual<CleanupBranchCandidate[]>([
+      { branch: "loop/cycle-a", expectedSha: "sha-loop/cycle-a", mergeKind: "pr_merged" },
+      { branch: "loop/cycle-b", expectedSha: "sha-loop/cycle-b", mergeKind: "pr_merged" },
+    ]);
+  });
+
+  it("excludes attached, current, protected, unmerged, and missing-ref branches (fail closed)", () => {
+    const audit = auditOf([], ["loop/cycle-attached", "loop/cycle-current", "main", "loop/cycle-unmerged", "loop/cycle-missing", "loop/cycle-ok"]);
+    const out = resolveStandaloneMergedBranches(audit, baseDeps({
+      attachedBranches: new Set(["loop/cycle-attached"]),
+      currentBranch: "loop/cycle-current",
+      refSha: (b) => (b === "loop/cycle-missing" ? null : `sha-${b}`),
+      branchMerge: (b) => (b === "loop/cycle-unmerged" ? null : "ancestor"),
+    }));
+    expect(out.map((c) => c.branch)).toEqual(["loop/cycle-ok"]);
+  });
+});
+
+describe("FIX-1454 planWorktreeCleanup with branch candidates", () => {
+  it("fills the minimal set with worktrees first, then merged branches, to clear excess", () => {
+    // 2 counted worktrees + 3 counted branches = canary 5, threshold 2 → excess 3.
+    const wt = rec({ path: "/repo/.roll/loop/worktrees/cycle-1", head: "h1" });
+    const branches: CleanupBranchCandidate[] = [
+      { branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" },
+      { branch: "loop/cycle-b", expectedSha: "sb", mergeKind: "pr_merged" },
+      { branch: "loop/cycle-c", expectedSha: "sc", mergeKind: "ancestor" },
+    ];
+    const audit = auditOf([wt, rec({ path: "/repo/.roll/loop/worktrees/cycle-keep", disposition: "preserved_unpublished", mergeEvidence: { kind: "none" } })], ["loop/cycle-a", "loop/cycle-b", "loop/cycle-c"]);
+    const plan = planWorktreeCleanup(audit, 2, branches);
+    // excess 3: 1 disposable worktree + 2 branches (deterministic by name).
+    expect(plan.candidates.map((c) => c.path)).toEqual(["/repo/.roll/loop/worktrees/cycle-1"]);
+    expect(plan.branchCandidates.map((b) => b.branch)).toEqual(["loop/cycle-a", "loop/cycle-b"]);
+    expect(plan.projectedTotal).toBe(2);
+  });
+
+  it("selects no branches when worktrees alone clear the excess", () => {
+    const audit = auditOf([rec({ path: "/repo/.roll/loop/worktrees/cycle-1" })], ["loop/cycle-a"]);
+    const plan = planWorktreeCleanup(audit, 1, [{ branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" }]);
+    // canary 2, threshold 1 → excess 1: one worktree suffices, branch preserved.
+    expect(plan.candidates).toHaveLength(1);
+    expect(plan.branchCandidates).toHaveLength(0);
+  });
+});
+
+describe("FIX-1454 applyWorktreeCleanup branch deletion", () => {
+  const planWith = (branchCandidates: CleanupBranchCandidate[]): Parameters<typeof applyWorktreeCleanup>[0] => ({
+    schema: 1, generatedAt: "t", threshold: 1, canaryTotal: 2, projectedTotal: 1,
+    countedBranches: branchCandidates.map((b) => b.branch), countedWorktrees: [],
+    candidates: [], branchCandidates, preserved: [],
+  });
+
+  it("deletes a branch that revalidates (sha + merged + unattached)", async () => {
+    const removeBranch = vi.fn(() => ({ ok: true, detail: "" }));
+    const res = await applyWorktreeCleanup(planWith([{ branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" }]), {
+      repositoryRoot: "/repo", dryRun: false,
+      freshBranchDeps: () => ({ attachedBranches: new Set(), currentBranch: null, refSha: () => "sa", branchMerge: () => "ancestor" }),
+      removeBranch,
+    });
+    expect(res.branchesRemoved.map((b) => b.branch)).toEqual(["loop/cycle-a"]);
+    expect(removeBranch).toHaveBeenCalledWith("/repo", "loop/cycle-a");
+    expect(res.refused).toHaveLength(0);
+  });
+
+  it("refuses (no delete) on changed ref, re-attach, or lost merge — fail closed", async () => {
+    const cases: Array<[string, StandaloneBranchDeps]> = [
+      ["changed-ref", { attachedBranches: new Set(), currentBranch: null, refSha: () => "DIFFERENT", branchMerge: () => "ancestor" }],
+      ["attached", { attachedBranches: new Set(["loop/cycle-a"]), currentBranch: null, refSha: () => "sa", branchMerge: () => "ancestor" }],
+      ["not-merged", { attachedBranches: new Set(), currentBranch: null, refSha: () => "sa", branchMerge: () => null }],
+      ["missing", { attachedBranches: new Set(), currentBranch: null, refSha: () => null, branchMerge: () => "ancestor" }],
+    ];
+    for (const [, deps] of cases) {
+      const removeBranch = vi.fn(() => ({ ok: true, detail: "" }));
+      const res = await applyWorktreeCleanup(planWith([{ branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" }]), {
+        repositoryRoot: "/repo", dryRun: false, freshBranchDeps: () => deps, removeBranch,
+      });
+      expect(res.branchesRemoved).toHaveLength(0);
+      expect(res.refused).toHaveLength(1);
+      expect(removeBranch).not.toHaveBeenCalled();
+    }
+  });
+
+  it("dry-run revalidates but never deletes", async () => {
+    const removeBranch = vi.fn(() => ({ ok: true, detail: "" }));
+    const res = await applyWorktreeCleanup(planWith([{ branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" }]), {
+      repositoryRoot: "/repo", dryRun: true,
+      freshBranchDeps: () => ({ attachedBranches: new Set(), currentBranch: null, refSha: () => "sa", branchMerge: () => "ancestor" }),
+      removeBranch,
+    });
+    expect(res.branchesRemoved).toHaveLength(1);
+    expect(removeBranch).not.toHaveBeenCalled();
+  });
+});

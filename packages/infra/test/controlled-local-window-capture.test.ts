@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   captureControlledLocalPage,
   captureControlledLocalWindow,
+  runPlaywrightControlledPrepareActions,
   runControlledPrepareActions,
   type ControlledLocalPageCaptureDeps,
   type ControlledLocalWindowCaptureDeps,
@@ -61,6 +62,103 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
 }
 
 describe("FIX-005 controlled local window capture", () => {
+  it("locks Playwright preparation to one exact discovered page and original target frame", async () => {
+    const click = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        click,
+      }),
+    }));
+    const wrapper = { url: () => "http://127.0.0.1:4888/", frames: () => [] };
+    const target = { url: () => "http://127.0.0.1:4173/team", locator };
+    const otherSameOriginPage = { url: () => "http://127.0.0.1:4173/other", frames: () => [{ url: () => "http://127.0.0.1:4173/team", locator }] };
+    const browser = {
+      contexts: () => [{ pages: () => [{ url: () => "http://127.0.0.1:4888/", frames: () => [wrapper, target] }, otherSameOriginPage] }],
+      close,
+    };
+
+    await runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, { connectOverCDP: vi.fn(async () => browser as never), sleep: vi.fn(async () => undefined) });
+
+    expect(locator).toHaveBeenCalledWith("#synthetic-checkbox");
+    expect(click).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects duplicate or same-origin replacement target frames before requesting pixels", async () => {
+    const stableLocator = () => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        click: vi.fn(async () => undefined),
+      }),
+    });
+    const duplicateBrowser = {
+      contexts: () => [{ pages: () => [{
+        url: () => "http://127.0.0.1:4888/",
+        frames: () => [
+          { url: () => "http://127.0.0.1:4888/", locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", locator: stableLocator },
+          { url: () => "http://127.0.0.1:4173/team", locator: stableLocator },
+        ],
+      }] }],
+      close: vi.fn(async () => undefined),
+    };
+    const replacedFrameUrl = vi.fn(() => "http://127.0.0.1:4173/team").mockReturnValueOnce("http://127.0.0.1:4173/team").mockReturnValueOnce("http://127.0.0.1:4173/replaced");
+    const replacementBrowser = {
+      contexts: () => [{ pages: () => [{
+        url: () => "http://127.0.0.1:4888/",
+        frames: () => [
+          { url: () => "http://127.0.0.1:4888/", locator: stableLocator },
+          { url: replacedFrameUrl, locator: stableLocator },
+        ],
+      }] }],
+      close: vi.fn(async () => undefined),
+    };
+    const input = {
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }] as const,
+    };
+
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => duplicateBrowser as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("exactly one original target frame");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => replacementBrowser as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("left the original loopback target frame");
+  });
+
+  it("rejects password, contenteditable, and non-input textarea fills", async () => {
+    const locatorFor = (tagName: string, attributes: Record<string, string | null>) => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async (name: string) => attributes[name] ?? null),
+        evaluate: vi.fn(async () => tagName.toLowerCase()),
+        fill: vi.fn(async () => undefined),
+      }),
+    });
+    const browserFor = (locator: ReturnType<typeof locatorFor>) => ({
+      contexts: () => [{ pages: () => [{
+        url: () => "http://127.0.0.1:4888/",
+        frames: () => [{ url: () => "http://127.0.0.1:4888/", locator: () => locator }, { url: () => "http://127.0.0.1:4173/team", locator: () => locator }],
+      }] }],
+      close: vi.fn(async () => undefined),
+    });
+    const input = {
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "fill", selector: "#synthetic", value: "synthetic" }] as const,
+    };
+
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("INPUT", { type: "password" })) as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("password fields");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("INPUT", { contenteditable: "true" })) as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("contenteditable");
+    await expect(runPlaywrightControlledPrepareActions(input, { connectOverCDP: vi.fn(async () => browserFor(locatorFor("DIV", {})) as never), sleep: vi.fn(async () => undefined) })).rejects.toThrow("input or textarea");
+  });
+
   it("uses physical pointer input for a loopback React checkbox, then runs fixed wait and scroll operations", async () => {
     let frameTreeCalls = 0;
     const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {

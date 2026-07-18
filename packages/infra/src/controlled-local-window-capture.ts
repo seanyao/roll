@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chromium, type Browser, type Frame, type Locator } from "playwright-core";
 import {
   validateRollCaptureRequestV1,
   type RollCaptureRequestV1,
@@ -74,6 +75,11 @@ export interface ControlledPreparePort {
 
 export interface ControlledPrepareDeps {
   connect(socketUrl: string): Promise<CdpSession>;
+  sleep(ms: number): Promise<void>;
+}
+
+export interface ControlledPlaywrightPrepareDeps {
+  connectOverCDP(endpoint: string): Promise<Browser>;
   sleep(ms: number): Promise<void>;
 }
 
@@ -262,8 +268,103 @@ function defaultControlledLocalPageCaptureDeps(): ControlledLocalPageCaptureDeps
 
 function defaultControlledPreparePort(): ControlledPreparePort {
   return {
-    run: (input) => runControlledPrepareActions(input),
+    run: (input) => runPlaywrightControlledPrepareActions(input),
   };
+}
+
+/**
+ * The public prepare schema remains closed. Playwright attaches only to the
+ * disposable loopback Chrome launched by this capture path and resolves one
+ * exact page/frame already discovered for the capture, never an owner window.
+ */
+export async function runPlaywrightControlledPrepareActions(
+  input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] },
+  deps: ControlledPlaywrightPrepareDeps = { connectOverCDP: (endpoint) => chromium.connectOverCDP(endpoint), sleep: sleepForPrepare },
+): Promise<void> {
+  if (loopbackOrigin(input.targetUrl) === undefined) throw new Error("controlled prepare target must remain loopback");
+  const endpoint = devToolsHttpEndpoint(input.page.webSocketDebuggerUrl);
+  if (endpoint === undefined) throw new Error("controlled prepare DevTools endpoint must remain loopback");
+  const browser = await deps.connectOverCDP(endpoint);
+  try {
+    const frame = await waitForPlaywrightPrepareFrame(browser, input.page.url, input.targetUrl, deps.sleep);
+    if (frame === undefined) throw new Error("controlled prepare target frame was not found");
+    for (const action of input.actions) {
+      if (action.kind === "wait") {
+        await deps.sleep(action.ms);
+      } else if (action.kind === "click") {
+        await (await visibleLocator(frame, action.selector)).click();
+      } else if (action.kind === "fill") {
+        const locator = await visibleLocator(frame, action.selector);
+        await assertSafePrepareFillTarget(locator);
+        await locator.fill(action.value);
+      } else {
+        await (await visibleLocator(frame, action.selector)).scrollIntoViewIfNeeded();
+      }
+      if (frame.url() !== input.targetUrl) {
+        throw new Error("controlled prepare action left the original loopback target frame");
+      }
+    }
+  } finally {
+    await closePlaywrightBrowserQuietly(browser);
+  }
+}
+
+async function waitForPlaywrightPrepareFrame(
+  browser: Browser,
+  pageUrl: string,
+  targetUrl: string,
+  sleep: (ms: number) => Promise<void>,
+): Promise<Frame | undefined> {
+  for (let attempt = 0; attempt < PREPARE_FRAME_ATTEMPTS; attempt += 1) {
+    const pages = browser.contexts().flatMap((context) => context.pages()).filter((page) => page.url() === pageUrl);
+    if (pages.length > 1) throw new Error("controlled prepare found multiple exact capture pages");
+    const [page] = pages;
+    if (page !== undefined) {
+      const frames = page.frames().filter((frame) => frame.url() === targetUrl);
+      if (frames.length > 1) throw new Error("controlled prepare requires exactly one original target frame");
+      if (frames.length === 1) return frames[0];
+    }
+    await sleep(PREPARE_FRAME_INTERVAL_MS);
+  }
+  return undefined;
+}
+
+async function visibleLocator(frame: Frame, selector: string): Promise<Locator> {
+  const first = frame.locator(selector).first();
+  try {
+    await first.waitFor({ state: "visible", timeout: PREPARE_FRAME_ATTEMPTS * PREPARE_FRAME_INTERVAL_MS });
+  } catch {
+    throw new Error(`prepare selector did not resolve to a visible element: ${selector}`);
+  }
+  if (!await first.isVisible()) throw new Error("prepare selector is not visible");
+  return first;
+}
+
+async function assertSafePrepareFillTarget(locator: Locator): Promise<void> {
+  const tagName = await locator.evaluate((element) => element.tagName.toLowerCase());
+  if (tagName !== "input" && tagName !== "textarea") throw new Error("prepare fill target must be an input or textarea");
+  if (await locator.getAttribute("contenteditable") !== null) throw new Error("prepare does not fill contenteditable fields");
+  if (tagName === "input" && (await locator.getAttribute("type"))?.toLowerCase() === "password") {
+    throw new Error("prepare does not fill password fields");
+  }
+}
+
+function devToolsHttpEndpoint(socketUrl: string): string | undefined {
+  try {
+    const parsed = new URL(socketUrl);
+    if (parsed.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsed.hostname)) return undefined;
+    return `http://${parsed.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
+async function closePlaywrightBrowserQuietly(browser: Browser): Promise<void> {
+  try {
+    await browser.close();
+  } catch {
+    // Chrome/profile cleanup remains authoritative for the disposable process.
+  }
 }
 
 export async function runControlledPrepareActions(

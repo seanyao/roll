@@ -274,6 +274,7 @@ export async function runControlledPrepareActions(
   try {
     await cdp.send("Runtime.enable");
     await cdp.send("Page.enable");
+    await cdp.send("DOM.enable");
     const targetOrigin = loopbackOrigin(input.targetUrl);
     if (targetOrigin === undefined) throw new Error("controlled prepare target must remain loopback");
     const frameId = await waitForInitialPrepareFrame(cdp, input.targetUrl, deps.sleep);
@@ -283,7 +284,7 @@ export async function runControlledPrepareActions(
         await deps.sleep(action.ms);
       } else {
         const contextId = await isolatedFrameContext(cdp, frameId);
-        if (action.kind === "click") await evaluatePrepare(cdp, contextId, clickPrepareExpression(action.selector));
+        if (action.kind === "click") await dispatchPhysicalPrepareClick(cdp, contextId, frameId, action.selector);
         if (action.kind === "fill") await evaluatePrepare(cdp, contextId, fillPrepareExpression(action.selector, action.value));
         if (action.kind === "scroll") await evaluatePrepare(cdp, contextId, scrollPrepareExpression(action.selector));
       }
@@ -346,8 +347,73 @@ async function evaluatePrepare(cdp: CdpSession, contextId: number, expression: s
   }
 }
 
-function clickPrepareExpression(selector: string): string {
-  return `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) throw new Error("prepare click selector not found"); element.click(); })()`;
+async function dispatchPhysicalPrepareClick(cdp: CdpSession, contextId: number, frameId: string, selector: string): Promise<void> {
+  const point = await evaluatePrepareValue(cdp, contextId, clickPointPrepareExpression(selector));
+  if (!isPrepareClickPoint(point)) throw new Error("prepare click target has no usable visible point");
+  const offset = await prepareFrameOffset(cdp, frameId);
+  const x = point.x + offset.x;
+  const y = point.y + offset.y;
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+}
+
+async function evaluatePrepareValue(cdp: CdpSession, contextId: number, expression: string): Promise<unknown> {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression,
+    contextId,
+    awaitPromise: true,
+    returnByValue: true,
+  }) as { result?: { value?: unknown }; exceptionDetails?: { text?: unknown; exception?: { description?: unknown } } };
+  if (result.exceptionDetails !== undefined) {
+    const detail = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "prepare action failed";
+    throw new Error(typeof detail === "string" ? detail : "prepare action failed");
+  }
+  return result.result?.value;
+}
+
+function isPrepareClickPoint(value: unknown): value is { x: number; y: number } {
+  if (typeof value !== "object" || value === null) return false;
+  const point = value as { x?: unknown; y?: unknown };
+  return typeof point.x === "number" && Number.isFinite(point.x) && typeof point.y === "number" && Number.isFinite(point.y);
+}
+
+async function prepareFrameOffset(cdp: CdpSession, frameId: string): Promise<{ x: number; y: number }> {
+  const tree = await cdp.send("Page.getFrameTree") as { frameTree?: unknown };
+  const ancestors = frameAncestors(tree.frameTree, frameId);
+  if (ancestors === undefined) throw new Error("controlled prepare target frame was not found");
+  let x = 0;
+  let y = 0;
+  for (const childFrameId of ancestors) {
+    const owner = await cdp.send("DOM.getFrameOwner", { frameId: childFrameId }) as { backendNodeId?: unknown };
+    if (typeof owner.backendNodeId !== "number") throw new Error("prepare click target frame owner was not found");
+    const model = await cdp.send("DOM.getBoxModel", { backendNodeId: owner.backendNodeId }) as { model?: { content?: unknown } };
+    const content = model.model?.content;
+    if (!Array.isArray(content) || content.length !== 8 || content.some((coordinate) => typeof coordinate !== "number" || !Number.isFinite(coordinate))) {
+      throw new Error("prepare click target frame has no usable visible point");
+    }
+    x += Math.min(content[0], content[2], content[4], content[6]);
+    y += Math.min(content[1], content[3], content[5], content[7]);
+  }
+  return { x, y };
+}
+
+function frameAncestors(value: unknown, targetFrameId: string, ancestors: readonly string[] = []): readonly string[] | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const tree = value as { frame?: { id?: unknown }; childFrames?: unknown };
+  if (tree.frame?.id === targetFrameId) return ancestors;
+  if (!Array.isArray(tree.childFrames)) return undefined;
+  for (const child of tree.childFrames) {
+    if (typeof child !== "object" || child === null) continue;
+    const childFrame = child as { frame?: { id?: unknown } };
+    if (typeof childFrame.frame?.id !== "string") continue;
+    const found = frameAncestors(child, targetFrameId, [...ancestors, childFrame.frame.id]);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function clickPointPrepareExpression(selector: string): string {
+  return `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) throw new Error("prepare click selector not found"); const rect = element.getBoundingClientRect(); const style = getComputedStyle(element); if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden" || style.pointerEvents === "none") throw new Error("prepare click target has no usable visible point"); const x = rect.left + rect.width / 2; const y = rect.top + rect.height / 2; if (!element.contains(document.elementFromPoint(x, y))) throw new Error("prepare click target has no usable visible point"); return { x, y }; })()`;
 }
 
 function fillPrepareExpression(selector: string, value: string): string {

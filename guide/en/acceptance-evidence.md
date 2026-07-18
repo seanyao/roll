@@ -349,7 +349,10 @@ Unknown fields or action kinds, arbitrary JavaScript, navigation, and excessive
 lists or waits are rejected before Chrome launches. The temporary DevTools
 session locates the wrapper's declared loopback frame, performs only fixed UI
 operations in that frame, and verifies the frame remains on the same loopback
-origin after every action. A prepare failure sends no capture request.
+origin after every action. `click` resolves a visible element and sends bounded
+physical pointer press/release events through the disposable Chrome instance,
+so controlled React inputs receive their normal UI event path. A prepare failure
+sends no capture request.
 
 This is not general browser automation: it cannot use an owner profile or open
 remote URLs. The prepare API exposes no cookie or storage read/write/import/

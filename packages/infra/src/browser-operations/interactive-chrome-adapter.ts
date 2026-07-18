@@ -132,7 +132,7 @@ export function createLoopbackOwnerChromeAdapter(endpoint: string): InteractiveC
         return [{ id: target.id, url: target.url, webSocketDebuggerUrl: target.webSocketDebuggerUrl }];
       });
     },
-    connect: async (target) => openCdpSession(target.webSocketDebuggerUrl),
+    connect: async (target) => openLoopbackCdpSession(target.webSocketDebuggerUrl),
     nowMs: Date.now,
   });
 }
@@ -198,7 +198,14 @@ interface SocketLike {
   addEventListener(type: "open" | "message" | "error", listener: (event: { data?: unknown }) => void): void;
 }
 
-async function openCdpSession(url: string): Promise<CdpSession> {
+/**
+ * Open a DevTools session only when the discovered socket remains loopback.
+ *
+ * The controlled local-capture lane reuses this transport for its disposable
+ * profile; it never discovers or connects to an owner Chrome endpoint.
+ */
+export async function openLoopbackCdpSession(url: string): Promise<CdpSession> {
+  if (!isLoopbackDevToolsSocket(url)) throw new Error("DevTools WebSocket must remain loopback");
   const Socket = (globalThis as Record<string, unknown>)["WebSocket"];
   if (typeof Socket !== "function") throw new Error("WebSocket is unavailable in this runtime");
   const socket = new (Socket as new (url: string) => SocketLike)(url);

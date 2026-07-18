@@ -11,7 +11,8 @@ import {
   type RollCaptureRequestV1,
   type RollCaptureResponseV1,
 } from "@roll/spec";
-import { type ChromeLauncher, type ChromeProcess, SystemChromeLauncher } from "./browser-operations/managed-chrome-adapter.js";
+import { type CdpSession, type ChromeLauncher, type ChromeProcess, SystemChromeLauncher } from "./browser-operations/managed-chrome-adapter.js";
+import { openLoopbackCdpSession } from "./browser-operations/interactive-chrome-adapter.js";
 import { RollCaptureProvider, type RollCaptureProviderPort } from "./roll-capture.js";
 
 const CHROME_APP_NAME = "Google Chrome";
@@ -24,6 +25,10 @@ export interface ControlledLocalWindowCaptureInput {
   projectRoot: string;
   /** The one local synthetic page to make visible. Network and file URLs are refused. */
   url: string;
+  /** Original tested page when a nonce wrapper owns the visible window. */
+  prepareTargetUrl?: string;
+  /** Closed-vocabulary interaction steps completed before physical capture. */
+  prepare?: readonly ControlledPrepareAction[];
   /**
    * Exact title rendered by the synthetic page. It must carry a caller-created
    * nonce so another Chrome window cannot be selected accidentally.
@@ -37,6 +42,8 @@ export interface ControlledLocalWindowCaptureInput {
 export interface ControlledLocalPageCaptureInput {
   projectRoot: string;
   url: string;
+  /** Closed-vocabulary interaction steps completed inside the local page before capture. */
+  prepare?: readonly ControlledPrepareAction[];
   request: Omit<RollCaptureRequestV1, "target">;
 }
 
@@ -51,6 +58,16 @@ export interface ControlledLocalWindowCaptureResult {
 export interface ControlledPage {
   url: string;
   webSocketDebuggerUrl: string;
+}
+
+export type ControlledPrepareAction =
+  | { kind: "click"; selector: string }
+  | { kind: "fill"; selector: string; value: string }
+  | { kind: "wait"; ms: number }
+  | { kind: "scroll"; selector: string };
+
+export interface ControlledPreparePort {
+  run(input: { page: ControlledPage; targetUrl: string; actions: readonly ControlledPrepareAction[] }): Promise<void>;
 }
 
 export interface ControlledPagePort {
@@ -71,6 +88,8 @@ export interface ControlledLocalWindowCaptureDeps {
   };
   ports: { allocate(): Promise<number> };
   pages: ControlledPagePort;
+  /** Closed-vocabulary interactions against only the disposable Chrome page. */
+  prepare: ControlledPreparePort;
   provider: RollCaptureProviderPort;
   sleep(ms: number): Promise<void>;
 }
@@ -99,6 +118,8 @@ export async function captureControlledLocalPage(
     return await captureControlledLocalWindow({
       projectRoot: input.projectRoot,
       url: wrapper.url,
+      prepareTargetUrl: input.url,
+      prepare: input.prepare,
       windowTitle: wrapper.windowTitle,
       request: input.request,
     }, deps);
@@ -118,6 +139,11 @@ export async function captureControlledLocalWindow(
 ): Promise<ControlledLocalWindowCaptureResult> {
   const urlFailure = localUrlFailure(input.url);
   if (urlFailure !== undefined) return { status: "failed", reason: urlFailure };
+  const prepareTargetUrl = input.prepareTargetUrl ?? input.url;
+  const prepareUrlFailure = localUrlFailure(prepareTargetUrl);
+  if (prepareUrlFailure !== undefined) return { status: "failed", reason: prepareUrlFailure };
+  const prepareFailure = validateControlledPrepareActions(input.prepare);
+  if (prepareFailure !== undefined) return { status: "failed", reason: prepareFailure };
   if (!input.windowTitle.startsWith("Roll Capture ") || input.windowTitle.length <= "Roll Capture ".length) {
     return { status: "failed", reason: "controlled local window capture requires a nonce-bearing title beginning with Roll Capture " };
   }
@@ -148,6 +174,10 @@ export async function captureControlledLocalWindow(
     const page = await waitForExactLocalPage(endpoint, input.url, deps);
     if (page === null) {
       return { status: "failed", reason: "isolated local page was not discovered before capture" };
+    }
+
+    if (input.prepare !== undefined && input.prepare.length > 0) {
+      await deps.prepare.run({ page, targetUrl: prepareTargetUrl, actions: input.prepare });
     }
 
     // macOS obtains a window title asynchronously from Chromium. Keeping the
@@ -181,9 +211,39 @@ function defaultControlledLocalWindowCaptureDeps(): ControlledLocalWindowCapture
     fs: { mkdtemp, rm },
     ports: { allocate: allocateLoopbackPort },
     pages: defaultControlledPagePort(),
+    prepare: defaultControlledPreparePort(),
     provider: new RollCaptureProvider(),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+}
+
+function validateControlledPrepareActions(actions: readonly ControlledPrepareAction[] | undefined): string | undefined {
+  if (actions === undefined) return undefined;
+  if (actions.length > 16) return "controlled prepare allows at most 16 actions";
+  let totalWaitMs = 0;
+  for (const action of actions as readonly unknown[]) {
+    if (typeof action !== "object" || action === null || !("kind" in action) || typeof action.kind !== "string") {
+      return "controlled prepare action is invalid";
+    }
+    if (action.kind === "wait") {
+      if (!("ms" in action) || typeof action.ms !== "number" || !Number.isInteger(action.ms) || action.ms < 0 || action.ms > 5_000) {
+        return "controlled prepare wait requires an integer ms from 0 to 5000";
+      }
+      totalWaitMs += action.ms;
+      if (totalWaitMs > 15_000) return "controlled prepare waits may total at most 15000ms";
+      continue;
+    }
+    if (action.kind !== "click" && action.kind !== "fill" && action.kind !== "scroll") {
+      return "controlled prepare only permits click, fill, wait, and scroll actions";
+    }
+    if (!("selector" in action) || typeof action.selector !== "string" || action.selector.trim() === "" || action.selector.length > 500) {
+      return "controlled prepare selector must be a non-empty string of at most 500 characters";
+    }
+    if (action.kind === "fill" && (!("value" in action) || typeof action.value !== "string" || action.value.length > 1_000)) {
+      return "controlled prepare fill value must be a string of at most 1000 characters";
+    }
+  }
+  return undefined;
 }
 
 function defaultControlledLocalPageCaptureDeps(): ControlledLocalPageCaptureDeps {
@@ -191,6 +251,118 @@ function defaultControlledLocalPageCaptureDeps(): ControlledLocalPageCaptureDeps
     ...defaultControlledLocalWindowCaptureDeps(),
     wrappers: { open: createControlledCaptureWrapper },
   };
+}
+
+function defaultControlledPreparePort(): ControlledPreparePort {
+  return {
+    async run({ page, targetUrl, actions }) {
+      const cdp = await openLoopbackCdpSession(page.webSocketDebuggerUrl);
+      try {
+        await cdp.send("Runtime.enable");
+        await cdp.send("Page.enable");
+        const targetOrigin = loopbackOrigin(targetUrl);
+        if (targetOrigin === undefined) throw new Error("controlled prepare target must remain loopback");
+        let frameId = await findInitialPrepareFrame(cdp, targetUrl);
+        if (frameId === undefined) throw new Error("controlled prepare target frame was not found");
+        for (const action of actions) {
+          if (action.kind === "wait") {
+            await sleepForPrepare(action.ms);
+          } else {
+            const contextId = await isolatedFrameContext(cdp, frameId);
+            if (action.kind === "click") await evaluatePrepare(cdp, contextId, clickPrepareExpression(action.selector));
+            if (action.kind === "fill") await evaluatePrepare(cdp, contextId, fillPrepareExpression(action.selector, action.value));
+            if (action.kind === "scroll") await evaluatePrepare(cdp, contextId, scrollPrepareExpression(action.selector));
+          }
+          frameId = await findCurrentPrepareFrame(cdp, targetOrigin);
+          if (frameId === undefined) throw new Error("controlled prepare action left the original loopback origin");
+        }
+      } finally {
+        await closePrepareSession(cdp);
+      }
+    },
+  };
+}
+
+async function findInitialPrepareFrame(cdp: CdpSession, targetUrl: string): Promise<string | undefined> {
+  const tree = await cdp.send("Page.getFrameTree") as { frameTree?: unknown };
+  return findFrame(tree.frameTree, (url) => url === targetUrl);
+}
+
+async function findCurrentPrepareFrame(cdp: CdpSession, targetOrigin: string): Promise<string | undefined> {
+  const tree = await cdp.send("Page.getFrameTree") as { frameTree?: unknown };
+  return findFrame(tree.frameTree, (url) => originOf(url) === targetOrigin);
+}
+
+function findFrame(value: unknown, matches: (url: string) => boolean): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const tree = value as { frame?: { id?: unknown; url?: unknown }; childFrames?: unknown };
+  if (typeof tree.frame?.id === "string" && typeof tree.frame.url === "string" && matches(tree.frame.url)) return tree.frame.id;
+  if (!Array.isArray(tree.childFrames)) return undefined;
+  for (const child of tree.childFrames) {
+    const found = findFrame(child, matches);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+async function isolatedFrameContext(cdp: CdpSession, frameId: string): Promise<number> {
+  const result = await cdp.send("Page.createIsolatedWorld", { frameId, grantUniveralAccess: false }) as { executionContextId?: unknown };
+  if (typeof result.executionContextId !== "number") throw new Error("controlled prepare could not create an isolated frame context");
+  return result.executionContextId;
+}
+
+async function evaluatePrepare(cdp: CdpSession, contextId: number, expression: string): Promise<void> {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression,
+    contextId,
+    awaitPromise: true,
+    returnByValue: true,
+  }) as { exceptionDetails?: { text?: unknown; exception?: { description?: unknown } } };
+  if (result.exceptionDetails !== undefined) {
+    const detail = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "prepare action failed";
+    throw new Error(typeof detail === "string" ? detail : "prepare action failed");
+  }
+}
+
+function clickPrepareExpression(selector: string): string {
+  return `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) throw new Error("prepare click selector not found"); element.click(); })()`;
+}
+
+function fillPrepareExpression(selector: string, value: string): string {
+  return `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) throw new Error("prepare fill selector is not fillable"); if (element instanceof HTMLInputElement && element.type.toLowerCase() === "password") throw new Error("prepare does not fill password fields"); const prototype = element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype; const setValue = Object.getOwnPropertyDescriptor(prototype, "value")?.set; if (setValue === undefined) throw new Error("prepare fill value setter unavailable"); setValue.call(element, ${JSON.stringify(value)}); element.dispatchEvent(new Event("input", { bubbles: true })); element.dispatchEvent(new Event("change", { bubbles: true })); })()`;
+}
+
+function scrollPrepareExpression(selector: string): string {
+  return `(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!(element instanceof HTMLElement)) throw new Error("prepare scroll selector not found"); element.scrollIntoView({ block: "center", inline: "nearest" }); })()`;
+}
+
+function loopbackOrigin(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    return ["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsed.hostname) ? parsed.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function originOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+async function sleepForPrepare(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function closePrepareSession(cdp: CdpSession): Promise<void> {
+  try {
+    await cdp.close();
+  } catch {
+    // The disposable browser and profile cleanup still run after a lost socket.
+  }
 }
 
 function localUrlFailure(raw: string): string | undefined {

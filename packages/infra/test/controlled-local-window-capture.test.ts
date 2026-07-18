@@ -4,6 +4,7 @@ import {
   captureControlledLocalWindow,
   type ControlledLocalPageCaptureDeps,
   type ControlledLocalWindowCaptureDeps,
+  type ControlledPrepareAction,
 } from "../src/controlled-local-window-capture.js";
 import { chromeLaunchArgs } from "../src/browser-operations/managed-chrome-adapter.js";
 
@@ -34,6 +35,7 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
         webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/fix-005",
       })),
     },
+    prepare: { run: vi.fn(async () => undefined) },
     provider: {
       writeRequest: vi.fn(async () => undefined),
       readResponse: vi.fn(async () => null),
@@ -175,6 +177,63 @@ describe("FIX-005 controlled local window capture", () => {
     expect(deps.provider.writeRequest).toHaveBeenCalledOnce();
   });
 
+  it("runs an explicit closed-vocabulary prepare list against the isolated local page before requesting pixels", async () => {
+    const actions: readonly ControlledPrepareAction[] = [
+      { kind: "click", selector: "#synthetic-checkbox" },
+      { kind: "wait", ms: 200 },
+      { kind: "scroll", selector: "#synthetic-result" },
+    ];
+    const run = vi.fn(async () => undefined);
+    const deps = dependencies({ prepare: { run } });
+
+    const result = await captureControlledLocalWindow({
+      projectRoot: "/project",
+      url: "http://127.0.0.1:4173/team",
+      windowTitle: "Roll Capture FIX-1435 nonce-unique",
+      prepare: actions,
+      request,
+    }, deps);
+
+    expect(result.status).toBe("taken");
+    expect(run).toHaveBeenCalledWith({
+      page: { url: "http://127.0.0.1:4173/team", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/fix-005" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions,
+    });
+    expect(run.mock.invocationCallOrder[0]).toBeLessThan((deps.provider.writeRequest as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]);
+  });
+
+  it("refuses an unknown prepare action before launching Chrome or requesting pixels", async () => {
+    const deps = dependencies();
+
+    const result = await captureControlledLocalWindow({
+      projectRoot: "/project",
+      url: "http://127.0.0.1:4173/team",
+      windowTitle: "Roll Capture FIX-1435 nonce-unique",
+      prepare: [{ kind: "evaluate", expression: "document.cookie" }] as unknown as readonly ControlledPrepareAction[],
+      request,
+    }, deps);
+
+    expect(result).toMatchObject({ status: "failed", reason: expect.stringContaining("prepare") });
+    expect(deps.chrome.launch).not.toHaveBeenCalled();
+    expect(deps.provider.writeRequest).not.toHaveBeenCalled();
+  });
+
+  it("never requests pixels when a controlled prepare action fails", async () => {
+    const deps = dependencies({ prepare: { run: vi.fn(async () => { throw new Error("selector not found"); }) } });
+
+    const result = await captureControlledLocalWindow({
+      projectRoot: "/project",
+      url: "http://127.0.0.1:4173/team",
+      windowTitle: "Roll Capture FIX-1435 nonce-unique",
+      prepare: [{ kind: "click", selector: "#missing" }],
+      request,
+    }, deps);
+
+    expect(result).toMatchObject({ status: "failed", reason: expect.stringContaining("selector not found") });
+    expect(deps.provider.writeRequest).not.toHaveBeenCalled();
+  });
+
   it("wraps a loopback page in its own nonce-titled window and closes that wrapper after capture", async () => {
     const close = vi.fn(async () => undefined);
     const open = vi.fn(async () => ({
@@ -193,5 +252,29 @@ describe("FIX-005 controlled local window capture", () => {
     expect(result).toMatchObject({ status: "taken", selector: { windowTitle: "Roll Capture FIX-005 generated-nonce" } });
     expect(open).toHaveBeenCalledWith({ url: "http://localhost:4173/team", storyId: "FIX-005" });
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the original loopback frame as the only prepare target when capture uses a nonce wrapper", async () => {
+    const close = vi.fn(async () => undefined);
+    const open = vi.fn(async () => ({
+      url: "http://127.0.0.1:4888/",
+      windowTitle: "Roll Capture FIX-1435 generated-nonce",
+      close,
+    }));
+    const run = vi.fn(async () => undefined);
+    const deps: ControlledLocalPageCaptureDeps = { ...dependencies({ prepare: { run } }), wrappers: { open } };
+
+    const result = await captureControlledLocalPage({
+      projectRoot: "/project",
+      url: "http://localhost:4173/team",
+      prepare: [{ kind: "click", selector: "#synthetic-checkbox" }],
+      request,
+    }, deps);
+
+    expect(result.status).toBe("taken");
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      targetUrl: "http://localhost:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }));
   });
 });

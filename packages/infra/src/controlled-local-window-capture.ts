@@ -276,7 +276,7 @@ export async function runControlledPrepareActions(
     await cdp.send("Page.enable");
     const targetOrigin = loopbackOrigin(input.targetUrl);
     if (targetOrigin === undefined) throw new Error("controlled prepare target must remain loopback");
-    let frameId = await waitForInitialPrepareFrame(cdp, input.targetUrl, deps.sleep);
+    const frameId = await waitForInitialPrepareFrame(cdp, input.targetUrl, deps.sleep);
     if (frameId === undefined) throw new Error("controlled prepare target frame was not found");
     for (const action of input.actions) {
       if (action.kind === "wait") {
@@ -287,8 +287,9 @@ export async function runControlledPrepareActions(
         if (action.kind === "fill") await evaluatePrepare(cdp, contextId, fillPrepareExpression(action.selector, action.value));
         if (action.kind === "scroll") await evaluatePrepare(cdp, contextId, scrollPrepareExpression(action.selector));
       }
-      frameId = await findCurrentPrepareFrame(cdp, targetOrigin);
-      if (frameId === undefined) throw new Error("controlled prepare action left the original loopback origin");
+      if (!await originalPrepareFrameRemainsLocal(cdp, frameId, targetOrigin)) {
+        throw new Error("controlled prepare action left the original loopback origin");
+      }
     }
   } finally {
     await closePrepareSession(cdp);
@@ -309,15 +310,15 @@ async function waitForInitialPrepareFrame(cdp: CdpSession, targetUrl: string, sl
   return undefined;
 }
 
-async function findCurrentPrepareFrame(cdp: CdpSession, targetOrigin: string): Promise<string | undefined> {
+async function originalPrepareFrameRemainsLocal(cdp: CdpSession, frameId: string, targetOrigin: string): Promise<boolean> {
   const tree = await cdp.send("Page.getFrameTree") as { frameTree?: unknown };
-  return findFrame(tree.frameTree, (url) => originOf(url) === targetOrigin);
+  return findFrame(tree.frameTree, (url, id) => id === frameId && originOf(url) === targetOrigin) !== undefined;
 }
 
-function findFrame(value: unknown, matches: (url: string) => boolean): string | undefined {
+function findFrame(value: unknown, matches: (url: string, id: string) => boolean): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const tree = value as { frame?: { id?: unknown; url?: unknown }; childFrames?: unknown };
-  if (typeof tree.frame?.id === "string" && typeof tree.frame.url === "string" && matches(tree.frame.url)) return tree.frame.id;
+  if (typeof tree.frame?.id === "string" && typeof tree.frame.url === "string" && matches(tree.frame.url, tree.frame.id)) return tree.frame.id;
   if (!Array.isArray(tree.childFrames)) return undefined;
   for (const child of tree.childFrames) {
     const found = findFrame(child, matches);

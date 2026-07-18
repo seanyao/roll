@@ -96,6 +96,26 @@ describe("FIX-005 controlled local window capture", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
+  it("rejects a navigation that replaces the prepared frame even when another loopback frame remains", async () => {
+    let frameTreeCalls = 0;
+    const send = vi.fn(async (method: string) => {
+      if (method === "Page.getFrameTree") {
+        frameTreeCalls += 1;
+        return frameTreeCalls === 1
+          ? { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "react", url: "http://127.0.0.1:4173/" } }] } }
+          : { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "react", url: "https://example.test/" } }, { frame: { id: "other-local", url: "http://127.0.0.1:4173/" } }] } };
+      }
+      if (method === "Page.createIsolatedWorld") return { executionContextId: 17 };
+      return {};
+    });
+
+    await expect(runControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, { connect: vi.fn(async () => ({ send, close: vi.fn(async () => undefined) })), sleep: vi.fn(async () => undefined) })).rejects.toThrow("left the original loopback origin");
+  });
+
   it("keeps ordinary managed Chrome headless and makes only the dedicated capture process visible", () => {
     const headless = chromeLaunchArgs({ profileDir: "/tmp/default", remoteDebuggingPort: 9222 });
     const visible = chromeLaunchArgs({

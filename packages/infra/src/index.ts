@@ -11,6 +11,7 @@ export * from "./screenshot.js";
 export * from "./screen-lock.js";
 export * from "./redact.js";
 export * from "./roll-capture.js";
+export * from "./controlled-local-window-capture.js";
 export * from "./capture-privacy.js";
 export * from "./tools/index.js";
 export * from "./playwright-pin.js";

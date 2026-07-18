@@ -18,6 +18,7 @@
  *     non-degraded state (AC2).
  */
 
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -31,15 +32,22 @@ import {
   type DeclaredSurface,
   type EvidenceHealthFact,
 } from "@roll/core";
-import { RollCaptureReceiptStore } from "@roll/infra";
+import {
+  RollCaptureReceiptStore,
+  captureControlledLocalPage,
+  isLoopbackCaptureUrl,
+  type ControlledLocalPageCaptureInput,
+  type ControlledLocalWindowCaptureResult,
+} from "@roll/infra";
 import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
 
 export const CAPTURE_USAGE =
-  "Usage: roll capture <status|migrate|repair>\n" +
+  "Usage: roll capture <status|migrate|repair|local-window>\n" +
   "  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n" +
   "  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
   "  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
-  "截图策略迁移、仅证据修复与就绪度：migrate 仅在网关+渲染器就绪时启用 best_effort（可回退）；repair 只重跑截图、绝不重建交付。\n";
+  "  local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n" +
+  "截图策略迁移、仅证据修复与就绪度：migrate 仅在网关+渲染器就绪时启用 best_effort（可回退）；repair 只重跑截图、绝不重建交付；local-window 仅捕获隔离的本地合成页面。\n";
 
 export interface CaptureCommandDeps {
   /** Read a text file; null when absent/unreadable. */
@@ -56,6 +64,8 @@ export interface CaptureCommandDeps {
   store?: CaptureReceiptStorePort;
   /** Declared surface resolver for `repair` (from the story spec). */
   resolveSurface?: (storyId: string, projectRoot: string) => DeclaredSurface | null;
+  /** FIX-005: isolated, loopback-only visible Chrome + Roll Capture lane. */
+  captureLocalWindow?: (input: ControlledLocalPageCaptureInput) => Promise<ControlledLocalWindowCaptureResult>;
   now?: () => Date;
 }
 
@@ -90,9 +100,65 @@ export async function captureCommand(args: string[], deps: CaptureCommandDeps = 
   if (sub === "status") return captureStatus(rest, deps);
   if (sub === "migrate") return captureMigrate(rest, deps);
   if (sub === "repair") return captureRepair(rest, deps);
+  if (sub === "local-window") return captureLocalWindow(rest, deps);
   process.stderr.write(`[roll] unknown 'roll capture' subcommand: ${sub}\n`);
   process.stderr.write(CAPTURE_USAGE);
   return 1;
+}
+
+// ── local-window (FIX-005) ──────────────────────────────────────────────────
+
+async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Promise<number> {
+  const storyId = flagValue(args, "--story");
+  const url = flagValue(args, "--url");
+  const projectRoot = flagValue(args, "--project") ?? process.cwd();
+  const runId = flagValue(args, "--run") ?? `local-${(deps.now ?? (() => new Date()))().toISOString().replace(/[^0-9]/gu, "")}`;
+  const json = args.includes("--json");
+  if (storyId === undefined || url === undefined) {
+    process.stdout.write("Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]\n");
+    return 1;
+  }
+  if (!safeSegment(storyId) || !safeSegment(runId)) {
+    process.stdout.write("local-window requires safe story and run identifiers (letters, digits, dot, underscore, hyphen only).\n");
+    return 1;
+  }
+  if (!isLoopbackCaptureUrl(url)) {
+    process.stdout.write("local-window only permits loopback HTTP(S) pages; no owner Chrome or remote URL was opened.\n");
+    return 1;
+  }
+
+  const now = (deps.now ?? (() => new Date()))();
+  const captureId = randomUUID();
+  const result = await (deps.captureLocalWindow ?? captureControlledLocalPage)({
+    projectRoot,
+    url,
+    request: {
+      protocol: "roll.capture.v1",
+      requestId: `controlled-${storyId}-${captureId}`,
+      storyId,
+      runId,
+      kind: "web",
+      out: join(projectRoot, ".roll", "captures", "controlled-local", storyId, runId, `controlled-window-${captureId}.png`),
+      timeoutMs: 60_000,
+      createdAt: now.toISOString(),
+    },
+  });
+  if (json) {
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  } else {
+    process.stdout.write([
+      `local-window capture: ${result.status}`,
+      ...(result.selector === undefined ? [] : [`  selector: ${result.selector.appName} · ${result.selector.windowTitle}`]),
+      ...(result.path === undefined ? [] : [`  screenshot: ${result.path}`]),
+      ...(result.response?.responsePath === undefined ? [] : [`  receipt: ${result.response.responsePath}`]),
+      ...(result.reason === undefined ? [] : [`  reason: ${result.reason}`]),
+    ].join("\n") + "\n");
+  }
+  return result.status === "taken" ? 0 : 1;
+}
+
+function safeSegment(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u.test(value) && !value.includes("..");
 }
 
 // ── status (AC4) ──────────────────────────────────────────────────────────────

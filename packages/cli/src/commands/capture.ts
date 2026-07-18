@@ -38,6 +38,7 @@ import {
   isLoopbackCaptureUrl,
   type ControlledLocalPageCaptureInput,
   type ControlledLocalWindowCaptureResult,
+  type ControlledPrepareAction,
 } from "@roll/infra";
 import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
 
@@ -46,7 +47,7 @@ export const CAPTURE_USAGE =
   "  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n" +
   "  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
   "  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
-  "  local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n" +
+  "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n" +
   "截图策略迁移、仅证据修复与就绪度：migrate 仅在网关+渲染器就绪时启用 best_effort（可回退）；repair 只重跑截图、绝不重建交付；local-window 仅捕获隔离的本地合成页面。\n";
 
 export interface CaptureCommandDeps {
@@ -113,6 +114,7 @@ async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Pro
   const url = flagValue(args, "--url");
   const projectRoot = flagValue(args, "--project") ?? process.cwd();
   const runId = flagValue(args, "--run") ?? `local-${(deps.now ?? (() => new Date()))().toISOString().replace(/[^0-9]/gu, "")}`;
+  const rawPrepare = flagValue(args, "--prepare");
   const json = args.includes("--json");
   if (storyId === undefined || url === undefined) {
     process.stdout.write("Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]\n");
@@ -126,12 +128,18 @@ async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Pro
     process.stdout.write("local-window only permits loopback HTTP(S) pages; no owner Chrome or remote URL was opened.\n");
     return 1;
   }
+  const prepare = parseControlledPrepare(rawPrepare);
+  if (typeof prepare === "string") {
+    process.stdout.write(`local-window ${prepare}\n`);
+    return 1;
+  }
 
   const now = (deps.now ?? (() => new Date()))();
   const captureId = randomUUID();
   const result = await (deps.captureLocalWindow ?? captureControlledLocalPage)({
     projectRoot,
     url,
+    prepare,
     request: {
       protocol: "roll.capture.v1",
       requestId: `controlled-${storyId}-${captureId}`,
@@ -155,6 +163,58 @@ async function captureLocalWindow(args: string[], deps: CaptureCommandDeps): Pro
     ].join("\n") + "\n");
   }
   return result.status === "taken" ? 0 : 1;
+}
+
+function parseControlledPrepare(raw: string | undefined): readonly ControlledPrepareAction[] | undefined | string {
+  if (raw === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "prepare must be a JSON action list";
+  }
+  if (!Array.isArray(parsed)) return "prepare must be a JSON action list";
+  if (parsed.length > 16) return "prepare allows at most 16 actions";
+  let totalWaitMs = 0;
+  const actions: ControlledPrepareAction[] = [];
+  for (const item of parsed) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return "prepare action must be an object";
+    const action = item as Record<string, unknown>;
+    const kind = action.kind;
+    if (kind === "wait") {
+      if (!hasOnly(action, ["kind", "ms"]) || typeof action.ms !== "number" || !Number.isInteger(action.ms) || action.ms < 0 || action.ms > 5_000) {
+        return "prepare wait requires only kind and an integer ms from 0 to 5000";
+      }
+      totalWaitMs += action.ms;
+      if (totalWaitMs > 15_000) return "prepare waits may total at most 15000ms";
+      actions.push({ kind, ms: action.ms });
+      continue;
+    }
+    if (kind === "click" || kind === "scroll") {
+      if (!hasOnly(action, ["kind", "selector"]) || !validPrepareSelector(action.selector)) {
+        return `prepare ${kind} requires only kind and a non-empty selector`;
+      }
+      actions.push({ kind, selector: action.selector });
+      continue;
+    }
+    if (kind === "fill") {
+      if (!hasOnly(action, ["kind", "selector", "value"]) || !validPrepareSelector(action.selector) || typeof action.value !== "string" || action.value.length > 1_000) {
+        return "prepare fill requires only kind, a non-empty selector, and a value of at most 1000 characters";
+      }
+      actions.push({ kind, selector: action.selector, value: action.value });
+      continue;
+    }
+    return "prepare only permits click, fill, wait, and scroll actions";
+  }
+  return actions;
+}
+
+function hasOnly(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => key in value);
+}
+
+function validPrepareSelector(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "" && value.length <= 500;
 }
 
 function safeSegment(value: string): boolean {

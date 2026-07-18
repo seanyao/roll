@@ -235,4 +235,39 @@ describe("FIX-005 roll capture local-window", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).not.toBe(requests[1]);
   });
+
+  it("passes only a parsed closed-vocabulary prepare list to the controlled local lane", async () => {
+    const root = tmpProject();
+    const localWindow = vi.fn(async () => ({ status: "taken" as const }));
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-1435", "--url", "http://127.0.0.1:4173/",
+      "--prepare", '[{"kind":"click","selector":"#synthetic-checkbox"},{"kind":"wait","ms":125},{"kind":"scroll","selector":"#synthetic-result"}]',
+    ], { captureLocalWindow: localWindow } as never);
+    out.restore();
+
+    expect(code).toBe(0);
+    expect(localWindow).toHaveBeenCalledWith(expect.objectContaining({
+      prepare: [
+        { kind: "click", selector: "#synthetic-checkbox" },
+        { kind: "wait", ms: 125 },
+        { kind: "scroll", selector: "#synthetic-result" },
+      ],
+    }));
+  });
+
+  it("rejects arbitrary evaluation and never starts the controlled local lane", async () => {
+    const root = tmpProject();
+    const localWindow = vi.fn();
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-1435", "--url", "http://127.0.0.1:4173/",
+      "--prepare", '[{"kind":"evaluate","expression":"document.cookie"}]',
+    ], { captureLocalWindow: localWindow } as never);
+    out.restore();
+
+    expect(code).toBe(1);
+    expect(localWindow).not.toHaveBeenCalled();
+    expect(out.text()).toContain("prepare");
+  });
 });

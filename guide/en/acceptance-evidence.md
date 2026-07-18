@@ -351,10 +351,12 @@ session locates the wrapper's declared loopback frame, performs only fixed UI
 operations in that frame, and verifies the frame remains on the same loopback
 origin after every action. A prepare failure sends no capture request.
 
-This is not general browser automation: it cannot use an owner profile, read or
-write cookies or storage, open remote URLs, or export browser data. `fill`
-rejects password controls and must be used only for non-sensitive synthetic
-local values; never place credentials or personal data in a command line.
+This is not general browser automation: it cannot use an owner profile or open
+remote URLs. The prepare API exposes no cookie or storage read/write/import/
+export operation and does not inject credentials; ordinary local application UI
+interactions still behave normally. `fill` rejects password controls and must
+be used only for non-sensitive synthetic local values; never place credentials
+or personal data in a command line.
 
 It accepts only loopback HTTP(S) pages. Roll starts a disposable Chrome profile
 and a nonce-titled local wrapper window, asks Roll Capture.app for that exact

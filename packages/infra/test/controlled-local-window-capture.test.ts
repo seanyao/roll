@@ -290,6 +290,40 @@ describe("FIX-005 controlled local window capture", () => {
     expect(deps.provider.writeRequest).not.toHaveBeenCalled();
   });
 
+  it("rejects password fills and aborts before any Roll Capture request", async () => {
+    const send = vi.fn(async (method: string) => {
+      if (method === "Page.getFrameTree") {
+        return { frameTree: { frame: { id: "synthetic-page", url: "http://127.0.0.1:4173/team" } } };
+      }
+      if (method === "Page.createIsolatedWorld") return { executionContextId: 17 };
+      if (method === "Runtime.evaluate") {
+        return { exceptionDetails: { text: "prepare does not fill password fields" } };
+      }
+      return {};
+    });
+    const deps = dependencies({
+      prepare: {
+        run: (input) => runControlledPrepareActions(input, {
+          connect: vi.fn(async () => ({ send, close: vi.fn(async () => undefined) })),
+          sleep: vi.fn(async () => undefined),
+        }),
+      },
+    });
+
+    const result = await captureControlledLocalWindow({
+      projectRoot: "/project",
+      url: "http://127.0.0.1:4173/team",
+      windowTitle: "Roll Capture FIX-1435 nonce-unique",
+      prepare: [{ kind: "fill", selector: "#synthetic-password", value: "not-a-real-secret" }],
+      request,
+    }, deps);
+
+    expect(result).toMatchObject({ status: "failed", reason: expect.stringContaining("password fields") });
+    const evaluation = send.mock.calls.find(([method]) => method === "Runtime.evaluate")?.[1] as { expression?: string } | undefined;
+    expect(evaluation?.expression).toContain('element.type.toLowerCase() === "password"');
+    expect(deps.provider.writeRequest).not.toHaveBeenCalled();
+  });
+
   it("wraps a loopback page in its own nonce-titled window and closes that wrapper after capture", async () => {
     const close = vi.fn(async () => undefined);
     const open = vi.fn(async () => ({

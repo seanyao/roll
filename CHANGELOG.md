@@ -4,6 +4,7 @@
 
 ### 稳定性
 - 修复致命回归:自动交付循环在 worktree 里跑 `roll test` 因"改动已提交、--changed 匹配到 0 个测试"被误判成失败,导致每张卡都过不了验收、无法交付;现在 roll 自带的 --affected 闸把 0 改动测试当诚实绿(整套仍由 CI 全量兜底) (FIX-1454)
+- 浏览器审计账本(`.roll/browser-operations/events.ndjson`,只追加、随正常授权取证增长)不再被 bootstrap 完整性闸误判为未知污染而卡住后续每张卡;该豁免精确绑定到这一个路径且校验 ndjson 结构,被替换/损坏的账本仍会被拦(不引入 trust-all/ignore-dirty) (FIX-1455)
 
 ## v4.718.2 — 2026-07-18
 

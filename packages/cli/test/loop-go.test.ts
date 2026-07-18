@@ -543,6 +543,36 @@ describe("US-GOAL-002 — roll loop go", () => {
     expect(classifyBootstrapArtifacts(["AGENTS.md"], [manifest], p)).toMatchObject({ kind: "bootstrap_only", files: ["AGENTS.md"] });
   });
 
+  it("FIX-1455: a valid browser audit ledger coexists with the gate (does not pause)", () => {
+    const p = project();
+    const ledger = ".roll/browser-operations/events.ndjson";
+    mkdirSync(join(p, ".roll", "browser-operations"), { recursive: true });
+    writeFileSync(join(p, ledger), '{"e":"approve"}\n{"e":"capture"}\n');
+
+    // A valid ndjson ledger is owned (runtimeLedger) → no pause.
+    expect(classifyBootstrapArtifacts([ledger], [], p)).toMatchObject({
+      kind: "none",
+      files: [],
+      runtimeLedger: [ledger],
+    });
+
+    // An unrelated unknown .roll path alongside the ledger still fails closed.
+    mkdirSync(join(p, ".roll", "features"), { recursive: true });
+    writeFileSync(join(p, ".roll", "features", "x-pollute.txt"), "junk");
+    expect(classifyBootstrapArtifacts([ledger, ".roll/features/x-pollute.txt"], [], p)).toMatchObject({
+      kind: "bootstrap_only",
+      files: [".roll/features/x-pollute.txt"],
+      runtimeLedger: [ledger],
+    });
+
+    // A replaced/corrupted ledger (non-ndjson) is rejected — no trust-all bypass.
+    writeFileSync(join(p, ledger), "not json\n");
+    expect(classifyBootstrapArtifacts([ledger], [], p)).toMatchObject({
+      kind: "bootstrap_only",
+      files: [ledger],
+    });
+  });
+
   it("FIX-1272: a mixed checkout reports verified + external and is not called bootstrap-only", () => {
     const p = project();
     const rel = ".roll/features/loop-engine/FIX-1272/run/report.html";

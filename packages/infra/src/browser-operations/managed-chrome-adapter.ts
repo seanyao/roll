@@ -183,6 +183,7 @@ export function chromeLaunchArgs(options: ChromeLaunchOptions): string[] {
     "--disable-background-networking",
     "--disable-sync",
     "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
     "--disable-popup-blocking",
     "--disable-features=Translate",
     visible ? `--app=${options.initialUrl ?? "about:blank"}` : "about:blank",

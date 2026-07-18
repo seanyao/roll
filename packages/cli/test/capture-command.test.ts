@@ -203,6 +203,22 @@ describe("FIX-005 roll capture local-window", () => {
     expect(out.text()).not.toContain(`receipt: ${screenshotPath}`);
   });
 
+  it("uses the controlled Roll Capture lane when the browser extension is unavailable", async () => {
+    const root = tmpProject();
+    const localWindow = vi.fn(async () => ({ status: "taken" as const }));
+    const out = captureStdout();
+    const code = await captureCommand([
+      "local-window", "--project", root, "--story", "FIX-1444", "--run", "extension-unavailable",
+      "--url", "http://127.0.0.1:4173/synthetic",
+    ], { captureLocalWindow: localWindow } as never);
+    out.restore();
+
+    expect(code).toBe(0);
+    expect(localWindow).toHaveBeenCalledOnce();
+    expect(out.text()).toContain("browser extension: not used");
+    expect(out.text()).toContain("privacy: loopback-only synthetic target in a temporary profile");
+  });
+
   it("rejects a remote page before the controlled capture lane starts", async () => {
     const root = tmpProject();
     const localWindow = vi.fn();

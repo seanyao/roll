@@ -28,6 +28,14 @@ import type { GoTmuxState } from "../src/commands/loop-go.js";
 
 const CLI_BIN = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "roll.js");
 
+async function waitForOutput(readOutput: () => string, expected: string, timeoutMs = 8_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!readOutput().includes(expected)) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${expected}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 const CYCLE_STREAM = [
   "── cycle 20260614-1 · US-LOOP-074 · agent kimi ──",
   JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", name: "Edit", input: { file_path: "packages/cli/src/commands/loop-watch.ts" } }] } }),
@@ -506,12 +514,12 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
       out += String(d);
     });
 
-    // After the watcher is following, append a SECOND cycle banner mid-stream.
+    // Wait until the watcher renders the seed before appending a SECOND banner.
     // A banner is a tier-A lifecycle node the generic normalizer renders in the
     // concise default view, so its appearance proves the stream did not freeze.
-    await new Promise((r) => setTimeout(r, 600));
+    await waitForOutput(() => out, "US-LOOP-074");
     appendFileSync(live, "── cycle 20260614-9 · US-LOOP-099 · agent kimi ──\n", "utf8");
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForOutput(() => out, "US-LOOP-099");
 
     // Read-only: the only bytes in live.log are the banner + OUR append.
     // If watch ever wrote, the size would exceed this exact expected length.
@@ -523,5 +531,5 @@ describe("roll loop watch — mid-stream rendering + read-only (AC4/AC2, spawned
     // The mid-stream append rendered (it did NOT look frozen) — the core AC4 claim.
     expect(out).toContain("US-LOOP-074"); // seeded banner
     expect(out).toContain("US-LOOP-099"); // the banner that arrived AFTER attach
-  }, 15_000);
+  }, 20_000);
 });

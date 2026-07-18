@@ -61,7 +61,7 @@ function dependencies(overrides: Partial<ControlledLocalWindowCaptureDeps> = {})
 }
 
 describe("FIX-005 controlled local window capture", () => {
-  it("waits for the loopback React frame and runs only fixed click, wait, and scroll operations", async () => {
+  it("uses physical pointer input for a loopback React checkbox, then runs fixed wait and scroll operations", async () => {
     let frameTreeCalls = 0;
     const send = vi.fn(async (method: string, params?: Record<string, unknown>) => {
       if (method === "Page.getFrameTree") {
@@ -71,7 +71,13 @@ describe("FIX-005 controlled local window capture", () => {
           : { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "react", url: "http://127.0.0.1:4173/" } }] } };
       }
       if (method === "Page.createIsolatedWorld") return { executionContextId: 17 };
-      if (method === "Runtime.evaluate") return {};
+      if (method === "DOM.getFrameOwner") return { backendNodeId: 25 };
+      if (method === "DOM.getBoxModel") return { model: { content: [20, 30, 220, 30, 220, 230, 20, 230] } };
+      if (method === "Runtime.evaluate") {
+        const expression = String(params?.expression ?? "");
+        if (expression.includes("getBoundingClientRect")) return { result: { value: { x: 120, y: 80 } } };
+        return {};
+      }
       return {};
     });
     const close = vi.fn(async () => undefined);
@@ -93,6 +99,8 @@ describe("FIX-005 controlled local window capture", () => {
     const expressions = send.mock.calls.filter(([method]) => method === "Runtime.evaluate").map(([, params]) => String((params as { expression: string }).expression));
     expect(expressions).toEqual(expect.arrayContaining([expect.stringContaining("#synthetic-checkbox"), expect.stringContaining("#synthetic-result")]));
     expect(expressions.join("\n")).not.toContain("document.cookie");
+    expect(send).toHaveBeenCalledWith("Input.dispatchMouseEvent", expect.objectContaining({ type: "mousePressed", button: "left", clickCount: 1 }));
+    expect(send).toHaveBeenCalledWith("Input.dispatchMouseEvent", expect.objectContaining({ type: "mouseReleased", button: "left", clickCount: 1 }));
     expect(close).toHaveBeenCalledOnce();
   });
 
@@ -106,6 +114,9 @@ describe("FIX-005 controlled local window capture", () => {
           : { frameTree: { frame: { id: "wrapper", url: "http://127.0.0.1:4888/" }, childFrames: [{ frame: { id: "react", url: "https://example.test/" } }, { frame: { id: "other-local", url: "http://127.0.0.1:4173/" } }] } };
       }
       if (method === "Page.createIsolatedWorld") return { executionContextId: 17 };
+      if (method === "Runtime.evaluate") return { result: { value: { x: 120, y: 80 } } };
+      if (method === "DOM.getFrameOwner") return { backendNodeId: 25 };
+      if (method === "DOM.getBoxModel") return { model: { content: [20, 30, 220, 30, 220, 230, 20, 230] } };
       return {};
     });
 

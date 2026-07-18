@@ -294,7 +294,8 @@ roll capture local-window --story FIX-1435 --url http://127.0.0.1:4173/ \
 `--prepare` 只允许有上限的 `click`、`fill`、`wait` 与 `scroll`。未知字段或动作种类、
 任意 JavaScript、导航、超量动作或等待都会在 Chrome 启动前被拒绝。临时 DevTools 会定位
 wrapper 声明的 loopback frame，只在该 frame 执行固定 UI 操作，并在每一步后校验 frame
-仍处于同一 loopback origin。准备动作失败时不会发送截图请求。
+仍处于同一 loopback origin。`click` 会定位可见元素，并通过一次性 Chrome 发出有界的真实
+指针按下/抬起事件，使受控 React 输入走正常 UI 事件路径。准备动作失败时不会发送截图请求。
 
 这不是通用浏览器自动化：它不能使用 owner profile，也不能打开远程 URL。prepare API 不
 暴露 cookie 或 storage 的读写、导入或导出操作，也不会注入凭据；目标本地应用本身的正常

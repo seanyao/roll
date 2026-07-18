@@ -72,6 +72,13 @@ export interface ManagedProcessControl {
   sigtermGraceMs?: number;
   /** Settle window a SIGKILL'd group gets before the final liveness verdict. Default 100ms. */
   sigkillSettleMs?: number;
+  /**
+   * FIX-1434: bounded budget for retrying SIGKILL against a group that still
+   * reads "alive" AFTER our direct MCP child has exited — reparented descendants
+   * that the kernel has not finished reaping (a Linux reap-lag race, where
+   * `kill(-pgid, 0)` on a zombie returns success rather than EPERM). Default 1500ms.
+   */
+  sigkillReapBudgetMs?: number;
   /** Liveness poll interval. Default 20ms. */
   pollIntervalMs?: number;
 }
@@ -545,11 +552,33 @@ async function terminateProcessGroup(
   signalGroupBestEffort(control, pid, "SIGKILL");
   if (await waitForGroupDead(control, pid, sigkillSettleMs)) return;
 
-  const finalState = probeGroup(control, pid);
+  let finalState = probeGroup(control, pid);
   if (finalState === "dead") return;
   // Our direct child has exited; residual EPERM is a dead/zombie group we cannot
   // (and need not) signal. Not a leak.
   if (finalState === "uncertain" && child.exitCode !== null) return;
+
+  // FIX-1434: on Linux, `kill(-pgid, 0)` against a just-exited-but-not-yet-reaped
+  // descendant returns success ("alive"), not EPERM — so the EPERM leniency above
+  // never triggers there, and a transient reap-lag under CI load spuriously trips
+  // the leak gate. When our direct MCP child has already exited, an "alive" group
+  // is almost always reparented descendants pending reap: give it a bounded,
+  // re-signalling budget before the final verdict. A group that outlives the whole
+  // budget still fails loud, and a group that is alive while our MCP child is STILL
+  // running remains an immediate, unchanged leak failure.
+  if (finalState === "alive" && child.exitCode !== null) {
+    const reapBudgetMs = control.sigkillReapBudgetMs ?? 1500;
+    const sliceMs = Math.max(sigkillSettleMs, 50);
+    const rounds = Math.max(1, Math.ceil(reapBudgetMs / sliceMs));
+    for (let round = 0; round < rounds; round += 1) {
+      signalGroupBestEffort(control, pid, "SIGKILL");
+      if (await waitForGroupDead(control, pid, sliceMs)) return;
+    }
+    finalState = probeGroup(control, pid);
+    if (finalState === "dead") return;
+    // Reaped into a zombie/EPERM state — the descendants are gone, not a leak.
+    if (finalState === "uncertain") return;
+  }
 
   throw new McpProcessCleanupError(describeUnkillableGroup(pid, finalState, child.exitCode !== null), {
     pid,

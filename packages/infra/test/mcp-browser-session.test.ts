@@ -396,6 +396,7 @@ describe("FIX-1275 managed MCP cleanup is resilient to macOS EPERM", () => {
       sleep: () => Promise.resolve(),
       sigtermGraceMs: 5,
       sigkillSettleMs: 5,
+      sigkillReapBudgetMs: 15,
       pollIntervalMs: 1,
       killGroup: (pid, signal) => {
         calls.push({ pid, signal });
@@ -470,6 +471,43 @@ describe("FIX-1275 managed MCP cleanup is resilient to macOS EPERM", () => {
     const failed = events.find((e) => e.type === "browser:mcp-failed");
     expect(failed?.type === "browser:mcp-failed" && failed.category).toBe("crash");
     expect(failed?.type === "browser:mcp-failed" && failed.message).toMatch(/MCP process cleanup failed/);
+  });
+
+  it("tolerates reap-lag: a group that reads alive but dies shortly after the MCP child exited (#1434)", async () => {
+    const { events, emit } = captureEvents();
+    // Linux reap-lag: after the MCP child exits, kill(-pgid, 0) still reports the
+    // reparented descendants as alive (success, not EPERM) until the kernel reaps
+    // them a couple of SIGKILL rounds later.
+    let sigkills = 0;
+    const { control, calls } = fakeControl(({ signal }) => {
+      if (signal === "SIGKILL") { sigkills += 1; return; }
+      // signal 0 probe: alive until two SIGKILL rounds have landed, then ESRCH.
+      if (signal === 0 && sigkills >= 2) throw errno("ESRCH", "kill ESRCH");
+    });
+    const { session, child } = await openGroupSession(control, emit, "run-reap-lag");
+    child.exitCode = 0; // MCP child already exited; only lingering descendants remain
+
+    await expect(session.close()).resolves.toBeUndefined();
+
+    expect(events.filter((e) => e.type === "browser:mcp-closed")).toHaveLength(1);
+    expect(events.some((e) => e.type === "browser:mcp-failed")).toBe(false);
+    // The reap-lag path re-sends SIGKILL beyond the first settle window.
+    expect(calls.filter((c) => c.signal === "SIGKILL").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("still fails loud when a group outlives the reap budget even after the MCP child exited (#1434)", async () => {
+    const { events, emit } = captureEvents();
+    // Child exited, but a detached descendant genuinely leaks and never dies:
+    // the bounded reap budget must NOT turn a real leak into a silent success.
+    const { control } = fakeControl(() => {
+      /* every kill "succeeds" yet the group stays alive forever */
+    });
+    const { session, child } = await openGroupSession(control, emit, "run-reap-exceeded");
+    child.exitCode = 0;
+
+    await expect(session.close()).rejects.toThrow(/still alive after SIGTERM and SIGKILL/);
+    const failed = events.find((e) => e.type === "browser:mcp-failed");
+    expect(failed?.type === "browser:mcp-failed" && failed.category).toBe("crash");
   });
 
   it("does NOT swallow EPERM while the MCP child is still running", async () => {

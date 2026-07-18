@@ -28,9 +28,9 @@
  * generous `it` timeout is headroom for a cold CI build, not the expected cost.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 const REPO_ROOT = resolve(__dirname, "../../..");
@@ -141,6 +141,58 @@ describe("npm pack → install → run (release packaging)", () => {
       //     installed dist/roll.mjs. This is the load-bearing assertion.
       const prices = run(bin, ["config", "prices", "show"], prefix);
       expect(prices).toMatch(/snapshots\s+\d+ loaded/);
+
+      // 3e. #1448: the SHIPPED `roll test` command path must be Vitest-3
+      //     compatible — FIX-1274's fix lives in the bundle, but its unit tests
+      //     only drive the in-process source function. Here we run the actually
+      //     installed dist/roll.mjs against a Vitest 3.2.x target and assert it
+      //     selects `--changed` and NEVER forwards the unsupported `--affected`.
+      const proj = tmp("vitest-target");
+      mkdirSync(join(proj, ".roll"), { recursive: true });
+      writeFileSync(join(proj, ".roll", "local.yaml"), "test_isolation:\n  type: none\n");
+      writeFileSync(join(proj, "package.json"), JSON.stringify({ name: "vitest-target", scripts: { test: "vitest run" } }, null, 2));
+      mkdirSync(join(proj, "node_modules", "vitest"), { recursive: true });
+      writeFileSync(join(proj, "node_modules", "vitest", "package.json"), JSON.stringify({ name: "vitest", version: "3.2.7" }));
+      const g = (args: string[]): void => {
+        const r = spawnSync("git", args, { cwd: proj, encoding: "utf8" });
+        if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+      };
+      g(["init", "-q"]);
+      g(["config", "user.email", "t@example.com"]);
+      g(["config", "user.name", "t"]);
+      g(["add", "-A"]);
+      g(["commit", "-q", "-m", "baseline", "--no-verify"]);
+      // A Vitest-3.2.x-flavoured npm shim: reject --affected, pass on --changed.
+      const shimDir = tmp("npm-shim");
+      const npmLog = join(shimDir, "npm-args.log");
+      writeFileSync(
+        join(shimDir, "npm"),
+        [
+          "#!/bin/sh",
+          `echo "$*" >> "${npmLog}"`,
+          'case "$*" in',
+          '  *--affected*) echo "CACError: Unknown option \\`--affected\\`" >&2; exit 1 ;;',
+          '  *--changed*) echo "Test Files  1 passed (1)"; echo "Tests  3 passed (3)"; exit 0 ;;',
+          '  *) echo "Test Files  9 passed (9)"; exit 0 ;;',
+          "esac",
+          "",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const testRun = spawnSync(bin, ["test"], {
+        cwd: proj,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...envFor(proj),
+          // Shim's npm first; keep node (bin shim is `env node`) + git resolvable.
+          PATH: `${shimDir}:${dirname(process.execPath)}:/usr/bin:/bin`,
+        },
+      });
+      expect(testRun.status, `shipped roll test failed: ${testRun.stdout}\n${testRun.stderr}`).toBe(0);
+      const npmArgs = readFileSync(npmLog, "utf8");
+      expect(npmArgs).toContain("--changed");
+      expect(npmArgs).not.toContain("--affected");
     },
     120_000,
   );

@@ -240,6 +240,46 @@ describe("FIX-005 controlled local window capture", () => {
     expect(page.session.detach).toHaveBeenCalledTimes(2);
   });
 
+  it("fails closed when a controlled checkbox never reaches the requested state (#1439)", async () => {
+    // The click AND the recovery check both leave isChecked() unchanged — the
+    // prepared page never reaches the requested visible state, so prepare must
+    // throw before any capture is requested rather than proceed on a stale page.
+    const click = vi.fn(async () => undefined);
+    const check = vi.fn(async () => undefined);
+    const isChecked = vi.fn(async () => false); // never flips
+    const locator = vi.fn(() => ({
+      first: () => ({
+        waitFor: vi.fn(async () => undefined),
+        isVisible: vi.fn(async () => true),
+        getAttribute: vi.fn(async () => "checkbox"),
+        isChecked,
+        click,
+        check,
+      }),
+    }));
+    const page = pageWithDevToolsIdentity({
+      url: "http://127.0.0.1:4888/",
+      targetId: "controlled",
+      frameId: "original-target-frame",
+      targetUrl: "http://127.0.0.1:4173/team",
+      frames: () => [{ url: () => "http://127.0.0.1:4888/", isDetached: () => false, locator }, { url: () => "http://127.0.0.1:4173/team", isDetached: () => false, locator }],
+    });
+    const browser = {
+      contexts: () => [{ pages: () => [page] }],
+      close: vi.fn(async () => undefined),
+    };
+
+    await expect(runPlaywrightControlledPrepareActions({
+      page: { url: "http://127.0.0.1:4888/", webSocketDebuggerUrl: "ws://127.0.0.1:9333/devtools/page/controlled" },
+      targetUrl: "http://127.0.0.1:4173/team",
+      actions: [{ kind: "click", selector: "#synthetic-checkbox" }],
+    }, {
+      connectOverCDP: vi.fn(async () => browser as never),
+      connectCdp: vi.fn(async () => discoveredFrameIdentitySession("original-target-frame") as never),
+      sleep: vi.fn(async () => undefined),
+    })).rejects.toThrow(/checkbox recovery did not change state/);
+  });
+
   it("rejects a same-URL replacement before the first locator action", async () => {
     const click = vi.fn(async () => undefined);
     const locator = vi.fn(() => ({

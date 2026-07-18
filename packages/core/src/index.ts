@@ -92,6 +92,7 @@ export * from "./attest/report-smoke.js";
 export * from "./attest/evidence-drafter.js";
 export * from "./attest/evidence-classifier.js";
 export * from "./attest/capture-planner.js";
+export * from "./attest/serve-rendered-capture-v2.js";
 export * from "./attest/evidence-health.js";
 export * from "./attest/capture-policy-migration.js";
 export * from "./attest/evidence-repair.js";

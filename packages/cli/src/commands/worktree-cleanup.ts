@@ -201,11 +201,13 @@ export interface StandaloneBranchDeps {
    * `ancestor` when every commit is reachable from the integration branch;
    * `patch_equivalent` when `git cherry` shows every branch commit already has an
    * equivalent patch in integration; `final_tree` (FIX-1471) when the branch tip
-   * tree is byte-identical to a merge commit reachable from integration (the
-   * squash-merge case `git cherry` false-negatives). `null` = cannot prove
-   * delivery → preserve (fail closed). A merged GitHub PR alone is NOT proof — a
-   * squash merge leaves the exact branch tips undelivered and any unique commit
-   * must be kept unless the whole final tree is provably on integration.
+   * tree is byte-identical to the merge commit of the branch's OWN merged GitHub
+   * PR and that merge commit is an ancestor of integration (the squash-merge case
+   * `git cherry` false-negatives). `null` = cannot prove delivery → preserve (fail
+   * closed). A merged GitHub PR alone is NOT proof — a squash merge leaves the
+   * exact branch tips undelivered and any unique commit must be kept unless the
+   * whole final tree matches the branch's own landed PR merge commit. An unrelated
+   * integration commit that merely shares a tree oid is NEVER proof.
    */
   branchMerge: (branch: string, sha: string) => "ancestor" | "patch_equivalent" | "final_tree" | null;
 }
@@ -804,35 +806,46 @@ function gitCap(repoRoot: string, args: string[]): string {
 export type BranchGitProbe = (args: string[]) => { ok: boolean; stdout: string };
 
 /**
+ * FIX-1471: injectable lookup for the merge commit OID of a MERGED GitHub PR whose
+ * head is EXACTLY `branch`. Returns the merge commit SHA, or `null` when there is
+ * no such merged PR (or the probe fails). Real implementations shell out to `gh`;
+ * tests inject fakes. This is the ONLY source of a squash-merge delivery anchor —
+ * see {@link classifyFinalTreeDelivery}.
+ */
+export type PrMergeCommitProbe = (branch: string) => string | null;
+
+/**
  * FIX-1458 (#1465), FIX-1471: classify how a standalone branch's work is
- * delivered, using ONLY fresh git evidence — never a merged-PR label on its own.
+ * delivered, using ONLY fresh git evidence anchored to the branch's own PR — never
+ * a merged-PR label on its own, and never an arbitrary same-tree commit.
  *
  *  - `ancestor`        — `merge-base --is-ancestor`: every commit is literally
  *                        reachable from integration; deleting the ref loses nothing.
  *  - `patch_equivalent`— `git cherry <integration> <branch>` prints `-` for every
  *                        commit (each already has an equivalent patch upstream).
  *  - `final_tree`      — (FIX-1471) the branch tip's whole-repo tree is
- *                        byte-identical to a commit reachable from the integration
- *                        branch. This is the squash-merge case: `git cherry`
- *                        false-negatives (the individual TCR commits have no
- *                        matching patch id upstream), but the PR's single merge
- *                        commit carries the branch's EXACT final tree. The matched
- *                        commit is, by construction of walking `git log
- *                        <integration>`, an ancestor of the integration branch.
- *  - `null`            — no ancestry, no full-patch-equivalence, and no exact
- *                        final-tree match (incl. a NEAR-match that differs by even
- *                        one file), or any empty/failed probe. Fail closed:
- *                        unproven ⇒ preserve.
+ *                        byte-identical to the ACTUAL merge commit of a merged
+ *                        GitHub PR for THIS exact head ref, and that merge commit
+ *                        is an ancestor of the integration branch. This is the
+ *                        squash-merge case: `git cherry` false-negatives (the
+ *                        individual TCR commits have no matching patch id
+ *                        upstream), but the PR's single merge commit carries the
+ *                        branch's EXACT final tree. See {@link classifyFinalTreeDelivery}.
+ *  - `null`            — no ancestry, no full-patch-equivalence, and no
+ *                        PR-anchored exact final-tree match (incl. a NEAR-match
+ *                        that differs by even one file), or any empty/failed
+ *                        probe. Fail closed: unproven ⇒ preserve.
  *
- * Pure w.r.t. the injected probe; no gh, no network — a merged PR label is
- * deliberately NOT consulted. Delivery is proven only by ancestry, full
- * patch-equivalence, or an exact final-tree match on an integration-reachable
- * commit — never by partial patch overlap or PR state alone.
+ * Pure w.r.t. the injected probes. Delivery is proven only by ancestry, full
+ * patch-equivalence, or an exact final-tree match against the branch's own merged
+ * PR merge commit — never by partial patch overlap, PR state alone, or an
+ * unrelated integration commit that happens to share a tree oid.
  */
 export function classifyBranchMerge(
   branch: string,
   integrationBranch: string,
   git: BranchGitProbe,
+  prMergeCommit: PrMergeCommitProbe,
 ): "ancestor" | "patch_equivalent" | "final_tree" | null {
   if (git(["merge-base", "--is-ancestor", branch, integrationBranch]).ok) return "ancestor";
   const cherry = git(["cherry", integrationBranch, branch]);
@@ -846,40 +859,61 @@ export function classifyBranchMerge(
     // Otherwise (a `+` unique patch — the squash-merge case — an empty diff, or
     // unrecognized output) fall through to the final-tree proof below.
   }
-  return classifyFinalTreeDelivery(branch, integrationBranch, git);
+  return classifyFinalTreeDelivery(branch, integrationBranch, git, prMergeCommit);
 }
 
 /**
- * FIX-1471: prove delivery of a squash-merged ref by exact final-tree equality.
+ * FIX-1471: prove delivery of a squash-merged ref by exact final-tree equality
+ * against the branch's OWN merged PR merge commit.
  *
  * A squash merge collapses the branch's TCR commits into one merge commit on the
  * integration branch, so `git cherry` shows every branch commit as unique (`+`).
  * But that merge commit's whole-repo tree is byte-identical to the branch tip's
- * tree (equivalently `git diff --quiet <ref> <merge>` = 0). We resolve the branch
- * tip tree and scan commits reachable from the integration branch for a commit
- * with the same tree oid; a match is the merge commit and is, by construction of
- * `git log <integration>`, an ancestor of integration.
+ * tree. Delivery is accepted ONLY when ALL of the following hold:
  *
- * Fail closed: a missing/failed tree or log probe, or no exact match (a NEAR-match
- * that differs by even one file changes the tree oid and does NOT match), ⇒ null.
+ *   1. A merged GitHub PR exists for THIS exact head ref, yielding a merge commit
+ *      OID (`prMergeCommit(branch)`). No merged PR / no merge OID ⇒ preserve.
+ *   2. That merge commit is an ancestor of the integration branch
+ *      (`merge-base --is-ancestor <merge> <integration>`) — i.e. actually landed.
+ *   3. The branch tip tree oid equals the merge commit's tree oid, byte-for-byte.
+ *
+ * Crucially, the tree is compared ONLY against the branch's associated PR merge
+ * commit — NOT against every integration-reachable commit. An unrelated commit on
+ * main that coincidentally shares a tree oid (empty/trivial trees, reverts) is
+ * never treated as delivery proof.
+ *
+ * Fail closed: absent merged PR, non-ancestor merge commit, a missing/failed tree
+ * probe, or any tree mismatch (a NEAR-match differing by even one file changes the
+ * tree oid) ⇒ null.
  */
 function classifyFinalTreeDelivery(
   branch: string,
   integrationBranch: string,
   git: BranchGitProbe,
+  prMergeCommit: PrMergeCommitProbe,
 ): "final_tree" | null {
-  const treeProbe = git(["rev-parse", `${branch}^{tree}`]);
-  if (!treeProbe.ok) return null; // cannot resolve the branch tree → preserve
-  const branchTree = treeProbe.stdout.trim();
+  // (1) The delivery anchor is the branch's OWN merged PR merge commit — nothing else.
+  const rawMerge = prMergeCommit(branch);
+  if (rawMerge === null) return null; // no merged PR for this head ref → preserve
+  const merge = rawMerge.trim();
+  if (merge === "") return null;
+
+  // (2) That merge commit must actually be on the integration branch.
+  if (!git(["merge-base", "--is-ancestor", merge, integrationBranch]).ok) return null;
+
+  // (3) The branch tip tree must be byte-identical to the merge commit's tree.
+  const branchTreeProbe = git(["rev-parse", `${branch}^{tree}`]);
+  if (!branchTreeProbe.ok) return null; // cannot resolve the branch tree → preserve
+  const branchTree = branchTreeProbe.stdout.trim();
   if (branchTree === "") return null;
-  const log = git(["log", "--format=%H %T", integrationBranch]);
-  if (!log.ok) return null; // cannot read integration history → preserve
-  for (const line of log.stdout.split("\n")) {
-    const parts = line.trim().split(/\s+/);
-    const tree = parts[1];
-    if (parts[0] && tree && tree === branchTree) return "final_tree";
-  }
-  return null; // no integration-reachable commit carries this exact tree → preserve
+
+  const mergeTreeProbe = git(["rev-parse", `${merge}^{tree}`]);
+  if (!mergeTreeProbe.ok) return null; // cannot resolve the merge commit tree → preserve
+  const mergeTree = mergeTreeProbe.stdout.trim();
+  if (mergeTree === "") return null;
+
+  if (branchTree !== mergeTree) return null; // near-match / different tree → preserve
+  return "final_tree";
 }
 
 /** FIX-1454: real git+gh probes for standalone-branch recovery over `repoRoot`. */
@@ -909,23 +943,68 @@ export function buildStandaloneBranchDeps(
         return null;
       }
     },
-    // FIX-1458 (#1465): delivery is proven ONLY by fresh git patch evidence via
-    // classifyBranchMerge (ancestor OR `git cherry` patch-equivalence). A merged
-    // GitHub PR is deliberately NOT consulted: a squash merge leaves the exact
-    // branch tips undelivered, so authorizing deletion on a merged PR alone
-    // silently discards unique commits (US-ORG-003/007/004 in the report).
+    // FIX-1458 (#1465), FIX-1471: delivery is proven by fresh git patch evidence
+    // (ancestor OR `git cherry` patch-equivalence) OR, for the squash-merge case,
+    // by the branch tip tree matching the merge commit of the branch's OWN merged
+    // GitHub PR (an ancestor of integration). A merged PR label alone never
+    // authorizes deletion, and no arbitrary same-tree integration commit is ever
+    // consulted — that would silently discard unique commits (US-ORG-003/007/004).
     branchMerge: (branch) =>
-      classifyBranchMerge(branch, integrationBranch, (args) => {
-        try {
-          return { ok: true, stdout: gitCap(repoRoot, args) };
-        } catch (err) {
-          // execFileSync throws on non-zero exit; capture any stdout it produced
-          // (git cherry exits 0 normally, so a throw here means a real failure).
-          const stdout = typeof (err as { stdout?: unknown }).stdout === "string" ? (err as { stdout: string }).stdout : "";
-          return { ok: false, stdout };
-        }
-      }),
+      classifyBranchMerge(
+        branch,
+        integrationBranch,
+        (args) => {
+          try {
+            return { ok: true, stdout: gitCap(repoRoot, args) };
+          } catch (err) {
+            // execFileSync throws on non-zero exit; capture any stdout it produced
+            // (git cherry exits 0 normally, so a throw here means a real failure).
+            const stdout = typeof (err as { stdout?: unknown }).stdout === "string" ? (err as { stdout: string }).stdout : "";
+            return { ok: false, stdout };
+          }
+        },
+        (b) => ghMergedPrMergeCommit(repoRoot, b),
+      ),
   };
+}
+
+/**
+ * FIX-1471: resolve the merge commit OID of a MERGED GitHub PR whose head is
+ * EXACTLY `branch`. Synchronous (matches this file's execFileSync style) and
+ * fail-closed: any gh failure, a non-merged PR, a head-ref mismatch, or a missing
+ * merge oid ⇒ `null`, so an unproven ref is preserved rather than deleted.
+ *
+ * `gh pr view <branch>` resolves the PR associated with the head ref. We require
+ * `state === "MERGED"`, a non-null `mergedAt`, a `headRefName` that matches the
+ * branch when reported, and a real `mergeCommit.oid`.
+ */
+function ghMergedPrMergeCommit(repoRoot: string, branch: string): string | null {
+  let out: string;
+  try {
+    out = execFileSync(
+      "gh",
+      ["pr", "view", branch, "--json", "state,mergedAt,mergeCommit,headRefName"],
+      { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+  } catch {
+    return null; // no PR for this head ref, or gh failed → fail closed (preserve)
+  }
+  try {
+    const j = JSON.parse(out) as {
+      state?: string;
+      mergedAt?: string | null;
+      mergeCommit?: { oid?: string } | null;
+      headRefName?: string | null;
+    };
+    if (j.state !== "MERGED") return null; // open/closed-unmerged → not delivered
+    if (j.mergedAt == null || j.mergedAt === "") return null;
+    // Never accept a PR whose head ref is not exactly this branch.
+    if (typeof j.headRefName === "string" && j.headRefName !== "" && j.headRefName !== branch) return null;
+    const oid = j.mergeCommit?.oid;
+    return typeof oid === "string" && oid !== "" ? oid : null;
+  } catch {
+    return null; // unparseable gh output → fail closed
+  }
 }
 
 function resolveIntegrationForCleanup(repoRoot: string): string {

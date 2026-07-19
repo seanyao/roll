@@ -629,6 +629,9 @@ describe("FIX-1458 (#1465) classifyBranchMerge — patch-equivalence, not merged
     if (args[0] === "cherry") return { ok: !opts.cherryFails, stdout: opts.cherry ?? "" };
     return { ok: false, stdout: "" };
   };
+  // No associated merged PR — these cases prove the ancestor / patch-equivalence
+  // paths in isolation and must never fall through to a final-tree acceptance.
+  const noPr = (): string | null => null;
 
   it("refuses a squash-merged branch whose tips carry unique undelivered patches (the regression)", () => {
     // Historical PR squash-merged, but `git cherry` marks every branch commit '+'
@@ -637,94 +640,143 @@ describe("FIX-1458 (#1465) classifyBranchMerge — patch-equivalence, not merged
       "loop/cycle-org",
       "main",
       probe({ ancestor: false, cherry: "+ aaaaaaa US-ORG-003\n+ bbbbbbb US-ORG-007\n+ ccccccc US-ORG-004" }),
+      noPr,
     );
     expect(kind).toBeNull();
   });
 
   it("refuses when even ONE commit is unique among otherwise-delivered ones", () => {
-    const kind = classifyBranchMerge("loop/cycle-mixed", "main", probe({ ancestor: false, cherry: "- 111 done\n+ 222 unique\n- 333 done" }));
+    const kind = classifyBranchMerge("loop/cycle-mixed", "main", probe({ ancestor: false, cherry: "- 111 done\n+ 222 unique\n- 333 done" }), noPr);
     expect(kind).toBeNull();
   });
 
   it("allows a branch whose every commit is patch-equivalent upstream (git cherry all '-')", () => {
-    const kind = classifyBranchMerge("loop/cycle-eq", "main", probe({ ancestor: false, cherry: "- 111 a\n- 222 b" }));
+    const kind = classifyBranchMerge("loop/cycle-eq", "main", probe({ ancestor: false, cherry: "- 111 a\n- 222 b" }), noPr);
     expect(kind).toBe("patch_equivalent");
   });
 
   it("allows a literal ancestor branch without consulting cherry", () => {
-    const kind = classifyBranchMerge("loop/cycle-anc", "main", probe({ ancestor: true }));
+    const kind = classifyBranchMerge("loop/cycle-anc", "main", probe({ ancestor: true }), noPr);
     expect(kind).toBe("ancestor");
   });
 
   it("a merged PR ALONE never authorizes deletion — no ancestry + no cherry proof ⇒ preserve", () => {
     // Empty cherry (no commits it can prove) with no ancestry must fail closed,
     // even though a merged PR may exist (which this classifier deliberately ignores).
-    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "" }))).toBeNull();
+    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "" }), noPr)).toBeNull();
   });
 
   it("fails closed when git cherry cannot run", () => {
-    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherryFails: true }))).toBeNull();
+    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherryFails: true }), noPr)).toBeNull();
   });
 });
 
-describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proof", () => {
-  // A scripted git probe that additionally answers `rev-parse <ref>^{tree}` and
-  // `git log --format=%H %T <integration>` so the final-tree proof can run.
+describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proof (PR-anchored)", () => {
+  const BRANCH = "loop/cycle-20260716-191815-7797";
+  // A scripted git world for the final-tree proof. The tree oid of any object is
+  // resolved from `trees` (keyed by ref — the branch name or a merge oid); a merge
+  // oid is an ancestor of integration iff it is listed in `onMain`.
   const probe = (opts: {
-    ancestor?: boolean;
+    ancestor?: boolean; // branch is-ancestor of integration (false for squash)
     cherry?: string;
-    branchTree?: string;
-    logTrees?: string; // raw "sha tree" lines for `git log` over integration
-    treeFails?: boolean;
-    logFails?: boolean;
+    trees?: Record<string, string>; // ref/oid → tree oid (via `rev-parse <ref>^{tree}`)
+    onMain?: string[]; // merge oids that ARE ancestors of integration
+    treeFails?: boolean; // every rev-parse fails
   }): BranchGitProbe => (args) => {
-    if (args[0] === "merge-base" && args[1] === "--is-ancestor") return { ok: opts.ancestor === true, stdout: "" };
+    if (args[0] === "merge-base" && args[1] === "--is-ancestor") {
+      const ref = args[2];
+      if (ref === BRANCH) return { ok: opts.ancestor === true, stdout: "" }; // branch→integration
+      return { ok: (opts.onMain ?? []).includes(ref ?? ""), stdout: "" }; // mergeOid→integration
+    }
     if (args[0] === "cherry") return { ok: true, stdout: opts.cherry ?? "" };
-    if (args[0] === "rev-parse") return { ok: !opts.treeFails, stdout: opts.treeFails ? "" : (opts.branchTree ?? "") };
-    if (args[0] === "log") return { ok: !opts.logFails, stdout: opts.logFails ? "" : (opts.logTrees ?? "") };
+    if (args[0] === "rev-parse") {
+      if (opts.treeFails) return { ok: false, stdout: "" };
+      const ref = (args[1] ?? "").replace(/\^\{tree\}$/, "");
+      const tree = (opts.trees ?? {})[ref];
+      return tree !== undefined ? { ok: true, stdout: tree } : { ok: false, stdout: "" };
+    }
     return { ok: false, stdout: "" };
   };
+  // Squash-merge shape: not a literal ancestor, every TCR commit is a unique `+`.
+  const squash = "+ aaaaaaa tcr 1\n+ bbbbbbb tcr 2\n+ ccccccc tcr 3";
 
-  it("accepts a squash-merged ref whose final tree equals a merged PR commit on main", () => {
-    // Squash merge: is-ancestor false, git cherry marks every TCR commit '+'
-    // (no equivalent patch id upstream), but the PR's single merge commit on main
-    // carries the branch's EXACT final tree.
+  it("accepts when the branch tip tree equals its OWN merged PR merge commit (ancestor of main)", () => {
     const kind = classifyBranchMerge(
-      "loop/cycle-20260716-191815-7797",
+      BRANCH,
       "main",
       probe({
         ancestor: false,
-        cherry: "+ aaaaaaa tcr 1\n+ bbbbbbb tcr 2\n+ ccccccc tcr 3",
-        branchTree: "tree-final",
-        logTrees: "206634f6 other-tree\nd3c7b923 tree-final\n0b325033 older-tree",
+        cherry: squash,
+        trees: { [BRANCH]: "tree-final", "merge-oid": "tree-final" },
+        onMain: ["merge-oid"],
       }),
+      () => "merge-oid", // the branch's associated merged PR merge commit
     );
     expect(kind).toBe("final_tree");
   });
 
-  it("preserves a NEAR-match ref whose tree differs from every merged commit (fail closed)", () => {
+  it("preserves an arbitrary main commit with the SAME tree but no associated merged PR", () => {
+    // The security regression: even though some commit reachable from main carries
+    // `tree-final`, there is NO merged PR for this exact head ref, so delivery is
+    // NOT proven — the ref (and any unique commit) must be kept.
     const kind = classifyBranchMerge(
-      "loop/cycle-near",
+      BRANCH,
       "main",
       probe({
         ancestor: false,
-        cherry: "+ aaaaaaa tcr 1\n+ bbbbbbb tcr 2",
-        branchTree: "tree-final",
-        logTrees: "206634f6 tree-final-x\nd3c7b923 tree-almost\n0b325033 tree-final2",
+        cherry: squash,
+        trees: { [BRANCH]: "tree-final", "unrelated-main-commit": "tree-final" },
+        onMain: ["unrelated-main-commit"],
       }),
+      () => null, // gh finds no merged PR for this head ref
+    );
+    expect(kind).toBeNull();
+  });
+
+  it("preserves when the associated PR merge commit's tree differs (wrong PR / near-match)", () => {
+    const kind = classifyBranchMerge(
+      BRANCH,
+      "main",
+      probe({
+        ancestor: false,
+        cherry: squash,
+        trees: { [BRANCH]: "tree-final", "wrong-merge-oid": "tree-other" },
+        onMain: ["wrong-merge-oid"],
+      }),
+      () => "wrong-merge-oid",
+    );
+    expect(kind).toBeNull();
+  });
+
+  it("preserves when there is no merge commit oid at all (absent merge commit)", () => {
+    const kind = classifyBranchMerge(
+      BRANCH,
+      "main",
+      probe({ ancestor: false, cherry: squash, trees: { [BRANCH]: "tree-final" } }),
+      () => "", // PR object present but no merge commit oid → treat as absent
+    );
+    expect(kind).toBeNull();
+  });
+
+  it("preserves when the associated PR merge commit is NOT an ancestor of integration", () => {
+    // The merge commit tree matches, but it never landed on integration — fail closed.
+    const kind = classifyBranchMerge(
+      BRANCH,
+      "main",
+      probe({
+        ancestor: false,
+        cherry: squash,
+        trees: { [BRANCH]: "tree-final", "merge-oid": "tree-final" },
+        onMain: [], // merge-oid is NOT reachable from integration
+      }),
+      () => "merge-oid",
     );
     expect(kind).toBeNull();
   });
 
   it("fails closed when the branch tree cannot be resolved", () => {
     expect(
-      classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "+ a", treeFails: true, logTrees: "s tree-final" })),
-    ).toBeNull();
-  });
-
-  it("fails closed when the integration log cannot be read", () => {
-    expect(
-      classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "+ a", branchTree: "tree-final", logFails: true })),
+      classifyBranchMerge(BRANCH, "main", probe({ ancestor: false, cherry: "+ a", treeFails: true, onMain: ["merge-oid"] }), () => "merge-oid"),
     ).toBeNull();
   });
 });

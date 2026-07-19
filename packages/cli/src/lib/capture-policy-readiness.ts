@@ -20,7 +20,7 @@ import {
   type CaptureMigrationCapabilities,
 } from "@roll/core";
 import { chromiumInstalled } from "@roll/infra";
-import { negotiateCaptureProtocol, parseCaptureProtocolAdvertisement, ROLL_CAPTURE_PROTOCOL_V2 } from "@roll/spec";
+import { negotiateCaptureProtocol, parseCaptureProtocolAdvertisement, ROLL_CAPTURE_PROTOCOL_V2, t, v3Catalog, type Lang } from "@roll/spec";
 
 export interface CapturePolicyReadinessDeps {
   /** Project root whose `.roll/policy.yaml` records the capture policy. */
@@ -131,21 +131,54 @@ export function collectCapturePolicyReadiness(deps: CapturePolicyReadinessDeps =
   };
 }
 
-/** Bilingual doctor / status section (EN line then ZH line — never inline). */
-export function renderCapturePolicyReadinessDoctorSection(readiness: CapturePolicyReadiness): string[] {
+/**
+ * Renders the capture-policy readiness section.
+ *
+ * When `lang` is provided, renders a single-language section using the i18n
+ * catalog (`roll capture status` path). When `lang` is omitted, renders the
+ * legacy bilingual EN+ZH section for backward-compatible `roll doctor` output.
+ */
+export function renderCapturePolicyReadinessDoctorSection(
+  readiness: CapturePolicyReadiness,
+  opts?: { lang?: Lang },
+): string[] {
   const mark = (ok: boolean): string => (ok ? "✓" : "−");
   const lines: string[] = [];
-  lines.push("");
-  lines.push("Capture policy readiness");
-  lines.push("截图策略就绪度");
-  lines.push("");
-  lines.push(`  ${mark(readiness.gateway.available)} v2 capture gateway — ${readiness.gateway.available ? "ready" : "unavailable"}`);
-  lines.push(`    ${readiness.gateway.reason}`);
-  lines.push(`  ${mark(readiness.renderer.available)} browser renderer — ${readiness.renderer.available ? "ready" : "unavailable"}`);
-  lines.push(`    ${readiness.renderer.reason}`);
-  lines.push(`  · effective capture policy — ${readiness.policy.mode ?? "unset"}`);
-  lines.push(`    ${readiness.policy.reason}`);
-  lines.push(`  · next migration — ${readiness.migration.action} (${readiness.migration.reasonCode})`);
-  lines.push(`    ${readiness.migration.reason}`);
+
+  if (opts?.lang !== undefined) {
+    // Single-language path (FIX-1453).
+    const lang = opts.lang;
+    const m = (key: string, ...args: ReadonlyArray<string | number>): string =>
+      t(v3Catalog, lang, key, ...args);
+    lines.push("");
+    lines.push(m("capture.readiness.title"));
+    lines.push("");
+    const gwKey = readiness.gateway.available ? "capture.readiness.gateway_ready" : "capture.readiness.gateway_unavailable";
+    lines.push(m(gwKey, mark(readiness.gateway.available)));
+    lines.push(`    ${readiness.gateway.reason}`);
+    const rKey = readiness.renderer.available ? "capture.readiness.renderer_ready" : "capture.readiness.renderer_unavailable";
+    lines.push(m(rKey, mark(readiness.renderer.available)));
+    lines.push(`    ${readiness.renderer.reason}`);
+    lines.push(m("capture.readiness.policy", readiness.policy.mode ?? "unset"));
+    lines.push(`    ${readiness.policy.reason}`);
+    lines.push(m("capture.readiness.migration", readiness.migration.action, readiness.migration.reasonCode));
+    lines.push(`    ${readiness.migration.reason}`);
+  } else {
+    // Legacy bilingual path (doctor backward compat).
+    lines.push("");
+    lines.push("Capture policy readiness");
+    lines.push("截图策略就绪度");
+    lines.push("");
+    lines.push(`  ${mark(readiness.gateway.available)} v2 capture gateway — ${readiness.gateway.available ? "ready" : "unavailable"}`);
+    lines.push(`    ${readiness.gateway.reason}`);
+    lines.push(`  ${mark(readiness.renderer.available)} browser renderer — ${readiness.renderer.available ? "ready" : "unavailable"}`);
+    lines.push(`    ${readiness.renderer.reason}`);
+    lines.push(`  · effective capture policy — ${readiness.policy.mode ?? "unset"}`);
+    lines.push(`    ${readiness.policy.reason}`);
+    lines.push(`  · next migration — ${readiness.migration.action} (${readiness.migration.reasonCode})`);
+    lines.push(`    ${readiness.migration.reason}`);
+  }
   return lines;
 }
+
+

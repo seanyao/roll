@@ -87,7 +87,7 @@ import { skillsCommand } from "./skills.js";
 import { statusCommand } from "./status.js";
 import { testCommand } from "./test.js";
 import { toolCommand } from "./tool.js";
-import { captureCommand, CAPTURE_USAGE } from "./capture.js";
+import { captureCommand } from "./capture.js";
 import { TRUTH_USAGE, truthCommand } from "./truth.js";
 import { tuneCommand } from "./tune.js";
 import { updateCommand } from "./update.js";
@@ -203,7 +203,14 @@ export function registerAll(): void {
   // US-EVID-032: `capture` — capture-policy migration (best_effort, capability
   // gated + reversible), evidence-only repair (never reopens the build), and
   // readiness status (v2 gateway + renderer + effective policy).
-  registerPorted("capture", (args) => captureCommand(args), { help: CAPTURE_USAGE });
+  registerPorted("capture", (args) => captureCommand(args), {
+    help:
+      "Usage: roll capture <status|migrate|repair|local-window>\n" +
+      "  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n" +
+      "  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
+      "  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
+      "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n",
+  });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
   registerPorted("attest", attestCommand, { hidden: true });

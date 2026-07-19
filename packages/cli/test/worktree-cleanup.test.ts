@@ -19,11 +19,13 @@ import { auditWorktrees } from "../src/commands/worktree-audit.js";
 import {
   applyWorktreeCleanup,
   CLEANUP_USAGE,
+  classifyBranchMerge,
   formatCanaryTripReport,
   isSafelyDisposable,
   planWorktreeCleanup,
   resolveStandaloneMergedBranches,
   worktreeCleanupCommand,
+  type BranchGitProbe,
   type CleanupBranchCandidate,
   type StandaloneBranchDeps,
 } from "../src/commands/worktree-cleanup.js";
@@ -592,7 +594,7 @@ describe("FIX-1454 resolveStandaloneMergedBranches", () => {
     attachedBranches: new Set<string>(),
     currentBranch: null,
     refSha: (b) => `sha-${b}`,
-    branchMerge: () => "pr_merged",
+    branchMerge: () => "patch_equivalent",
     ...over,
   });
 
@@ -600,8 +602,8 @@ describe("FIX-1454 resolveStandaloneMergedBranches", () => {
     const audit = auditOf([], ["loop/cycle-a", "loop/cycle-b"]);
     const out = resolveStandaloneMergedBranches(audit, baseDeps());
     expect(out).toEqual<CleanupBranchCandidate[]>([
-      { branch: "loop/cycle-a", expectedSha: "sha-loop/cycle-a", mergeKind: "pr_merged" },
-      { branch: "loop/cycle-b", expectedSha: "sha-loop/cycle-b", mergeKind: "pr_merged" },
+      { branch: "loop/cycle-a", expectedSha: "sha-loop/cycle-a", mergeKind: "patch_equivalent" },
+      { branch: "loop/cycle-b", expectedSha: "sha-loop/cycle-b", mergeKind: "patch_equivalent" },
     ]);
   });
 
@@ -617,13 +619,59 @@ describe("FIX-1454 resolveStandaloneMergedBranches", () => {
   });
 });
 
+describe("FIX-1458 (#1465) classifyBranchMerge — patch-equivalence, not merged-PR", () => {
+  // A scripted git probe: ancestor iff `merge-base --is-ancestor` is registered ok;
+  // `git cherry <int> <branch>` returns the provided lines.
+  const probe = (opts: { ancestor?: boolean; cherry?: string; cherryFails?: boolean }): BranchGitProbe => (args) => {
+    if (args[0] === "merge-base" && args[1] === "--is-ancestor") return { ok: opts.ancestor === true, stdout: "" };
+    if (args[0] === "cherry") return { ok: !opts.cherryFails, stdout: opts.cherry ?? "" };
+    return { ok: false, stdout: "" };
+  };
+
+  it("refuses a squash-merged branch whose tips carry unique undelivered patches (the regression)", () => {
+    // Historical PR squash-merged, but `git cherry` marks every branch commit '+'
+    // (no equivalent upstream) — US-ORG-003/007/004 would be lost. Must preserve.
+    const kind = classifyBranchMerge(
+      "loop/cycle-org",
+      "main",
+      probe({ ancestor: false, cherry: "+ aaaaaaa US-ORG-003\n+ bbbbbbb US-ORG-007\n+ ccccccc US-ORG-004" }),
+    );
+    expect(kind).toBeNull();
+  });
+
+  it("refuses when even ONE commit is unique among otherwise-delivered ones", () => {
+    const kind = classifyBranchMerge("loop/cycle-mixed", "main", probe({ ancestor: false, cherry: "- 111 done\n+ 222 unique\n- 333 done" }));
+    expect(kind).toBeNull();
+  });
+
+  it("allows a branch whose every commit is patch-equivalent upstream (git cherry all '-')", () => {
+    const kind = classifyBranchMerge("loop/cycle-eq", "main", probe({ ancestor: false, cherry: "- 111 a\n- 222 b" }));
+    expect(kind).toBe("patch_equivalent");
+  });
+
+  it("allows a literal ancestor branch without consulting cherry", () => {
+    const kind = classifyBranchMerge("loop/cycle-anc", "main", probe({ ancestor: true }));
+    expect(kind).toBe("ancestor");
+  });
+
+  it("a merged PR ALONE never authorizes deletion — no ancestry + no cherry proof ⇒ preserve", () => {
+    // Empty cherry (no commits it can prove) with no ancestry must fail closed,
+    // even though a merged PR may exist (which this classifier deliberately ignores).
+    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "" }))).toBeNull();
+  });
+
+  it("fails closed when git cherry cannot run", () => {
+    expect(classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherryFails: true }))).toBeNull();
+  });
+});
+
 describe("FIX-1454 planWorktreeCleanup with branch candidates", () => {
   it("fills the minimal set with worktrees first, then merged branches, to clear excess", () => {
     // 2 counted worktrees + 3 counted branches = canary 5, threshold 2 → excess 3.
     const wt = rec({ path: "/repo/.roll/loop/worktrees/cycle-1", head: "h1" });
     const branches: CleanupBranchCandidate[] = [
       { branch: "loop/cycle-a", expectedSha: "sa", mergeKind: "ancestor" },
-      { branch: "loop/cycle-b", expectedSha: "sb", mergeKind: "pr_merged" },
+      { branch: "loop/cycle-b", expectedSha: "sb", mergeKind: "patch_equivalent" },
       { branch: "loop/cycle-c", expectedSha: "sc", mergeKind: "ancestor" },
     ];
     const audit = auditOf([wt, rec({ path: "/repo/.roll/loop/worktrees/cycle-keep", disposition: "preserved_unpublished", mergeEvidence: { kind: "none" } })], ["loop/cycle-a", "loop/cycle-b", "loop/cycle-c"]);

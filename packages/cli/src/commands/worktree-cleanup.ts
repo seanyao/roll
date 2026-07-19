@@ -60,8 +60,13 @@ export interface CleanupBranchCandidate {
   branch: string;
   /** Ref SHA the plan observed; `--apply` refuses if the fresh ref differs. */
   expectedSha: string;
-  /** How the merge was proven: ancestor or squash-merged (`git branch --merged`). */
-  mergeKind: "ancestor" | "pr_merged";
+  /**
+   * How delivery was PROVEN (FIX-1458 / #1465): `ancestor` = every commit is
+   * reachable from integration; `patch_equivalent` = `git cherry` shows every
+   * branch commit already has an equivalent patch in integration. A merged PR
+   * alone never qualifies — squash merges leave the exact tips undelivered.
+   */
+  mergeKind: "ancestor" | "patch_equivalent";
 }
 
 /** A worktree the plan leaves untouched, with the audit disposition that spared it. */
@@ -109,7 +114,7 @@ export interface CleanupRefusal {
 export interface BranchRemoval {
   branch: string;
   expectedSha: string;
-  mergeKind: "ancestor" | "pr_merged";
+  mergeKind: "ancestor" | "patch_equivalent";
 }
 
 export interface WorktreeCleanupResult {
@@ -127,7 +132,7 @@ export interface WorktreeCleanupResult {
 
 // ─── planning (pure) ─────────────────────────────────────────────────────────
 
-const MERGED_KINDS = new Set(["ancestor", "pr_merged", "patch_equivalent"]);
+const MERGED_KINDS = new Set(["ancestor", "patch_equivalent"]);
 
 /** True iff `rec` satisfies EVERY safe-removal invariant on a fresh audit. */
 export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
@@ -158,11 +163,14 @@ export interface StandaloneBranchDeps {
   /** Resolve a local branch ref to its SHA, or null if the ref is missing. */
   refSha: (branch: string) => string | null;
   /**
-   * Verifiable merge evidence for a standalone branch: `ancestor` when its tip
-   * is contained in the integration branch, `pr_merged` when a merged GitHub PR
-   * exists for it. `null` = NOT verifiably merged → never a candidate (fail closed).
+   * PROOF that a standalone branch's work is already delivered (FIX-1458 / #1465):
+   * `ancestor` when every commit is reachable from the integration branch;
+   * `patch_equivalent` when `git cherry` shows every branch commit already has an
+   * equivalent patch in integration. `null` = cannot prove delivery → preserve
+   * (fail closed). A merged GitHub PR alone is NOT proof — a squash merge leaves
+   * the exact branch tips undelivered and any unique commit must be kept.
    */
-  branchMerge: (branch: string, sha: string) => "ancestor" | "pr_merged" | null;
+  branchMerge: (branch: string, sha: string) => "ancestor" | "patch_equivalent" | null;
 }
 
 /**
@@ -636,6 +644,43 @@ function gitCap(repoRoot: string, args: string[]): string {
   return execFileSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
+/** Injectable git probe for {@link classifyBranchMerge}: `ok` = exit 0. */
+export type BranchGitProbe = (args: string[]) => { ok: boolean; stdout: string };
+
+/**
+ * FIX-1458 (#1465): classify how a standalone branch's work is delivered, using
+ * ONLY fresh git patch evidence — never a merged-PR label on its own.
+ *
+ *  - `ancestor`        — `merge-base --is-ancestor`: every commit is literally
+ *                        reachable from integration; deleting the ref loses nothing.
+ *  - `patch_equivalent`— `git cherry <integration> <branch>` prints `-` for every
+ *                        commit (each already has an equivalent patch upstream).
+ *  - `null`            — ANY `git cherry` `+` line (a unique, undelivered patch —
+ *                        the squash-merge case the regression mis-deleted), an
+ *                        empty/failed probe, or no commits to compare. Fail closed:
+ *                        unproven ⇒ preserve.
+ *
+ * Pure w.r.t. the injected probe; no gh, no network — a merged PR is deliberately
+ * NOT consulted, because a squash merge does not deliver the exact branch tips.
+ */
+export function classifyBranchMerge(
+  branch: string,
+  integrationBranch: string,
+  git: BranchGitProbe,
+): "ancestor" | "patch_equivalent" | null {
+  if (git(["merge-base", "--is-ancestor", branch, integrationBranch]).ok) return "ancestor";
+  const cherry = git(["cherry", integrationBranch, branch]);
+  if (!cherry.ok) return null; // cannot prove delivery → preserve
+  const lines = cherry.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+  if (lines.length === 0) return null; // nothing to compare → preserve
+  if (lines.some((l) => l.startsWith("+"))) return null; // unique undelivered patch → preserve
+  if (lines.every((l) => l.startsWith("-"))) return "patch_equivalent"; // every commit delivered/equivalent
+  return null; // unrecognized cherry output → preserve
+}
+
 /** FIX-1454: real git+gh probes for standalone-branch recovery over `repoRoot`. */
 export function buildStandaloneBranchDeps(
   repoRoot: string,
@@ -663,35 +708,22 @@ export function buildStandaloneBranchDeps(
         return null;
       }
     },
-    branchMerge: (branch) => {
-      // 1. Fast git-level ancestor check (real merge / fast-forward).
-      try {
-        execFileSync("git", ["-C", repoRoot, "merge-base", "--is-ancestor", branch, integrationBranch], { stdio: "ignore" });
-        return "ancestor";
-      } catch {
-        /* not an ancestor */
-      }
-      // 2. Squash-safe: git lists it under --merged.
-      try {
-        for (const line of gitCap(repoRoot, ["branch", "--merged", integrationBranch]).split("\n")) {
-          if (line.replace(/^[*+]?\s+/, "").trim() === branch) return "pr_merged";
+    // FIX-1458 (#1465): delivery is proven ONLY by fresh git patch evidence via
+    // classifyBranchMerge (ancestor OR `git cherry` patch-equivalence). A merged
+    // GitHub PR is deliberately NOT consulted: a squash merge leaves the exact
+    // branch tips undelivered, so authorizing deletion on a merged PR alone
+    // silently discards unique commits (US-ORG-003/007/004 in the report).
+    branchMerge: (branch) =>
+      classifyBranchMerge(branch, integrationBranch, (args) => {
+        try {
+          return { ok: true, stdout: gitCap(repoRoot, args) };
+        } catch (err) {
+          // execFileSync throws on non-zero exit; capture any stdout it produced
+          // (git cherry exits 0 normally, so a throw here means a real failure).
+          const stdout = typeof (err as { stdout?: unknown }).stdout === "string" ? (err as { stdout: string }).stdout : "";
+          return { ok: false, stdout };
         }
-      } catch {
-        /* ignore */
-      }
-      // 3. Verifiable merged GitHub PR (covers squash merges with a new commit).
-      try {
-        const n = execFileSync(
-          "gh",
-          ["pr", "list", "--head", branch, "--state", "merged", "--json", "number", "--jq", "length"],
-          { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-        ).trim();
-        if (parseInt(n, 10) > 0) return "pr_merged";
-      } catch {
-        /* gh unavailable / no merged PR → not verifiably merged */
-      }
-      return null;
-    },
+      }),
   };
 }
 

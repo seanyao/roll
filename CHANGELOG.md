@@ -7,6 +7,8 @@
 - 浏览器审计账本(`.roll/browser-operations/events.ndjson`,只追加、随正常授权取证增长)不再被 bootstrap 完整性闸误判为未知污染而卡住后续每张卡;该豁免精确绑定到这一个路径且校验 ndjson 结构,被替换/损坏的账本仍会被拦(不引入 trust-all/ignore-dirty) (FIX-1455)
 - `roll worktree cleanup` 现在还能回收"已合并但没有 worktree 的孤立 loop 分支"(其提交已并入主干或有已合并的 GitHub PR),让分支泄漏 canary 真正能降下来;删除前逐个复核(引用未变、确已合并、未被 worktree 占用、非当前/受保护分支),任何不符即拒删,绝不 trust-all 或手动 `git branch -D` (FIX-1456)
 
+- `roll capture` 全线输出现遵循 `ROLL_LANG` 与配置的语言(不再硬编码英文或双行中英混排):`ROLL_LANG=zh roll capture status` 打印中文、`en` 打印英文;约 40 条捕获文案已加入中英目录 (FIX-1453)
+
 ## v4.718.2 — 2026-07-18
 
 ### 稳定性

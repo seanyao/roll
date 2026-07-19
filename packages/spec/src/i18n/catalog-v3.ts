@@ -782,4 +782,175 @@ export const v3Catalog: Catalog = {
     en: "running v%s, latest %s — run `roll update`",
     zh: "当前 v%s，最新 %s — 建议运行 `roll update`",
   },
+
+  // FIX-1453 — `roll capture` i18n (was hardcoded English, dual-line mixed).
+
+  "capture.usage": {
+    en: "Usage: roll capture <status|migrate|repair|local-window>\n  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n",
+    zh: "用法：roll capture <status|migrate|repair|local-window>\n  status  [--project <path>] [--json]                 网关/渲染器就绪度 + 有效截图策略\n  migrate [--project <path>] [--revert] [--dry-run] [--json]  能力就绪时启用 best_effort（可回退）\n  repair  <story-id> [--project <path>] [--health <path>] [--json]  仅证据修复；绝不重新打开构建\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  仅捕获隔离的本地合成页面\n",
+  },
+  "capture.unknown_subcommand": {
+    en: "[roll] unknown 'roll capture' subcommand: %s",
+    zh: "[roll] 未知 'roll capture' 子命令：%s",
+  },
+
+  // local-window
+  "capture.local_window.usage": {
+    en: "Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",
+    zh: "用法：roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",
+  },
+  "capture.local_window.unsafe_id": {
+    en: "local-window requires safe story and run identifiers (letters, digits, dot, underscore, hyphen only).",
+    zh: "local-window 需要安全的 story 与 run 标识符（仅字母、数字、点、下划线、连字符）。",
+  },
+  "capture.local_window.loopback_only": {
+    en: "local-window only permits loopback HTTP(S) pages; no owner Chrome or remote URL was opened.",
+    zh: "local-window 仅允许 loopback HTTP(S) 页面；不会打开用户的 Chrome 或远程 URL。",
+  },
+  "capture.local_window.result": {
+    en: "local-window capture: %s",
+    zh: "local-window 截图：%s",
+  },
+  "capture.local_window.no_extension": {
+    en: "  browser extension: not used",
+    zh: "  浏览器扩展：未使用",
+  },
+  "capture.local_window.privacy": {
+    en: "  privacy: loopback-only synthetic target in a temporary profile",
+    zh: "  隐私：仅在临时 profile 中捕获 loopback 合成页面",
+  },
+  "capture.local_window.selector": {
+    en: "  selector: %s · %s",
+    zh: "  选择器：%s · %s",
+  },
+  "capture.local_window.screenshot": {
+    en: "  screenshot: %s",
+    zh: "  截图：%s",
+  },
+  "capture.local_window.receipt": {
+    en: "  receipt: %s",
+    zh: "  回执：%s",
+  },
+  "capture.local_window.reason": {
+    en: "  reason: %s",
+    zh: "  原因：%s",
+  },
+  "capture.local_window.prepare_must_be_list": {
+    en: "prepare must be a JSON action list",
+    zh: "prepare 必须是 JSON action 列表",
+  },
+  "capture.local_window.prepare_max_actions": {
+    en: "prepare allows at most 16 actions",
+    zh: "prepare 最多允许 16 个 action",
+  },
+  "capture.local_window.prepare_action_object": {
+    en: "prepare action must be an object",
+    zh: "prepare action 必须是对象",
+  },
+  "capture.local_window.prepare_wait_ms": {
+    en: "prepare wait requires only kind and an integer ms from 0 to 5000",
+    zh: "prepare wait 只需 kind 和 0-5000 之间的整数 ms",
+  },
+  "capture.local_window.prepare_waits_max": {
+    en: "prepare waits may total at most 15000ms",
+    zh: "prepare wait 总计不能超过 15000ms",
+  },
+  "capture.local_window.prepare_selector_required": {
+    en: "prepare %s requires only kind and a non-empty selector",
+    zh: "prepare %s 只需 kind 和非空选择器",
+  },
+  "capture.local_window.prepare_fill_required": {
+    en: "prepare fill requires only kind, a non-empty selector, and a value of at most 1000 characters",
+    zh: "prepare fill 只需 kind、非空选择器和不超过 1000 字符的 value",
+  },
+  "capture.local_window.prepare_only_permits": {
+    en: "prepare only permits click, fill, wait, and scroll actions",
+    zh: "prepare 只允许 click、fill、wait、scroll 四种 action",
+  },
+
+  // migrate
+  "capture.migrate.revert": {
+    en: "capture migrate --revert: %s",
+    zh: "capture migrate --revert：%s",
+  },
+  "capture.migrate.result": {
+    en: "capture migrate: %s (%s)",
+    zh: "capture migrate：%s（%s）",
+  },
+  "capture.migrate.detail": {
+    en: "  %s",
+    zh: "  %s",
+  },
+  "capture.dry_run_not_written": {
+    en: " (dry-run; not written)",
+    zh: "（dry-run；未写入）",
+  },
+  "capture.written": {
+    en: " (written)",
+    zh: "（已写入）",
+  },
+  "capture.no_change": {
+    en: " (no change)",
+    zh: "（无变更）",
+  },
+
+  // repair
+  "capture.repair.usage": {
+    en: "Usage: roll capture repair <story-id> [--project <path>] [--health <path>] [--json]",
+    zh: "用法：roll capture repair <story-id> [--project <path>] [--health <path>] [--json]",
+  },
+  "capture.repair.no_record": {
+    en: "no evidence-health record at %s; nothing to repair",
+    zh: "%s 没有 evidence-health 记录；无需修复",
+  },
+  "capture.repair.failed_delivery": {
+    en: "delivery failed: normal failure handling, not an evidence repair; build not reopened",
+    zh: "交付失败：走正常失败处理，不属证据修复；构建不会重新打开",
+  },
+  "capture.repair.not_degraded": {
+    en: "visual state is \"%s\", not degraded-infrastructure; not evidence-only repairable; build not reopened",
+    zh: "visual 状态为 \"%s\"，不是 degraded-infrastructure；不可做仅证据修复；构建不会重新打开",
+  },
+  "capture.repair.result": {
+    en: "capture repair: %s",
+    zh: "capture repair：%s",
+  },
+  "capture.repair.reopened": {
+    en: "  reopenedBuild=%s buildUntouched=%s",
+    zh: "  reopenedBuild=%s buildUntouched=%s",
+  },
+  "capture.repair.visual": {
+    en: "  visual: %s -> %s",
+    zh: "  visual：%s -> %s",
+  },
+
+  // capture-policy readiness (shared by `roll capture status` + `roll doctor`)
+  "capture.readiness.title": {
+    en: "Capture policy readiness",
+    zh: "截图策略就绪度",
+  },
+  "capture.readiness.gateway_ready": {
+    en: "  %s v2 capture gateway — ready",
+    zh: "  %s v2 capture gateway — 就绪",
+  },
+  "capture.readiness.gateway_unavailable": {
+    en: "  %s v2 capture gateway — unavailable",
+    zh: "  %s v2 capture gateway — 不可用",
+  },
+  "capture.readiness.renderer_ready": {
+    en: "  %s browser renderer — ready",
+    zh: "  %s browser renderer — 就绪",
+  },
+  "capture.readiness.renderer_unavailable": {
+    en: "  %s browser renderer — unavailable",
+    zh: "  %s browser renderer — 不可用",
+  },
+  "capture.readiness.policy": {
+    en: "  · effective capture policy — %s",
+    zh: "  · 有效截图策略 — %s",
+  },
+  "capture.readiness.migration": {
+    en: "  · next migration — %s (%s)",
+    zh: "  · 下次迁移 — %s（%s）",
+  },
 };

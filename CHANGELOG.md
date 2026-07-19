@@ -1,7 +1,5 @@
 # Changelog
 
-## Unreleased
-
 ## v4.720.1 — 2026-07-20
 
 ### 稳定性

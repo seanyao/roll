@@ -9,6 +9,7 @@
 
 - `roll capture` 全线输出现遵循 `ROLL_LANG` 与配置的语言(不再硬编码英文或双行中英混排):`ROLL_LANG=zh roll capture status` 打印中文、`en` 打印英文;约 40 条捕获文案已加入中英目录 (FIX-1453)
 - 截图协议广播支持按来源(per-source)声明与协商:只有明确声明 roll.capture.v2 且真正 served 的来源才算 v2 可用,`roll capture status` 不再在物理通道仍是 v1 时谎报整体 v2 就绪;旧广播(无 sources)行为完全不变 (US-PHYSICAL-011)
+- 新增渲染态 roll.capture.v2 截图证据的进程内服务:声明的网页界面用 Playwright 无头渲染→写出 PNG + 带 sha256 摘要的 v2 收据(登录/跳转/非法目标只记 skipped、绝不伪造),为 best-effort 多通道截图打底 (US-PHYSICAL-010)
 
 ## v4.718.2 — 2026-07-18
 

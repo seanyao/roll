@@ -795,6 +795,10 @@ export const v3Catalog: Catalog = {
   },
 
   // local-window
+  "capture.refresh.wrote": {
+    en: "capture refresh: wrote host capabilities to %s",
+    zh: "capture refresh：已将主机能力写入 %s",
+  },
   "capture.local_window.usage": {
     en: "Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",
     zh: "用法：roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",

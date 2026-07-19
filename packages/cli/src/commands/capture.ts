@@ -24,8 +24,10 @@ import { dirname, join } from "node:path";
 import {
   isEvidenceOnlyRepairable,
   planCapturePolicyMigration,
+  refreshCaptureCapabilities,
   repairDegradedEvidence,
   revertCapturePolicyMigration,
+  type AdapterCapabilityProbe,
   type CaptureLanePort,
   type CaptureMigrationCapabilities,
   type CaptureReceiptStorePort,
@@ -35,14 +37,15 @@ import {
 import {
   RollCaptureReceiptStore,
   captureControlledLocalPage,
+  chromiumInstalled,
   isLoopbackCaptureUrl,
   type ControlledLocalPageCaptureInput,
   type ControlledLocalWindowCaptureResult,
   type ControlledPrepareAction,
 } from "@roll/infra";
-import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
+import { ROLL_CAPTURE_PROTOCOL_V1, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
-import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
+import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, resolveCaptureHostRoot, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
 
 /** Resolve the display language for this command, including configLang. */
 function msgLang(): Lang {
@@ -79,6 +82,10 @@ export interface CaptureCommandDeps {
   resolveSurface?: (storyId: string, projectRoot: string) => DeclaredSurface | null;
   /** FIX-005: isolated, loopback-only visible Chrome + Roll Capture lane. */
   captureLocalWindow?: (input: ControlledLocalPageCaptureInput) => Promise<ControlledLocalWindowCaptureResult>;
+  /** US-PHYSICAL-012: override the Roll Capture host root for `refresh` (tests). */
+  captureHostRoot?: string;
+  /** US-PHYSICAL-012: override the renderer probe for `refresh` (tests). */
+  rendererInstalled?: () => boolean;
   now?: () => Date;
 }
 
@@ -113,10 +120,40 @@ export async function captureCommand(args: string[], deps: CaptureCommandDeps = 
   if (sub === "status") return captureStatus(rest, deps);
   if (sub === "migrate") return captureMigrate(rest, deps);
   if (sub === "repair") return captureRepair(rest, deps);
+  if (sub === "refresh") return captureRefresh(rest, deps);
   if (sub === "local-window") return captureLocalWindow(rest, deps);
   process.stderr.write(msg("capture.unknown_subcommand", sub) + "\n");
   process.stderr.write(captureUsage());
   return 1;
+}
+
+// ── refresh (US-PHYSICAL-012) — write honest host capabilities.json ─────────
+
+async function captureRefresh(args: string[], deps: CaptureCommandDeps): Promise<number> {
+  const json = args.includes("--json");
+  const captureRoot = deps.captureHostRoot ?? resolveCaptureHostRoot();
+  const rendererServed = (deps.rendererInstalled ?? chromiumInstalled)();
+  const probe: AdapterCapabilityProbe = {
+    rendererServed,
+    ...(rendererServed
+      ? {}
+      : { rendererReason: "Playwright Chromium is not installed; run `npx playwright install chromium`" }),
+    // The native Roll Capture host speaks v1 (file-drop). Physical v2 is
+    // US-PHYSICAL-014 — never advertised here, so status stays honest.
+    physical: {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      served: true,
+      reason: "Roll Capture.app is v1-only; physical v2 pending US-PHYSICAL-014",
+    },
+    hostVersion: "roll-adapter",
+  };
+  const { advertisement, path } = refreshCaptureCapabilities(captureRoot, probe);
+  if (json) {
+    process.stdout.write(JSON.stringify({ path, advertisement }, null, 2) + "\n");
+  } else {
+    process.stdout.write(msg("capture.refresh.wrote", path) + "\n");
+  }
+  return 0;
 }
 
 // ── local-window (FIX-005) ──────────────────────────────────────────────────

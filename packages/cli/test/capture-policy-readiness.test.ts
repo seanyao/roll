@@ -96,3 +96,37 @@ describe("renderCapturePolicyReadinessDoctorSection — bilingual (AC3/AC4)", ()
     expect(lines.some((l) => l.includes("Capture policy readiness") && l.includes("截图"))).toBe(false);
   });
 });
+
+describe("US-PHYSICAL-012 per-source readiness", () => {
+  it("surfaces + renders per-source v2 readiness (rendered ready, physical legacy)", () => {
+    const r = collectCapturePolicyReadiness({
+      projectRoot: "/proj",
+      captureRoot: "/caphost",
+      rendererInstalled: () => true,
+      readFileText: fs({
+        [CAPS]: JSON.stringify({
+          protocols: ["roll.capture.v1", "roll.capture.v2"],
+          sources: {
+            "playwright-rendered": { protocol: "roll.capture.v2", served: true },
+            "roll-capture-window": { protocol: "roll.capture.v1", served: true, reason: "Roll Capture.app is v1-only" },
+          },
+        }),
+      }),
+    });
+    expect(r.perSource?.["playwright-rendered"]?.available).toBe(true);
+    expect(r.perSource?.["roll-capture-window"]?.available).toBe(false);
+    const section = renderCapturePolicyReadinessDoctorSection(r).join("\n");
+    expect(section).toContain("v2 playwright-rendered — ready");
+    expect(section).toContain("v2 roll-capture-window — unavailable");
+  });
+
+  it("has no perSource for a legacy protocol-only advertisement (back-compat)", () => {
+    const r = collectCapturePolicyReadiness({
+      projectRoot: "/proj",
+      captureRoot: "/caphost",
+      rendererInstalled: () => true,
+      readFileText: fs({ [CAPS]: JSON.stringify({ protocols: ["roll.capture.v2"] }) }),
+    });
+    expect(r.perSource).toBeUndefined();
+  });
+});

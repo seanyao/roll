@@ -179,6 +179,19 @@ describe("parseMergeCommitMessages", () => {
     expect(facts[0].mergeCommit).toBe("ghi789");
   });
 
+  it("FIX-1457: last '(#N)' wins when the subject embeds an issue ref before the PR number", () => {
+    // GitHub squash appends the PR number as the LAST "(#N)"; a "Closes #issue"
+    // echoed into the PR title lands earlier. The PR identity must be the PR,
+    // not the issue.
+    const lines = [
+      "mno345 1719000250 Fix FIX-1456: recover merged standalone loop branches (#1454) (#1456)",
+    ];
+    const facts = parseMergeCommitMessages(lines);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].prNumber).toBe(1456);
+    expect(facts[0].storyIds).toEqual(["FIX-1456"]);
+  });
+
   it("skips non-merge lines", () => {
     const lines = [
       "jkl012 1719000300 regular commit without PR",

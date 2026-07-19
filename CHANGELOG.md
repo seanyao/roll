@@ -3,8 +3,8 @@
 ## Unreleased
 
 ### 稳定性
-- `roll worktree cleanup` 现在能认出压缩合并的交付，未交付分支仍会保留 [loop]
-- 暂停后可用 `roll loop go --cards` 只跑指定卡，其他启动方式继续保持暂停 [loop]
+- `roll worktree cleanup` 现在能认出压缩合并的交付，未交付分支仍会保留（FIX-1471）[loop]
+- 暂停后可用 `roll loop go --cards` 只跑指定卡，其他启动方式继续保持暂停（FIX-1472）[loop]
 
 ## v4.719.3 — 2026-07-19
 

@@ -125,6 +125,11 @@ interface GoOptions {
   attach: boolean;
   scope: GoalScope;
   scopeSpecified: boolean;
+  // FIX-1472 (supervisor review): true ONLY when an explicit `--cards`/`--cards=`
+  // flag was passed on THIS invocation. A bare positional token (`go FIX-007`)
+  // still forms a cards scope but leaves this false, so it cannot claim the
+  // guided paused-bypass. Fail closed — only the flag is the sanctioned gesture.
+  cardsFlagSpecified: boolean;
   maxCycles?: number;
   forSeconds?: number;
   reviewMode: GoalReviewMode;
@@ -457,6 +462,7 @@ function parseOptions(args: string[]): GoOptions {
   let noTmux = false;
   let attach = false;
   let scopeSpecified = false;
+  let cardsFlagSpecified = false;
   let reviewMode: GoalReviewMode = "auto";
   let reviewModeSpecified = false;
 
@@ -532,11 +538,13 @@ function parseOptions(args: string[]): GoOptions {
     }
     if (arg === "--cards") {
       cards.push(...parseCards(args[i + 1]));
+      cardsFlagSpecified = true;
       i += 1;
       continue;
     }
     if (arg.startsWith("--cards=")) {
       cards.push(...parseCards(arg.slice("--cards=".length)));
+      cardsFlagSpecified = true;
       continue;
     }
     if (!arg.startsWith("-")) cards.push(...parseCards(arg));
@@ -552,6 +560,7 @@ function parseOptions(args: string[]): GoOptions {
     attach,
     scope,
     scopeSpecified,
+    cardsFlagSpecified,
     reviewMode,
     reviewModeSpecified,
     ...(maxCycles !== undefined ? { maxCycles } : {}),
@@ -571,12 +580,19 @@ function hasHelpArg(args: readonly string[]): boolean {
  * scheduler / launchd / fallback process, and the `cards` scope filters the
  * picker to the named ids (no backlog scan, no other-card selection); the run
  * stays bounded by `--max-cycles` and by the scope itself. Fail closed: only an
- * explicit, non-empty `--cards` scope NAMED THIS RUN qualifies — a missing,
- * inherited, `--all`, or `--epic` scope stays autonomous and keeps honoring the
- * pause marker.
+ * explicit, non-empty `--cards` FLAG passed THIS RUN qualifies — a missing,
+ * inherited, positional-token, `--all`, or `--epic` scope stays autonomous and
+ * keeps honoring the pause marker. A bare positional token (`go FIX-007`) forms
+ * a cards scope but is NOT the sanctioned supervisor gesture, so it does not
+ * bypass the pause (`cardsFlagSpecified` gates that).
  */
 function isGuidedRun(opts: GoOptions): boolean {
-  return opts.scopeSpecified && opts.scope.kind === "cards" && opts.scope.cards.length > 0;
+  return (
+    opts.cardsFlagSpecified &&
+    opts.scopeSpecified &&
+    opts.scope.kind === "cards" &&
+    opts.scope.cards.length > 0
+  );
 }
 
 function loopGoHelp(): string {

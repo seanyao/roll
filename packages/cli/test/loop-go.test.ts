@@ -2582,6 +2582,94 @@ describe("FIX-1472 — guided/supervisor one-shot runs the scoped card while pau
     expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
   });
 
+  it("fails closed: paused --all does not bypass the pause marker or start run-once", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | unscoped eligible | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_550,
+      nowIso: () => "2026-06-11T10:05:50Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--all", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: paused --epic does not bypass the pause marker or start run-once", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | scoped eligible | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_575,
+      nowIso: () => "2026-06-11T10:05:57Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--epic", "loop-engine", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: a POSITIONAL card token (no --cards flag) does not bypass the pause", async () => {
+    // `roll loop go FIX-007 --max-cycles 1` forms a cards SCOPE from the bare
+    // positional token, but it is NOT an explicit `--cards` flag. Only the flag
+    // is the sanctioned supervisor gesture, so a positional scope must keep
+    // honoring the PAUSE marker (fail closed).
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-007](.roll/features/loop-engine/FIX-007/spec.md) | scoped | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700,
+      nowIso: () => "2026-06-11T10:07:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "FIX-007", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
   it("fails closed: an INHERITED cards scope (not named this run) does not bypass the pause", async () => {
     const p = project();
     writeBacklog(p, [

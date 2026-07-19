@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
 import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
-import { GOAL_ALLOWED_CARDS_ENV } from "../src/lib/goal-progress.js";
+import { buildRunOnceChildEnv } from "../src/commands/loop-go.js";
+import { GOAL_ALLOWED_CARDS_ENV, GOAL_GUIDED_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
@@ -28,6 +29,57 @@ function tmp(tag: string): string {
   const d = mkdtempSync(join(tmpdir(), `roll-runonce-${tag}-`));
   dirs.push(d);
   return realpathSync(d);
+}
+
+async function captureRunOnce(fn: () => Promise<number>): Promise<{ code: number; out: string; err: string }> {
+  const out: string[] = [];
+  const err: string[] = [];
+  const stdout = process.stdout.write.bind(process.stdout);
+  const stderr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string | Uint8Array) => (out.push(String(chunk)), true)) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => (err.push(String(chunk)), true)) as typeof process.stderr.write;
+  try {
+    return { code: await fn(), out: out.join(""), err: err.join("") };
+  } finally {
+    process.stdout.write = stdout;
+    process.stderr.write = stderr;
+  }
+}
+
+async function runPausedRunOnce(project: string, childEnv: NodeJS.ProcessEnv): Promise<{ code: number; out: string; err: string }> {
+  const previousCwd = process.cwd();
+  const previous = {
+    mainProject: process.env["ROLL_MAIN_PROJECT"],
+    mainSlug: process.env["ROLL_MAIN_SLUG"],
+    runtimeDir: process.env["ROLL_PROJECT_RUNTIME_DIR"],
+    lang: process.env["ROLL_LANG"],
+    allowedCards: process.env[GOAL_ALLOWED_CARDS_ENV],
+    guided: process.env[GOAL_GUIDED_ENV],
+  };
+  try {
+    process.chdir(project);
+    process.env["ROLL_MAIN_PROJECT"] = project;
+    process.env["ROLL_MAIN_SLUG"] = "proj-abc123";
+    process.env["ROLL_LANG"] = "en";
+    delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    process.env[GOAL_ALLOWED_CARDS_ENV] = childEnv[GOAL_ALLOWED_CARDS_ENV] ?? "";
+    process.env[GOAL_GUIDED_ENV] = childEnv[GOAL_GUIDED_ENV] ?? "";
+    return await captureRunOnce(() => loopRunOnceCommand([]));
+  } finally {
+    process.chdir(previousCwd);
+    if (previous.mainProject === undefined) delete process.env["ROLL_MAIN_PROJECT"];
+    else process.env["ROLL_MAIN_PROJECT"] = previous.mainProject;
+    if (previous.mainSlug === undefined) delete process.env["ROLL_MAIN_SLUG"];
+    else process.env["ROLL_MAIN_SLUG"] = previous.mainSlug;
+    if (previous.runtimeDir === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    else process.env["ROLL_PROJECT_RUNTIME_DIR"] = previous.runtimeDir;
+    if (previous.lang === undefined) delete process.env["ROLL_LANG"];
+    else process.env["ROLL_LANG"] = previous.lang;
+    if (previous.allowedCards === undefined) delete process.env[GOAL_ALLOWED_CARDS_ENV];
+    else process.env[GOAL_ALLOWED_CARDS_ENV] = previous.allowedCards;
+    if (previous.guided === undefined) delete process.env[GOAL_GUIDED_ENV];
+    else process.env[GOAL_GUIDED_ENV] = previous.guided;
+  }
 }
 
 describe("loop run-once CLI wiring", () => {
@@ -735,6 +787,56 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     expect(n).toBe(1);
     const res = await pending;
     expect(res.exitCode).not.toBe(0); // killed, promise still settles
+  });
+});
+
+describe("FIX-1472 — loop run-once pause gate consumes the loop-go child environment", () => {
+  function pausedProject(tag: string): string {
+    const project = tmp(tag);
+    execFileSync("git", ["init", "-q", project]);
+    mkdirSync(join(project, ".roll", "loop"), { recursive: true });
+    writeFileSync(join(project, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    // Keep the positive case local and deterministic after it gets through the
+    // pause gate: no remote makes the next preflight return 1 before any agent.
+    writeFileSync(join(project, ".roll", "policy.yaml"), "loop_safety:\n  skip_network_check: true\n");
+    return project;
+  }
+
+  it("allows only the explicit guided child with non-empty cards through a real paused run-once gate", async () => {
+    const project = pausedProject("guided-pause-pass");
+    const childEnv = buildRunOnceChildEnv(
+      { projectPath: project, allowedCards: ["FIX-007"], guided: true },
+      { [GOAL_GUIDED_ENV]: "0" },
+    );
+
+    expect(childEnv[GOAL_ALLOWED_CARDS_ENV]).toBe("FIX-007");
+    expect(childEnv[GOAL_GUIDED_ENV]).toBe("1");
+    const r = await runPausedRunOnce(project, childEnv);
+
+    // The next deterministic preflight is "no remote" (1); PAUSE itself
+    // returns 0. This proves the real command crossed its pause gate without
+    // starting an agent or changing the owner's pause marker.
+    expect(r.code).toBe(1);
+    expect(r.out).not.toContain("loop is paused (PAUSE marker present)");
+    expect(existsSync(join(project, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("blocks a real paused run-once when loop-go explicitly clears an ambient guided=1", async () => {
+    const project = pausedProject("guided-pause-block");
+    // Simulate the hostile parent environment. The child builder MUST overwrite
+    // it with 0 for an unguided invocation before the real command reads it.
+    const childEnv = buildRunOnceChildEnv(
+      { projectPath: project, allowedCards: ["FIX-007"], guided: false },
+      { [GOAL_GUIDED_ENV]: "1" },
+    );
+
+    expect(childEnv[GOAL_ALLOWED_CARDS_ENV]).toBe("FIX-007");
+    expect(childEnv[GOAL_GUIDED_ENV]).toBe("0");
+    const r = await runPausedRunOnce(project, childEnv);
+
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("loop is paused (PAUSE marker present)");
+    expect(existsSync(join(project, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
   });
 });
 

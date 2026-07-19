@@ -333,6 +333,21 @@ function assertTestProofFresh(exec: (cmd: string, args: string[]) => string): vo
   }
 }
 
+function hasOnlyPreparedReleaseChanges(exec: (cmd: string, args: string[]) => string): boolean {
+  const status = exec("git", ["status", "--porcelain", "--untracked-files=all"]).trim();
+  if (status === "") return false;
+
+  const allowed = new Set(["package.json", "CHANGELOG.md"]);
+  const unexpected = status
+    .split("\n")
+    .map((line) => line.slice(2).trim())
+    .filter((path) => !allowed.has(path));
+  if (unexpected.length > 0) {
+    throw new Error(`unexpected worktree changes during release recovery: ${unexpected.join(", ")}`);
+  }
+  return true;
+}
+
 export function commitPushWithGate(opts: {
   branch: string;
   message: string;
@@ -341,29 +356,41 @@ export function commitPushWithGate(opts: {
 }): void {
   const { branch, message, rollManaged, exec } = opts;
   const original = exec("git", ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+  const preparedChanges = hasOnlyPreparedReleaseChanges(exec);
 
   let createdLocal = false;
+  const checkoutExistingBranch = (): void => {
+    if (preparedChanges) {
+      // Preserve only the transaction's known preparation changes. Git's
+      // three-way checkout fails on conflicts rather than discarding them.
+      exec("git", ["checkout", "--merge", branch]);
+      return;
+    }
+    exec("git", ["checkout", branch]);
+  };
   const checkoutBranch = (): void => {
     // Local branch already present → reuse.
+    let localSha = "";
     try {
-      const localSha = exec("git", ["rev-parse", "--verify", `refs/heads/${branch}`]).trim();
-      if (localSha !== "") {
-        exec("git", ["checkout", branch]);
-        return;
-      }
+      localSha = exec("git", ["rev-parse", "--verify", `refs/heads/${branch}`]).trim();
     } catch {
       // fall through to remote / create-new path
     }
+    if (localSha !== "") {
+      checkoutExistingBranch();
+      return;
+    }
     // Remote branch exists (e.g., previous run pushed it) → fetch and reuse.
+    let remote = "";
     try {
-      const remote = exec("git", ["ls-remote", "--heads", "origin", branch]).trim();
-      if (remote !== "") {
-        exec("git", ["fetch", "origin", `${branch}:${branch}`]);
-        exec("git", ["checkout", branch]);
-        return;
-      }
+      remote = exec("git", ["ls-remote", "--heads", "origin", branch]).trim();
     } catch {
       // fall through to create-new path
+    }
+    if (remote !== "") {
+      exec("git", ["fetch", "origin", `${branch}:${branch}`]);
+      checkoutExistingBranch();
+      return;
     }
     createdLocal = true;
     exec("git", ["checkout", "-b", branch]);

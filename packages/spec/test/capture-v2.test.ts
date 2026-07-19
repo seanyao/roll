@@ -209,3 +209,54 @@ describe("US-PHYSICAL-009 receipt validation (AC4)", () => {
     expect(isAcceptedCaptureReceiptV2(physicalReceipt({ state: "skipped", screenshotPath: undefined, sha256: undefined, reason: "x" }), physicalIntent())).toBe(false);
   });
 });
+
+describe("US-PHYSICAL-011 per-source protocol advertisement + negotiation", () => {
+  it("reports per-source v2 availability only for explicitly-served roll.capture.v2 sources", () => {
+    const n = negotiateCaptureProtocol({
+      protocols: [ROLL_CAPTURE_PROTOCOL_V1, ROLL_CAPTURE_PROTOCOL_V2],
+      sources: {
+        "playwright-rendered": { protocol: ROLL_CAPTURE_PROTOCOL_V2, served: true },
+        "roll-capture-window": { protocol: ROLL_CAPTURE_PROTOCOL_V1, served: true, reason: "Roll Capture.app is v1-only" },
+      },
+    });
+    expect(n.perSource?.["playwright-rendered"]).toEqual({ available: true });
+    expect(n.perSource?.["roll-capture-window"]?.available).toBe(false);
+    if (n.perSource?.["roll-capture-window"]?.available === false) {
+      expect(n.perSource["roll-capture-window"].reason).toContain("v1-only");
+    }
+  });
+
+  it("does NOT grant a source v2 when it advertises v2 but is not served", () => {
+    const n = negotiateCaptureProtocol({
+      protocols: [ROLL_CAPTURE_PROTOCOL_V2],
+      sources: { "playwright-rendered": { protocol: ROLL_CAPTURE_PROTOCOL_V2, served: false, reason: "Chromium not installed" } },
+    });
+    expect(n.perSource?.["playwright-rendered"]?.available).toBe(false);
+  });
+
+  it("is back-compat: an advertisement with no `sources` yields no perSource and unchanged v1/v2/selected", () => {
+    const withSources = negotiateCaptureProtocol({ protocols: [ROLL_CAPTURE_PROTOCOL_V2], sources: { "playwright-rendered": { protocol: ROLL_CAPTURE_PROTOCOL_V2, served: true } } });
+    const legacy = negotiateCaptureProtocol({ protocols: [ROLL_CAPTURE_PROTOCOL_V2] });
+    expect(legacy.perSource).toBeUndefined();
+    expect({ v1: legacy.v1, v2: legacy.v2, selected: legacy.selected }).toEqual({ v1: withSources.v1, v2: withSources.v2, selected: withSources.selected });
+  });
+
+  it("parses a well-formed sources map and drops malformed entries (fail closed)", () => {
+    const adv = parseCaptureProtocolAdvertisement({
+      protocols: [ROLL_CAPTURE_PROTOCOL_V2],
+      sources: {
+        "playwright-rendered": { protocol: ROLL_CAPTURE_PROTOCOL_V2, served: true },
+        "roll-capture-window": { protocol: 42, served: "yes" }, // malformed → dropped
+        "unknown-source": { protocol: ROLL_CAPTURE_PROTOCOL_V2, served: true }, // not a CaptureSource → ignored
+      },
+    });
+    expect(adv?.sources?.["playwright-rendered"]).toEqual({ protocol: ROLL_CAPTURE_PROTOCOL_V2, served: true });
+    expect(adv?.sources?.["roll-capture-window"]).toBeUndefined();
+  });
+
+  it("drops a non-object sources value entirely (protocol-level only)", () => {
+    const adv = parseCaptureProtocolAdvertisement({ protocols: [ROLL_CAPTURE_PROTOCOL_V1], sources: "nope" });
+    expect(adv?.sources).toBeUndefined();
+    expect(adv?.protocols).toEqual([ROLL_CAPTURE_PROTOCOL_V1]);
+  });
+});

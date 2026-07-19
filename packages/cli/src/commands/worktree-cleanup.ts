@@ -68,12 +68,15 @@ export interface CleanupBranchCandidate {
   /** Ref SHA the plan observed; `--apply` refuses if the fresh ref differs. */
   expectedSha: string;
   /**
-   * How delivery was PROVEN (FIX-1458 / #1465): `ancestor` = every commit is
-   * reachable from integration; `patch_equivalent` = `git cherry` shows every
-   * branch commit already has an equivalent patch in integration. A merged PR
-   * alone never qualifies — squash merges leave the exact tips undelivered.
+   * How delivery was PROVEN (FIX-1458 / #1465, FIX-1471): `ancestor` = every
+   * commit is reachable from integration; `patch_equivalent` = `git cherry` shows
+   * every branch commit already has an equivalent patch in integration;
+   * `final_tree` = the branch tip tree is byte-identical to a merge commit
+   * reachable from integration (squash-merge case). A merged PR alone never
+   * qualifies — squash merges leave the exact tips undelivered unless the whole
+   * final tree is provably on integration.
    */
-  mergeKind: "ancestor" | "patch_equivalent";
+  mergeKind: "ancestor" | "patch_equivalent" | "final_tree";
 }
 
 /** A worktree the plan leaves untouched, with the audit disposition that spared it. */
@@ -123,7 +126,7 @@ export interface CleanupRefusal {
 export interface BranchRemoval {
   branch: string;
   expectedSha: string;
-  mergeKind: "ancestor" | "patch_equivalent";
+  mergeKind: "ancestor" | "patch_equivalent" | "final_tree";
 }
 
 export interface WorktreeCleanupResult {
@@ -141,7 +144,7 @@ export interface WorktreeCleanupResult {
 
 // ─── planning (pure) ─────────────────────────────────────────────────────────
 
-const MERGED_KINDS = new Set(["ancestor", "patch_equivalent"]);
+const MERGED_KINDS = new Set(["ancestor", "patch_equivalent", "final_tree"]);
 
 /** True iff `rec` satisfies EVERY safe-removal invariant on a fresh audit. */
 export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
@@ -197,11 +200,14 @@ export interface StandaloneBranchDeps {
    * PROOF that a standalone branch's work is already delivered (FIX-1458 / #1465):
    * `ancestor` when every commit is reachable from the integration branch;
    * `patch_equivalent` when `git cherry` shows every branch commit already has an
-   * equivalent patch in integration. `null` = cannot prove delivery → preserve
-   * (fail closed). A merged GitHub PR alone is NOT proof — a squash merge leaves
-   * the exact branch tips undelivered and any unique commit must be kept.
+   * equivalent patch in integration; `final_tree` (FIX-1471) when the branch tip
+   * tree is byte-identical to a merge commit reachable from integration (the
+   * squash-merge case `git cherry` false-negatives). `null` = cannot prove
+   * delivery → preserve (fail closed). A merged GitHub PR alone is NOT proof — a
+   * squash merge leaves the exact branch tips undelivered and any unique commit
+   * must be kept unless the whole final tree is provably on integration.
    */
-  branchMerge: (branch: string, sha: string) => "ancestor" | "patch_equivalent" | null;
+  branchMerge: (branch: string, sha: string) => "ancestor" | "patch_equivalent" | "final_tree" | null;
 }
 
 /**
@@ -798,37 +804,82 @@ function gitCap(repoRoot: string, args: string[]): string {
 export type BranchGitProbe = (args: string[]) => { ok: boolean; stdout: string };
 
 /**
- * FIX-1458 (#1465): classify how a standalone branch's work is delivered, using
- * ONLY fresh git patch evidence — never a merged-PR label on its own.
+ * FIX-1458 (#1465), FIX-1471: classify how a standalone branch's work is
+ * delivered, using ONLY fresh git evidence — never a merged-PR label on its own.
  *
  *  - `ancestor`        — `merge-base --is-ancestor`: every commit is literally
  *                        reachable from integration; deleting the ref loses nothing.
  *  - `patch_equivalent`— `git cherry <integration> <branch>` prints `-` for every
  *                        commit (each already has an equivalent patch upstream).
- *  - `null`            — ANY `git cherry` `+` line (a unique, undelivered patch —
- *                        the squash-merge case the regression mis-deleted), an
- *                        empty/failed probe, or no commits to compare. Fail closed:
+ *  - `final_tree`      — (FIX-1471) the branch tip's whole-repo tree is
+ *                        byte-identical to a commit reachable from the integration
+ *                        branch. This is the squash-merge case: `git cherry`
+ *                        false-negatives (the individual TCR commits have no
+ *                        matching patch id upstream), but the PR's single merge
+ *                        commit carries the branch's EXACT final tree. The matched
+ *                        commit is, by construction of walking `git log
+ *                        <integration>`, an ancestor of the integration branch.
+ *  - `null`            — no ancestry, no full-patch-equivalence, and no exact
+ *                        final-tree match (incl. a NEAR-match that differs by even
+ *                        one file), or any empty/failed probe. Fail closed:
  *                        unproven ⇒ preserve.
  *
- * Pure w.r.t. the injected probe; no gh, no network — a merged PR is deliberately
- * NOT consulted, because a squash merge does not deliver the exact branch tips.
+ * Pure w.r.t. the injected probe; no gh, no network — a merged PR label is
+ * deliberately NOT consulted. Delivery is proven only by ancestry, full
+ * patch-equivalence, or an exact final-tree match on an integration-reachable
+ * commit — never by partial patch overlap or PR state alone.
  */
 export function classifyBranchMerge(
   branch: string,
   integrationBranch: string,
   git: BranchGitProbe,
-): "ancestor" | "patch_equivalent" | null {
+): "ancestor" | "patch_equivalent" | "final_tree" | null {
   if (git(["merge-base", "--is-ancestor", branch, integrationBranch]).ok) return "ancestor";
   const cherry = git(["cherry", integrationBranch, branch]);
-  if (!cherry.ok) return null; // cannot prove delivery → preserve
-  const lines = cherry.stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l !== "");
-  if (lines.length === 0) return null; // nothing to compare → preserve
-  if (lines.some((l) => l.startsWith("+"))) return null; // unique undelivered patch → preserve
-  if (lines.every((l) => l.startsWith("-"))) return "patch_equivalent"; // every commit delivered/equivalent
-  return null; // unrecognized cherry output → preserve
+  if (cherry.ok) {
+    const lines = cherry.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l !== "");
+    // Every commit already has an equivalent patch upstream ⇒ delivered.
+    if (lines.length > 0 && lines.every((l) => l.startsWith("-"))) return "patch_equivalent";
+    // Otherwise (a `+` unique patch — the squash-merge case — an empty diff, or
+    // unrecognized output) fall through to the final-tree proof below.
+  }
+  return classifyFinalTreeDelivery(branch, integrationBranch, git);
+}
+
+/**
+ * FIX-1471: prove delivery of a squash-merged ref by exact final-tree equality.
+ *
+ * A squash merge collapses the branch's TCR commits into one merge commit on the
+ * integration branch, so `git cherry` shows every branch commit as unique (`+`).
+ * But that merge commit's whole-repo tree is byte-identical to the branch tip's
+ * tree (equivalently `git diff --quiet <ref> <merge>` = 0). We resolve the branch
+ * tip tree and scan commits reachable from the integration branch for a commit
+ * with the same tree oid; a match is the merge commit and is, by construction of
+ * `git log <integration>`, an ancestor of integration.
+ *
+ * Fail closed: a missing/failed tree or log probe, or no exact match (a NEAR-match
+ * that differs by even one file changes the tree oid and does NOT match), ⇒ null.
+ */
+function classifyFinalTreeDelivery(
+  branch: string,
+  integrationBranch: string,
+  git: BranchGitProbe,
+): "final_tree" | null {
+  const treeProbe = git(["rev-parse", `${branch}^{tree}`]);
+  if (!treeProbe.ok) return null; // cannot resolve the branch tree → preserve
+  const branchTree = treeProbe.stdout.trim();
+  if (branchTree === "") return null;
+  const log = git(["log", "--format=%H %T", integrationBranch]);
+  if (!log.ok) return null; // cannot read integration history → preserve
+  for (const line of log.stdout.split("\n")) {
+    const parts = line.trim().split(/\s+/);
+    const tree = parts[1];
+    if (parts[0] && tree && tree === branchTree) return "final_tree";
+  }
+  return null; // no integration-reachable commit carries this exact tree → preserve
 }
 
 /** FIX-1454: real git+gh probes for standalone-branch recovery over `repoRoot`. */

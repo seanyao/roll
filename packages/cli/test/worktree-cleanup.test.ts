@@ -667,6 +667,68 @@ describe("FIX-1458 (#1465) classifyBranchMerge — patch-equivalence, not merged
   });
 });
 
+describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proof", () => {
+  // A scripted git probe that additionally answers `rev-parse <ref>^{tree}` and
+  // `git log --format=%H %T <integration>` so the final-tree proof can run.
+  const probe = (opts: {
+    ancestor?: boolean;
+    cherry?: string;
+    branchTree?: string;
+    logTrees?: string; // raw "sha tree" lines for `git log` over integration
+    treeFails?: boolean;
+    logFails?: boolean;
+  }): BranchGitProbe => (args) => {
+    if (args[0] === "merge-base" && args[1] === "--is-ancestor") return { ok: opts.ancestor === true, stdout: "" };
+    if (args[0] === "cherry") return { ok: true, stdout: opts.cherry ?? "" };
+    if (args[0] === "rev-parse") return { ok: !opts.treeFails, stdout: opts.treeFails ? "" : (opts.branchTree ?? "") };
+    if (args[0] === "log") return { ok: !opts.logFails, stdout: opts.logFails ? "" : (opts.logTrees ?? "") };
+    return { ok: false, stdout: "" };
+  };
+
+  it("accepts a squash-merged ref whose final tree equals a merged PR commit on main", () => {
+    // Squash merge: is-ancestor false, git cherry marks every TCR commit '+'
+    // (no equivalent patch id upstream), but the PR's single merge commit on main
+    // carries the branch's EXACT final tree.
+    const kind = classifyBranchMerge(
+      "loop/cycle-20260716-191815-7797",
+      "main",
+      probe({
+        ancestor: false,
+        cherry: "+ aaaaaaa tcr 1\n+ bbbbbbb tcr 2\n+ ccccccc tcr 3",
+        branchTree: "tree-final",
+        logTrees: "206634f6 other-tree\nd3c7b923 tree-final\n0b325033 older-tree",
+      }),
+    );
+    expect(kind).toBe("final_tree");
+  });
+
+  it("preserves a NEAR-match ref whose tree differs from every merged commit (fail closed)", () => {
+    const kind = classifyBranchMerge(
+      "loop/cycle-near",
+      "main",
+      probe({
+        ancestor: false,
+        cherry: "+ aaaaaaa tcr 1\n+ bbbbbbb tcr 2",
+        branchTree: "tree-final",
+        logTrees: "206634f6 tree-final-x\nd3c7b923 tree-almost\n0b325033 tree-final2",
+      }),
+    );
+    expect(kind).toBeNull();
+  });
+
+  it("fails closed when the branch tree cannot be resolved", () => {
+    expect(
+      classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "+ a", treeFails: true, logTrees: "s tree-final" })),
+    ).toBeNull();
+  });
+
+  it("fails closed when the integration log cannot be read", () => {
+    expect(
+      classifyBranchMerge("loop/cycle-x", "main", probe({ ancestor: false, cherry: "+ a", branchTree: "tree-final", logFails: true })),
+    ).toBeNull();
+  });
+});
+
 describe("FIX-1454 planWorktreeCleanup with branch candidates", () => {
   it("fills the minimal set with worktrees first, then merged branches, to clear excess", () => {
     // 2 counted worktrees + 3 counted branches = canary 5, threshold 2 → excess 3.

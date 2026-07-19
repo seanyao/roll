@@ -10,7 +10,7 @@
  * Data contract: {@link WorktreeAuditRecord}, {@link WorktreeAuditOutput}
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { isEphemeralBranch } from "@roll/core";
@@ -33,7 +33,16 @@ export type WorktreeDisposition =
   | "preserved_needs_review"
   | "preserved_unpublished"
   | "preserved_dirty_no_tcr"
-  | "external_unmanaged";
+  | "external_unmanaged"
+  // FIX-1460 (#1468): a loop worktree DIR that exists on disk under
+  // `.roll/loop/worktrees` but is absent from `git worktree list` (its
+  // registration was removed — e.g. a failed `git worktree remove` that left
+  // untracked scratch). The runtime canary counts these dirs, so they must be
+  // visible here or they leak. `orphan_reclaimable` = owning cycle is provably
+  // delivered → safe bounded reclaim; `preserved_orphan` = delivery not provable
+  // → preserved + surfaced (never auto-deleted).
+  | "orphan_reclaimable"
+  | "preserved_orphan";
 
 export interface WorktreeAuditRecord {
   path: string;
@@ -93,6 +102,12 @@ export interface WorktreeAuditDeps {
   git?: (args: string[], cwd: string) => string;
   /** Read file content (for events.ndjson, lock files). */
   readFile?: (p: string) => string | null;
+  /**
+   * FIX-1460: list immediate subdirectory NAMES of a path (for the orphan
+   * loop-worktree disk scan). Defaults to a real readdir filtered to directories.
+   * Injectable in tests. Must NOT throw — returns [] when the path is absent.
+   */
+  readDir?: (p: string) => string[];
   /** Current timestamp as ISO-8601 string. */
   nowISO?: () => string;
   /** Current UTC seconds. */
@@ -189,6 +204,91 @@ function readCycleContext(eventsPath: string, deps: WorktreeAuditDeps): Map<stri
 function extractCycleId(dirName: string): string | undefined {
   const m = /^(cycle-\d{8}-\d{6}-\d+)$/.exec(dirName);
   return m ? m[1] : undefined;
+}
+
+/**
+ * FIX-1460 (#1468): conservative delivered-outcome allowlist. Only a cycle whose
+ * work is on the integration branch makes its orphan worktree dir redundant and
+ * therefore safely reclaimable. Mirrors the consistency audit's DELIVERED_OUTCOMES
+ * plus `merged` (reconcile treats status==="merged" as delivered).
+ */
+const ORPHAN_DELIVERED_OUTCOMES = new Set(["delivered", "merged"]);
+
+/** Resolve symlinks for path comparison; returns the input unchanged if it can't. */
+function realpathSafe(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/** Default real directory-name lister for the orphan scan (dirs only, never throws). */
+function defaultReadDirNames(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e: Dirent) => e.isDirectory())
+      .map((e: Dirent) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * FIX-1460 (#1468): enumerate ORPHAN loop worktree directories — dirs under
+ * `.roll/loop/worktrees` that are NOT registered in `git worktree list`. Such a
+ * dir is what a failed `git worktree remove --force` (blocked by untracked scratch
+ * like `.next`) leaves behind: the registration is gone but the directory remains,
+ * so the runtime canary keeps counting it while cleanup cannot see it.
+ *
+ * Each orphan becomes a loop-owned record so it is COUNTED + VISIBLE. It is marked
+ * `orphan_reclaimable` ONLY when it is inactive AND its owning cycle's recorded
+ * outcome is delivered/merged (its work is on main → the checkout is redundant);
+ * otherwise `preserved_orphan` (delivery not provable → never auto-deleted).
+ */
+function scanOrphanLoopWorktrees(
+  repoRoot: string,
+  registeredPaths: ReadonlySet<string>,
+  cycles: Map<string, CycleEvent>,
+  deps: WorktreeAuditDeps,
+): WorktreeAuditRecord[] {
+  const worktreesDir = join(repoRoot, ".roll", "loop", "worktrees");
+  const names = deps.readDir ? deps.readDir(worktreesDir) : defaultReadDirNames(worktreesDir);
+  const out: WorktreeAuditRecord[] = [];
+  for (const name of [...names].sort()) {
+    const absPath = resolve(join(worktreesDir, name));
+    if (registeredPaths.has(realpathSafe(absPath))) continue; // a registered worktree — already recorded above
+    const cycleId = extractCycleId(name);
+    const ce = cycleId ? cycles.get(cycleId) : undefined;
+    const outcome = ce?.outcome;
+    const active = isActiveCycle(cycleId, repoRoot, deps);
+
+    const rec: WorktreeAuditRecord = {
+      path: absPath,
+      owner: "loop",
+      ...(cycleId ? { cycleId } : {}),
+      ...(ce?.storyId ? { storyId: ce.storyId } : {}),
+      ...(outcome ? { outcome } : {}),
+      dirtyTracked: "unknown", // no git metadata for a deregistered dir
+      dirtyUntracked: "unknown",
+      ahead: null,
+      mergeEvidence: { kind: "none" },
+      active,
+      disposition: "preserved_orphan",
+      reason: "",
+    };
+
+    if (active) {
+      rec.reason = "orphan loop dir with an active cycle lock; never reclaimed";
+    } else if (outcome && ORPHAN_DELIVERED_OUTCOMES.has(outcome)) {
+      rec.disposition = "orphan_reclaimable";
+      rec.reason = `orphan loop dir (deregistered from git); owning cycle outcome '${outcome}' is delivered — bounded reclaim`;
+    } else {
+      rec.reason = `orphan loop dir (deregistered from git); delivery not provable (cycle outcome '${outcome ?? "unknown"}') — preserved, reclaim manually after review`;
+    }
+    out.push(rec);
+  }
+  return out;
 }
 
 // ─── dirty detection ────────────────────────────────────────────────────────
@@ -472,6 +572,20 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     records.push(baseRec);
   }
 
+  // 4a. FIX-1460 (#1468): scan `.roll/loop/worktrees` on disk for ORPHAN dirs —
+  // present on disk but absent from `git worktree list` above. These are what the
+  // runtime canary counts, so surfacing them here keeps the two counters in sync
+  // and stops the leak (a deregistered dir that pauses the loop but is invisible
+  // to cleanup). Fail-closed: only a dir whose owning cycle is provably delivered
+  // is reclaimable; every other orphan is preserved + surfaced.
+  // Dedup by realpath — `git worktree list` returns realpath'd paths while the
+  // scan joins onto repoRoot; a symlinked prefix (e.g. macOS /tmp→/private/tmp)
+  // must not make a registered worktree look like an orphan (double-count).
+  const registeredLoopPaths = new Set(records.map((r) => realpathSafe(resolve(r.path))));
+  for (const orphan of scanOrphanLoopWorktrees(repoRoot, registeredLoopPaths, cycles, deps)) {
+    records.push(orphan);
+  }
+
   // 4b. Enumerate the EXACT ephemeral local branches the canary counts. The
   // canary's total = ephemeral branches + loop worktree dirs; surfacing the
   // branch names here makes the audit the single source of truth for what the
@@ -552,7 +666,9 @@ function renderHuman(output: WorktreeAuditOutput): string {
     "preserved_unpublished",
     "preserved_dirty_no_tcr",
     "preserved_needs_review",
+    "preserved_orphan",
     "disposable_candidate",
+    "orphan_reclaimable",
     "external_unmanaged",
   ];
 

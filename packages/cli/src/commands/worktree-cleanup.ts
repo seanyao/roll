@@ -27,8 +27,8 @@
  */
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_BRANCH_CANARY_MAX } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import {
@@ -47,7 +47,14 @@ export interface CleanupCandidate {
   branch?: string;
   /** HEAD the audit observed; `--apply` refuses if the fresh head differs. */
   expectedHead: string;
-  reason: "disposable_candidate";
+  reason: "disposable_candidate" | "orphan_reclaimable";
+  /**
+   * FIX-1460 (#1468): how this path is reclaimed. `git_worktree` (default) uses
+   * `git worktree remove` for a registered worktree; `rm_dir` uses a bounded
+   * directory delete for an ORPHAN dir that git no longer registers (there is no
+   * worktree for git to remove). Absent ⇒ `git_worktree` (backwards compatible).
+   */
+  reclaim?: "git_worktree" | "rm_dir";
 }
 
 /**
@@ -103,6 +110,8 @@ export interface CleanupRemoval {
   expectedHead: string;
   branch?: string;
   cycleId?: string;
+  /** FIX-1460: how the path was reclaimed (git worktree remove vs bounded rm). */
+  reclaim?: "git_worktree" | "rm_dir";
 }
 
 export interface CleanupRefusal {
@@ -145,6 +154,28 @@ export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
     typeof rec.head === "string" &&
     rec.head.length > 0
   );
+}
+
+/**
+ * FIX-1460 (#1468): true iff `rec` is an ORPHAN loop dir the audit proved safe to
+ * reclaim — loop-owned, inactive, and its owning cycle provably delivered. There
+ * is no registered worktree, so it is reclaimed by a bounded directory delete.
+ */
+export function isReclaimableOrphan(rec: WorktreeAuditRecord): boolean {
+  return rec.owner === "loop" && rec.active === false && rec.disposition === "orphan_reclaimable";
+}
+
+/**
+ * FIX-1460: hard boundary for any directory delete — the path MUST resolve to a
+ * direct child of `<repoRoot>/.roll/loop/worktrees`. Never deletes the worktrees
+ * root itself, a nested path, a sibling, or anything outside the loop scratch dir.
+ */
+export function isBoundedLoopWorktreeDir(repoRoot: string, path: string): boolean {
+  const base = resolve(join(repoRoot, ".roll", "loop", "worktrees"));
+  const abs = resolve(path);
+  if (abs === base) return false; // never the root
+  if (!abs.startsWith(base + sep)) return false; // must be inside
+  return dirname(abs) === base; // must be a DIRECT child (no nested paths)
 }
 
 /** Refs the branch-recovery path must never delete, regardless of merge state. */
@@ -215,8 +246,10 @@ export function planWorktreeCleanup(
   const excess = canaryTotal - threshold;
 
   // The removable pool: audit-proven safe candidates, deterministically ordered.
+  // FIX-1460: includes reclaimable ORPHAN dirs (deregistered from git) alongside
+  // disposable registered worktrees — each removal drops the canary total by one.
   const pool = audit.records
-    .filter(isSafelyDisposable)
+    .filter((r) => isSafelyDisposable(r) || isReclaimableOrphan(r))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const branchPool = [...standaloneMergedBranches].sort((a, b) => a.branch.localeCompare(b.branch));
@@ -231,13 +264,18 @@ export function planWorktreeCleanup(
   const chosenBranches = branchPool.slice(0, Math.min(remainingExcess, branchPool.length));
   const chosenPaths = new Set(chosen.map((r) => r.path));
 
-  const candidates: CleanupCandidate[] = chosen.map((r) => ({
-    path: r.path,
-    ...(r.cycleId ? { cycleId: r.cycleId } : {}),
-    ...(r.branch ? { branch: r.branch } : {}),
-    expectedHead: r.head as string,
-    reason: "disposable_candidate" as const,
-  }));
+  const candidates: CleanupCandidate[] = chosen.map((r) => {
+    const orphan = isReclaimableOrphan(r);
+    return {
+      path: r.path,
+      ...(r.cycleId ? { cycleId: r.cycleId } : {}),
+      ...(r.branch ? { branch: r.branch } : {}),
+      // An orphan has no registered HEAD; apply skips the head check for rm_dir.
+      expectedHead: orphan ? "" : (r.head as string),
+      reason: orphan ? ("orphan_reclaimable" as const) : ("disposable_candidate" as const),
+      reclaim: orphan ? ("rm_dir" as const) : ("git_worktree" as const),
+    };
+  });
 
   // Everything not chosen is preserved — including disposables held back because
   // the minimal set already cleared the pressure.
@@ -278,6 +316,8 @@ export interface ApplyCleanupOptions {
   audit?: () => WorktreeAuditOutput;
   /** Remove one worktree via git + prune registration. Injectable for tests. */
   removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+  /** FIX-1460: reclaim one orphan loop dir via a bounded rm. Injectable for tests. */
+  reclaimOrphanDir?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
   /**
    * FIX-1454: fresh standalone-branch probes, called immediately before EVERY
    * branch deletion so a ref/merge/attach change between plan and apply is caught.
@@ -309,6 +349,7 @@ function defaultRemoveBranch(repositoryRoot: string, branch: string): { ok: bool
 }
 
 function defaultRemoveWorktree(repositoryRoot: string, path: string): { ok: boolean; detail: string } {
+  let gitErr = "";
   try {
     // Remove ONLY this validated path. --force tolerates untracked scratch, but
     // tracked dirt was already rejected by the immediately-preceding fresh audit
@@ -320,7 +361,26 @@ function defaultRemoveWorktree(repositoryRoot: string, path: string): { ok: bool
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (err) {
-    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+    gitErr = err instanceof Error ? err.message : String(err);
+  }
+  // FIX-1460 (#1468): `git worktree remove --force` can fail with "Directory not
+  // empty" when untracked scratch (e.g. a `.next` build dir) appeared AFTER the
+  // audit — that failure removes the registration but leaves the directory, which
+  // is exactly how a leaked orphan is born. Finish the job with a BOUNDED rm of
+  // the exact validated path (already proven disposable this apply). The path is
+  // hard-bounded to a direct child of `.roll/loop/worktrees`; anything else is a
+  // fail-loud refusal — never a broader delete.
+  if (existsSync(path)) {
+    if (!isBoundedLoopWorktreeDir(repositoryRoot, path)) {
+      return { ok: false, detail: gitErr || `refused: ${path} is outside .roll/loop/worktrees` };
+    }
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch (e) {
+      return { ok: false, detail: gitErr || (e instanceof Error ? e.message : String(e)) };
+    }
+  } else if (gitErr) {
+    return { ok: false, detail: gitErr };
   }
   try {
     // Reclaim the worktree admin metadata immediately (git's default prune
@@ -331,6 +391,35 @@ function defaultRemoveWorktree(repositoryRoot: string, path: string): { ok: bool
     });
   } catch {
     /* best-effort: the removal already succeeded */
+  }
+  return { ok: true, detail: "" };
+}
+
+/**
+ * FIX-1460 (#1468): reclaim an ORPHAN loop dir (deregistered from git) with a
+ * BOUNDED rm. There is no worktree for git to remove, so this deletes the exact
+ * directory — but only after asserting it is a direct child of
+ * `.roll/loop/worktrees`. Any path outside that boundary is a fail-loud refusal.
+ */
+function defaultReclaimOrphanDir(repositoryRoot: string, path: string): { ok: boolean; detail: string } {
+  if (!isBoundedLoopWorktreeDir(repositoryRoot, path)) {
+    return { ok: false, detail: `refused: ${path} is outside .roll/loop/worktrees` };
+  }
+  if (!existsSync(path)) {
+    return { ok: false, detail: "missing: orphan dir already gone" };
+  }
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+  try {
+    execFileSync("git", ["-C", repositoryRoot, "worktree", "prune", "--expire", "now"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch {
+    /* best-effort */
   }
   return { ok: true, detail: "" };
 }
@@ -350,6 +439,7 @@ export async function applyWorktreeCleanup(
   const auditFn =
     options.audit ?? (() => auditWorktrees({ repoRoot: repositoryRoot, home: homedir() }));
   const removeFn = options.removeWorktree ?? defaultRemoveWorktree;
+  const reclaimOrphanFn = options.reclaimOrphanDir ?? defaultReclaimOrphanDir;
   const removeBranchFn = options.removeBranch ?? defaultRemoveBranch;
   const emit = options.emit ?? (() => {});
   const nowMs = options.nowMs ?? (() => Date.now());
@@ -369,15 +459,56 @@ export async function applyWorktreeCleanup(
     };
 
     if (!rec) {
-      refuse("missing: worktree no longer registered (already removed or pruned)");
+      refuse(
+        candidate.reclaim === "rm_dir"
+          ? "missing: orphan dir no longer present (already reclaimed)"
+          : "missing: worktree no longer registered (already removed or pruned)",
+      );
       continue; // fail closed for this candidate; never substitute another
-    }
-    if (rec.head !== candidate.expectedHead) {
-      refuse(`changed-head: expected ${candidate.expectedHead}, found ${rec.head ?? "none"}`);
-      continue;
     }
     if (rec.active) {
       refuse("active: worktree activated concurrently (fresh lock/heartbeat)");
+      continue;
+    }
+
+    // FIX-1460 (#1468): ORPHAN reclaim path. A deregistered dir has no git
+    // metadata, so head/dirty checks do not apply — safety is the fresh audit
+    // STILL classifying it `orphan_reclaimable` (owning cycle provably delivered).
+    // Reclaim is a bounded directory delete, never `git worktree remove`.
+    if (candidate.reclaim === "rm_dir") {
+      if (!isReclaimableOrphan(rec)) {
+        refuse(`disposition: fresh audit reports '${rec.disposition}' (orphan no longer provably delivered)`);
+        continue;
+      }
+      const removal: CleanupRemoval = {
+        path: rec.path,
+        expectedHead: "",
+        reclaim: "rm_dir",
+        ...(rec.cycleId ? { cycleId: rec.cycleId } : {}),
+      };
+      if (options.dryRun) {
+        removed.push(removal);
+        continue;
+      }
+      const result = reclaimOrphanFn(repositoryRoot, rec.path);
+      if (!result.ok) {
+        refuse(`reclaim-failed: ${result.detail}`);
+        continue;
+      }
+      removed.push(removal);
+      emit({
+        type: "worktree_cleanup_applied",
+        path: rec.path,
+        expectedHead: "",
+        ...(rec.cycleId ? { cycleId: rec.cycleId } : {}),
+        ts: nowMs(),
+      });
+      continue;
+    }
+
+    // Registered-worktree removal path — strict git-backed revalidation.
+    if (rec.head !== candidate.expectedHead) {
+      refuse(`changed-head: expected ${candidate.expectedHead}, found ${rec.head ?? "none"}`);
       continue;
     }
     if (rec.dirtyTracked === true) {
@@ -396,6 +527,7 @@ export async function applyWorktreeCleanup(
     const removal: CleanupRemoval = {
       path: rec.path,
       expectedHead: candidate.expectedHead,
+      reclaim: "git_worktree",
       ...(rec.branch ? { branch: rec.branch } : {}),
       ...(rec.cycleId ? { cycleId: rec.cycleId } : {}),
     };
@@ -564,12 +696,25 @@ function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): 
   lines.push(`minimal candidate set (${plan.canaryTotal} → ${plan.projectedTotal})`);
   for (const c of plan.candidates) {
     const tags = [c.branch, c.cycleId].filter(Boolean).join(" ");
-    lines.push(`  worktree ${rel(c.path)}${tags ? "  " + tags : ""}  [disposable_candidate]`);
+    const label = c.reclaim === "rm_dir" ? "orphan_reclaimable · bounded rm" : "disposable_candidate";
+    const kind = c.reclaim === "rm_dir" ? "orphan  " : "worktree";
+    lines.push(`  ${kind} ${rel(c.path)}${tags ? "  " + tags : ""}  [${label}]`);
   }
   for (const b of plan.branchCandidates) {
     lines.push(`  branch   ${b.branch}  ${b.expectedSha.slice(0, 9)}  [merged: ${b.mergeKind}]`);
   }
   lines.push("");
+
+  // FIX-1460 (#1468): surface preserved orphan dirs (deregistered, delivery not
+  // provable). They are counted + visible but NEVER auto-deleted — the operator
+  // reclaims one explicitly after review.
+  const preservedOrphans = plan.preserved.filter((p) => p.disposition === "preserved_orphan");
+  if (preservedOrphans.length > 0) {
+    lines.push(`preserved orphan dirs (${preservedOrphans.length}) — visible + counted, never auto-deleted`);
+    for (const p of preservedOrphans) lines.push(`  ${rel(p.path)}  — ${p.reason}`);
+    lines.push("  Reclaim one after review with: roll worktree cleanup --reclaim-orphan <path>");
+    lines.push("");
+  }
 
   if (mode === "dry-run") {
     lines.push("Dry run — no git state changed.");
@@ -631,6 +776,11 @@ export const CLEANUP_USAGE =
   "             closed (no substitution). Then resume explicitly: roll loop resume\n" +
   "  --json     emit the schema-1 plan (dry-run) or result (apply) as JSON\n" +
   "  --repo     override the project root (default: current directory)\n" +
+  "  --reclaim-orphan <path>  (FIX-1460) bounded-rm ONE named orphan loop dir\n" +
+  "             (deregistered from git; delivery not auto-provable) after you\n" +
+  "             review it. Fails closed unless it is an inactive loop orphan\n" +
+  "             inside .roll/loop/worktrees. Auto-reclaim of provably-delivered\n" +
+  "             orphans happens under --apply.\n" +
   "\n" +
   "  安全清理:仅移除审计判定为已合并、干净、非活跃的 disposable_candidate;\n" +
   "  先跑 --dry-run,再 --apply,最后手动 roll loop resume。";
@@ -742,6 +892,7 @@ export async function worktreeCleanupCommand(
   args: string[],
   deps?: Partial<WorktreeAuditDeps> & {
     removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+    reclaimOrphanDir?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
     emit?: (event: RollEvent) => void;
     nowMs?: () => number;
   },
@@ -766,10 +917,56 @@ export async function worktreeCleanupCommand(
     home: deps?.home ?? homedir(),
     git: deps?.git,
     readFile: deps?.readFile,
+    readDir: deps?.readDir,
     nowISO: deps?.nowISO,
     nowSec: deps?.nowSec,
     integrationBranch: deps?.integrationBranch,
   };
+
+  // FIX-1460 (#1468): explicit operator reclaim of ONE preserved orphan dir whose
+  // delivery could not be auto-proven. The operator names the exact path (having
+  // reviewed it); we still fail-closed on: not-in-audit, not loop-owned, active,
+  // a registered/other worktree (must use --apply), or a path outside the bounded
+  // `.roll/loop/worktrees` scratch dir. Never a broad or substituted delete.
+  const reclaimIdx = args.indexOf("--reclaim-orphan");
+  if (reclaimIdx >= 0) {
+    const named = args[reclaimIdx + 1];
+    if (!named) {
+      process.stderr.write("roll worktree cleanup: --reclaim-orphan requires a <path>.\n");
+      return 2;
+    }
+    const fresh = auditWorktrees(fullDeps);
+    const target = resolve(named);
+    const rec = fresh.records.find((r) => resolve(r.path) === target);
+    if (!rec) {
+      process.stderr.write(`refused: ${named} is not in the worktree audit.\n`);
+      return 2;
+    }
+    if (rec.owner !== "loop") {
+      process.stderr.write(`refused: ${named} is not a loop worktree (owner=${rec.owner}).\n`);
+      return 2;
+    }
+    if (rec.active) {
+      process.stderr.write(`refused: ${named} has an active cycle lock.\n`);
+      return 2;
+    }
+    if (rec.disposition !== "orphan_reclaimable" && rec.disposition !== "preserved_orphan") {
+      process.stderr.write(`refused: ${named} audits as '${rec.disposition}', not an orphan dir — use --apply for registered worktrees.\n`);
+      return 2;
+    }
+    if (!isBoundedLoopWorktreeDir(repoRoot, rec.path)) {
+      process.stderr.write(`refused: ${named} is outside .roll/loop/worktrees.\n`);
+      return 2;
+    }
+    const reclaimFn = deps?.reclaimOrphanDir ?? defaultReclaimOrphanDir;
+    const r = reclaimFn(repoRoot, rec.path);
+    if (!r.ok) {
+      process.stderr.write(`reclaim-failed: ${r.detail}\n`);
+      return 1;
+    }
+    process.stdout.write(`reclaimed orphan dir: ${rec.path}\n`);
+    return 0;
+  }
 
   const threshold = resolveThreshold();
   const integrationBranch = fullDeps.integrationBranch ?? resolveIntegrationForCleanup(repoRoot);

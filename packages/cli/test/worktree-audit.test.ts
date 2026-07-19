@@ -928,3 +928,84 @@ describe("Read-only guarantee", () => {
     expect(resultA.summary).toEqual(resultB.summary);
   });
 });
+
+// ─── FIX-1460 (#1468): orphan loop worktree dir scanning ────────────────────
+
+describe("FIX-1460 (#1468) orphan loop worktree dirs", () => {
+  const events = (rows: object[]): string => rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+
+  function orphanDeps(over?: Partial<WorktreeAuditDeps>): WorktreeAuditDeps {
+    return makeDeps({
+      // Only the main repo is a registered worktree; the cycle dirs are orphans.
+      git: (args) =>
+        args[0] === "worktree" && args[1] === "list"
+          ? porcelain([{ path: "/fake/repo", head: "abc123", branch: "refs/heads/main" }])
+          : "",
+      readDir: (p) =>
+        p.endsWith(`.roll/loop/worktrees`.replace(/\//g, "/"))
+          ? ["cycle-20260718-000000-1", "cycle-20260718-000000-2"]
+          : [],
+      readFile: (p) =>
+        p.endsWith("events.ndjson")
+          ? events([
+              { cycleId: "cycle-20260718-000000-1", outcome: "delivered", storyId: "US-A-1" },
+              { cycleId: "cycle-20260718-000000-2", outcome: "gave_up" },
+            ])
+          : null, // inner.lock etc. → not active
+      ...over,
+    });
+  }
+
+  it("surfaces a delivered orphan as a counted loop record marked orphan_reclaimable", () => {
+    const out = auditWorktrees(orphanDeps());
+    const rec = out.records.find((r) => r.path.endsWith("cycle-20260718-000000-1"));
+    expect(rec).toBeDefined();
+    expect(rec?.owner).toBe("loop");
+    expect(rec?.disposition).toBe("orphan_reclaimable");
+    // counted (main + 2 orphans)
+    expect(out.records.filter((r) => r.owner === "loop").length).toBe(2);
+  });
+
+  it("preserves an orphan whose cycle is NOT provably delivered", () => {
+    const out = auditWorktrees(orphanDeps());
+    const rec = out.records.find((r) => r.path.endsWith("cycle-20260718-000000-2"));
+    expect(rec?.disposition).toBe("preserved_orphan");
+  });
+
+  it("preserves an orphan with an unknown (non-cycle) dir name (delivery unprovable)", () => {
+    const out = auditWorktrees(
+      orphanDeps({
+        readDir: () => ["cycle-20260718-cap004"], // non-standard name → no cycle context
+        readFile: () => null,
+      }),
+    );
+    const rec = out.records.find((r) => r.path.endsWith("cycle-20260718-cap004"));
+    expect(rec?.disposition).toBe("preserved_orphan");
+  });
+
+  it("does NOT reclassify a REGISTERED worktree dir as an orphan (no double count)", () => {
+    const out = auditWorktrees(
+      makeDeps({
+        git: (args) =>
+          args[0] === "worktree" && args[1] === "list"
+            ? porcelain([
+                { path: "/fake/repo", head: "abc", branch: "refs/heads/main" },
+                { path: "/fake/repo/.roll/loop/worktrees/cycle-20260718-000000-1", head: "def" },
+              ])
+            : "",
+        readDir: () => ["cycle-20260718-000000-1"],
+        readFile: () => null,
+      }),
+    );
+    const matches = out.records.filter((r) => r.path.endsWith("cycle-20260718-000000-1"));
+    expect(matches).toHaveLength(1);
+    expect(matches[0].disposition).not.toBe("orphan_reclaimable");
+    expect(matches[0].disposition).not.toBe("preserved_orphan");
+  });
+
+  it("never touches dirs outside .roll/loop/worktrees (empty scan when dir absent)", () => {
+    const out = auditWorktrees(orphanDeps({ readDir: () => [] }));
+    expect(out.records.filter((r) => r.disposition === "orphan_reclaimable")).toHaveLength(0);
+    expect(out.records.filter((r) => r.disposition === "preserved_orphan")).toHaveLength(0);
+  });
+});

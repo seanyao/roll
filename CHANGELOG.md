@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.719.1 — 2026-07-19
+
 ### 稳定性
 - 修复交付投影读错 PR 号:当 PR 标题内嵌了 `Closes #issue`,GitHub squash 后的提交主题会带两个 `(#N)`(issue 在前、真正的 PR 号在后),旧逻辑取第一个把 issue 当成 PR,导致发版 truth-live 一致性闸误报"Done 行 PR 号对不上";现按 GitHub 惯例取最后一个 `(#N)` (FIX-1457)
 - 渲染态 v2 截图通道接入 CapturePlanner 派发:声明网页界面即经进程内 Playwright 渲染派发出一份带 sha256 摘要的 v2 收据(登录/跳转/非法目标只记 skipped、绝不伪造),归入同一 CaptureSet (US-PHYSICAL-013)

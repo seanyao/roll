@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v4.719.3 — 2026-07-19
+
 ### 稳定性
 - 修复致命回收漏洞:`.roll/loop/worktrees` 下"磁盘有、但 git 已不再注册"的孤儿目录(多因 `git worktree remove` 撞上 `.next` 之类未跟踪生成物"目录非空"失败,注册删了目录留下)会一直把运行时 canary 顶高、让 loop 永久暂停,而 cleanup 却看不见它、清不掉;现在审计会扫磁盘把孤儿显式计入并展示,能证明其所属 cycle 已交付的孤儿用"有界删除"(严格限定在 `.roll/loop/worktrees` 直接子目录内)自动回收、证不了的一律保留+提示 `--reclaim-orphan <path>` 人工回收;registered/外部/用户 worktree 绝不触碰;删注册 worktree 若残留目录也用同一有界删除补齐,不再产生新孤儿 (FIX-1460 / #1468)
 

@@ -21,6 +21,8 @@ import {
   CLEANUP_USAGE,
   classifyBranchMerge,
   formatCanaryTripReport,
+  isBoundedLoopWorktreeDir,
+  isReclaimableOrphan,
   isSafelyDisposable,
   planWorktreeCleanup,
   resolveStandaloneMergedBranches,
@@ -737,5 +739,101 @@ describe("FIX-1454 applyWorktreeCleanup branch deletion", () => {
     });
     expect(res.branchesRemoved).toHaveLength(1);
     expect(removeBranch).not.toHaveBeenCalled();
+  });
+});
+
+// ─── FIX-1460 (#1468): orphan loop worktree dir reclaim ─────────────────────
+
+describe("FIX-1460 (#1468) orphan reclaim", () => {
+  const orphanRec = (over: Partial<WorktreeAuditRecord> = {}): WorktreeAuditRecord =>
+    rec({
+      path: "/repo/.roll/loop/worktrees/cycle-o",
+      head: undefined,
+      dirtyTracked: "unknown",
+      dirtyUntracked: "unknown",
+      ahead: null,
+      mergeEvidence: { kind: "none" },
+      disposition: "orphan_reclaimable",
+      reason: "orphan (delivered)",
+      ...over,
+    });
+
+  it("isBoundedLoopWorktreeDir accepts only a DIRECT child of .roll/loop/worktrees", () => {
+    const root = "/repo";
+    expect(isBoundedLoopWorktreeDir(root, "/repo/.roll/loop/worktrees/cycle-1")).toBe(true);
+    expect(isBoundedLoopWorktreeDir(root, "/repo/.roll/loop/worktrees")).toBe(false); // the root itself
+    expect(isBoundedLoopWorktreeDir(root, "/repo/.roll/loop/worktrees/cycle-1/nested")).toBe(false); // nested
+    expect(isBoundedLoopWorktreeDir(root, "/repo/src")).toBe(false); // outside
+    expect(isBoundedLoopWorktreeDir(root, "/etc")).toBe(false);
+  });
+
+  it("isReclaimableOrphan requires loop-owned, inactive, orphan_reclaimable", () => {
+    expect(isReclaimableOrphan(orphanRec())).toBe(true);
+    expect(isReclaimableOrphan(orphanRec({ active: true }))).toBe(false);
+    expect(isReclaimableOrphan(orphanRec({ disposition: "preserved_orphan" }))).toBe(false);
+    expect(isReclaimableOrphan(orphanRec({ owner: "external" }))).toBe(false);
+  });
+
+  it("plans an orphan_reclaimable record as an rm_dir candidate", () => {
+    const audit = auditOf([orphanRec()], []); // canary 1, threshold 0 → excess 1
+    const plan = planWorktreeCleanup(audit, 0);
+    expect(plan.candidates).toHaveLength(1);
+    expect(plan.candidates[0].reclaim).toBe("rm_dir");
+    expect(plan.candidates[0].reason).toBe("orphan_reclaimable");
+    expect(plan.candidates[0].expectedHead).toBe("");
+  });
+
+  it("apply reclaims a still-proven orphan via the bounded rm hook", async () => {
+    const plan = planWorktreeCleanup(auditOf([orphanRec()], []), 0);
+    const calls: string[] = [];
+    const res = await applyWorktreeCleanup(plan, {
+      repositoryRoot: "/repo",
+      dryRun: false,
+      audit: () => auditOf([orphanRec()], []),
+      reclaimOrphanDir: (_root, p) => {
+        calls.push(p);
+        return { ok: true, detail: "" };
+      },
+      removeWorktree: () => {
+        throw new Error("git worktree remove must NOT be used for an orphan dir");
+      },
+    });
+    expect(calls).toEqual(["/repo/.roll/loop/worktrees/cycle-o"]);
+    expect(res.removed).toHaveLength(1);
+    expect(res.removed[0].reclaim).toBe("rm_dir");
+    expect(res.refused).toHaveLength(0);
+  });
+
+  it("apply refuses (fail closed) when the fresh audit downgrades the orphan to preserved_orphan", async () => {
+    const plan = planWorktreeCleanup(auditOf([orphanRec()], []), 0);
+    let called = false;
+    const res = await applyWorktreeCleanup(plan, {
+      repositoryRoot: "/repo",
+      dryRun: false,
+      audit: () => auditOf([orphanRec({ disposition: "preserved_orphan" })], []),
+      reclaimOrphanDir: () => {
+        called = true;
+        return { ok: true, detail: "" };
+      },
+    });
+    expect(called).toBe(false);
+    expect(res.removed).toHaveLength(0);
+    expect(res.refused[0].reason).toMatch(/preserved_orphan|provably delivered/);
+  });
+
+  it("dry-run reports the orphan candidate but calls no reclaim hook", async () => {
+    const plan = planWorktreeCleanup(auditOf([orphanRec()], []), 0);
+    let called = false;
+    const res = await applyWorktreeCleanup(plan, {
+      repositoryRoot: "/repo",
+      dryRun: true,
+      audit: () => auditOf([orphanRec()], []),
+      reclaimOrphanDir: () => {
+        called = true;
+        return { ok: true, detail: "" };
+      },
+    });
+    expect(called).toBe(false);
+    expect(res.removed[0].reclaim).toBe("rm_dir");
   });
 });

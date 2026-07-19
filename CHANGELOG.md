@@ -4,6 +4,7 @@
 
 ### 稳定性
 - 渲染态 v2 截图通道接入 CapturePlanner 派发:声明网页界面即经进程内 Playwright 渲染派发出一份带 sha256 摘要的 v2 收据(登录/跳转/非法目标只记 skipped、绝不伪造),归入同一 CaptureSet (US-PHYSICAL-013)
+- 文档更新:截图 v2 网关的按来源就绪度、`roll capture refresh`/`status`/`migrate` 用法、渲染态进程内服务与"物理通道诚实标 v1"都写进中英验收证据文档(只写目标态) (US-PHYSICAL-015)
 - 新增 `roll capture refresh`:探测本机真实能力后写出诚实的截图主机 capabilities.json(渲染器在→广播 rendered 通道 v2、渲染器缺→明确记 served:false 不谎报;物理通道诚实标 v1);`roll capture status` 因此按来源显示 v2 就绪度,不再笼统谎报 (US-PHYSICAL-012)
 - 修复致命回归:自动交付循环在 worktree 里跑 `roll test` 因"改动已提交、--changed 匹配到 0 个测试"被误判成失败,导致每张卡都过不了验收、无法交付;现在 roll 自带的 --affected 闸把 0 改动测试当诚实绿(整套仍由 CI 全量兜底) (FIX-1454)
 - 浏览器审计账本(`.roll/browser-operations/events.ndjson`,只追加、随正常授权取证增长)不再被 bootstrap 完整性闸误判为未知污染而卡住后续每张卡;该豁免精确绑定到这一个路径且校验 ndjson 结构,被替换/损坏的账本仍会被拦(不引入 trust-all/ignore-dirty) (FIX-1455)

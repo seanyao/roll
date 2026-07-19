@@ -268,6 +268,33 @@ at startup:
   content (chat, email, other projects). If the target window is not found, Roll
   Capture.app returns a documented fallback with the reason recorded in the
   response and evidence ledger — no silent expansion of capture scope.
+
+### Capture v2 gateway — per-source readiness (US-PHYSICAL-010..013)
+
+Roll's capture host speaks two protocols. `roll capture status` reports readiness
+**per source**, so it never claims a blanket "v2 ready" when a lane is still v1:
+
+- **rendered (`playwright-rendered`)** — served **in-process** by Roll via headless
+  Playwright: a declared web surface is rendered to a PNG and turned into a
+  `roll.capture.v2` receipt with a `sha256` digest. It advertises v2 **only when
+  Chromium is installed**; otherwise status shows it `unavailable` with an
+  actionable reason (never a fabricated capability).
+- **physical (`roll-capture-window`)** — the native `Roll Capture.app`, honestly
+  **v1** today (the file-drop protocol). Physical v2 is a separate follow-on
+  (US-PHYSICAL-014); status labels it `v1` rather than over-claiming v2.
+
+Wiring it up:
+
+- `roll capture refresh` probes the real machine and writes an honest
+  `capabilities.json` (rendered → v2 when the renderer is present; physical → v1).
+- `roll capture status` then shows `v2 playwright-rendered — ready` alongside
+  `v2 roll-capture-window — unavailable` (legacy), instead of one blanket line.
+- `roll capture migrate` enables `best_effort` only when the rendered v2 lane is
+  genuinely served; otherwise it retains the current policy with an explicit
+  reason. With `best_effort` on, a declared surface is dispatched through the
+  in-process rendered lane, producing a taken v2 receipt on the CaptureSet; a
+  login / foreign-redirect / disallowed target is recorded as `skipped`, never a
+  fabricated taken.
 - `Playwright Chromium` — optional headless web capture for `roll attest` and
   archive screenshots. Install with `npx playwright install chromium`.
 

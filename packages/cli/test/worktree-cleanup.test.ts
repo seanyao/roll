@@ -13,6 +13,10 @@
  * a blanket deletion; preservation holds under every race/failure path.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { RollEvent } from "@roll/spec";
 import type { WorktreeAuditOutput, WorktreeAuditRecord } from "../src/commands/worktree-audit.js";
 import { auditWorktrees } from "../src/commands/worktree-audit.js";
@@ -20,10 +24,13 @@ import {
   applyWorktreeCleanup,
   CLEANUP_USAGE,
   classifyBranchMerge,
+  defaultRemoveBranch,
   formatCanaryTripReport,
   isBoundedLoopWorktreeDir,
+  isFullGitOid,
   isReclaimableOrphan,
   isSafelyDisposable,
+  parseMergedPrMergeCommit,
   planWorktreeCleanup,
   resolveStandaloneMergedBranches,
   worktreeCleanupCommand,
@@ -673,6 +680,12 @@ describe("FIX-1458 (#1465) classifyBranchMerge — patch-equivalence, not merged
 
 describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proof (PR-anchored)", () => {
   const BRANCH = "loop/cycle-20260716-191815-7797";
+  // Full 40-hex git OIDs — the merge anchor must validate as a real OID before it
+  // is ever passed to git (supervisor review). `MERGE` is the branch's own PR
+  // merge commit; `OTHER` is an unrelated integration commit sharing the tree.
+  const MERGE = "1111111111111111111111111111111111111111";
+  const OTHER = "2222222222222222222222222222222222222222";
+  const WRONG = "3333333333333333333333333333333333333333";
   // A scripted git world for the final-tree proof. The tree oid of any object is
   // resolved from `trees` (keyed by ref — the branch name or a merge oid); a merge
   // oid is an ancestor of integration iff it is listed in `onMain`.
@@ -707,10 +720,10 @@ describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proo
       probe({
         ancestor: false,
         cherry: squash,
-        trees: { [BRANCH]: "tree-final", "merge-oid": "tree-final" },
-        onMain: ["merge-oid"],
+        trees: { [BRANCH]: "tree-final", [MERGE]: "tree-final" },
+        onMain: [MERGE],
       }),
-      () => "merge-oid", // the branch's associated merged PR merge commit
+      () => MERGE, // the branch's associated merged PR merge commit
     );
     expect(kind).toBe("final_tree");
   });
@@ -725,8 +738,8 @@ describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proo
       probe({
         ancestor: false,
         cherry: squash,
-        trees: { [BRANCH]: "tree-final", "unrelated-main-commit": "tree-final" },
-        onMain: ["unrelated-main-commit"],
+        trees: { [BRANCH]: "tree-final", [OTHER]: "tree-final" },
+        onMain: [OTHER],
       }),
       () => null, // gh finds no merged PR for this head ref
     );
@@ -740,10 +753,10 @@ describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proo
       probe({
         ancestor: false,
         cherry: squash,
-        trees: { [BRANCH]: "tree-final", "wrong-merge-oid": "tree-other" },
-        onMain: ["wrong-merge-oid"],
+        trees: { [BRANCH]: "tree-final", [WRONG]: "tree-other" },
+        onMain: [WRONG],
       }),
-      () => "wrong-merge-oid",
+      () => WRONG,
     );
     expect(kind).toBeNull();
   });
@@ -758,6 +771,28 @@ describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proo
     expect(kind).toBeNull();
   });
 
+  it("preserves when the merge anchor is not a full git OID (HEAD/ref/short) — never passed to git", () => {
+    // A probe that returns a ref name or abbreviated sha must be rejected BEFORE it
+    // reaches git, where `HEAD`/`main` would resolve to an unrelated commit and
+    // forge a proof. Each is fail-closed regardless of tree/ancestor scripting.
+    for (const bad of ["HEAD", "main", "refs/heads/main", "1111111", "zzzz", "  "]) {
+      const kind = classifyBranchMerge(
+        BRANCH,
+        "main",
+        probe({
+          ancestor: false,
+          cherry: squash,
+          // Script the world as if the ref DID match + land, to prove the OID guard
+          // (not a tree/ancestor miss) is what rejects it.
+          trees: { [BRANCH]: "tree-final", [bad.trim()]: "tree-final" },
+          onMain: [bad.trim()],
+        }),
+        () => bad,
+      );
+      expect(kind).toBeNull();
+    }
+  });
+
   it("preserves when the associated PR merge commit is NOT an ancestor of integration", () => {
     // The merge commit tree matches, but it never landed on integration — fail closed.
     const kind = classifyBranchMerge(
@@ -766,18 +801,131 @@ describe("FIX-1471 classifyBranchMerge — squash-merge final-tree delivery proo
       probe({
         ancestor: false,
         cherry: squash,
-        trees: { [BRANCH]: "tree-final", "merge-oid": "tree-final" },
-        onMain: [], // merge-oid is NOT reachable from integration
+        trees: { [BRANCH]: "tree-final", [MERGE]: "tree-final" },
+        onMain: [], // MERGE is NOT reachable from integration
       }),
-      () => "merge-oid",
+      () => MERGE,
     );
     expect(kind).toBeNull();
   });
 
   it("fails closed when the branch tree cannot be resolved", () => {
     expect(
-      classifyBranchMerge(BRANCH, "main", probe({ ancestor: false, cherry: "+ a", treeFails: true, onMain: ["merge-oid"] }), () => "merge-oid"),
+      classifyBranchMerge(BRANCH, "main", probe({ ancestor: false, cherry: "+ a", treeFails: true, onMain: [MERGE] }), () => MERGE),
     ).toBeNull();
+  });
+});
+
+describe("FIX-1471 parseMergedPrMergeCommit / isFullGitOid — gh PR probe guards", () => {
+  const BRANCH = "loop/cycle-99";
+  const OID = "abcabcabcabcabcabcabcabcabcabcabcabcabca"; // 40 hex
+  const OID256 = "a".repeat(64);
+  const json = (o: Record<string, unknown>): string => JSON.stringify(o);
+
+  it("isFullGitOid accepts 40-hex and 64-hex, rejects everything else", () => {
+    expect(isFullGitOid(OID)).toBe(true);
+    expect(isFullGitOid(OID256)).toBe(true);
+    for (const bad of ["HEAD", "main", "refs/heads/main", "abcabc", "1234567", "", "  ", "ABC" + "a".repeat(37), "g".repeat(40)]) {
+      expect(isFullGitOid(bad)).toBe(false);
+    }
+  });
+
+  it("returns the merge oid on a merged PR whose head ref is EXACTLY the branch", () => {
+    const oid = parseMergedPrMergeCommit(
+      json({ state: "MERGED", mergedAt: "2026-07-16T00:00:00Z", mergeCommit: { oid: OID }, headRefName: BRANCH }),
+      BRANCH,
+    );
+    expect(oid).toBe(OID);
+  });
+
+  it("rejects a null / empty / missing / mismatched headRefName (fail closed)", () => {
+    const base = { state: "MERGED", mergedAt: "2026-07-16T00:00:00Z", mergeCommit: { oid: OID } };
+    expect(parseMergedPrMergeCommit(json({ ...base, headRefName: null }), BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit(json({ ...base, headRefName: "" }), BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit(json({ ...base }), BRANCH)).toBeNull(); // headRefName missing
+    expect(parseMergedPrMergeCommit(json({ ...base, headRefName: "loop/other" }), BRANCH)).toBeNull();
+  });
+
+  it("rejects a non-merged PR (open / closed-unmerged / no mergedAt)", () => {
+    const mc = { oid: OID };
+    expect(parseMergedPrMergeCommit(json({ state: "OPEN", mergedAt: null, mergeCommit: mc, headRefName: BRANCH }), BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit(json({ state: "CLOSED", mergedAt: null, mergeCommit: mc, headRefName: BRANCH }), BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit(json({ state: "MERGED", mergedAt: "", mergeCommit: mc, headRefName: BRANCH }), BRANCH)).toBeNull();
+  });
+
+  it("rejects a merge commit that is not a full git OID (HEAD / ref / short / absent / malformed)", () => {
+    const base = { state: "MERGED", mergedAt: "2026-07-16T00:00:00Z", headRefName: BRANCH };
+    for (const bad of ["HEAD", "main", "refs/heads/main", "abcabc", "1234567", ""]) {
+      expect(parseMergedPrMergeCommit(json({ ...base, mergeCommit: { oid: bad } }), BRANCH)).toBeNull();
+    }
+    expect(parseMergedPrMergeCommit(json({ ...base, mergeCommit: null }), BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit(json({ ...base }), BRANCH)).toBeNull(); // mergeCommit missing
+  });
+
+  it("rejects unparseable gh output", () => {
+    expect(parseMergedPrMergeCommit("not json", BRANCH)).toBeNull();
+    expect(parseMergedPrMergeCommit("", BRANCH)).toBeNull();
+  });
+});
+
+describe("FIX-1471 defaultRemoveBranch — atomic compare-and-delete (TOCTOU)", () => {
+  let repo: string;
+  // Strip any leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE so the temp repo is
+  // hermetic (these otherwise redirect git at the outer worktree — a known trap).
+  const cleanEnv = { ...process.env };
+  delete cleanEnv["GIT_DIR"];
+  delete cleanEnv["GIT_WORK_TREE"];
+  delete cleanEnv["GIT_INDEX_FILE"];
+  const git = (...a: string[]): string =>
+    execFileSync("git", ["-C", repo, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: cleanEnv }).trim();
+
+  afterEach(() => {
+    if (repo) rmSync(repo, { recursive: true, force: true });
+  });
+
+  const initRepo = (): void => {
+    repo = mkdtempSync(join(tmpdir(), "roll-toctou-"));
+    git("init", "-q");
+    git("config", "user.email", "t@t.co");
+    git("config", "user.name", "t");
+    git("config", "commit.gpgsign", "false");
+  };
+
+  it("deletes only when the ref STILL equals the expected sha (race: ref advanced ⇒ refuse, commit preserved)", () => {
+    initRepo();
+    // Delivered tip A on the branch.
+    git("commit", "-q", "--allow-empty", "-m", "delivered");
+    git("branch", "loop/cycle-race");
+    const shaA = git("rev-parse", "refs/heads/loop/cycle-race");
+
+    // RACE: after the fresh sha check observed shaA, the branch advances to a NEW,
+    // unmerged commit B before the delete fires.
+    git("checkout", "-q", "loop/cycle-race");
+    git("commit", "-q", "--allow-empty", "-m", "new unmerged work after check");
+    const shaB = git("rev-parse", "refs/heads/loop/cycle-race");
+    git("checkout", "-q", "-"); // leave the branch checked out only briefly
+    expect(shaB).not.toBe(shaA);
+
+    // Compare-and-delete against the STALE expected sha A must refuse atomically…
+    const stale = defaultRemoveBranch(repo, "loop/cycle-race", shaA);
+    expect(stale.ok).toBe(false);
+    // …and the branch (with its unmerged commit B) is preserved, not discarded.
+    expect(git("rev-parse", "refs/heads/loop/cycle-race")).toBe(shaB);
+    expect(git("rev-parse", "refs/heads/loop/cycle-race^{tree}")).toBeTruthy();
+
+    // Re-observing the CURRENT sha B then deletes cleanly.
+    const fresh = defaultRemoveBranch(repo, "loop/cycle-race", shaB);
+    expect(fresh.ok).toBe(true);
+    expect(() => git("rev-parse", "--verify", "refs/heads/loop/cycle-race")).toThrow();
+  });
+
+  it("refuses a non-full-OID expected sha without touching the ref", () => {
+    initRepo();
+    git("commit", "-q", "--allow-empty", "-m", "c");
+    git("branch", "loop/cycle-x");
+    const r = defaultRemoveBranch(repo, "loop/cycle-x", "HEAD");
+    expect(r.ok).toBe(false);
+    expect(git("rev-parse", "--verify", "refs/heads/loop/cycle-x")).toBeTruthy();
   });
 });
 
@@ -822,7 +970,8 @@ describe("FIX-1454 applyWorktreeCleanup branch deletion", () => {
       removeBranch,
     });
     expect(res.branchesRemoved.map((b) => b.branch)).toEqual(["loop/cycle-a"]);
-    expect(removeBranch).toHaveBeenCalledWith("/repo", "loop/cycle-a");
+    // Compare-and-delete: the observed sha is threaded so the delete is atomic.
+    expect(removeBranch).toHaveBeenCalledWith("/repo", "loop/cycle-a", "sa");
     expect(res.refused).toHaveLength(0);
   });
 

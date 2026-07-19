@@ -332,21 +332,35 @@ export interface ApplyCleanupOptions {
    * Required (only) when the plan carries branchCandidates.
    */
   freshBranchDeps?: () => StandaloneBranchDeps;
-  /** FIX-1454: delete one local branch via `git branch -D`. Injectable for tests. */
-  removeBranch?: (repositoryRoot: string, branch: string) => { ok: boolean; detail: string };
+  /**
+   * FIX-1454 / FIX-1471: delete one local branch, ATOMICALLY, only if it still
+   * points at `expectedSha` (compare-and-delete closes the check→delete race).
+   * Injectable for tests.
+   */
+  removeBranch?: (repositoryRoot: string, branch: string, expectedSha: string) => { ok: boolean; detail: string };
   /** Structured event sink (defaults to no-op; the CLI wires events.ndjson). */
   emit?: (event: RollEvent) => void;
   nowISO?: () => string;
   nowMs?: () => number;
 }
 
-function defaultRemoveBranch(repositoryRoot: string, branch: string): { ok: boolean; detail: string } {
+export function defaultRemoveBranch(
+  repositoryRoot: string,
+  branch: string,
+  expectedSha: string,
+): { ok: boolean; detail: string } {
+  // FIX-1471 (supervisor review): ATOMIC compare-and-delete closes the TOCTOU
+  // window between the fresh sha/merge revalidation and the delete. `git branch
+  // -D` deletes whatever the ref points at NOW — if the branch advanced to new,
+  // unmerged commits after the check, `-D` would silently discard them. `git
+  // update-ref -d <ref> <oldvalue>` instead deletes ONLY if the ref STILL equals
+  // `expectedSha` at delete time, and fails loudly otherwise. No commits are lost:
+  // the proven-delivered tip lives on the integration branch.
+  if (!isFullGitOid(expectedSha)) {
+    return { ok: false, detail: `refused: expected sha ${expectedSha} is not a full git OID` };
+  }
   try {
-    // -D (not -d): the ref is only deleted after a fresh revalidation proved it
-    // merged + unattached + at the expected sha, so a forced ref delete is safe
-    // and squash-merge tolerant. Only the ref is removed; no commits are lost
-    // (they live on the integration branch).
-    execFileSync("git", ["-C", repositoryRoot, "branch", "-D", branch], {
+    execFileSync("git", ["-C", repositoryRoot, "update-ref", "-d", `refs/heads/${branch}`, expectedSha], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -588,7 +602,9 @@ export async function applyWorktreeCleanup(
 
       const removalB: BranchRemoval = { branch: bc.branch, expectedSha: bc.expectedSha, mergeKind: mk };
       if (options.dryRun) { branchesRemoved.push(removalB); continue; }
-      const r = removeBranchFn(repositoryRoot, bc.branch);
+      // Atomic compare-and-delete against the observed sha — a ref that advanced
+      // between this check and the delete makes update-ref fail, so we refuse.
+      const r = removeBranchFn(repositoryRoot, bc.branch, bc.expectedSha);
       if (!r.ok) { refuseB(`delete-failed: ${r.detail}`); continue; }
       branchesRemoved.push(removalB);
       emit({ type: "worktree_cleanup_applied", path: `branch:${bc.branch}`, expectedHead: bc.expectedSha, branch: bc.branch, ts: nowMs() });
@@ -770,10 +786,16 @@ export const CLEANUP_USAGE =
   "  Safely recover from branch/worktree canary pressure using the worktree\n" +
   "  audit as the SOLE authority. Removes ONLY inactive, merged, clean\n" +
   "  `disposable_candidate` loop worktrees, plus (FIX-1454) standalone ephemeral\n" +
-  "  branches that are verifiably merged (ancestor of the integration branch or a\n" +
-  "  merged GitHub PR) and attached to no worktree — never a path/ref that is\n" +
-  "  merely old or counted, and never a preserved (unpublished / dirty / active /\n" +
-  "  external / current / protected / unmerged) one.\n" +
+  "  branches that are verifiably delivered and attached to no worktree. Delivery\n" +
+  "  is PROVEN by one of: every commit is an ancestor of the integration branch;\n" +
+  "  `git cherry` shows every commit already has an equivalent patch upstream; or\n" +
+  "  (FIX-1471, squash merges) the branch tip tree is byte-identical to the merge\n" +
+  "  commit of the branch's OWN merged GitHub PR (matched by exact head ref) AND\n" +
+  "  that merge commit is an ancestor of the integration branch. A merged PR alone\n" +
+  "  is NEVER sufficient, and no arbitrary same-tree commit on the integration\n" +
+  "  branch is ever used. Never a path/ref that is merely old or counted, and never\n" +
+  "  a preserved (unpublished / dirty / active / external / current / protected /\n" +
+  "  unmerged) one.\n" +
   "\n" +
   "  Always dry-run first. Default (no flag) is --dry-run.\n" +
   "  --dry-run  print counted refs/dirs, audit dispositions, and the minimal\n" +
@@ -896,7 +918,10 @@ function classifyFinalTreeDelivery(
   const rawMerge = prMergeCommit(branch);
   if (rawMerge === null) return null; // no merged PR for this head ref → preserve
   const merge = rawMerge.trim();
-  if (merge === "") return null;
+  // The anchor MUST be a full git OID before it ever reaches git as a revision —
+  // a ref name (`HEAD`, `main`), abbreviated sha, or malformed value could
+  // otherwise resolve to an unrelated commit and forge a delivery proof.
+  if (!isFullGitOid(merge)) return null;
 
   // (2) That merge commit must actually be on the integration branch.
   if (!git(["merge-base", "--is-ancestor", merge, integrationBranch]).ok) return null;
@@ -969,14 +994,59 @@ export function buildStandaloneBranchDeps(
 }
 
 /**
+ * FIX-1471 (supervisor review): a FULL git object id — 40-hex SHA-1 or 64-hex
+ * SHA-256, lowercase. Anything else (a ref name like `HEAD` or `main`, an
+ * abbreviated sha, empty, or malformed) is rejected so it can NEVER be handed to
+ * git as a revision, where it would resolve to an unrelated commit.
+ */
+export function isFullGitOid(value: string): boolean {
+  return /^[0-9a-f]{40}$/.test(value) || /^[0-9a-f]{64}$/.test(value);
+}
+
+/**
+ * FIX-1471 (supervisor review): PURE extraction of a delivery-authorizing merge
+ * commit OID from a `gh pr view --json state,mergedAt,mergeCommit,headRefName`
+ * payload for `branch`. Returns the oid ONLY when EVERY guard holds; otherwise
+ * `null` (fail closed). Split out from the gh shell-out so the guards are unit
+ * testable without a live `gh`.
+ *
+ * Guards:
+ *   - `state === "MERGED"` and a non-empty `mergedAt` (an open / closed-unmerged
+ *     PR never authorizes deletion).
+ *   - `headRefName` is PRESENT (a string) and EXACTLY `branch`. A null / empty /
+ *     missing / mismatched head ref is rejected — we never bind a delivery proof
+ *     to a PR whose head we cannot confirm is this exact ref.
+ *   - `mergeCommit.oid` is a FULL git OID (see {@link isFullGitOid}) — a ref name
+ *     (`HEAD`), abbreviated sha, or malformed value is rejected.
+ */
+export function parseMergedPrMergeCommit(raw: string, branch: string): string | null {
+  let j: {
+    state?: string;
+    mergedAt?: string | null;
+    mergeCommit?: { oid?: string } | null;
+    headRefName?: string | null;
+  };
+  try {
+    j = JSON.parse(raw) as typeof j;
+  } catch {
+    return null; // unparseable gh output → fail closed
+  }
+  if (j.state !== "MERGED") return null; // open / closed-unmerged → not delivered
+  if (typeof j.mergedAt !== "string" || j.mergedAt === "") return null;
+  // Head ref MUST be present and exactly this branch — never null/empty/missing.
+  if (typeof j.headRefName !== "string" || j.headRefName !== branch) return null;
+  const oid = j.mergeCommit?.oid;
+  if (typeof oid !== "string" || !isFullGitOid(oid)) return null; // reject HEAD/refs/short/malformed
+  return oid;
+}
+
+/**
  * FIX-1471: resolve the merge commit OID of a MERGED GitHub PR whose head is
  * EXACTLY `branch`. Synchronous (matches this file's execFileSync style) and
- * fail-closed: any gh failure, a non-merged PR, a head-ref mismatch, or a missing
- * merge oid ⇒ `null`, so an unproven ref is preserved rather than deleted.
- *
- * `gh pr view <branch>` resolves the PR associated with the head ref. We require
- * `state === "MERGED"`, a non-null `mergedAt`, a `headRefName` that matches the
- * branch when reported, and a real `mergeCommit.oid`.
+ * fail-closed: any gh failure, a non-merged PR, a head-ref mismatch, or a
+ * non-full-OID merge commit ⇒ `null`, so an unproven ref is preserved rather than
+ * deleted. `gh pr view <branch>` resolves the PR associated with the head ref;
+ * {@link parseMergedPrMergeCommit} applies the guards.
  */
 function ghMergedPrMergeCommit(repoRoot: string, branch: string): string | null {
   let out: string;
@@ -989,22 +1059,7 @@ function ghMergedPrMergeCommit(repoRoot: string, branch: string): string | null 
   } catch {
     return null; // no PR for this head ref, or gh failed → fail closed (preserve)
   }
-  try {
-    const j = JSON.parse(out) as {
-      state?: string;
-      mergedAt?: string | null;
-      mergeCommit?: { oid?: string } | null;
-      headRefName?: string | null;
-    };
-    if (j.state !== "MERGED") return null; // open/closed-unmerged → not delivered
-    if (j.mergedAt == null || j.mergedAt === "") return null;
-    // Never accept a PR whose head ref is not exactly this branch.
-    if (typeof j.headRefName === "string" && j.headRefName !== "" && j.headRefName !== branch) return null;
-    const oid = j.mergeCommit?.oid;
-    return typeof oid === "string" && oid !== "" ? oid : null;
-  } catch {
-    return null; // unparseable gh output → fail closed
-  }
+  return parseMergedPrMergeCommit(out, branch);
 }
 
 function resolveIntegrationForCleanup(repoRoot: string): string {

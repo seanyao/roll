@@ -227,6 +227,27 @@ evidence、已有证据暴露 rendering/layout 风险；升级原因必须记录
   不再默认全屏。全屏截图必须在卡片 spec 中显式声明 `capture_fullscreen: true`。
   这个隐私优先的设计防止证据链夹带屏幕上无关的隐私内容（聊天记录、邮件、其他项目）。
   如果目标窗口找不到，Roll Capture.app 会返回带有原因的降级记录——不允许静默扩大截取范围。
+
+### 截图 v2 网关 —— 按来源就绪度 (US-PHYSICAL-010..013)
+
+Roll 的截图主机支持两种协议。`roll capture status` 现在**按来源**分别报告就绪度,
+不再在某条通道还是 v1 时笼统谎报"v2 就绪":
+
+- **渲染态 (`playwright-rendered`)** —— 由 Roll **进程内**用无头 Playwright 提供:
+  声明的网页界面渲染成 PNG,转成带 `sha256` 摘要的 `roll.capture.v2` 收据。**仅在装了
+  Chromium 时**才广播 v2;否则状态显示 `unavailable` 并给出可执行原因(绝不伪造能力)。
+- **物理态 (`roll-capture-window`)** —— 原生 `Roll Capture.app`,今天诚实标为 **v1**
+  (文件投递协议)。物理 v2 是单独的后续卡(US-PHYSICAL-014);状态标 `v1` 而非谎称 v2。
+
+接线方式:
+
+- `roll capture refresh` 探测本机真实能力,写出诚实的 `capabilities.json`(渲染器在→
+  渲染通道 v2;物理→v1)。
+- `roll capture status` 随后按来源显示 `v2 playwright-rendered — ready` 与
+  `v2 roll-capture-window — unavailable`(legacy),不再是一条笼统结论。
+- `roll capture migrate` 仅当渲染态 v2 通道真正 served 时才开启 `best_effort`,否则保留
+  当前策略并说明原因。开启后,声明界面经进程内渲染通道派发,产出归入 CaptureSet 的
+  taken v2 收据;登录 / 跳转 / 非法目标记为 `skipped`,绝不伪造 taken。
 - `Playwright Chromium` —— 可选的 headless web 截图工具，用于 `roll attest`
   和归档截图。安装命令是 `npx playwright install chromium`。
 

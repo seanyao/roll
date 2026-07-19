@@ -486,10 +486,32 @@ export function canonicalizeSurfaceUrl(rawUrl: string): string | null {
 
 // ── Protocol negotiation (AC1) ───────────────────────────────────────────────
 
+/**
+ * US-PHYSICAL-011: per-source capability a host advertises. `served` is the
+ * writer's real capability probe — a source that is declared but not actually
+ * served (e.g. renderer missing) must set `served: false` with a reason, never
+ * over-claim.
+ */
+export interface CaptureSourceAdvertisement {
+  /** Highest protocol this source can serve, e.g. `roll.capture.v2`. */
+  protocol: string;
+  /** Whether the source is genuinely served right now (capability-probed). */
+  served: boolean;
+  /** Actionable reason when not served / for diagnostics. */
+  reason?: string;
+}
+
 /** What a Roll Capture host advertises about the protocols it can serve. */
 export interface CaptureProtocolAdvertisement {
   /** Protocols the host declares it can serve. Absent = legacy host. */
   protocols?: readonly string[];
+  /**
+   * US-PHYSICAL-011: OPTIONAL per-source capability. When present, negotiation
+   * reports per-source availability so status never claims "v2 ready" when a
+   * declared source (e.g. physical) is still only v1. Absent = protocol-level
+   * only (exact legacy behavior, back-compat).
+   */
+  sources?: Readonly<Partial<Record<CaptureSource, CaptureSourceAdvertisement>>>;
   /** Optional host build version, for diagnostics. */
   hostVersion?: string;
 }
@@ -501,6 +523,13 @@ export interface CaptureProtocolNegotiation {
   v2: CaptureProtocolAvailability;
   /** Highest mutually-supported protocol, or null when none can be negotiated. */
   selected: typeof ROLL_CAPTURE_PROTOCOL_V2 | typeof ROLL_CAPTURE_PROTOCOL_V1 | null;
+  /**
+   * US-PHYSICAL-011: per-source v2 availability, present ONLY when the
+   * advertisement carried a `sources` map. A source's v2 is available iff it
+   * explicitly advertises `roll.capture.v2` AND `served: true` — never inferred
+   * from the protocol-level list. Absent here = the host made no per-source claim.
+   */
+  perSource?: Readonly<Partial<Record<CaptureSource, CaptureProtocolAvailability>>>;
 }
 
 /**
@@ -536,17 +565,66 @@ export function negotiateCaptureProtocol(
     ? { available: true }
     : { available: false, reason: `host does not advertise ${ROLL_CAPTURE_PROTOCOL_V2}` };
   const selected = v2.available ? ROLL_CAPTURE_PROTOCOL_V2 : v1.available ? ROLL_CAPTURE_PROTOCOL_V1 : null;
-  return { v1, v2, selected };
+
+  // US-PHYSICAL-011: per-source v2 availability, only when the host made a
+  // per-source claim. A source is v2-available ONLY if it explicitly advertises
+  // roll.capture.v2 AND is genuinely served — never inferred from `protocols`.
+  const sources = advertisement?.sources;
+  if (sources === undefined) return { v1, v2, selected };
+  const perSource: Partial<Record<CaptureSource, CaptureProtocolAvailability>> = {};
+  for (const source of CAPTURE_SOURCES) {
+    const adv = sources[source];
+    if (adv === undefined) continue;
+    perSource[source] =
+      adv.protocol === ROLL_CAPTURE_PROTOCOL_V2 && adv.served === true
+        ? { available: true }
+        : {
+            available: false,
+            reason:
+              adv.reason ??
+              (adv.protocol !== ROLL_CAPTURE_PROTOCOL_V2
+                ? `source ${source} serves ${adv.protocol}, not ${ROLL_CAPTURE_PROTOCOL_V2}`
+                : `source ${source} advertises ${ROLL_CAPTURE_PROTOCOL_V2} but is not served`),
+          };
+  }
+  return { v1, v2, selected, perSource };
 }
 
 export function parseCaptureProtocolAdvertisement(value: unknown): CaptureProtocolAdvertisement | null {
   if (!isRecord(value)) return null;
   const rawProtocols = value["protocols"];
   const protocols = Array.isArray(rawProtocols) ? rawProtocols.filter((p): p is string => typeof p === "string") : undefined;
+  // US-PHYSICAL-011: parse the OPTIONAL per-source map. Only well-formed entries
+  // for known sources are kept; a malformed `sources` value is dropped entirely
+  // (fail closed to protocol-level), never partially trusted.
+  const sources = parseCaptureSourceAdvertisements(value["sources"]);
   return {
     ...(protocols !== undefined ? { protocols } : {}),
+    ...(sources !== undefined ? { sources } : {}),
     ...(typeof value["hostVersion"] === "string" ? { hostVersion: value["hostVersion"] } : {}),
   };
+}
+
+function parseCaptureSourceAdvertisements(
+  raw: unknown,
+): Readonly<Partial<Record<CaptureSource, CaptureSourceAdvertisement>>> | undefined {
+  if (!isRecord(raw)) return undefined;
+  const out: Partial<Record<CaptureSource, CaptureSourceAdvertisement>> = {};
+  let any = false;
+  for (const source of CAPTURE_SOURCES) {
+    const entry = raw[source];
+    if (!isRecord(entry)) continue;
+    const protocol = entry["protocol"];
+    const served = entry["served"];
+    if (typeof protocol !== "string" || protocol === "" || typeof served !== "boolean") continue;
+    out[source] = {
+      protocol,
+      served,
+      ...(typeof entry["reason"] === "string" ? { reason: entry["reason"] } : {}),
+    };
+    any = true;
+  }
+  return any ? out : undefined;
 }
 
 // ── v2 schemas ───────────────────────────────────────────────────────────────

@@ -368,10 +368,13 @@ function mergeFactFromCommitMessage(
   if (mergeMatch) {
     prNum = Number(mergeMatch[1]);
   } else {
-    // Squash-merge "(#N)" in the subject.
-    const squashMatch = /\(#(\d+)\)/.exec(subject);
-    if (squashMatch) {
-      prNum = Number(squashMatch[1]);
+    // Squash-merge "(#N)" in the subject. FIX-1457: GitHub appends the PR
+    // number as the LAST "(#N)"; any earlier "(#N)" is a manual reference
+    // (e.g. a "Closes #issue" echoed into the PR title). Take the last match
+    // so an embedded issue number is never mistaken for the PR identity.
+    const lastSquashMatch = [...subject.matchAll(/\(#(\d+)\)/g)].at(-1);
+    if (lastSquashMatch) {
+      prNum = Number(lastSquashMatch[1]);
     } else if (storyIds.length > 0) {
       // FIX-1046: when the subject names a story-id but lacks a (#N) PR
       // reference, search the body for (#N). A squash-merge that carries the

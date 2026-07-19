@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { buildPendingDeliveryEvidenceManifest, parsePeerReviewTranscript, writePendingDeliveryEvidenceManifest } from "@roll/core";
 import { parseGoalYaml, renderGoalYaml, type RollGoal } from "@roll/spec";
-import { classifyBootstrapArtifacts, deliveryGateStopDetails, hasSafetyPauseSince, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { buildRunOnceChildEnv, classifyBootstrapArtifacts, deliveryGateStopDetails, hasSafetyPauseSince, loopGoCommand, planGoTmuxCommands, spawnFinalReviewAgent, type LoopGoDeps } from "../src/commands/loop-go.js";
+import { GOAL_GUIDED_ENV } from "../src/lib/goal-progress.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -2497,5 +2498,245 @@ describe("FIX-1253 — go banner shows the EFFECTIVE scope, never the parsed def
     expect(r.code).toBe(0);
     expect(r.out).toContain("cards FIX-1250");
     expect(r.out).toContain("inherited from existing goal");
+  });
+});
+
+describe("FIX-1472 — guided/supervisor one-shot runs the scoped card while paused", () => {
+  it("runs exactly the explicit --cards X (never an unscoped Todo) while the loop is paused, and leaves the PAUSE marker in place", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-007](.roll/features/loop-engine/FIX-007/spec.md) | scoped | 📋 Todo |",
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | unscoped eligible | 📋 Todo |",
+    ]);
+    // Autonomous scheduling is paused (owner ran `roll loop pause`).
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const allowed: Array<string[] | undefined> = [];
+    const guidedFlags: Array<boolean | undefined> = [];
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_000 + calls,
+      nowIso: () => `2026-06-11T10:00:0${calls}Z`,
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async ({ projectPath, allowedCards, guided }) => {
+        calls += 1;
+        allowed.push(allowedCards);
+        guidedFlags.push(guided);
+        writeFileSync(
+          join(projectPath, ".roll", "loop", "runs.jsonl"),
+          `${JSON.stringify({ story_id: "FIX-007", cycle_id: `cycle-${calls}`, ts: `2026-06-11T10:00:0${calls}Z`, status: "done" })}\n`,
+          { flag: "a" },
+        );
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--cards", "FIX-007", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    // Exactly one cycle started — the scoped card ran despite the pause.
+    expect(calls).toBe(1);
+    // Only the explicitly scoped card was handed to run-once; the unscoped
+    // eligible Todo was never selected.
+    expect(allowed).toEqual([["FIX-007"]]);
+    // The guided signal is threaded to the run-once child so the real child
+    // (which also honors the PAUSE marker) knows to run rather than skip.
+    expect(guidedFlags).toEqual([true]);
+    // The session stopped on the explicit --max-cycles bound, not the pause.
+    expect(r.out).toContain("max_cycles");
+    expect(r.out).not.toContain("pause_marker");
+    // `pause` still stops autonomous scheduling — the marker is untouched.
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+    const goal = parseGoalYaml(readFileSync(join(p, ".roll", "loop", "goal.yaml"), "utf8"));
+    expect(goal.lastDecisionReason).toContain("max_cycles");
+  });
+
+  it("fails closed: a paused flagless go (no explicit --cards) still stops at pause_marker without running a cycle", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | unscoped eligible | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_500,
+      nowIso: () => "2026-06-11T10:05:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    // No card was explicitly scoped, so the pause is honored: zero cycles.
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: paused --all does not bypass the pause marker or start run-once", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | unscoped eligible | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_550,
+      nowIso: () => "2026-06-11T10:05:50Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--all", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: paused --epic does not bypass the pause marker or start run-once", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [US-ELIGIBLE](.roll/features/loop-engine/US-ELIGIBLE/spec.md) | scoped eligible | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_575,
+      nowIso: () => "2026-06-11T10:05:57Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--epic", "loop-engine", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: a POSITIONAL card token (no --cards flag) does not bypass the pause", async () => {
+    // `roll loop go FIX-007 --max-cycles 1` forms a cards SCOPE from the bare
+    // positional token, but it is NOT an explicit `--cards` flag. Only the flag
+    // is the sanctioned supervisor gesture, so a positional scope must keep
+    // honoring the PAUSE marker (fail closed).
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-007](.roll/features/loop-engine/FIX-007/spec.md) | scoped | 📋 Todo |",
+    ]);
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_700,
+      nowIso: () => "2026-06-11T10:07:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "FIX-007", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+    expect(existsSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"))).toBe(true);
+  });
+
+  it("fails closed: an INHERITED cards scope (not named this run) does not bypass the pause", async () => {
+    const p = project();
+    writeBacklog(p, [
+      "| [FIX-007](.roll/features/loop-engine/FIX-007/spec.md) | scoped | 📋 Todo |",
+    ]);
+    // A prior goal narrowed the scope to cards; this run names nothing.
+    writeFileSync(
+      join(p, ".roll", "loop", "goal.yaml"),
+      renderGoalYaml({
+        schema: "goal.v1",
+        scope: { kind: "cards", cards: ["FIX-007"] },
+        review: { mode: "auto" },
+        limits: {},
+        status: "active",
+        usage: { cycles: 0, costUsd: 0 },
+        createdAt: "2026-06-11T16:11:49Z",
+        updatedAt: "2026-06-11T16:12:26Z",
+      }),
+    );
+    writeFileSync(join(p, ".roll", "loop", "PAUSE-proj-abc123"), "owner pause\n");
+    let calls = 0;
+    const deps: LoopGoDeps = {
+      identity: () => Promise.resolve({ path: p, slug: "proj-abc123" }),
+      pid: () => 12345,
+      nowSec: () => 1_780_000_600,
+      nowIso: () => "2026-06-11T10:06:00Z",
+      hasTmux: () => false,
+      startTmux: () => false,
+      runOnce: async () => {
+        calls += 1;
+        return 0;
+      },
+    };
+
+    const r = await capture(() => loopGoCommand(["--worker", "--max-cycles", "1"], deps));
+
+    expect(r.code).toBe(0);
+    expect(calls).toBe(0);
+    expect(r.out).toContain("pause_marker");
+  });
+});
+
+describe("FIX-1472 (supervisor review) — buildRunOnceChildEnv sets guided EXPLICITLY, never inherits ambient", () => {
+  it("forces GOAL_GUIDED_ENV to \"0\" for an unguided child even when the parent env has an ambient \"1\"", () => {
+    // Ambient guided=1 leaked from a parent go-driver; an autonomous child that
+    // merely carries an allowed-card scope (e.g. `go --all`) must NOT inherit it,
+    // or it would bypass the PAUSE marker.
+    const env = buildRunOnceChildEnv(
+      { projectPath: "/tmp/x", allowedCards: ["FIX-007"] },
+      { [GOAL_GUIDED_ENV]: "1" },
+    );
+    expect(env[GOAL_GUIDED_ENV]).toBe("0");
+  });
+
+  it("forces GOAL_GUIDED_ENV to \"0\" when input.guided is explicitly false and ambient is \"1\"", () => {
+    const env = buildRunOnceChildEnv(
+      { projectPath: "/tmp/x", guided: false },
+      { [GOAL_GUIDED_ENV]: "1" },
+    );
+    expect(env[GOAL_GUIDED_ENV]).toBe("0");
+  });
+
+  it("sets GOAL_GUIDED_ENV to \"1\" only when this call is guided", () => {
+    const env = buildRunOnceChildEnv(
+      { projectPath: "/tmp/x", allowedCards: ["FIX-007"], guided: true },
+      {},
+    );
+    expect(env[GOAL_GUIDED_ENV]).toBe("1");
   });
 });

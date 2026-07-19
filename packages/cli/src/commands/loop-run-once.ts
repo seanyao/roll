@@ -37,7 +37,7 @@ import { currentLang, realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
-import { parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
+import { isGuidedRunOnce, parseAllowedCardsEnv, scopeBacklogForAllowedCards } from "../lib/goal-progress.js";
 import { auditWorktrees } from "./worktree-audit.js";
 import { formatCanaryTripReport } from "./worktree-cleanup.js";
 import { writeLatestLoopDigest } from "../lib/morning-report.js";
@@ -984,7 +984,12 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   // FIX-1019: if a prior goal session (or the user) paused the loop, launchd
   // ticks must ALSO respect the PAUSE marker. Exit 0 so cron does not retry.
-  if (isLoopPaused(id.path, id.slug)) {
+  // FIX-1472: EXCEPT a guided/supervisor one-shot — an explicit `roll loop go
+  // --cards X` handed this child a non-empty scope AND the guided flag. That is
+  // a foreground supervisor action, not an autonomous tick, so it runs the
+  // scoped card while autonomous scheduling stays paused. Fail closed: a
+  // missing/empty scope (or a stray env flag) still honors the pause.
+  if (isLoopPaused(id.path, id.slug) && !isGuidedRunOnce(allowedCards)) {
     const lang = resolveLang({
       rollLang: process.env["ROLL_LANG"],
       lcAll: process.env["LC_ALL"],

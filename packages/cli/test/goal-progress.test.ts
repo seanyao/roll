@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { parseBacklog, pickStory } from "@roll/core";
 import {
   GOAL_ALLOWED_CARDS_ENV,
+  GOAL_GUIDED_ENV,
   filterByAllowedCards,
+  isGuidedRunOnce,
   parseAllowedCardsEnv,
   runAttemptFromRow,
   scopeBacklogForAllowedCards,
@@ -68,5 +70,21 @@ describe("goal progress helpers", () => {
     });
     // No story_id at all → undefined → the per-card loop has nothing to key on.
     expect(runAttemptFromRow({ cycle_id: "c1", status: "failed" })).toBeUndefined();
+  });
+
+  describe("FIX-1472 — guided one-shot detection (fail closed)", () => {
+    it("is guided only when the guided env is set AND a non-empty scope was handed down", () => {
+      expect(isGuidedRunOnce(new Set(["FIX-007"]), { [GOAL_GUIDED_ENV]: "1" })).toBe(true);
+    });
+
+    it("is NOT guided without the explicit guided env flag (autonomous tick keeps honoring pause)", () => {
+      expect(isGuidedRunOnce(new Set(["FIX-007"]), {})).toBe(false);
+      expect(isGuidedRunOnce(new Set(["FIX-007"]), { [GOAL_GUIDED_ENV]: "0" })).toBe(false);
+    });
+
+    it("fails closed on a missing/empty scope even when the guided env is set", () => {
+      expect(isGuidedRunOnce(undefined, { [GOAL_GUIDED_ENV]: "1" })).toBe(false);
+      expect(isGuidedRunOnce(new Set(), { [GOAL_GUIDED_ENV]: "1" })).toBe(false);
+    });
   });
 });

@@ -1366,6 +1366,12 @@ export async function loopPauseCommand(_args: string[], deps: LoopSchedDeps = re
   process.stdout.write(
     "mode: guided — scheduler will not start long-running Story execution until `roll loop resume`\n",
   );
+  // FIX-1472: pause stops AUTONOMOUS scheduling only. A supervisor can still run
+  // one explicitly-scoped card without resuming (which would re-enable
+  // autonomous selection of any eligible Todo).
+  process.stdout.write(
+    "  supervisor one-shot: `roll loop go --cards <ids> --max-cycles 1` runs exactly those cards while staying paused (no autonomous scheduling).\n",
+  );
   return 0;
 }
 

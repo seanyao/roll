@@ -19,7 +19,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, createReadStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import { GOAL_ALLOWED_CARDS_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
+import { GOAL_ALLOWED_CARDS_ENV, GOAL_GUIDED_ENV, runAttemptFromRow } from "../lib/goal-progress.js";
 import { projectAgent } from "./agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { deliveryGateDiagnosticsFromRows, storyTruthFromBacklog, type DeliveryGateDiagnostic, type TruthRunRow } from "../lib/truth-adapter.js";
@@ -82,6 +82,12 @@ interface ProjectId {
 export interface RunOnceInput {
   projectPath: string;
   allowedCards?: string[];
+  /**
+   * FIX-1472: this cycle is a guided/supervisor one-shot (the owner named exact
+   * `--cards` on this `go`). Threaded to the run-once child so it runs the
+   * scoped card even while autonomous scheduling is paused. See {@link GOAL_GUIDED_ENV}.
+   */
+  guided?: boolean;
 }
 
 export interface StartTmuxInput {
@@ -557,6 +563,22 @@ function hasHelpArg(args: readonly string[]): boolean {
   return args.includes("--help") || args.includes("-h");
 }
 
+/**
+ * FIX-1472: a guided/supervisor one-shot — the owner named EXACT cards on THIS
+ * invocation (`roll loop go --cards X`). It is an explicit foreground supervisor
+ * action, NOT autonomous scheduling, so it runs the named card(s) even while the
+ * loop is PAUSED (pause stops autonomous scheduling only). `go` never installs a
+ * scheduler / launchd / fallback process, and the `cards` scope filters the
+ * picker to the named ids (no backlog scan, no other-card selection); the run
+ * stays bounded by `--max-cycles` and by the scope itself. Fail closed: only an
+ * explicit, non-empty `--cards` scope NAMED THIS RUN qualifies — a missing,
+ * inherited, `--all`, or `--epic` scope stays autonomous and keeps honoring the
+ * pause marker.
+ */
+function isGuidedRun(opts: GoOptions): boolean {
+  return opts.scopeSpecified && opts.scope.kind === "cards" && opts.scope.cards.length > 0;
+}
+
 function loopGoHelp(): string {
   return [
     "Usage: roll loop go [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
@@ -580,6 +602,12 @@ function loopGoHelp(): string {
     "  范围 (--epic/--cards) 与 --review 省略时仍沿用——它们是 goal 的身份，不是每次的安全旋钮。",
     "  The startup banner shows the EFFECTIVE scope; an inherited scope is flagged so a flagless go can never silently narrow. Pass --all to reset to the full backlog.",
     "  启动横幅显示生效的 scope；沿用的 scope 会被标注，flagless go 绝不静默收窄。用 --all 重置回全量。",
+    "",
+    "Guided one-shot while paused (FIX-1472):",
+    "  An explicit `roll loop go --cards X` runs the named card(s) even while `roll loop pause` is in effect — it is a supervisor action, not autonomous scheduling. It installs no scheduler and picks no other card; bound it with --max-cycles.",
+    "  显式的 `roll loop go --cards X` 即使在 `roll loop pause` 生效时也会执行指定卡——这是 Supervisor 手动动作，不是自主排程。它不安装排程、不选别的卡；用 --max-cycles 限定次数。",
+    "  Pause still stops autonomous scheduling; only an explicitly-named --cards scope bypasses it (a flagless/inherited/--all/--epic go keeps honoring the pause).",
+    "  pause 仍然停止自主排程；只有本次显式指定的 --cards 范围才会绕过（flagless/沿用/--all/--epic 的 go 仍遵守暂停）。",
     "",
     "Progress guardrails (the loop stops on NO PROGRESS, not on cost):",
     "  productivity floor  A cycle whose agent EXECUTED but produced 0 commits and no delivery is a `gave_up` terminal — alerted on the first occurrence (no streak).",
@@ -741,6 +769,32 @@ function followGoLiveFeed(projectPath: string, rollBin: string): Promise<void> {
   });
 }
 
+/**
+ * Build the env for the detached `roll loop run-once` child. Pure and exported
+ * so the fail-closed guarantees are unit-testable without spawning a process.
+ *
+ * FIX-1472 (supervisor review): the guided flag is set EXPLICITLY on every
+ * invocation — "1" only when THIS call is guided, "0" otherwise — so an ambient
+ * `ROLL_LOOP_GO_GUIDED=1` inherited from the parent env can NEVER leak into an
+ * unguided child and let an autonomous invocation (which still carries an
+ * allowed-card env, e.g. `go --all`) bypass the PAUSE marker. The explicit key
+ * comes after the `...base` spread, so it always wins.
+ */
+export function buildRunOnceChildEnv(input: RunOnceInput, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    ROLL_LOOP_GO_CHILD: "1",
+    // FIX-1022: unattended go-driver child must never trigger the macOS
+    // screencapture TCC prompt (isTTY is unreliable under PTY wrapping).
+    ROLL_NO_SCREENCAP: base["ROLL_NO_SCREENCAP"] ?? "1",
+    ...(input.allowedCards !== undefined ? { [GOAL_ALLOWED_CARDS_ENV]: input.allowedCards.join(",") } : {}),
+    // FIX-1472: guided is set on EVERY call (never conditionally spread) so an
+    // inherited ambient "1" cannot survive into an unguided child. Fail closed
+    // to "0" — isGuidedRunOnce treats anything but "1" as not guided.
+    [GOAL_GUIDED_ENV]: input.guided === true ? "1" : "0",
+  };
+}
+
 function realRunOnce(input: RunOnceInput): Promise<number> {
   const bin = rollBin();
   const cmd = bin.endsWith(".js") || bin.endsWith(".mjs") ? process.execPath : bin;
@@ -749,14 +803,7 @@ function realRunOnce(input: RunOnceInput): Promise<number> {
     const child = spawn(cmd, args, {
       cwd: input.projectPath,
       detached: true,
-      env: {
-        ...process.env,
-        ROLL_LOOP_GO_CHILD: "1",
-        // FIX-1022: unattended go-driver child must never trigger the macOS
-        // screencapture TCC prompt (isTTY is unreliable under PTY wrapping).
-        ROLL_NO_SCREENCAP: process.env["ROLL_NO_SCREENCAP"] ?? "1",
-        ...(input.allowedCards !== undefined ? { [GOAL_ALLOWED_CARDS_ENV]: input.allowedCards.join(",") } : {}),
-      },
+      env: buildRunOnceChildEnv(input),
       stdio: "inherit",
     });
     child.on("exit", (code) => resolve(code ?? 1));
@@ -1980,11 +2027,16 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     progress = progressFromGoal(goal);
     initialUsage = runSummaryFromGoal(goal);
     const deadlineSec = timeboxDeadlineSec(goal, opts, startedSec);
+    // FIX-1472: a guided/supervisor one-shot (explicit `--cards` named this run)
+    // runs the scoped card even while autonomous scheduling is paused. Computed
+    // from THIS run's options, not the persisted goal, so an inherited cards
+    // scope never silently bypasses the pause.
+    const guided = isGuidedRun(opts);
     bus.appendEvent(evPath, { type: "goal:session_start", sessionId: sid, scope: goal.scope, ts: startedSec });
 
     while (true) {
       if (stopRequested) break;
-      if (existsSync(pauseMarkerPath(id.path, id.slug))) {
+      if (!guided && existsSync(pauseMarkerPath(id.path, id.slug))) {
         stopReason = "pause_marker";
         break;
       }
@@ -2079,9 +2131,9 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         break;
       }
       if (stopRequested) break;
-      if (existsSync(pauseMarkerPath(id.path, id.slug))) continue;
+      if (!guided && existsSync(pauseMarkerPath(id.path, id.slug))) continue;
       const before = readRunSnapshot(runsPath(id.path));
-      await deps.runOnce({ projectPath: id.path, allowedCards });
+      await deps.runOnce({ projectPath: id.path, allowedCards, ...(guided ? { guided: true } : {}) });
       goal = updateUsage(id.path, goal, baseline, initialUsage, deps.nowIso());
       writeGoal(gPath, goal);
       const after = readRunSnapshot(runsPath(id.path));
@@ -2163,7 +2215,7 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
         stopReason = "safety_pause";
         break;
       }
-      if (existsSync(pauseMarkerPath(id.path, id.slug))) {
+      if (!guided && existsSync(pauseMarkerPath(id.path, id.slug))) {
         stopReason = "pause_marker";
         break;
       }

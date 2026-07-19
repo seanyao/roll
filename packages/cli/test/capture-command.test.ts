@@ -499,3 +499,29 @@ describe("FIX-1453 — roll capture i18n (AC1/AC2/AC3)", () => {
     }
   });
 });
+
+describe("US-PHYSICAL-012 roll capture refresh", () => {
+  it("writes capabilities.json advertising rendered v2 when the renderer is present", async () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-caphost-"));
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation(((c: string | Uint8Array) => (out.push(String(c)), true)) as typeof process.stdout.write);
+    const code = await captureCommand(["refresh", "--json"], { captureHostRoot: root, rendererInstalled: () => true });
+    spy.mockRestore();
+    expect(code).toBe(0);
+    const caps = JSON.parse(readFileSync(join(root, "capabilities.json"), "utf8"));
+    expect(caps.sources["playwright-rendered"]).toEqual({ protocol: "roll.capture.v2", served: true });
+    expect(caps.sources["roll-capture-window"].protocol).toBe("roll.capture.v1");
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("does not advertise rendered v2 as served when the renderer is absent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-caphost-"));
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as typeof process.stdout.write);
+    await captureCommand(["refresh"], { captureHostRoot: root, rendererInstalled: () => false });
+    spy.mockRestore();
+    const caps = JSON.parse(readFileSync(join(root, "capabilities.json"), "utf8"));
+    expect(caps.sources["playwright-rendered"].served).toBe(false);
+    expect(caps.protocols).not.toContain("roll.capture.v2");
+    rmSync(root, { recursive: true, force: true });
+  });
+});

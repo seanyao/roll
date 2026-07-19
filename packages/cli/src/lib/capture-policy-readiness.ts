@@ -53,6 +53,12 @@ export interface CapturePolicyReadiness {
   policy: EffectiveCapturePolicy;
   /** What `roll capture migrate` would do next (from the pure migration planner). */
   migration: { action: string; reasonCode: string; reason: string };
+  /**
+   * US-PHYSICAL-011/012: per-source v2 readiness surfaced from the host
+   * advertisement, present only when it carried a `sources` map. Lets status show
+   * "v2 rendered: ready · v2 physical: legacy" instead of a blanket claim.
+   */
+  perSource?: Readonly<Record<string, CapabilityReadiness>>;
 }
 
 function defaultReadFileText(path: string): string | null {
@@ -63,9 +69,14 @@ function defaultReadFileText(path: string): string | null {
   }
 }
 
-function defaultCaptureRoot(env: NodeJS.ProcessEnv, home: string): string {
+/** US-PHYSICAL-012: the Roll Capture host root where `capabilities.json` lives. */
+export function resolveCaptureHostRoot(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
   const override = (env["ROLL_CAPTURE_HOME"] ?? "").trim();
   return override !== "" ? override : join(home, "Library", "Application Support", "Roll Capture");
+}
+
+function defaultCaptureRoot(env: NodeJS.ProcessEnv, home: string): string {
+  return resolveCaptureHostRoot(env, home);
 }
 
 export function collectCapturePolicyReadiness(deps: CapturePolicyReadinessDeps = {}): CapturePolicyReadiness {
@@ -94,6 +105,17 @@ export function collectCapturePolicyReadiness(deps: CapturePolicyReadinessDeps =
       : negotiation.v2.reason,
     selected: negotiation.selected,
   };
+  // US-PHYSICAL-012: surface per-source v2 readiness when the host advertised it.
+  let perSource: Record<string, CapabilityReadiness> | undefined;
+  if (negotiation.perSource !== undefined) {
+    perSource = {};
+    for (const [source, avail] of Object.entries(negotiation.perSource)) {
+      if (avail === undefined) continue;
+      perSource[source] = avail.available
+        ? { available: true, reason: `${source} serves ${ROLL_CAPTURE_PROTOCOL_V2}` }
+        : { available: false, reason: avail.reason };
+    }
+  }
 
   // ── Renderer — Playwright Chromium availability. ──
   const rendererReady = rendererInstalled();
@@ -128,6 +150,7 @@ export function collectCapturePolicyReadiness(deps: CapturePolicyReadinessDeps =
     renderer,
     policy,
     migration: { action: plan.action, reasonCode: plan.reasonCode, reason: plan.reason },
+    ...(perSource !== undefined ? { perSource } : {}),
   };
 }
 
@@ -177,6 +200,14 @@ export function renderCapturePolicyReadinessDoctorSection(
     lines.push(`    ${readiness.policy.reason}`);
     lines.push(`  · next migration — ${readiness.migration.action} (${readiness.migration.reasonCode})`);
     lines.push(`    ${readiness.migration.reason}`);
+  }
+  // US-PHYSICAL-012: per-source v2 readiness (only when the host advertised it),
+  // so status never claims a blanket "v2 ready" when a source is still v1.
+  if (readiness.perSource !== undefined) {
+    for (const [source, avail] of Object.entries(readiness.perSource)) {
+      lines.push(`  ${mark(avail.available)} v2 ${source} — ${avail.available ? "ready" : "unavailable"}`);
+      if (avail.reason !== undefined && avail.reason !== "") lines.push(`    ${avail.reason}`);
+    }
   }
   return lines;
 }

@@ -4,6 +4,7 @@
  * no-stray-surface cleanup guard.
  */
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -694,6 +695,80 @@ describe("enableAutoMergeResilient — FIX-353 transient EOF → retry → REST 
 });
 
 describe("FIX-330 — release transaction is re-runnable and self-healing", () => {
+  function withRealReleaseRepository(
+    run: (repo: string, git: (args: string[]) => string) => void,
+  ): void {
+    const root = join(tmpdir(), `roll-release-retry-${randomUUID()}`);
+    const repo = join(root, "repo");
+    const remote = join(root, "origin.git");
+    const git = (args: string[]): string => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+
+    mkdirSync(repo, { recursive: true });
+    try {
+      git(["init", "-b", "main"]);
+      git(["config", "user.email", "test@example.com"]);
+      git(["config", "user.name", "Roll test"]);
+      writeFileSync(join(repo, "package.json"), '{"version":"1.0.0"}\n');
+      writeFileSync(join(repo, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n- release note\n");
+      git(["add", "package.json", "CHANGELOG.md"]);
+      git(["commit", "-m", "base"]);
+      execFileSync("git", ["init", "--bare", remote], { encoding: "utf8" });
+      git(["remote", "add", "origin", remote]);
+      git(["push", "-u", "origin", "main"]);
+
+      git(["checkout", "-b", "release/v1"]);
+      writeFileSync(join(repo, "package.json"), '{"version":"1.0.1"}\n');
+      writeFileSync(join(repo, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n## v1.0.1\n\n- release note\n");
+      git(["add", "package.json", "CHANGELOG.md"]);
+      git(["commit", "-m", "Release: v1"]);
+      git(["push", "-u", "origin", "release/v1"]);
+      git(["checkout", "main"]);
+
+      writeFileSync(join(repo, "package.json"), '{"version":"1.0.1"}\n');
+      writeFileSync(join(repo, "CHANGELOG.md"), "# Changelog\n\n## Unreleased\n\n## v1.0.1\n\n- release note\n");
+      run(repo, git);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function realGitExec(repo: string): (cmd: string, args: string[]) => string {
+    return (cmd, args) => execFileSync(cmd, args, { cwd: repo, encoding: "utf8" });
+  }
+
+  it("FIX-1472 reuses an existing local release branch after release preparation in a real Git worktree", () => {
+    withRealReleaseRepository((repo, git) => {
+      expect(() =>
+        commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec: realGitExec(repo) }),
+      ).not.toThrow();
+      expect(git(["branch", "--show-current"]).trim()).toBe("release/v1");
+      expect(git(["status", "--porcelain"])).toBe("");
+    });
+  });
+
+  it("FIX-1472 fetches and reuses an existing remote release branch after release preparation in a real Git worktree", () => {
+    withRealReleaseRepository((repo, git) => {
+      git(["branch", "-D", "release/v1"]);
+      expect(() =>
+        commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec: realGitExec(repo) }),
+      ).not.toThrow();
+      expect(git(["branch", "--show-current"]).trim()).toBe("release/v1");
+      expect(git(["status", "--porcelain"])).toBe("");
+    });
+  });
+
+  it("FIX-1472 rejects unrelated worktree changes without switching or hiding them", () => {
+    withRealReleaseRepository((repo, git) => {
+      writeFileSync(join(repo, "notes.txt"), "keep me\n");
+      expect(() =>
+        commitPushWithGate({ branch: "release/v1", message: "Release: v1", rollManaged: false, exec: realGitExec(repo) }),
+      ).toThrow(/unexpected worktree changes/i);
+      expect(git(["branch", "--show-current"]).trim()).toBe("main");
+      expect(readFileSync(join(repo, "notes.txt"), "utf8")).toBe("keep me\n");
+      expect(git(["status", "--porcelain"])).toContain("?? notes.txt");
+    });
+  });
+
   /** A scriptable synchronous exec for testing commitPushWithGate. */
   function scriptExec(responses: Record<string, { stdout?: string; throw?: string }>) {
     const calls: string[][] = [];

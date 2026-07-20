@@ -70,12 +70,15 @@ export type RollEvent =
   | { type: "agent:stall"; cycleId: string; agent: string; idleSec: number; thresholdSec: number; ts: number }
   // FIX-907 — the per-cycle HARD TIMEOUT tripped: a builder hung (process alive,
   // 0% CPU, no new commits/events) or a runaway exceeded the wall-clock ceiling.
-  // `reason` is the criterion that fired — `wall` (total cycle time > ceiling) or
+  // `reason` is the criterion that fired — `wall` (total cycle time > ceiling),
   // `no-progress` (no new commit/stdout for the idle window; NOT pure elapsed
-  // time, so a slow-but-still-emitting deepseek call never trips it). The agent
-  // process tree was killed, the inflight lock released, and the worktree branch
-  // PRESERVED (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
-  | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number; ts: number }
+  // time, so a slow-but-still-emitting deepseek call never trips it), or
+  // FIX-1477's `no-state-change` (no new commit AND no worktree dirty-state
+  // change for the state window, EVEN IF stdout kept flowing — the thrash
+  // shape: tokens burning, zero git progress). The agent process tree was
+  // killed, the inflight lock released, and the worktree branch PRESERVED
+  // (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
+  | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number; ts: number }
   // US-LOOP-088 — post-cycle environment cleanup is observable in the event stream.
   | { type: "cycle:cleanup"; cycleId: string; rule: string; path: string; ok: boolean; warning?: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number; failure_class?: FailureClass; root_cause_key?: string }

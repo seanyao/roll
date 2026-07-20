@@ -554,13 +554,21 @@ export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
 // 46min after one TCR commit). FIX-907 races the spawn against this decision so
 // a hung builder is killed and the lock freed without human intervention.
 //
-// TWO criteria, EITHER trips:
+// THREE criteria, ANY trips:
 //   (a) WALL — total cycle elapsed exceeds the hard ceiling (default 45min).
-//   (b) NO-PROGRESS — no NEW commit or stdout/event for the idle window
-//       (default 15min). Critically this is keyed on the LAST PROGRESS time, NOT
-//       on pure elapsed time: a slow `deepseek` call sits at 0% CPU but keeps
-//       emitting stdout/events, which bumps `lastProgressSec`, so it is NEVER
-//       mis-killed. Only a TRULY silent hang trips no-progress.
+//   (b) NO-PROGRESS (true silence) — no NEW commit, dirty-state change, or
+//       stdout/event for the idle window (default 15min). Keyed on the LAST
+//       PROGRESS time, NOT on pure elapsed time: a slow `deepseek` call sits
+//       at 0% CPU but keeps emitting stdout/events, which bumps
+//       `lastProgressSec`, so it is NEVER mis-killed. Only a TRULY silent
+//       hang trips no-progress.
+//   (c) NO-STATE-CHANGE (FIX-1477) — no NEW commit AND no worktree dirty-state
+//       change for the state window (default 25min), EVEN IF stdout flows.
+//       Progress is redefined as GIT STATE CHANGE (agent-agnostic): stdout
+//       activity feeds only the silence fuse (b), it no longer counts as
+//       "working" — a thrashing agent (kimi打转白烧) is caught ~20min early,
+//       while a stdout-buffering agent that keeps writing files (pi冤杀) is
+//       saved by its dirty-state signature changes.
 
 /** v3 per-cycle WALL-clock hard ceiling (seconds). Default 45min — a cycle that
  *  runs this long total is a runaway, killed regardless of recent progress.
@@ -570,6 +578,14 @@ export const CYCLE_WALL_TIMEOUT_SEC = 2700;
  *  builder produces no new commit AND no new stdout/event for this long, it is
  *  judged hung (the FIX-390 silent-hang shape) and killed. */
 export const CYCLE_NO_PROGRESS_SEC = 900;
+/** FIX-1477 — per-cycle NO-STATE-CHANGE window (seconds). Default 25min — if
+ *  the cycle worktree's GIT STATE (new commit OR dirty-state signature change)
+ *  has not changed for this long, the builder is judged stuck and killed EVEN
+ *  IF stdout is still flowing (the kimi-thrash shape: tokens burning, zero git
+ *  progress). stdout activity does NOT reset this clock — only git state does.
+ *  Rationale (owner-approved): a real full test run takes minutes; 25min with
+ *  zero git state change is genuinely stuck. */
+export const CYCLE_NO_STATE_CHANGE_SEC = 1500;
 
 /** FIX-929 — agent stall detection threshold (seconds). Default 10min (600s) —
  *  a softer signal that fires BEFORE the hard timeout kill. Does NOT kill the
@@ -580,45 +596,65 @@ export const CYCLE_STALL_THRESHOLD_SEC = 600;
 export const STALL_STARTUP_GRACE_SEC = 120;
 
 /** The per-cycle hard-timeout verdict. `timedOut:false` carries the tighter of
- *  the two remaining budgets so the poller can schedule its next wake. */
+ *  the enabled budgets so the poller can schedule its next wake. */
 export type CycleTimeoutVerdict =
   | { timedOut: false; remainingSec: number }
-  | { timedOut: true; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number };
+  | { timedOut: true; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number };
 
 /** Inputs for {@link cycleTimeoutVerdict} — all clocks injected (pure). */
 export interface CycleTimeoutInput {
   /** Seconds since the agent spawn started (now - spawnStart). */
   elapsedSec: number;
-  /** Seconds since the LAST observed progress (new commit or stdout/event):
-   *  now - lastProgressSec. Reset to 0 whenever progress is seen, so a slow but
-   *  still-emitting call (deepseek) never accrues idle time. */
+  /** Seconds since the LAST observed progress (new commit, dirty-state change,
+   *  or stdout/event): now - lastProgressSec. Reset to 0 whenever any liveness
+   *  signal is seen, so a slow but still-emitting call (deepseek) — or a
+   *  stdout-buffering agent that keeps changing the worktree (pi, FIX-1477) —
+   *  never accrues idle time. This is the TRUE-SILENCE fuse. */
   idleSec: number;
+  /** FIX-1477 — seconds since the last GIT STATE change (new commit OR
+   *  worktree dirty-state signature change): now - lastStateSec. stdout does
+   *  NOT reset this clock. Omitted ⇒ the no-state-change criterion is skipped
+   *  (legacy callers byte-identical). */
+  stateIdleSec?: number;
   /** WALL ceiling (default {@link CYCLE_WALL_TIMEOUT_SEC}). */
   wallLimitSec?: number;
   /** NO-PROGRESS idle window (default {@link CYCLE_NO_PROGRESS_SEC}). */
   noProgressLimitSec?: number;
+  /** FIX-1477 — NO-STATE-CHANGE window (default
+   *  {@link CYCLE_NO_STATE_CHANGE_SEC}). Only consulted when `stateIdleSec` is
+   *  supplied. */
+  noStateChangeLimitSec?: number;
 }
 
 /**
- * Pure per-cycle hard-timeout decision (FIX-907). WALL is checked FIRST so a
- * runaway that also happens to be idle is attributed to the wall ceiling. A
- * non-positive limit DISABLES that criterion (an operator escape hatch); if both
- * are disabled the cycle never times out by this gate. Boundary `>=` (the limit
- * itself is a breach, mirroring {@link watchdogVerdict}).
+ * Pure per-cycle hard-timeout decision (FIX-907; the no-state-change criterion
+ * is FIX-1477). WALL is checked FIRST so a runaway that also happens to be idle
+ * is attributed to the wall ceiling; NO-PROGRESS (true silence) is checked
+ * before NO-STATE-CHANGE so a fully hung agent keeps its historical
+ * `no-progress` attribution. A non-positive limit DISABLES that criterion (an
+ * operator escape hatch); if all are disabled the cycle never times out by this
+ * gate. Boundary `>=` (the limit itself is a breach, mirroring
+ * {@link watchdogVerdict}).
  */
 export function cycleTimeoutVerdict(input: CycleTimeoutInput): CycleTimeoutVerdict {
   const wall = input.wallLimitSec ?? CYCLE_WALL_TIMEOUT_SEC;
   const idle = input.noProgressLimitSec ?? CYCLE_NO_PROGRESS_SEC;
+  const stateIdle = input.noStateChangeLimitSec ?? CYCLE_NO_STATE_CHANGE_SEC;
   if (wall > 0 && input.elapsedSec >= wall) {
     return { timedOut: true, reason: "wall", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
   }
   if (idle > 0 && input.idleSec >= idle) {
     return { timedOut: true, reason: "no-progress", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
   }
-  // Remaining = the tighter of the two budgets (whichever is enabled).
+  if (input.stateIdleSec !== undefined && stateIdle > 0 && input.stateIdleSec >= stateIdle) {
+    return { timedOut: true, reason: "no-state-change", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
+  }
+  // Remaining = the tighter of the enabled budgets.
   const wallRemain = wall > 0 ? wall - input.elapsedSec : Number.POSITIVE_INFINITY;
   const idleRemain = idle > 0 ? idle - input.idleSec : Number.POSITIVE_INFINITY;
-  return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain) };
+  const stateRemain =
+    input.stateIdleSec !== undefined && stateIdle > 0 ? stateIdle - input.stateIdleSec : Number.POSITIVE_INFINITY;
+  return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain, stateRemain) };
 }
 
 /** FIX-929 stall-detection inputs — all clocks injected (pure). */

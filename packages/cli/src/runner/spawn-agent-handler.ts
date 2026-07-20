@@ -127,11 +127,15 @@ export async function executeSpawnAgentCommand(
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
       // it just holds the inflight lock and blocks the whole loop (实证: FIX-390
-      // hung 46min). This poller races the spawn: a NEW commit OR any stdout
-      // chunk is "progress" (resets the no-progress clock so a slow-but-emitting
-      // deepseek is never mis-killed); a wall-clock overrun OR a truly silent
-      // idle window kills the agent tree + records cycle:timeout. On a kill the
-      // spawn resolves and we fold `timedOut` so the orchestrator's existing
+      // hung 46min). This poller races the spawn. FIX-1477 redefines "progress"
+      // as GIT STATE CHANGE, agent-agnostic: a NEW commit OR a worktree
+      // dirty-state signature change (`git status --porcelain` diff) resets BOTH
+      // idle clocks (this is what saves stdout-buffering agents like pi that
+      // write files long before committing); a stdout chunk now feeds ONLY the
+      // true-silence fuse. A wall-clock overrun, a truly silent idle window, OR
+      // a no-state-change window (thrash: tokens flowing, zero git progress)
+      // kills the agent tree + records cycle:timeout. On a kill the spawn
+      // resolves and we fold `timedOut` so the orchestrator's existing
       // abort_timeout teardown frees the lock and PRESERVES the worktree branch.
       // FIX-929 — the STALL DETECTOR. Fires a SOFT `agent:stall` signal when
       // the agent has produced zero output for ≥ threshold after startup grace.
@@ -145,11 +149,15 @@ export async function executeSpawnAgentCommand(
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
         thresholdSec: readStallThreshold(ports.repoCwd).thresholdSec,
       });
+      // FIX-1477: the dirty-state probe rides the same git port (optional — a
+      // port without it runs the state fuse on commits only).
+      const statusSignature = ports.git.worktreeStatusSignature;
       const timeoutWatchdog = startSpawnTimeoutWatchdog({
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
         commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
+        ...(statusSignature !== undefined ? { stateSignature: () => statusSignature(execCwd) } : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -182,7 +190,7 @@ export async function executeSpawnAgentCommand(
       // codex; the cold spawn below is the only path. A future resumable engine
       // re-introduces this as registry-driven, agent-agnostic logic.
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
-      let timeoutFired: "wall" | "no-progress" | null = null;
+      let timeoutFired: "wall" | "no-progress" | "no-state-change" | null = null;
       let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
       let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
       try {
@@ -216,8 +224,10 @@ export async function executeSpawnAgentCommand(
           // claim (pick_story → 🔨) and the work must be the same story.
           ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
           onChunk: (d: Buffer) => {
-            // FIX-907: any stdout chunk is PROGRESS — resets the no-progress
-            // clock so a slow-but-still-emitting agent never trips the idle gate.
+            // FIX-907/FIX-1477: any stdout chunk is LIVENESS — resets only the
+            // true-silence (no-progress) clock, NOT the git-state clock, so a
+            // thrashing agent burning tokens with zero git progress is still
+            // caught by the no-state-change fuse.
             timeoutWatchdog.markProgress();
             // FIX-929: bump the stall-detector's progress clock — same signal,
             // separate detector with its own (lower) threshold.
@@ -255,7 +265,7 @@ export async function executeSpawnAgentCommand(
       // FIX-907: fold a watchdog kill into `timedOut` so the orchestrator runs
       // its clean abort_timeout teardown (kill + cycle:end blocked + lock release;
       // worktree PRESERVED). The cycle:timeout event was already emitted at the
-      // breach moment (auditable reason: wall/no-progress).
+      // breach moment (auditable reason: wall/no-progress/no-state-change).
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
       // E4: scoop ALERT*.md the builder dropped in its OWN cwd (the submodule

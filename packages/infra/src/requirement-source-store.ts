@@ -518,7 +518,6 @@ export function captureRequirementSource(
   const requirementPath = join(workspaceRoot, "requirements", source.value.provider, source.value.requirementId);
   const lockPath = requirementCaptureLockPath(workspaceRoot, source.value.requirementId);
   ensureSafeDirectory(workspaceRoot, dirname(lockPath), true);
-  ensureSafeDirectory(workspaceRoot, requirementPath, true);
   const lock = acquireLock(lockPath, process.pid, {
     cycleId: `requirement:${workspace.workspaceId}:${source.value.requirementId}`,
     unparseableIsHeld: true,
@@ -527,7 +526,7 @@ export function captureRequirementSource(
   try {
     const renameFile = deps.renameFile ?? renameSync;
     const sourcePath = join(requirementPath, "source.yaml");
-    const existing = readExisting(sourcePath);
+    const existing = existsSync(requirementPath) ? readExisting(sourcePath) : undefined;
     if (existing !== undefined && existsSync(join(requirementPath, PROJECTION_JOURNAL))) {
       projectCurrent(requirementPath, existing, validateRevision(requirementPath, existing), deps);
     }
@@ -538,6 +537,7 @@ export function captureRequirementSource(
       "Requirement body exceeds the capture byte limit",
     );
     const context = contextFiles(input, deps);
+    ensureSafeDirectory(workspaceRoot, requirementPath, true);
     const descriptors: RequirementContextDescriptor[] = context.map((file) => ({
       path: file.relativePath,
       bytes: file.bytes,

@@ -136,20 +136,25 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(scrub(fromCwd.stdout, f)).toMatchSnapshot("terminal-cwd-reused");
   });
 
-  it("rejects credential-shaped refs and unsafe paths without echoing input", async () => {
+  it("rejects credential-shaped refs and unsafe paths without echoing input or writing evidence", async () => {
     const f = fixture();
     const secret = "https://token:credential-sentinel@example.test/issue/1";
     const credentialArgs = addArgs(f).map((arg) => arg === "SOT-15499" ? secret : arg);
     const credential = await run([...credentialArgs, "--json"], f);
     expect(credential.status).toBe(1);
+    expect(credential.stdout).not.toContain(secret);
+    expect(credential.stdout).not.toContain("credential-sentinel");
     expect(credential.stderr).not.toContain(secret);
     expect(credential.stderr).not.toContain("credential-sentinel");
+    expect(credential.stdout).toBe("");
     expect(JSON.parse(credential.stderr)).toMatchObject({ error: { code: "source_not_declared" } });
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
 
     const escapeArgs = addArgs(f).map((arg) => arg === "brief.md" ? "../jira.md" : arg);
     const escape = await run([...escapeArgs, "--json"], f);
     expect(escape.status).toBe(1);
     expect(JSON.parse(escape.stderr)).toMatchObject({ error: { code: "unsafe_context" } });
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
   it("exposes locale-specific nested help and includes requirement in Workspace help", async () => {

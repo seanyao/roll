@@ -223,17 +223,17 @@ const networkHostPattern = "(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9
 const httpsRemotePattern = new RegExp(`^https://(${networkHostPattern})(?::443)?/(.+)$`, "u");
 const sshRemotePattern = new RegExp(`^ssh://[A-Za-z0-9._~-]+@(${networkHostPattern})(?::22)?/(.+)$`, "u");
 
-function isSafeNetworkHost(host: string): boolean {
-  if (host.startsWith("[") && host.endsWith("]")) {
-    try {
-      return new URL(`https://${host}/`).hostname !== "";
-    } catch {
-      return false;
-    }
-  }
-  return host.split(".").every((label) =>
+function normalizeNetworkHost(host: string): string | null {
+  if (!host.startsWith("[") && !host.split(".").every((label) =>
     label.length >= 1 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label)
-  );
+  )) {
+    return null;
+  }
+  try {
+    return new URL(`https://${host}/`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function normalizeNetworkRemote(value: string): ContractResult<string> {
@@ -245,14 +245,16 @@ function normalizeNetworkRemote(value: string): ContractResult<string> {
   }
   const host = match[1];
   const rawPath = match[2];
-  if (host === undefined || rawPath === undefined || !isSafeNetworkHost(host)) {
+  if (host === undefined || rawPath === undefined) {
     return remoteFailure("repository remote must contain a host and safe repository path");
   }
+  const canonicalHost = normalizeNetworkHost(host);
+  if (canonicalHost === null) return remoteFailure("repository remote contains an invalid host");
   const path = trimRepositorySuffix(`/${rawPath}`);
   if (path === null || path.slice(1).split("/").length < 2) {
     return remoteFailure("network repository remote must contain an owner and repository path");
   }
-  return { ok: true, value: `${https === null ? "ssh" : "https"}://${host.toLowerCase()}${path}` };
+  return { ok: true, value: `${https === null ? "ssh" : "https"}://${canonicalHost}${path}` };
 }
 
 function normalizeUrlRemote(value: string): ContractResult<string> {
@@ -284,14 +286,16 @@ export function normalizeRepositoryRemote(value: unknown): ContractResult<string
   if (scp !== null) {
     const host = scp[2];
     const rawPath = scp[3];
-    if (host === undefined || rawPath === undefined || !isSafeNetworkHost(host)) {
+    if (host === undefined || rawPath === undefined) {
       return remoteFailure("repository remote is not a supported SCP-style remote");
     }
+    const canonicalHost = normalizeNetworkHost(host);
+    if (canonicalHost === null) return remoteFailure("repository remote contains an invalid host");
     const path = trimRepositorySuffix(`/${rawPath}`);
     if (path === null || path.slice(1).split("/").length < 2) {
       return remoteFailure("repository remote must contain an owner and repository path");
     }
-    return { ok: true, value: `ssh://${host.toLowerCase()}${path}` };
+    return { ok: true, value: `ssh://${canonicalHost}${path}` };
   }
   return normalizeUrlRemote(value);
 }

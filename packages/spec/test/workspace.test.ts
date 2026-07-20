@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import * as publicSpec from "../src/index.js";
 import {
@@ -79,6 +80,17 @@ function issue() {
 }
 
 describe("Workspace repository identity", () => {
+  it("keeps the Workspace contract module inside the pure spec boundary", () => {
+    const source = readFileSync(new URL("../src/types/workspace.ts", import.meta.url), "utf8");
+    const imports = [...source.matchAll(/^import\s+(type\s+)?[^;]+?\s+from\s+["']([^"']+)["'];$/gmu)]
+      .map((match) => ({ kind: match[1] === undefined ? "value" : "type", source: match[2] }));
+    expect(imports).toEqual([
+      { kind: "value", source: "node:crypto" },
+      { kind: "type", source: "./json-schema.js" },
+    ]);
+    expect(source).not.toMatch(/\b(?:process|globalThis|fetch|console|Date|setTimeout|setInterval)\b/u);
+  });
+
   it("exports the complete v1 contract from the public spec surface", () => {
     expect(WORKSPACE_MANIFEST_V1).toBe("roll.workspace/v1");
     expect(REPOSITORY_BINDING_V1).toBe("roll.repository-binding/v1");
@@ -125,6 +137,15 @@ describe("Workspace repository identity", () => {
       ok: true,
       value: "repo-473d9ff14ae9",
     });
+  });
+
+  it.each([
+    ["https://127.1/Owner/Repo.git", "https://127.0.0.1/Owner/Repo", "https://127.0.0.1/Owner/Repo"],
+    ["https://0x7f000001/Owner/Repo.git", "https://127.0.0.1/Owner/Repo", "https://127.0.0.1/Owner/Repo"],
+    ["ssh://git@[0:0:0:0:0:0:0:1]/Owner/Repo.git", "ssh://[::1]/Owner/Repo", "ssh://git@[::1]/Owner/Repo"],
+  ])("canonicalizes equivalent IP host spellings: %s", (input, expected, equivalentInput) => {
+    expect(normalizeRepositoryRemote(input)).toEqual({ ok: true, value: expected });
+    expect(repositoryIdFromRemote(input)).toEqual(repositoryIdFromRemote(equivalentInput));
   });
 
   it.each([

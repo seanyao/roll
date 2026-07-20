@@ -24,6 +24,16 @@ import type { DeliverySet as WorkspaceDeliverySet } from "../src/types/workspace
 
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 type AssertFalse<T extends false> = T;
+type AssertTrue<T extends true> = T;
+type ContainsAny<T> = IsAny<T> extends true
+  ? true
+  : T extends readonly (infer Item)[]
+    ? ContainsAny<Item>
+    : T extends object
+      ? true extends { [Key in keyof T]-?: ContainsAny<T[Key]> }[keyof T]
+        ? true
+        : false
+      : false;
 
 const result: ContractResult<string> = { ok: true, value: "typed" };
 const resultIsNotAny: AssertFalse<IsAny<ContractResult<string>>> = false;
@@ -50,6 +60,14 @@ const workspaceRepositoriesIsNotAny: AssertFalse<IsAny<WorkspaceManifest["reposi
 const repositoryWorkflowIsNotAny: AssertFalse<IsAny<RepositoryBinding["workflow"]>> = false;
 const issueRepositoriesIsNotAny: AssertFalse<IsAny<IssueManifest["repositories"]>> = false;
 const issueRepositoryIsNotAny: AssertFalse<IsAny<IssueManifest["repositories"][number]>> = false;
+const workspaceContainsNoAny: AssertFalse<ContainsAny<WorkspaceManifest>> = false;
+const repositoryContainsNoAny: AssertFalse<ContainsAny<RepositoryBinding>> = false;
+const issueContainsNoAny: AssertFalse<ContainsAny<IssueManifest>> = false;
+const issueTargetContainsNoAny: AssertFalse<ContainsAny<IssueRepositoryTarget>> = false;
+const workspaceIdentityContainsNoAny: AssertFalse<ContainsAny<WorkspaceIdentity>> = false;
+const issueIdentityContainsNoAny: AssertFalse<ContainsAny<IssueIdentity>> = false;
+const repositoryIssueIdentityContainsNoAny: AssertFalse<ContainsAny<RepositoryIssueIdentity>> = false;
+const nestedAnyDetectionProbe: AssertTrue<ContainsAny<{ nested: { value: ReturnType<typeof JSON.parse> } }>> = true;
 
 const read: IssueRepositoryTarget = {
   repoId: "repo-0123456789ab",
@@ -103,6 +121,14 @@ void [
   repositoryWorkflowIsNotAny,
   issueRepositoriesIsNotAny,
   issueRepositoryIsNotAny,
+  workspaceContainsNoAny,
+  repositoryContainsNoAny,
+  issueContainsNoAny,
+  issueTargetContainsNoAny,
+  workspaceIdentityContainsNoAny,
+  issueIdentityContainsNoAny,
+  repositoryIssueIdentityContainsNoAny,
+  nestedAnyDetectionProbe,
   read,
   write,
   invalidRead,

@@ -298,6 +298,7 @@ export function acquireLock(
     cycleId?: string;
     hostname?: string;
     beforePublish?: () => void;
+    beforeStaleIsolation?: () => void;
   } = {},
 ): AcquireResult {
   const now = (opts.now ?? systemClock)();
@@ -324,17 +325,31 @@ export function acquireLock(
     return { acquired: false, heldByPid: held?.pid };
   }
 
-  // Proven stale (same-host dead/aged, or unparseable/legacy-stale): isolate it
-  // out of the way ATOMICALLY, then retry the mkdir exactly once. The rename is
-  // the serialization point — only one process can move a given path away, and
-  // whoever then wins the mkdir is the sole holder.
-  isolateStale(lockPath);
-  if (tryPublishLock(lockPath, owner)) {
-    return { acquired: true, heldByPid: undefined, ownerToken: owner.token };
+  // Serialize stale recovery separately from ordinary lock acquisition. Without
+  // this guard, two contenders can both inspect the same stale generation; the
+  // slower contender can then rename away the faster contender's newly
+  // published live lock. Only the recovery-guard holder may re-check, isolate,
+  // and retry publication.
+  const recoveryPath = `${lockPath}.recovery`;
+  if (!tryAcquireRecoveryGuard(recoveryPath)) {
+    return { acquired: false, heldByPid: held?.pid };
   }
-  // Lost the retry to a concurrent racer that re-created the lock — yield to it.
-  const winner = readLockOwner(lockPath);
-  return { acquired: false, heldByPid: winner?.pid };
+  try {
+    opts.beforeStaleIsolation?.();
+    const current = readLockOwner(lockPath);
+    if (existsSync(lockPath) && isOwnerHeld(current, now, staleSec, pidAlive, selfHost)) {
+      return { acquired: false, heldByPid: current?.pid };
+    }
+    if (existsSync(lockPath)) isolateStale(lockPath);
+    if (tryPublishLock(lockPath, owner)) {
+      return { acquired: true, heldByPid: undefined, ownerToken: owner.token };
+    }
+    // Lost the retry to a concurrent fresh acquirer — yield to it.
+    const winner = readLockOwner(lockPath);
+    return { acquired: false, heldByPid: winner?.pid };
+  } finally {
+    rmSyncQuiet(recoveryPath);
+  }
 }
 
 /**
@@ -349,6 +364,17 @@ export function releaseLock(lockPath: string, ownerToken?: string): void {
 }
 
 let lockTokenCounter = 0;
+
+function tryAcquireRecoveryGuard(recoveryPath: string): boolean {
+  try {
+    mkdirSync(recoveryPath);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST" || code === "ENOTDIR") return false;
+    throw error;
+  }
+}
 
 /** Prepare owner metadata privately, then atomically publish the complete lock. */
 function tryPublishLock(lockPath: string, owner: LockOwner, beforePublish?: () => void): boolean {

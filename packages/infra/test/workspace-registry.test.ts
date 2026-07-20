@@ -166,11 +166,19 @@ describe("Workspace registry v1 persistence", () => {
     const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
     const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
     let failCommit = false;
+    let registryAtRename = "";
+    let betaEventsAtRename = 0;
     const store = new WorkspaceRegistry({
       rollHome,
       now: () => 100,
       beforeRegistryRename: () => {
-        if (failCommit) throw new Error("planned registry commit failure");
+        if (failCommit) {
+          registryAtRename = readFileSync(workspaceRegistryPath(rollHome), "utf8");
+          betaEventsAtRename = store.readEvents().filter((event) =>
+            event.type === "workspace:registered" && event.workspaceId === "ws-beta"
+          ).length;
+          throw new Error("planned registry commit failure");
+        }
       },
     });
     store.register({ workspaceId: "ws-alpha", root: alpha });
@@ -180,6 +188,8 @@ describe("Workspace registry v1 persistence", () => {
     expect(() => store.register({ workspaceId: "ws-beta", root: beta })).toThrowError(
       expect.objectContaining({ code: "io_failure" }),
     );
+    expect(registryAtRename).toBe(before);
+    expect(betaEventsAtRename).toBe(1);
     expect(readFileSync(workspaceRegistryPath(rollHome), "utf8")).toBe(before);
 
     failCommit = false;

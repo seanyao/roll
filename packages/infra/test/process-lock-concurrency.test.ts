@@ -125,6 +125,27 @@ describe("FIX-365 atomic inner-lock — concurrency", () => {
 });
 
 describe("FIX-365 atomic inner-lock — conservative stale cleanup", () => {
+  it("serializes stale recovery so two contenders cannot both acquire", () => {
+    const d = tmp();
+    const lock = join(d, "inner.lock");
+    const stale = acquireLock(lock, 1001, { now: () => 0, staleSec: 1, pidAlive: () => true });
+    expect(stale.acquired).toBe(true);
+    let nested: ReturnType<typeof acquireLock> | undefined;
+
+    const outer = acquireLock(lock, 2002, {
+      now: () => 2,
+      staleSec: 1,
+      pidAlive: () => true,
+      beforeStaleIsolation: () => {
+        nested = acquireLock(lock, 3003, { now: () => 2, staleSec: 1, pidAlive: () => true });
+      },
+    });
+
+    expect(outer.acquired).toBe(true);
+    expect(nested).toEqual({ acquired: false, heldByPid: 1001 });
+    expect(readLockOwner(lock)?.pid).toBe(2002);
+  });
+
   it("same-host dead pid → auto-clears and is re-acquired", () => {
     const d = tmp();
     const lock = join(d, "inner.lock");

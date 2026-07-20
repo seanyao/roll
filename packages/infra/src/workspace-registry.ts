@@ -1,5 +1,4 @@
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -489,15 +488,15 @@ export class WorkspaceRegistry {
 
   private finishTransaction(transaction: WorkspaceRegistryTransaction): void {
     const current = this.read();
-    if (current.revision === transaction.beforeRevision) {
-      this.write(transaction.next);
-    } else if (serializeWorkspaceRegistry(current) !== serializeWorkspaceRegistry(transaction.next)) {
+    const requiresRegistryWrite = current.revision === transaction.beforeRevision;
+    if (!requiresRegistryWrite && serializeWorkspaceRegistry(current) !== serializeWorkspaceRegistry(transaction.next)) {
       throw new WorkspaceRegistryError("invalid_registry", "Pending Workspace transaction conflicts with registry revision");
     }
     const eventText = JSON.stringify(transaction.event);
     if (!this.readEvents().some((event) => JSON.stringify(event) === eventText)) {
       this.appendEvent(transaction.event);
     }
+    if (requiresRegistryWrite) this.write(transaction.next);
     try {
       rmSync(workspaceRegistryTransactionPath(this.options.rollHome), { force: true });
     } catch (error) {

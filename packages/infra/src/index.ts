@@ -1,6 +1,7 @@
 export * from "./config.js";
 export * from "./workspace-registry.js";
 export * from "./workspace-filesystem.js";
+export * from "./requirement-source-store.js";
 export * from "./repository-cache.js";
 export * from "./git.js";
 export * from "./github.js";

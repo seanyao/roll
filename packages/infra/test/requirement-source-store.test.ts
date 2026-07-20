@@ -193,6 +193,53 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readdirSync(outside)).toEqual([]);
   });
 
+  it("re-anchors containment right before the projection write even if the requirement directory is swapped mid-capture", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-projection-target");
+    mkdirSync(outside);
+    const requirementParent = join(f.workspace, "requirements", "jira");
+    let swapped = false;
+    let thrown: unknown;
+    try {
+      captureRequirementSource(request(f), {
+        beforeProjection: () => {
+          if (swapped) return;
+          swapped = true;
+          rmSync(requirementParent, { recursive: true, force: true });
+          symlinkSync(outside, requirementParent);
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    const chain = [thrown, (thrown as { cause?: unknown } | undefined)?.cause];
+    expect(chain.some((entry) => (entry as { code?: string } | undefined)?.code === "unsafe_context")).toBe(true);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("re-anchors containment right before committing the immutable revision even if swapped after the entry check", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-revision-target");
+    mkdirSync(outside);
+    const requirementParent = join(f.workspace, "requirements", "jira");
+    let thrown: unknown;
+    try {
+      captureRequirementSource(request(f), {
+        afterReadFile: (path) => {
+          if (path !== f.body) return;
+          rmSync(requirementParent, { recursive: true, force: true });
+          symlinkSync(outside, requirementParent);
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as { code?: string } | undefined)?.code).not.toBe("io_failure");
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
   it("fails closed on source mutation, revision rename failure and a concurrent writer", () => {
     const f = fixture();
     let mutated = false;

@@ -398,6 +398,7 @@ function isProjectionCurrent(
 }
 
 function projectCurrent(
+  workspaceRoot: string,
   requirementPath: string,
   manifest: RequirementSourceManifest,
   evidence: RevisionEvidence,
@@ -407,6 +408,7 @@ function projectCurrent(
   const journal = join(requirementPath, PROJECTION_JOURNAL);
   try {
     deps.beforeProjection?.();
+    ensureSafeDirectory(workspaceRoot, requirementPath, false);
     atomicWrite(join(requirementPath, "requirement.md"), evidence.body.content, renameFile);
     copyContextProjection(evidence.context, requirementPath, renameFile);
     atomicWrite(join(requirementPath, "attest.md"), renderRequirementAttestProjection(manifest), renameFile);
@@ -496,11 +498,13 @@ function validateRevision(
 }
 
 function prepareProjectionJournal(
+  workspaceRoot: string,
   requirementPath: string,
   manifest: RequirementSourceManifest,
   renameFile: (from: string, to: string) => void,
 ): void {
   try {
+    ensureSafeDirectory(workspaceRoot, requirementPath, false);
     atomicWrite(
       join(requirementPath, PROJECTION_JOURNAL),
       json({ schema: "roll.requirement-projection-journal/v1", revision: manifest.revision }),
@@ -512,6 +516,7 @@ function prepareProjectionJournal(
 }
 
 function writeRevision(
+  workspaceRoot: string,
   requirementPath: string,
   manifest: RequirementSourceManifest,
   body: StableFile,
@@ -523,6 +528,7 @@ function writeRevision(
     validateRevision(requirementPath, manifest);
     return;
   }
+  ensureSafeDirectory(workspaceRoot, requirementPath, false);
   const staging = join(requirementPath, `.revision.${randomUUID()}`);
   try {
     mkdirSync(join(staging, "context"), { recursive: true });
@@ -579,7 +585,7 @@ export function captureRequirementSource(
     const sourcePath = join(requirementPath, "source.yaml");
     const existing = existsSync(requirementPath) ? readExisting(sourcePath) : undefined;
     if (existing !== undefined && existsSync(join(requirementPath, PROJECTION_JOURNAL))) {
-      projectCurrent(requirementPath, existing, validateRevision(requirementPath, existing), deps);
+      projectCurrent(workspaceRoot, requirementPath, existing, validateRevision(requirementPath, existing), deps);
     }
     const body = stableFile(
       resolve(input.bodyFile),
@@ -612,7 +618,7 @@ export function captureRequirementSource(
     if (plan.outcome === "reused") {
       const evidence = validateRevision(requirementPath, plan.manifest);
       if (!isProjectionCurrent(requirementPath, plan.manifest, evidence)) {
-        projectCurrent(requirementPath, plan.manifest, evidence, deps);
+        projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
       }
       return {
         outcome: plan.outcome,
@@ -623,16 +629,18 @@ export function captureRequirementSource(
       };
     }
     if (plan.outcome === "created" || plan.outcome === "updated") {
-      writeRevision(requirementPath, plan.manifest, body, context, renameFile);
+      writeRevision(workspaceRoot, requirementPath, plan.manifest, body, context, renameFile);
     }
     const evidence = validateRevision(requirementPath, plan.manifest);
-    prepareProjectionJournal(requirementPath, plan.manifest, renameFile);
+    prepareProjectionJournal(workspaceRoot, requirementPath, plan.manifest, renameFile);
     try {
+      ensureSafeDirectory(workspaceRoot, requirementPath, false);
       atomicWrite(sourcePath, json(plan.manifest), renameFile);
     } catch (error) {
+      if (error instanceof RequirementSourceStoreError) throw error;
       return fail("io_failure", "Requirement source index could not be committed", error);
     }
-    projectCurrent(requirementPath, plan.manifest, evidence, deps);
+    projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
     return {
       outcome: plan.outcome,
       workspaceId: workspace.workspaceId,

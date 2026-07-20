@@ -158,29 +158,49 @@ describe("US-WS-007 RequirementSourceStore", () => {
     });
   });
 
-  it("rejects undeclared sources, dangling Stories, traversal, symlinks, non-regular files and context limits", () => {
+  it("rejects a ref not declared in workspace.yaml", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f, { ref: "SOT-99999" }))).toThrowError(
       expect.objectContaining({ code: "source_not_declared" }),
     );
+  });
+
+  it("rejects a Story ID that does not resolve inside the Workspace backlog", () => {
+    const f = fixture();
     expect(() => captureRequirementSource(request(f, { storyIds: ["US-MISSING"] }))).toThrowError(
       expect.objectContaining({ code: "story_not_found" }),
     );
+  });
+
+  it("rejects a context path using .. traversal to escape its declared root", () => {
+    const f = fixture();
     expect(() => captureRequirementSource(request(f, { contextPaths: ["../requirement.md"] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
+  });
+
+  it("rejects a context path whose leaf entry is itself a symlink, independent of any ancestor-directory symlink case", () => {
+    const f = fixture();
     symlinkSync(join(f.contextRoot, "domain.md"), join(f.contextRoot, "linked.md"));
     expect(() => captureRequirementSource(request(f, { contextPaths: ["linked.md"] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
+  });
+
+  it("rejects a context path that names a directory instead of a regular file", () => {
+    const f = fixture();
     expect(() => captureRequirementSource(request(f, { contextPaths: ["brief"] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
+  });
+
+  it("rejects an oversized single context file without reading its content past the limit check", () => {
+    const f = fixture();
     write(join(f.contextRoot, "huge.bin"), "x".repeat(1024 * 1024 + 1));
-    const reads: string[] = [];
     expect(() => captureRequirementSource(request(f, { contextPaths: ["huge.bin"] }))).toThrowError(
       expect.objectContaining({ code: "context_limit" }),
     );
+    const reads: string[] = [];
     expect(() => captureRequirementSource(request(f, { contextPaths: ["huge.bin"] }), {
       afterReadFile: (path) => reads.push(path),
     })).toThrowError(expect.objectContaining({ code: "context_limit" }));
@@ -246,6 +266,62 @@ describe("US-WS-007 RequirementSourceStore", () => {
     write(outside, "nested escape target\n");
     symlinkSync(outside, join(f.contextRoot, "brief", "nested-link.md"));
     expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/nested-link.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("rejects a context path whose immediate ancestor directory is itself a symlink to an outside real directory", () => {
+    const f = fixture();
+    const outsideDir = join(f.root, "outside-ancestor-dir");
+    mkdirSync(outsideDir);
+    write(join(outsideDir, "file.md"), "outside ancestor content\n");
+    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
+    symlinkSync(outsideDir, join(f.contextRoot, "brief"));
+
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/file.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("rejects a context path whose immediate ancestor directory is itself a symlink to an outside file (not a directory at all)", () => {
+    const f = fixture();
+    const outsideFile = join(f.root, "outside-ancestor-file.md");
+    write(outsideFile, "outside ancestor is actually a file\n");
+    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
+    symlinkSync(outsideFile, join(f.contextRoot, "brief"));
+
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/file.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("rejects a context path whose grandparent ancestor directory (two levels up) is a symlink, not only the immediate parent", () => {
+    const f = fixture();
+    const outsideDir = join(f.root, "outside-grandparent-dir");
+    mkdirSync(join(outsideDir, "inner"), { recursive: true });
+    write(join(outsideDir, "inner", "leaf.md"), "outside grandparent content\n");
+    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
+    symlinkSync(outsideDir, join(f.contextRoot, "brief"));
+
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/inner/leaf.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("rejects a context path whose sibling-adjacent same-named real directory is bypassed by an ancestor symlink pointing elsewhere", () => {
+    const f = fixture();
+    write(join(f.contextRoot, "brief", "acceptance.md"), "legit acceptance content\n");
+    const decoyDir = join(f.root, "decoy-brief");
+    mkdirSync(decoyDir);
+    write(join(decoyDir, "acceptance.md"), "decoy acceptance content\n");
+    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
+    symlinkSync(decoyDir, join(f.contextRoot, "brief"));
+
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/acceptance.md"] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);

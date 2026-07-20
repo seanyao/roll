@@ -43,6 +43,9 @@ schema: roll.workspace-init/v1
 id: ws-demo
 root: ~/.roll/workspaces/ws-demo
 display_name: Demo Workspace
+requirements:
+  - provider: jira
+    ref: SOT-15499
 repositories:
   - alias: product
     source: git@example.test:team/product.git
@@ -68,6 +71,30 @@ roll workspace pause ws-demo
 
 查询结果会把注册表/清单一致性与生命周期分开呈现。在工作区调度器表面尚未安装前，
 runtime health 会诚实显示为 `unknown`，原因是 `scheduler_not_available`。
+
+### 需求来源采集
+
+采集前必须先在 `workspace.yaml` 声明 Requirement source。命令只读取本地文件；
+Jira 与 GitHub 标识只用于来源身份，不会触发 provider 网络调用，也不读取凭据：
+
+```bash
+roll workspace requirement add \
+  --workspace ws-demo \
+  --provider jira \
+  --ref SOT-15499 \
+  --revision 42 \
+  --body-file /absolute/path/SOT-15499.md \
+  --context-root /absolute/path/context \
+  --context acceptance.md \
+  --story US-WS-007
+```
+
+命令会在 containment 与 symlink 检查后复制有界的普通上下文文件。每份原始采集都以
+不可变形式保存在
+`requirements/<provider>/<requirement-id>/revisions/rev-<digest>/`；完全相同的
+重复采集零写复用，新 revision 会保留旧字节。`source.yaml` 是原子提交的当前索引；
+根级 `requirement.md`、`context/` 与 `attest.md` 都是可重建投影。`attest.md` 可以聚合
+关联 Story 的交付，但绝不替代 Issue 自己拥有的证据。
 
 ## 常见覆盖场景
 

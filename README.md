@@ -228,7 +228,7 @@ with `roll loop resume` when ready.
 | `roll setup [-f\|--force] [--reselect] [--no-capture-install]` / `roll setup skills\|offboard` | Install/sync conventions, repair Roll Capture.app readiness, or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
-| `roll workspace <init\|list\|show\|register\|activate\|pause\|archive>` | Preview or atomically initialize a complete Workspace, then inspect and control explicitly targeted lifecycle state |
+| `roll workspace <init\|requirement\|list\|show\|register\|activate\|pause\|archive>` | Initialize and target a Workspace, capture declared Requirement sources with immutable revisions, and inspect lifecycle state |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |
 | `roll --version` / `roll -v` | Print installed roll version |
 

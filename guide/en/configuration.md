@@ -45,6 +45,9 @@ schema: roll.workspace-init/v1
 id: ws-demo
 root: ~/.roll/workspaces/ws-demo
 display_name: Demo Workspace
+requirements:
+  - provider: jira
+    ref: SOT-15499
 repositories:
   - alias: product
     source: git@example.test:team/product.git
@@ -72,6 +75,32 @@ roll workspace pause ws-demo
 The view reports registry/manifest consistency separately from lifecycle.
 Until the Workspace scheduler surface is installed, runtime health is reported
 honestly as `unknown` with reason `scheduler_not_available`.
+
+### Requirement source capture
+
+Requirement sources must be declared in `workspace.yaml` before capture. The
+capture command accepts local files only; Jira and GitHub identifiers are source
+identity, not an instruction to call a provider or read credentials:
+
+```bash
+roll workspace requirement add \
+  --workspace ws-demo \
+  --provider jira \
+  --ref SOT-15499 \
+  --revision 42 \
+  --body-file /absolute/path/SOT-15499.md \
+  --context-root /absolute/path/context \
+  --context acceptance.md \
+  --story US-WS-007
+```
+
+The command copies bounded regular context files after containment and symlink
+checks. Each raw capture is immutable under
+`requirements/<provider>/<requirement-id>/revisions/rev-<digest>/`; a repeated
+identical capture is a zero-write reuse, while a new revision preserves the old
+bytes. `source.yaml` is the atomic current index. Root-level `requirement.md`,
+`context/`, and `attest.md` are rebuildable projections; `attest.md` aggregates
+linked Story delivery but never replaces Issue-owned evidence.
 
 ## Common Overrides
 

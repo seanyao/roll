@@ -197,7 +197,7 @@ roll loop on
 | `roll setup [-f\|--force] [--reselect] [--no-capture-install]` / `roll setup skills\|offboard` | 安装/同步约定，修复 Roll Capture.app 就绪度，或移除 Roll 管理的项目产物 |
 | `roll status [ci\|pulse] [--json]` | 项目健康、CI 状态和交付脉搏 |
 | `roll test [--where] [--reset]` | 通过隔离适配器运行测试 |
-| `roll workspace <init\|list\|show\|register\|activate\|pause\|archive>` | 预览或原子初始化完整工作区，再查看并控制显式指定的生命周期 |
+| `roll workspace <init\|requirement\|list\|show\|register\|activate\|pause\|archive>` | 初始化并定位工作区，以不可变修订采集已声明的需求来源，再查看生命周期状态 |
 | `roll update` | 升级全局 Roll 并重新同步约定 |
 | `roll --version` / `roll -v` | 显示已安装的 roll 版本 |
 

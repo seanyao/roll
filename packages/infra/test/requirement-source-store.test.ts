@@ -892,6 +892,34 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(growingPath, "utf8")).toContain("Jira requirement");
   });
 
+  it("does not trust a same-inode, same-size content overwrite that lands between read completion and the after-fstat check", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const targetPath = join(first.requirementPath, "requirement.md");
+    const originalContent = readFileSync(targetPath, "utf8");
+    const sameLengthReplacement = `${"x".repeat(originalContent.length - 1)}\n`;
+    expect(sameLengthReplacement).toHaveLength(originalContent.length);
+    const inoBeforeOverwrite = statSync(targetPath).ino;
+    let overwritten = false;
+    let inoAtOverwrite: number | undefined;
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      afterProjectionRead: (path) => {
+        if (path !== targetPath || overwritten) return;
+        overwritten = true;
+        const fd = openSync(targetPath, "r+");
+        writeSync(fd, sameLengthReplacement, 0, "utf8");
+        closeSync(fd);
+        inoAtOverwrite = statSync(targetPath).ino;
+      },
+    });
+    expect(overwritten).toBe(true);
+    expect(inoAtOverwrite).toBe(inoBeforeOverwrite);
+    expect(repaired.outcome).toBe("reused");
+    expect(readFileSync(targetPath, "utf8")).toContain("Jira requirement");
+    expect(readFileSync(targetPath, "utf8")).not.toContain("xxxxxxxxxx");
+  });
+
   it("does not trust a stale fd once its pathname is renamed away and replaced by a symlink during the read", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

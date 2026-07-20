@@ -81,6 +81,7 @@ export interface RequirementSourceStoreDeps {
   readonly afterReadFile?: (path: string) => void;
   readonly beforeProjection?: () => void;
   readonly afterProjectionStat?: (path: string) => void;
+  readonly afterProjectionRead?: (path: string) => void;
 }
 
 interface StableFile {
@@ -173,6 +174,12 @@ interface BoundedReadHooks {
   readonly afterRead?: (path: string) => void;
 }
 
+// Compares fd-vs-fd (before/after) and path-vs-fd (pathAfter/after) via the same dev/ino/size/
+// mtime tuple (sameFile) so an in-place same-size content overwrite between the read loop and
+// this check is detected as staleness, not silently trusted. This still cannot see a write that
+// completes between the last stat call and the return of this function — the residual window
+// documented on ensureSafeDirectory applies here too; only the outer self-heal retry makes a
+// caught race harmless rather than truly unobservable.
 function boundedReadCurrent(path: string, maximumBytes: number, hooks: BoundedReadHooks = {}): Buffer | undefined {
   let descriptor: number;
   try {
@@ -196,14 +203,14 @@ function boundedReadCurrent(path: string, maximumBytes: number, hooks: BoundedRe
     }
     hooks.afterRead?.(path);
     const after = fstatSync(descriptor);
-    if (after.size !== total || after.dev !== before.dev || after.ino !== before.ino) return undefined;
+    if (after.size !== total || !sameFile(before, after)) return undefined;
     let pathAfter;
     try {
       pathAfter = lstatSync(path);
     } catch {
       return undefined;
     }
-    if (pathAfter.isSymbolicLink() || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino) return undefined;
+    if (pathAfter.isSymbolicLink() || !sameFile(after, pathAfter)) return undefined;
     return Buffer.concat(chunks, total);
   } catch {
     return undefined;
@@ -461,7 +468,7 @@ function isProjectionCurrent(
   evidence: RevisionEvidence,
   deps: RequirementSourceStoreDeps = {},
 ): boolean {
-  const hooks: BoundedReadHooks = { afterStat: deps.afterProjectionStat };
+  const hooks: BoundedReadHooks = { afterStat: deps.afterProjectionStat, afterRead: deps.afterProjectionRead };
   try {
     if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
     const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES, hooks);

@@ -173,8 +173,6 @@ export interface AcquireResult {
   acquired: boolean;
   /** When `acquired` is false, the live owner's pid (mirrors the bash skip). */
   heldByPid: number | undefined;
-  /** Ownership token for token-checked release; present only when acquired. */
-  ownerToken?: string;
 }
 
 /**
@@ -189,8 +187,6 @@ export interface LockOwner {
   startedAt: number;
   /** cycle (or card) id this lock was taken for; "" when not supplied. */
   cycleId: string;
-  /** Unique acquisition token, empty only for legacy locks. */
-  token: string;
 }
 
 /** Basename of the owner-metadata file written inside the lock directory. */
@@ -223,7 +219,6 @@ export function readLockOwner(lockPath: string): LockOwner | undefined {
         hostname: typeof o.hostname === "string" ? o.hostname : "",
         startedAt: o.startedAt,
         cycleId: typeof o.cycleId === "string" ? o.cycleId : "",
-        token: typeof o.token === "string" ? o.token : "",
       };
     } catch {
       return undefined;
@@ -233,7 +228,7 @@ export function readLockOwner(lockPath: string): LockOwner | undefined {
   try {
     const { pid, ts } = parseLock(readFileSync(lockPath, "utf8"));
     if (pid === undefined || ts === undefined) return undefined;
-    return { pid, hostname: "", startedAt: ts, cycleId: "", token: "" };
+    return { pid, hostname: "", startedAt: ts, cycleId: "" };
   } catch {
     return undefined;
   }
@@ -291,15 +286,7 @@ export function isOwnerHeld(
 export function acquireLock(
   lockPath: string,
   pid: number = process.pid,
-  opts: {
-    now?: Clock;
-    staleSec?: number;
-    pidAlive?: PidAlive;
-    cycleId?: string;
-    hostname?: string;
-    beforePublish?: () => void;
-    beforeStaleIsolation?: () => void;
-  } = {},
+  opts: { now?: Clock; staleSec?: number; pidAlive?: PidAlive; cycleId?: string; hostname?: string } = {},
 ): AcquireResult {
   const now = (opts.now ?? systemClock)();
   const staleSec = opts.staleSec ?? OUTER_LOCK_STALE_SEC;
@@ -310,13 +297,12 @@ export function acquireLock(
     hostname: selfHost,
     startedAt: now,
     cycleId: opts.cycleId ?? "",
-    token: `${pid}:${now}:${lockTokenCounter++}`,
   };
 
-  // Publish a fully initialized candidate directory atomically. No reader can
-  // observe lockPath without owner metadata.
-  if (tryPublishLock(lockPath, owner, opts.beforePublish)) {
-    return { acquired: true, heldByPid: undefined, ownerToken: owner.token };
+  // First attempt: pure atomic mkdir. The winner of the race lands here.
+  if (tryMkdir(lockPath)) {
+    writeMeta(lockPath, owner);
+    return { acquired: true, heldByPid: undefined };
   }
 
   // EEXIST: someone holds it (dir) OR a legacy file is in the way. Decide.
@@ -325,31 +311,18 @@ export function acquireLock(
     return { acquired: false, heldByPid: held?.pid };
   }
 
-  // Serialize stale recovery separately from ordinary lock acquisition. Without
-  // this guard, two contenders can both inspect the same stale generation; the
-  // slower contender can then rename away the faster contender's newly
-  // published live lock. Only the recovery-guard holder may re-check, isolate,
-  // and retry publication.
-  const recoveryPath = `${lockPath}.recovery`;
-  if (!tryAcquireRecoveryGuard(recoveryPath)) {
-    return { acquired: false, heldByPid: held?.pid };
+  // Proven stale (same-host dead/aged, or unparseable/legacy-stale): isolate it
+  // out of the way ATOMICALLY, then retry the mkdir exactly once. The rename is
+  // the serialization point — only one process can move a given path away, and
+  // whoever then wins the mkdir is the sole holder.
+  isolateStale(lockPath);
+  if (tryMkdir(lockPath)) {
+    writeMeta(lockPath, owner);
+    return { acquired: true, heldByPid: undefined };
   }
-  try {
-    opts.beforeStaleIsolation?.();
-    const current = readLockOwner(lockPath);
-    if (existsSync(lockPath) && isOwnerHeld(current, now, staleSec, pidAlive, selfHost)) {
-      return { acquired: false, heldByPid: current?.pid };
-    }
-    if (existsSync(lockPath)) isolateStale(lockPath);
-    if (tryPublishLock(lockPath, owner)) {
-      return { acquired: true, heldByPid: undefined, ownerToken: owner.token };
-    }
-    // Lost the retry to a concurrent fresh acquirer — yield to it.
-    const winner = readLockOwner(lockPath);
-    return { acquired: false, heldByPid: winner?.pid };
-  } finally {
-    rmSyncQuiet(recoveryPath);
-  }
+  // Lost the retry to a concurrent racer that re-created the lock — yield to it.
+  const winner = readLockOwner(lockPath);
+  return { acquired: false, heldByPid: winner?.pid };
 }
 
 /**
@@ -358,40 +331,30 @@ export function acquireLock(
  * exit path (`done` / `failed` / `auth_blocked` / crash-cleanup) releases.
  * Idempotent and tolerant of an already-absent lock.
  */
-export function releaseLock(lockPath: string, ownerToken?: string): void {
-  if (ownerToken !== undefined && readLockOwner(lockPath)?.token !== ownerToken) return;
+export function releaseLock(lockPath: string): void {
   rmSyncQuiet(lockPath);
 }
 
-let lockTokenCounter = 0;
-
-function tryAcquireRecoveryGuard(recoveryPath: string): boolean {
+/** `mkdir(lockPath)` WITHOUT `recursive` so an existing dir throws EEXIST.
+ *  Returns true iff WE created it. Parent dirs are created first (recursive). */
+function tryMkdir(lockPath: string): boolean {
+  mkdirSync(dirname(lockPath), { recursive: true });
   try {
-    mkdirSync(recoveryPath);
+    mkdirSync(lockPath); // atomic: EEXIST if it already exists
     return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "EEXIST" || code === "ENOTDIR") return false;
-    throw error;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
   }
 }
 
-/** Prepare owner metadata privately, then atomically publish the complete lock. */
-function tryPublishLock(lockPath: string, owner: LockOwner, beforePublish?: () => void): boolean {
-  mkdirSync(dirname(lockPath), { recursive: true });
-  const candidate = `${lockPath}.candidate.${owner.pid}.${lockTokenCounter++}`;
+/** Write owner metadata inside an owned lock directory (best-effort durable). */
+function writeMeta(lockDir: string, owner: LockOwner): void {
   try {
-    mkdirSync(candidate);
-    writeFileSync(metaPath(candidate), `${JSON.stringify(owner)}\n`, "utf8");
-    beforePublish?.();
-    renameSync(candidate, lockPath);
-    return true;
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === "EEXIST" || code === "ENOTEMPTY" || code === "ENOTDIR") return false;
-    throw e;
-  } finally {
-    rmSyncQuiet(candidate);
+    writeFileSync(metaPath(lockDir), `${JSON.stringify(owner)}\n`, "utf8");
+  } catch {
+    /* lenient: a missing meta only weakens diagnostics, not the mutual exclusion
+       (which is the mkdir). Readers tolerate an absent/garbage meta. */
   }
 }
 

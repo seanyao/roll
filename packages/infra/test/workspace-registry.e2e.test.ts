@@ -2,6 +2,11 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_MANIFEST_V1,
+  repositoryIdFromRemote,
+} from "@roll/spec";
 import { WorkspaceRegistry, workspaceRegistryPath } from "../src/workspace-registry.js";
 
 const sandboxes: string[] = [];
@@ -12,7 +17,24 @@ afterEach(() => {
 
 function workspace(root: string, workspaceId: string): string {
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({ id: workspaceId })}\n`, "utf8");
+  const remote = `https://example.test/workspaces/${workspaceId}.git`;
+  const repoId = repositoryIdFromRemote(remote);
+  if (!repoId.ok) throw new Error("test remote must be valid");
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({
+    schema: WORKSPACE_MANIFEST_V1,
+    workspaceId,
+    displayName: workspaceId,
+    requirements: [],
+    repositories: [{
+      schema: REPOSITORY_BINDING_V1,
+      repoId: repoId.value,
+      alias: "primary",
+      remote,
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    }],
+  })}\n`, "utf8");
   return root;
 }
 

@@ -19,6 +19,31 @@ function git(cwd: string, args: readonly string[]): void {
 afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true }); });
 
 describe("US-WS-006 Workspace init E2E", () => {
+  it("serves the exact deliverable help command through the real CLI entrypoint", () => {
+    const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-help-e2e-"));
+    roots.push(home);
+    const runHelp = (language: "en" | "zh") => spawnSync(
+      process.execPath,
+      [rollBin, "workspace", "init", "--help"],
+      {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: home, ROLL_HOME: join(home, ".roll"), ROLL_LANG: language, NO_COLOR: "1" },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    const en = runHelp("en");
+    expect(en.status, en.stderr).toBe(0);
+    expect(en.stderr).toBe("");
+    expect(en.stdout).toBe("Usage: roll workspace init <id> --config <file> [--check] [--json]\n");
+
+    const zh = runHelp("zh");
+    expect(zh.status, zh.stderr).toBe(0);
+    expect(zh.stderr).toBe("");
+    expect(zh.stdout).toBe("用法：roll workspace init <ID> --config <文件> [--check] [--json]\n");
+  });
+
   it("previews, applies, and reuses one complete Workspace through the built CLI", () => {
     const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-e2e-"));
     roots.push(home);

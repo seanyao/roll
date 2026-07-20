@@ -392,4 +392,62 @@ describe("applyIssueInit", () => {
     const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
     expect(journal.status).toBe("repair_required");
   });
+
+  it("refuses a read target whose real checkout contains a TRACKED symlink, rolling back deterministically", async () => {
+    const f = fixture();
+    // sot3 (the read target) is seeded with a real git-tracked symlink whose
+    // target lives OUTSIDE the checkout entirely — chmod can never make a
+    // symlink itself deny writes (it follows to the target), so the ONLY
+    // safe contract is refusing to expose this checkout as read-only at all.
+    const outsideFile = join(f.root, "outside-sot3-escape.txt");
+    writeFileSync(outsideFile, "external content a read checkout must never let through\n", "utf8");
+    symlinkSync(outsideFile, join(f.remotes.sot3.replace(/\.git$/, "-source"), "escape-link.txt"));
+    const sot3Source = f.remotes.sot3.replace(/\.git$/, "-source");
+    git(sot3Source, ["add", "escape-link.txt"]);
+    git(sot3Source, ["commit", "-q", "-m", "add escaping symlink"]);
+    // Refresh the bare remote sot3Remote points at so the new commit is fetchable.
+    execFileSync("git", ["push", f.remotes.sot3, "HEAD:main"], { cwd: sot3Source, stdio: "ignore" });
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    // sot1/sot2 were newly-created and clean during this run -> rolled back.
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+    expect(existsSync(join(f.issueRoot, "sot2"))).toBe(false);
+    // sot3 itself must never be left behind exposed as a "protected" read
+    // checkout that actually still lets writes through its symlink.
+    expect(existsSync(join(f.issueRoot, "sot3"))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
+  });
+
+  it("preserves a READ target as non-writable when rollback's own git worktree remove genuinely fails on it", async () => {
+    const f = fixture();
+    const sot3CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot3")?.repoId}.git`);
+    let sot3Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      // Real fault injection: right after sot3 (the read target, last in
+      // contract order) is created and protected, LOCK its real worktree —
+      // a genuine, unmocked reason `git worktree remove` refuses later,
+      // independent of any dirty check — then throw to force apply into its
+      // rollback path (sot3 is the last target created, so nothing further
+      // downstream would otherwise fail).
+      afterTargetCreated: (alias, path) => {
+        if (alias === "sot3") {
+          sot3Path = path;
+          git(sot3CachePath, ["worktree", "lock", path]);
+          throw new Error("real injected failure after sot3's creation, to force rollback");
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    // Rollback attempted to remove sot3 (a target created THIS run) but git
+    // genuinely refused (locked) -> preserved, and re-protected rather than
+    // left writable just because unprotect ran before the failed removal.
+    expect(existsSync(sot3Path)).toBe(true);
+    expect(() => writeFileSync(join(sot3Path, "README.md"), "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+    expect(() => writeFileSync(join(sot3Path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
+
+    git(sot3CachePath, ["worktree", "unlock", sot3Path]);
+  });
 });

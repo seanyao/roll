@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ReadOnlyWorktreeSymlinkError,
   issueWorktreeAdd,
   issueWorktreeIdentity,
   issueWorktreeRemove,
@@ -161,10 +162,46 @@ describe("issueWorktreeRemove", () => {
     await expect(issueWorktreeRemove(cachePath, path)).rejects.toThrow();
     expect(existsSync(join(path, "scratch.txt"))).toBe(true);
   });
+
+  it("re-protects a preserved READ target when git worktree remove genuinely fails (a real lock, not dirty)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    protectReadOnlyWorktree(path);
+    // A real, unmocked removal failure independent of dirty state: git
+    // itself refuses to remove a LOCKED worktree.
+    git(cachePath, ["worktree", "lock", path]);
+
+    await expect(issueWorktreeRemove(cachePath, path, { readOnly: true })).rejects.toThrow();
+
+    // The preserved target must remain non-writable — removal failed, so
+    // unprotecting it first must not be left as a permanent side effect.
+    expect(existsSync(path)).toBe(true);
+    expect(() => writeFileSync(join(path, "README.md"), "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+    expect(() => writeFileSync(join(path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
+
+    git(cachePath, ["worktree", "unlock", path]);
+  });
 });
 
 describe("protectReadOnlyWorktree / unprotectReadOnlyWorktree", () => {
-  it("denies writes to real product files and blocks new-file creation, without touching a tracked symlink's EXTERNAL target", async () => {
+  it("denies writes to real product files and blocks new-file creation in a checkout with no symlinks", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    protectReadOnlyWorktree(path);
+
+    expect(() => writeFileSync(join(path, "README.md"), "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+    expect(() => writeFileSync(join(path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
+
+    unprotectReadOnlyWorktree(path);
+    writeFileSync(join(path, "README.md"), "restored\n", { flag: "r+" });
+    expect(readFileSync(join(path, "README.md"), "utf8")).toBe("restored\n");
+  });
+
+  it("REFUSES to protect (and never chmods anything, including the EXTERNAL target) a checkout containing a tracked symlink", async () => {
     const root = sandbox();
     const outsidePath = join(root, "outside-the-worktree.txt");
     writeFileSync(outsidePath, "external content, never owned by any worktree\n", "utf8");
@@ -177,8 +214,10 @@ describe("protectReadOnlyWorktree / unprotectReadOnlyWorktree", () => {
     git(source, ["config", "user.name", "Roll Test"]);
     writeFileSync(join(source, "README.md"), "fixture\n", "utf8");
     // A real git-tracked symlink whose target lives OUTSIDE this worktree
-    // entirely (an absolute path escaping the repo) — exactly the boundary
-    // case protect/unprotect must never cross.
+    // entirely (an absolute path escaping the repo) — chmod can never make
+    // this symlink itself deny writes (it follows to the target), so
+    // protection must refuse the whole checkout rather than expose a
+    // write-through hole.
     symlinkSync(outsidePath, join(source, "escape-link.txt"));
     git(source, ["add", "README.md", "escape-link.txt"]);
     git(source, ["commit", "-q", "-m", "fixture with an escaping symlink"]);
@@ -188,31 +227,16 @@ describe("protectReadOnlyWorktree / unprotectReadOnlyWorktree", () => {
 
     const path = join(root, "issues", "US-XX1", "docs");
     await issueWorktreeAdd(cachePath, path, baseSha, null);
-    protectReadOnlyWorktree(path);
+    expect(() => protectReadOnlyWorktree(path)).toThrow(ReadOnlyWorktreeSymlinkError);
 
-    // The real checked-out product file is denied for writes.
-    expect(() => writeFileSync(join(path, "README.md"), "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
-    // A new top-level file cannot be created either.
-    expect(() => writeFileSync(join(path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
-
-    // The symlink itself is left exactly as git checked it out (still a link
-    // to the same external target) — its EXTERNAL target's permissions and
-    // content are completely untouched by protection.
-    const linkPath = join(path, "escape-link.txt");
-    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    // Nothing was chmod'd at all — the real product file stays writable...
+    writeFileSync(join(path, "README.md"), "still writable\n", { flag: "r+" });
+    expect(readFileSync(join(path, "README.md"), "utf8")).toBe("still writable\n");
+    // ...the symlink is untouched...
+    expect(lstatSync(join(path, "escape-link.txt")).isSymbolicLink()).toBe(true);
+    // ...and its EXTERNAL target's permissions/content are completely
+    // untouched (protection threw before reaching ANY chmod, not just this one).
     expect(statSync(outsidePath).mode & 0o777).toBe(outsideModeBefore);
     expect(readFileSync(outsidePath, "utf8")).toBe("external content, never owned by any worktree\n");
-    // Writing through the external path directly (not via the symlink) still
-    // works normally — protection never reached it.
-    writeFileSync(outsidePath, "still writable externally\n", "utf8");
-    expect(readFileSync(outsidePath, "utf8")).toBe("still writable externally\n");
-
-    unprotectReadOnlyWorktree(path);
-    // Unprotection restores the real product file's write access...
-    writeFileSync(join(path, "README.md"), "restored\n", { flag: "r+" });
-    expect(readFileSync(join(path, "README.md"), "utf8")).toBe("restored\n");
-    // ...and never touched the external target either (still untouched by
-    // the restore pass, same as it was left after protect).
-    expect(readFileSync(outsidePath, "utf8")).toBe("still writable externally\n");
   });
 });

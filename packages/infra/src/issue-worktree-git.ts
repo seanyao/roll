@@ -29,6 +29,21 @@ function walkProductEntries(root: string, apply: (entryPath: string, stat: Stats
   }
 }
 
+/** Collect every non-`.git` entry under `root` (recursing into real
+ *  directories only, mirroring {@link walkProductEntries}'s traversal) BEFORE
+ *  any mutation happens — used to scan for a disqualifying symlink in one
+ *  pass so a later mutating pass either runs in full or not at all. */
+function collectProductEntries(root: string): Array<{ readonly path: string; readonly stat: Stats }> {
+  const entries: Array<{ readonly path: string; readonly stat: Stats }> = [];
+  walkProductEntries(root, (path, stat) => entries.push({ path, stat }));
+  return entries;
+}
+
+/** Thrown by {@link protectReadOnlyWorktree} when the checkout contains a
+ *  tracked symlink — the read-only guarantee cannot be made for it (see the
+ *  function's own doc for why), so the checkout must never be exposed. */
+export class ReadOnlyWorktreeSymlinkError extends Error {}
+
 /** Deny filesystem writes to every product file/directory in a read-only Issue
  *  worktree checkout — NOT merely a detached HEAD, which only blocks branch
  *  commits and leaves the working tree writable to any normal process. The
@@ -42,18 +57,28 @@ function walkProductEntries(root: string, apply: (entryPath: string, stat: Stats
  *  worktree half-unregistered) — so protect and unprotect are a matched pair,
  *  never called independently of that ordering.
  *
- *  SYMLINK BOUNDARY: a symlinked entry is NEVER chmod'd. `chmodSync` follows
- *  a symlink to its target (verified: it changes the TARGET's mode, not the
- *  link's), and Node exposes no portable `lchmod` to change the link itself —
- *  so touching a symlink here could silently mutate a file outside the
- *  worktree entirely (anywhere the link points, including outside the repo).
- *  A tracked symlink is therefore left exactly as git checked it out; the
- *  read-only guarantee covers real files/directories the checkout owns. */
+ *  SYMLINK BOUNDARY — REFUSED, NOT SILENTLY ALLOWED: `chmodSync` follows a
+ *  symlink to its target (verified: it changes the TARGET's mode, not the
+ *  link's), and Node exposes no portable `lchmod` to change the link itself.
+ *  A tracked symlink therefore CANNOT be made read-only by this function —
+ *  writing through it would still reach whatever it points to, including a
+ *  file outside the checkout entirely. Rather than silently expose a
+ *  checkout that LOOKS protected but has a write-through hole, this SCANS
+ *  the whole tree for a symlink FIRST and throws
+ *  {@link ReadOnlyWorktreeSymlinkError} before a SECOND pass chmods anything
+ *  — never a partial chmod followed by a throw (which would leave some
+ *  files locked and others not, an inconsistent half-protected state). The
+ *  caller must treat the thrown error exactly like any other real
+ *  protection failure (roll the target back, never expose it). */
 export function protectReadOnlyWorktree(path: string): void {
-  walkProductEntries(path, (entryPath, stat) => {
-    if (stat.isSymbolicLink()) return;
-    chmodSync(entryPath, stat.mode & ~0o222);
-  });
+  const entries = collectProductEntries(path);
+  const symlink = entries.find((entry) => entry.stat.isSymbolicLink());
+  if (symlink !== undefined) {
+    throw new ReadOnlyWorktreeSymlinkError(`read-only checkout contains a tracked symlink at ${symlink.path} — cannot deny writes through it`);
+  }
+  for (const entry of entries) {
+    chmodSync(entry.path, entry.stat.mode & ~0o222);
+  }
   const rootStat = statSync(path);
   chmodSync(path, rootStat.mode & ~0o222);
 }
@@ -165,6 +190,16 @@ export async function issueWorktreeIdentity(path: string, expectedCachePath: str
   return { state: "compatible", dirty, branch: branch === "" ? null : branch, baseSha: head.stdout.trim() };
 }
 
+export interface IssueWorktreeRemoveOptions {
+  /** Set when the target being removed is a READ (protected) target — if
+   *  `git worktree remove` genuinely fails, the worktree is PRESERVED, and
+   *  since {@link unprotectReadOnlyWorktree} already ran to give git the
+   *  write access it needs, that preserved target must be re-protected
+   *  before this function returns; otherwise a "preserved" read target would
+   *  silently end up fully writable. */
+  readonly readOnly?: boolean;
+}
+
 /** Remove a worktree via `git worktree remove` — refuses (git's own guard) if
  *  the worktree has uncommitted changes. Never a blind `rm -rf`: the caller's
  *  clean/dirty decision is enforced by git itself, not re-derived here.
@@ -172,10 +207,11 @@ export async function issueWorktreeIdentity(path: string, expectedCachePath: str
  *  unlink every entry itself, which requires write permission throughout the
  *  tree; a still-protected checkout would make git fail (or, worse, abort
  *  with the worktree left half-registered), never a clean removal. */
-export async function issueWorktreeRemove(cachePath: string, path: string): Promise<void> {
+export async function issueWorktreeRemove(cachePath: string, path: string, options: IssueWorktreeRemoveOptions = {}): Promise<void> {
   unprotectReadOnlyWorktree(path);
   const result = await git(["worktree", "remove", path], cachePath);
   if (result.code !== 0) {
+    if (options.readOnly === true && existsSync(path)) protectReadOnlyWorktree(path);
     throw new Error(`git worktree remove refused for ${path}: ${result.stderr || result.stdout}`);
   }
 }

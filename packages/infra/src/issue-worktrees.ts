@@ -326,6 +326,7 @@ interface JournalTarget {
   readonly path: string;
   readonly created: boolean;
   readonly workBranch: string | null;
+  readonly access: "read" | "write";
 }
 
 interface IssueInitJournal {
@@ -367,10 +368,12 @@ async function rollbackCreatedTargets(
     const identity = await issueWorktreeIdentity(target.path, cache.cachePath);
     if (identity.state !== "compatible" || identity.dirty) continue; // preserve: conflict or dirty
     try {
-      await issueWorktreeRemove(cache.cachePath, target.path);
+      await issueWorktreeRemove(cache.cachePath, target.path, { readOnly: target.access === "read" });
     } catch {
       // A target that refuses removal (e.g. went dirty between the identity
-      // check and now) is preserved — never forced.
+      // check and now) is preserved — never forced. issueWorktreeRemove
+      // already re-protected it if it was a read target, so the preserved
+      // checkout stays non-writable rather than silently ending up exposed.
       continue;
     }
     // The worktree is gone; also delete the governed branch THIS run created,
@@ -466,6 +469,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
     path: join(input.issueRoot, target.alias),
     created: false,
     workBranch: target.workBranch,
+    access: target.access,
   }));
   let journal: IssueInitJournal = {
     schema: ISSUE_INIT_JOURNAL_V1,

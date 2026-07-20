@@ -281,8 +281,12 @@ export function normalizeRepositoryRemote(value: unknown): ContractResult<string
 export function repositoryIdFromRemote(value: unknown): ContractResult<string> {
   const normalized = normalizeRepositoryRemote(value);
   if (!normalized.ok) return normalized;
-  const digest = createHash("sha256").update(normalized.value).digest("hex").slice(0, 12);
-  return { ok: true, value: `repo-${digest}` };
+  return { ok: true, value: repositoryIdFromCanonicalRemote(normalized.value) };
+}
+
+function repositoryIdFromCanonicalRemote(canonicalRemote: string): string {
+  const digest = createHash("sha256").update(canonicalRemote).digest("hex").slice(0, 12);
+  return `repo-${digest}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -433,8 +437,7 @@ export function parseRepositoryBinding(value: unknown): ContractResult<Repositor
     errors.push({ code: "invalid_value", path: "integrationBranch", message: "integration branch is not a safe Git ref" });
   }
   if (normalized.ok && repoId !== undefined) {
-    const expected = repositoryIdFromRemote(normalized.value);
-    if (!expected.ok || repoId !== expected.value) {
+    if (repoId !== repositoryIdFromCanonicalRemote(normalized.value)) {
       errors.push({ code: "repo_id_mismatch", path: "repoId", message: "repoId does not match the canonical remote" });
     }
   }

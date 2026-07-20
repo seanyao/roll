@@ -3,13 +3,14 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   buildWorkspaceInitPlan,
   type WorkspaceInitConfig,
@@ -29,11 +30,12 @@ import {
   parseWorkspaceRegistry,
   workspaceRegistryPath,
 } from "./workspace-registry.js";
+import { acquireLock, releaseLock } from "./process.js";
 
 const JOURNAL_V1 = "roll.workspace-init-journal/v1" as const;
 
 export class WorkspaceInitializationError extends Error {
-  constructor(readonly code: "rejected" | "apply_failed", message: string, options?: ErrorOptions) {
+  constructor(readonly code: "rejected" | "concurrent_init" | "apply_failed", message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "WorkspaceInitializationError";
   }
@@ -65,6 +67,10 @@ interface InitJournal {
 
 export function workspaceInitJournalPath(rollHome: string, workspaceId: string): string {
   return join(resolve(rollHome), "workspace-init", `${workspaceId}.pending.json`);
+}
+
+export function workspaceInitLockPath(rollHome: string, workspaceId: string): string {
+  return join(resolve(rollHome), "locks", `workspace-init-${workspaceId}.lock`);
 }
 
 function digest(text: string): string {
@@ -127,14 +133,44 @@ function registryState(config: WorkspaceInitConfig): WorkspaceInitState {
   if (!existsSync(path)) return "absent";
   try {
     const snapshot = parseWorkspaceRegistry(readFileSync(path, "utf8"));
+    const canonicalRoot = canonicalProspectivePath(config.root);
     const byId = snapshot.entries.find((entry) => entry.workspaceId === config.workspaceId);
-    const byPath = snapshot.entries.find((entry) => entry.root === config.root || entry.canonicalRoot === config.root);
+    const byPath = snapshot.entries.find((entry) => entry.root === config.root || entry.canonicalRoot === canonicalRoot);
     if (byId === undefined && byPath === undefined) return "absent";
-    if (byId?.root === config.root && (byPath === undefined || byPath.workspaceId === config.workspaceId)) return "compatible";
+    if (byId?.root === config.root && byId.canonicalRoot === canonicalRoot &&
+      (byPath === undefined || byPath.workspaceId === config.workspaceId)) return "compatible";
     return "conflict";
   } catch {
     return "conflict";
   }
+}
+
+function canonicalProspectivePath(path: string): string {
+  const suffix: string[] = [];
+  let cursor = resolve(path);
+  for (;;) {
+    try {
+      return resolve(realpathSync(cursor), ...suffix);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      const parent = dirname(cursor);
+      if (parent === cursor) return resolve(path);
+      suffix.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+function contains(parent: string, child: string): boolean {
+  const path = relative(parent, child);
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
+}
+
+function hasCanonicalPathConflict(config: WorkspaceInitConfig): boolean {
+  const root = canonicalProspectivePath(config.root);
+  const reposRoot = canonicalProspectivePath(join(config.rollHome, "repos"));
+  return contains(root, reposRoot) || contains(reposRoot, root);
 }
 
 export async function inspectWorkspaceInitialization(
@@ -142,6 +178,14 @@ export async function inspectWorkspaceInitialization(
   deps: Pick<WorkspaceInitDeps, "inspectCache"> = {},
 ): Promise<WorkspaceInitPlan> {
   const journal = readJournal(config);
+  if (hasCanonicalPathConflict(config)) {
+    return buildWorkspaceInitPlan(config, {
+      paths: { [config.root]: "conflict" },
+      caches: {},
+      registry: { state: registryState(config) },
+      journal: { state: journal },
+    });
+  }
   const rootExists = existsSync(config.root);
   const repairable = journal === "repairable";
   if (rootExists) {
@@ -212,8 +256,19 @@ export async function applyWorkspaceInitialization(
   config: WorkspaceInitConfig,
   deps: WorkspaceInitDeps = {},
 ): Promise<{ readonly outcome: WorkspaceInitPlan["outcome"]; readonly plan: WorkspaceInitPlan }> {
-  const plan = await inspectWorkspaceInitialization(config, deps);
-  if (plan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
+  const initialPlan = await inspectWorkspaceInitialization(config, deps);
+  if (initialPlan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
+  const lockPath = workspaceInitLockPath(config.rollHome, config.workspaceId);
+  const lock = acquireLock(lockPath, process.pid, {
+    cycleId: `workspace-init:${config.workspaceId}`,
+    unparseableIsHeld: true,
+  });
+  if (!lock.acquired) {
+    throw new WorkspaceInitializationError("concurrent_init", `Workspace initialization is already running for ${config.workspaceId}`);
+  }
+  try {
+    const plan = await inspectWorkspaceInitialization(config, deps);
+    if (plan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
   const journalPath = workspaceInitJournalPath(config.rollHome, config.workspaceId);
   const created: CreatedNode[] = [];
   const preservedCaches: string[] = [];
@@ -273,5 +328,8 @@ export async function applyWorkspaceInitialization(
     journal = { ...journal, status: "repair_required", created: [...created], preserved, preservedCaches: [...preservedCaches] };
     atomicWrite(journalPath, journalText(journal));
     throw error;
+  }
+  } finally {
+    releaseLock(lockPath);
   }
 }

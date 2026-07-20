@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseWorkspaceInitConfig } from "@roll/core";
 import {
@@ -148,5 +148,57 @@ describe("Workspace filesystem transaction", () => {
     expect(ensureCache).not.toHaveBeenCalled();
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(false);
     expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+  });
+
+  it("rejects a root that aliases the machine cache through a symbolic link without writing state", async () => {
+    const f = fixture();
+    const repos = join(f.rollHome, "repos");
+    const linked = join(f.home, "linked");
+    mkdirSync(repos, { recursive: true });
+    symlinkSync(repos, linked, "dir");
+    const config = { ...f.config, root: join(linked, "ws-demo") };
+    const before = tree(f.rollHome);
+
+    const plan = await inspectWorkspaceInitialization(config, { inspectCache: async () => "absent" });
+
+    expect(plan.outcome).toBe("rejected");
+    expect(tree(f.rollHome)).toEqual(before);
+  });
+
+  it("fails closed when another process holds the Workspace init lock", async () => {
+    const f = fixture();
+    const lock = join(f.rollHome, "locks", "workspace-init-ws-demo.lock");
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, "meta.json"), `${JSON.stringify({
+      pid: process.pid,
+      hostname: hostname(),
+      startedAt: Math.floor(Date.now() / 1000),
+      cycleId: "other-init",
+    })}\n`, "utf8");
+
+    await expect(applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "concurrent_init" });
+    expect(existsSync(lock)).toBe(true);
+    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+  });
+
+  it("rejects a second lexical root for an already registered canonical Workspace", async () => {
+    const f = fixture();
+    await applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    });
+    const alias = join(f.home, "workspace-alias");
+    symlinkSync(dirname(f.root), alias, "dir");
+    const aliased = { ...f.config, root: join(alias, "ws-demo") };
+    const before = tree(f.rollHome);
+
+    await expect(applyWorkspaceInitialization(aliased, {
+      inspectCache: async () => "compatible",
+      ensureCache: async () => ({ action: "reused" as const }),
+    })).rejects.toMatchObject({ code: "rejected" });
+    expect(tree(f.rollHome)).toEqual(before);
   });
 });

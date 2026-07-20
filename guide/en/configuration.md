@@ -37,6 +37,30 @@ There is no global current Workspace: every lifecycle mutation names one ID or
 path, while `list --all` is read-only. Multiple registered Workspaces may be
 active simultaneously.
 
+Create a versioned init config outside the target root, preview every path,
+registry, and machine-cache decision, then apply the exact same config:
+
+```yaml
+schema: roll.workspace-init/v1
+id: ws-demo
+root: ~/.roll/workspaces/ws-demo
+display_name: Demo Workspace
+repositories:
+  - alias: product
+    source: git@example.test:team/product.git
+    integration_branch: main
+```
+
+```bash
+roll workspace init ws-demo --config /absolute/path/workspace-init.yaml --check
+roll workspace init ws-demo --config /absolute/path/workspace-init.yaml
+```
+
+`--check` performs no writes. Apply writes a repair journal before the durable
+layout, creates or reuses bare caches only under `$ROLL_HOME/repos/`, registers
+the Workspace last, and never creates a persistent product checkout inside the
+Workspace. Re-running an identical config is idempotent.
+
 ```bash
 roll workspace register ws-demo /absolute/path/to/workspace
 roll workspace activate ws-demo

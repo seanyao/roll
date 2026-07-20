@@ -30,6 +30,7 @@ export const v3Catalog: Catalog = {
   "workspace.init.error.repo_id_mismatch": { en: "Workspace repository identity does not match its remote", zh: "工作区仓库 ID 与远端地址不匹配" },
   "workspace.init.error.path_conflict": { en: "Workspace root conflicts with machine cache paths", zh: "工作区根目录与机器缓存路径冲突" },
   "workspace.init.error.rejected": { en: "Workspace initialization plan was rejected before mutation", zh: "工作区初始化计划已在变更前被拒绝" },
+  "workspace.init.error.concurrent_init": { en: "Workspace initialization is already running for this ID", zh: "该工作区 ID 已有初始化任务正在运行" },
   "workspace.init.error.apply_failed": { en: "Workspace initialization failed; inspect the repair journal", zh: "工作区初始化失败；请检查修复 journal" },
   "workspace.list.title": { en: "Workspaces (%d)", zh: "工作区（%d）" },
   "workspace.list.header": { en: "ID\tLifecycle\tRuntime\tConsistency\tPath", zh: "ID\t生命周期\t运行状态\t一致性\t路径" },

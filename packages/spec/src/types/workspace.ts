@@ -383,12 +383,11 @@ const WORKFLOW_TOKENS = [
   "{workspace_id}",
   "{story_id}",
   "{repo_alias}",
-  "{workspaceId}",
-  "{storyId}",
-  "{repoAlias}",
 ] as const;
 
 function isSafeBranchPattern(value: string): boolean {
+  const components = value.split("/");
+  if (!components.includes("{workspace_id}") || !components.includes("{story_id}")) return false;
   let concrete = value;
   for (const token of WORKFLOW_TOKENS) concrete = concrete.replaceAll(token, "id");
   if (concrete.includes("{") || concrete.includes("}")) return false;
@@ -738,13 +737,23 @@ export function parseIssueManifest(
     }
   }
   errors.push(...duplicateTargetErrors(targets));
-  const aliases = new Set(targets.map((target) => target.alias));
+  const targetsByAlias = new Map(targets.map((target) => [target.alias, target]));
   for (const [index, target] of targets.entries()) {
-    if (target.dependsOnRepo !== undefined && (!aliases.has(target.dependsOnRepo) || target.dependsOnRepo === target.alias)) {
+    if (target.dependsOnRepo === undefined) continue;
+    const dependency = targetsByAlias.get(target.dependsOnRepo);
+    if (dependency === undefined || target.dependsOnRepo === target.alias) {
       errors.push({
         code: "invalid_value",
         path: `repositories[${targetIndexes[index] ?? index}].dependsOnRepo`,
         message: "dependency must name a different declared repository alias",
+      });
+      continue;
+    }
+    if (target.access !== "write" || dependency.access !== "write") {
+      errors.push({
+        code: "invalid_value",
+        path: `repositories[${targetIndexes[index] ?? index}].dependsOnRepo`,
+        message: "publish dependencies require writable repository targets",
       });
     }
   }

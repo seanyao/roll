@@ -25,6 +25,12 @@ import type { DeliverySet as WorkspaceDeliverySet } from "../src/types/workspace
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 type AssertFalse<T extends false> = T;
 type AssertTrue<T extends true> = T;
+type Equal<Left, Right> =
+  (<T>() => T extends Left ? 1 : 2) extends (<T>() => T extends Right ? 1 : 2)
+    ? (<T>() => T extends Right ? 1 : 2) extends (<T>() => T extends Left ? 1 : 2)
+      ? true
+      : false
+    : false;
 type ContainsAny<T> = IsAny<T> extends true
   ? true
   : T extends readonly (infer Item)[]
@@ -45,6 +51,18 @@ type Failure = Extract<ContractResult<string>, { ok: false }>;
 type FailureError = Failure["errors"][number];
 const failureErrorIsNotAny: AssertFalse<IsAny<FailureError>> = false;
 const failureCode: ContractErrorCode = failure.errors[0]!.code;
+const contractResultContainsNoAny: AssertFalse<ContainsAny<ContractResult<string>>> = false;
+const contractErrorCodesStayClosed: AssertTrue<Equal<
+  ContractErrorCode,
+  | "invalid_type"
+  | "unknown_version"
+  | "unknown_field"
+  | "invalid_value"
+  | "identity_mismatch"
+  | "duplicate_identity"
+  | "unsafe_remote"
+  | "repo_id_mismatch"
+>> = true;
 const workspaceIsNotAny: AssertFalse<IsAny<WorkspaceManifest>> = false;
 const repositoryIsNotAny: AssertFalse<IsAny<RepositoryBinding>> = false;
 const issueIsNotAny: AssertFalse<IsAny<IssueManifest>> = false;
@@ -54,6 +72,10 @@ const repositoryIssueIdentityIsNotAny: AssertFalse<IsAny<RepositoryIssueIdentity
 const parseWorkspaceResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseWorkspaceManifest>>> = false;
 const parseRepositoryResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseRepositoryBinding>>> = false;
 const parseIssueResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseIssueManifest>>> = false;
+const parseWorkspaceResultContainsNoAny: AssertFalse<ContainsAny<ReturnType<typeof parseWorkspaceManifest>>> = false;
+const parseRepositoryResultContainsNoAny: AssertFalse<ContainsAny<ReturnType<typeof parseRepositoryBinding>>> = false;
+const parseIssueResultContainsNoAny: AssertFalse<ContainsAny<ReturnType<typeof parseIssueManifest>>> = false;
+const parseLegacyResultContainsNoAny: AssertFalse<ContainsAny<ReturnType<typeof parseLegacyProjectEventMigrationInput>>> = false;
 const workspaceRequirementsIsNotAny: AssertFalse<IsAny<WorkspaceManifest["requirements"]>> = false;
 const workspaceRequirementIsNotAny: AssertFalse<IsAny<WorkspaceManifest["requirements"][number]>> = false;
 const workspaceRepositoriesIsNotAny: AssertFalse<IsAny<WorkspaceManifest["repositories"]>> = false;
@@ -67,6 +89,11 @@ const issueTargetContainsNoAny: AssertFalse<ContainsAny<IssueRepositoryTarget>> 
 const workspaceIdentityContainsNoAny: AssertFalse<ContainsAny<WorkspaceIdentity>> = false;
 const issueIdentityContainsNoAny: AssertFalse<ContainsAny<IssueIdentity>> = false;
 const repositoryIssueIdentityContainsNoAny: AssertFalse<ContainsAny<RepositoryIssueIdentity>> = false;
+const workspaceIdentityKeysStayClosed: AssertTrue<Equal<keyof WorkspaceIdentity, "workspaceId">> = true;
+const issueIdentityKeysStayClosed: AssertTrue<Equal<keyof IssueIdentity, "workspaceId" | "storyId">> = true;
+const repositoryIssueIdentityKeysStayClosed: AssertTrue<
+  Equal<keyof RepositoryIssueIdentity, "workspaceId" | "storyId" | "repoId">
+> = true;
 const nestedAnyDetectionProbe: AssertTrue<ContainsAny<{ nested: { value: ReturnType<typeof JSON.parse> } }>> = true;
 
 const read: IssueRepositoryTarget = {
@@ -106,6 +133,8 @@ void [
   failure,
   failureErrorIsNotAny,
   failureCode,
+  contractResultContainsNoAny,
+  contractErrorCodesStayClosed,
   workspaceIsNotAny,
   repositoryIsNotAny,
   issueIsNotAny,
@@ -115,6 +144,10 @@ void [
   parseWorkspaceResultIsNotAny,
   parseRepositoryResultIsNotAny,
   parseIssueResultIsNotAny,
+  parseWorkspaceResultContainsNoAny,
+  parseRepositoryResultContainsNoAny,
+  parseIssueResultContainsNoAny,
+  parseLegacyResultContainsNoAny,
   workspaceRequirementsIsNotAny,
   workspaceRequirementIsNotAny,
   workspaceRepositoriesIsNotAny,
@@ -128,6 +161,9 @@ void [
   workspaceIdentityContainsNoAny,
   issueIdentityContainsNoAny,
   repositoryIssueIdentityContainsNoAny,
+  workspaceIdentityKeysStayClosed,
+  issueIdentityKeysStayClosed,
+  repositoryIssueIdentityKeysStayClosed,
   nestedAnyDetectionProbe,
   read,
   write,

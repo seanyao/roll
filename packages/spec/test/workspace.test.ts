@@ -73,7 +73,6 @@ function issue() {
         alias: docs.alias,
         access: "read",
         requiredDelivery: false,
-        dependsOnRepo: "product",
       },
     ],
   };
@@ -188,6 +187,7 @@ describe("Workspace repository identity", () => {
     const result = normalizeRepositoryRemote(input);
     expect(result.ok).toBe(false);
     if (result.ok) return;
+    expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors.every((error) => error.code === "unsafe_remote" && error.path === "remote")).toBe(true);
     expect(JSON.stringify(result.errors)).not.toContain(input);
   });
@@ -298,15 +298,15 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
   });
 
   it.each([
-    ["unknown version", { ...workspace(), schema: "roll.workspace/v2" }, "unknown_version"],
-    ["unknown root", { ...workspace(), root: "/tmp/workspace" }, "unknown_field"],
-    ["mutable lifecycle", { ...workspace(), lifecycle: "active" }, "unknown_field"],
-    ["workspace mismatch", workspace(), "identity_mismatch", { workspaceId: "ws-other" }],
-  ])("rejects %s", (_label, value, code, expectations = {}) => {
+    ["unknown version", { ...workspace(), schema: "roll.workspace/v2" }, "unknown_version", "schema", {}],
+    ["unknown root", { ...workspace(), root: "/tmp/workspace" }, "unknown_field", "root", {}],
+    ["mutable lifecycle", { ...workspace(), lifecycle: "active" }, "unknown_field", "lifecycle", {}],
+    ["workspace mismatch", workspace(), "identity_mismatch", "workspaceId", { workspaceId: "ws-other" }],
+  ])("rejects %s", (_label, value, code, path, expectations) => {
     const parsed = parseWorkspaceManifest(value, expectations);
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.errors.map((error) => error.code)).toContain(code);
+    expect(parsed.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code, path })]));
   });
 
   it("rejects repository ID mismatch, unsafe refs and unknown nested fields", () => {
@@ -320,6 +320,11 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     expect(parsed.errors.map((error) => error.code)).toEqual(
       expect.arrayContaining(["unknown_field", "repo_id_mismatch", "invalid_value"]),
     );
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unknown_field", path: "token" }),
+      expect.objectContaining({ code: "repo_id_mismatch", path: "repoId" }),
+      expect.objectContaining({ code: "invalid_value", path: "integrationBranch" }),
+    ]));
     expect(JSON.stringify(parsed.errors)).not.toContain("must-not-be-accepted");
   });
 
@@ -336,7 +341,16 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     },
   );
 
-  it.each(["roll/{workspace_id}/.hidden", "HEAD"])(
+  it.each([
+    "roll/{workspace_id}/.hidden",
+    "HEAD",
+    "main",
+    "roll/{workspace_id}/static",
+    "roll/static/{story_id}",
+    "roll/{workspace_id}{story_id}",
+    "roll/{workspace_id}-{story_id}",
+    "roll/{workspaceId}/{storyId}",
+  ])(
     "rejects unsafe Git ref template %s after substituting supported identity tokens",
     (branchPattern) => {
       const parsed = parseRepositoryBinding({
@@ -378,6 +392,26 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
         expect.objectContaining({ code: "unknown_field", path: "requirements[0].status" }),
       ]),
     });
+  });
+
+  it.each([
+    ["missing provider", { ref: "SOT-15499" }, "requirements[0].provider"],
+    ["missing ref", { provider: "jira" }, "requirements[0].ref"],
+    ["empty provider", { provider: "", ref: "SOT-15499" }, "requirements[0].provider"],
+    ["empty ref", { provider: "jira", ref: "" }, "requirements[0].ref"],
+    ["non-string provider", { provider: 42, ref: "SOT-15499" }, "requirements[0].provider"],
+    ["non-string ref", { provider: "jira", ref: 42 }, "requirements[0].ref"],
+  ])("rejects invalid Requirement Source %s", (_label, requirement, path) => {
+    const results = [
+      parseWorkspaceManifest({ ...workspace(), requirements: [requirement] }, {}),
+      parseIssueManifest({ ...issue(), requirements: [requirement] }, {}),
+    ];
+    for (const parsed of results) {
+      expect(parsed).toMatchObject({
+        ok: false,
+        errors: expect.arrayContaining([expect.objectContaining({ code: "invalid_type", path })]),
+      });
+    }
   });
 
   it("rejects a duplicate repository alias at the alias path", () => {
@@ -490,13 +524,58 @@ describe("IssueManifest repository targets", () => {
     });
   });
 
+  it("accepts an acyclic publish dependency between writable repository targets", () => {
+    const product = issue().repositories[0];
+    const docsRepository = repository("https://github.com/Owner/Docs.git", "docs");
+    const docs = {
+      repoId: docsRepository.repoId,
+      alias: docsRepository.alias,
+      access: "write" as const,
+      requiredDelivery: false,
+      noChangePolicy: "no_change_allowed" as const,
+      dependsOnRepo: "product",
+    };
+    expect(parseIssueManifest({ ...issue(), repositories: [product, docs] }, {})).toMatchObject({
+      ok: true,
+      value: { repositories: [expect.objectContaining({ alias: "product" }), expect.objectContaining({ alias: "docs" })] },
+    });
+  });
+
+  it("rejects publish dependencies from or to read-only repository targets", () => {
+    const product = issue().repositories[0];
+    const docs = issue().repositories[1];
+    const readSource = parseIssueManifest({
+      ...issue(),
+      repositories: [product, { ...docs, dependsOnRepo: "product" }],
+    }, {});
+    expect(readSource).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_value", path: "repositories[1].dependsOnRepo" }),
+      ]),
+    });
+
+    const writeToRead = parseIssueManifest({
+      ...issue(),
+      repositories: [{ ...product, dependsOnRepo: "docs" }, docs],
+    }, {});
+    expect(writeToRead).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_value", path: "repositories[0].dependsOnRepo" }),
+      ]),
+    });
+  });
+
   it.each(["baseSha", "worktreePath", "branch", "status", "deliverySet"])(
     "rejects runtime or mutable Issue field %s",
     (field) => {
       const parsed = parseIssueManifest({ ...issue(), [field]: "forbidden" }, {});
       expect(parsed.ok).toBe(false);
       if (parsed.ok) return;
-      expect(parsed.errors.map((error) => error.code)).toContain("unknown_field");
+      expect(parsed.errors).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "unknown_field", path: field }),
+      ]));
     },
   );
 
@@ -544,6 +623,12 @@ describe("IssueManifest repository targets", () => {
     expect(parsed.errors.map((error) => error.code)).toEqual(
       expect.arrayContaining(["duplicate_identity", "identity_mismatch"]),
     );
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate_identity", path: "repositories.alias" }),
+      expect.objectContaining({ code: "duplicate_identity", path: "repositories.repoId" }),
+      expect.objectContaining({ code: "identity_mismatch", path: "workspaceId" }),
+      expect.objectContaining({ code: "identity_mismatch", path: "storyId" }),
+    ]));
   });
 
   it.each([

@@ -1,8 +1,42 @@
 import { describe, expect, it } from "vitest";
 import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_MANIFEST_V1,
   normalizeRepositoryRemote,
+  parseRepositoryBinding,
+  parseWorkspaceManifest,
+  repositoryBindingV1Schema,
   repositoryIdFromRemote,
+  workspaceManifestV1Schema,
 } from "../src/types/workspace.js";
+
+function repository(remote = "https://github.com/Owner/Repo.git", alias = "product") {
+  const id = repositoryIdFromRemote(remote);
+  if (!id.ok) throw new Error("test remote must be valid");
+  return {
+    schema: REPOSITORY_BINDING_V1,
+    repoId: id.value,
+    alias,
+    remote,
+    integrationBranch: "main",
+    provider: "github",
+    workflow: {
+      branchPattern: "roll/{workspace_id}/{story_id}",
+      requiredChecks: ["unit", "integration"],
+    },
+  };
+}
+
+function workspace() {
+  return {
+    schema: WORKSPACE_MANIFEST_V1,
+    workspaceId: "ws-sot-platform",
+    displayName: "SOT platform delivery",
+    createdAt: "2026-07-20T00:00:00Z",
+    requirements: [{ provider: "jira", ref: "SOT-15499" }],
+    repositories: [repository()],
+  };
+}
 
 describe("Workspace repository identity", () => {
   it.each([
@@ -41,5 +75,79 @@ describe("Workspace repository identity", () => {
     expect(result.errors.every((error) => error.path === "remote")).toBe(true);
     expect(JSON.stringify(result.errors)).not.toContain("token");
     expect(JSON.stringify(result.errors)).not.toContain("secret");
+  });
+});
+
+describe("RepositoryBinding and WorkspaceManifest", () => {
+  it("publishes closed schemas at every object boundary", () => {
+    expect(repositoryBindingV1Schema).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspaceManifestV1Schema).toMatchObject({ type: "object", additionalProperties: false });
+    const workspaceProperties = (workspaceManifestV1Schema as { properties: Record<string, unknown> }).properties;
+    expect(workspaceProperties.repositories).toMatchObject({ type: "array" });
+  });
+
+  it("parses and canonicalizes a complete repository binding", () => {
+    const parsed = parseRepositoryBinding(repository());
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        schema: REPOSITORY_BINDING_V1,
+        alias: "product",
+        remote: "https://github.com/Owner/Repo",
+        integrationBranch: "main",
+        provider: "github",
+      },
+    });
+  });
+
+  it("round-trips a valid Workspace manifest and enforces expected identity", () => {
+    const parsed = parseWorkspaceManifest(JSON.parse(JSON.stringify(workspace())), {
+      workspaceId: "ws-sot-platform",
+    });
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: {
+        schema: WORKSPACE_MANIFEST_V1,
+        workspaceId: "ws-sot-platform",
+        requirements: [{ provider: "jira", ref: "SOT-15499" }],
+      },
+    });
+  });
+
+  it.each([
+    ["unknown version", { ...workspace(), schema: "roll.workspace/v2" }, "unknown_version"],
+    ["unknown root", { ...workspace(), root: "/tmp/workspace" }, "unknown_field"],
+    ["mutable lifecycle", { ...workspace(), lifecycle: "active" }, "unknown_field"],
+    ["workspace mismatch", workspace(), "identity_mismatch", { workspaceId: "ws-other" }],
+  ])("rejects %s", (_label, value, code, expectations = {}) => {
+    const parsed = parseWorkspaceManifest(value, expectations);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((error) => error.code)).toContain(code);
+  });
+
+  it("rejects repository ID mismatch, unsafe refs and unknown nested fields", () => {
+    const invalid = repository();
+    invalid.repoId = "repo-000000000000";
+    invalid.integrationBranch = "main..release";
+    const value = { ...invalid, token: "must-not-be-accepted" };
+    const parsed = parseRepositoryBinding(value);
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["unknown_field", "repo_id_mismatch", "invalid_value"]),
+    );
+    expect(JSON.stringify(parsed.errors)).not.toContain("must-not-be-accepted");
+  });
+
+  it.each([
+    ["alias", [repository(), repository("https://github.com/Owner/Other.git")]],
+    ["repoId", [repository(), { ...repository(), alias: "other" }]],
+    ["remote", [repository(), { ...repository("https://GITHUB.com/Owner/Repo"), alias: "other" }]],
+  ])("rejects duplicate repository %s", (_kind, repositories) => {
+    const parsed = parseWorkspaceManifest({ ...workspace(), repositories }, {});
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((error) => error.code)).toContain("duplicate_identity");
   });
 });

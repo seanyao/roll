@@ -29,7 +29,44 @@ export type ContractResult<T> =
   | { ok: true; value: T }
   | { ok: false; errors: readonly ContractError[] };
 
+export interface RequirementSourceReference {
+  provider: string;
+  ref: string;
+}
+
+export interface RepositoryWorkflowMetadata {
+  branchPattern: string;
+  requiredChecks: readonly string[];
+}
+
+export interface RepositoryBinding {
+  schema: typeof REPOSITORY_BINDING_V1;
+  repoId: string;
+  alias: string;
+  remote: string;
+  integrationBranch: string;
+  provider: string;
+  workflow: RepositoryWorkflowMetadata;
+}
+
+export interface WorkspaceManifest {
+  schema: typeof WORKSPACE_MANIFEST_V1;
+  workspaceId: string;
+  displayName: string;
+  createdAt?: string;
+  requirements: readonly RequirementSourceReference[];
+  repositories: readonly RepositoryBinding[];
+}
+
+export interface WorkspaceManifestExpectations {
+  workspaceId?: string;
+}
+
 const stringSchema: JsonSchema = { type: "string", minLength: 1 };
+const requirementSourceSchema = objectSchema(
+  { provider: stringSchema, ref: stringSchema },
+  ["provider", "ref"],
+);
 
 function objectSchema(
   properties: Readonly<Record<string, JsonSchema>>,
@@ -63,7 +100,7 @@ export const workspaceManifestV1Schema: JsonSchema = objectSchema(
     workspaceId: stringSchema,
     displayName: stringSchema,
     createdAt: stringSchema,
-    requirements: { type: "array", items: true },
+    requirements: { type: "array", items: requirementSourceSchema },
     repositories: { type: "array", items: repositoryBindingV1Schema },
   },
   ["schema", "workspaceId", "displayName", "requirements", "repositories"],
@@ -183,4 +220,255 @@ export function repositoryIdFromRemote(value: unknown): ContractResult<string> {
   if (!normalized.ok) return normalized;
   const digest = createHash("sha256").update(normalized.value).digest("hex").slice(0, 12);
   return { ok: true, value: `repo-${digest}` };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function unknownFieldErrors(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+): ContractError[] {
+  const allowedSet = new Set(allowed);
+  return Object.keys(value)
+    .filter((key) => !allowedSet.has(key))
+    .map((key) => ({
+      code: "unknown_field" as const,
+      path: path === "" ? key : `${path}.${key}`,
+      message: "contract contains an unknown field",
+    }));
+}
+
+function requiredString(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): string | undefined {
+  const candidate = value[key];
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    errors.push({ code: "invalid_type", path: `${path}${key}`, message: "field must be a non-empty string" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function optionalString(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): string | undefined {
+  const candidate = value[key];
+  if (candidate === undefined) return undefined;
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    errors.push({ code: "invalid_type", path: `${path}${key}`, message: "field must be a non-empty string" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function isSafeIdentifier(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value);
+}
+
+function isSafeAlias(value: string): boolean {
+  return /^[a-z][a-z0-9-]*$/u.test(value);
+}
+
+function isSafeGitRef(value: string): boolean {
+  if (value.startsWith("/") || value.endsWith("/") || value.endsWith(".") || value.endsWith(".lock")) return false;
+  if (value.includes("..") || value.includes("@{") || value.includes("//")) return false;
+  return !/[\x00-\x20~^:?*\\[]/u.test(value);
+}
+
+const WORKFLOW_TOKENS = [
+  "{workspace_id}",
+  "{story_id}",
+  "{repo_alias}",
+  "{workspaceId}",
+  "{storyId}",
+  "{repoAlias}",
+] as const;
+
+function isSafeBranchPattern(value: string): boolean {
+  let concrete = value;
+  for (const token of WORKFLOW_TOKENS) concrete = concrete.replaceAll(token, "id");
+  if (concrete.includes("{") || concrete.includes("}")) return false;
+  return isSafeGitRef(concrete);
+}
+
+function parseStringArray(value: unknown, path: string, errors: ContractError[]): readonly string[] | undefined {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string" && entry.trim() !== "")) {
+    errors.push({ code: "invalid_type", path, message: "field must be an array of non-empty strings" });
+    return undefined;
+  }
+  return [...value];
+}
+
+function parseWorkflow(value: unknown, errors: ContractError[]): RepositoryWorkflowMetadata | undefined {
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path: "workflow", message: "workflow must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(value, ["branchPattern", "requiredChecks"], "workflow"));
+  const branchPattern = requiredString(value, "branchPattern", "workflow.", errors);
+  const requiredChecks = parseStringArray(value["requiredChecks"], "workflow.requiredChecks", errors);
+  if (branchPattern !== undefined && !isSafeBranchPattern(branchPattern)) {
+    errors.push({ code: "invalid_value", path: "workflow.branchPattern", message: "branch pattern is not a safe Git ref template" });
+  }
+  if (branchPattern === undefined || requiredChecks === undefined) return undefined;
+  return { branchPattern, requiredChecks };
+}
+
+function parseRequirementSource(value: unknown, path: string, errors: ContractError[]): RequirementSourceReference | undefined {
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path, message: "requirement source must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(value, ["provider", "ref"], path));
+  const provider = requiredString(value, "provider", `${path}.`, errors);
+  const ref = requiredString(value, "ref", `${path}.`, errors);
+  return provider === undefined || ref === undefined ? undefined : { provider, ref };
+}
+
+function parseRequirementSources(value: unknown, path: string, errors: ContractError[]): readonly RequirementSourceReference[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path, message: "requirements must be an array" });
+    return undefined;
+  }
+  const parsed = value.map((entry, index) => parseRequirementSource(entry, `${path}[${index}]`, errors));
+  return parsed.every((entry) => entry !== undefined)
+    ? (parsed as readonly RequirementSourceReference[])
+    : undefined;
+}
+
+export function parseRepositoryBinding(value: unknown): ContractResult<RepositoryBinding> {
+  if (!isRecord(value)) return fail("invalid_type", "repository", "repository binding must be an object");
+  const errors = unknownFieldErrors(
+    value,
+    ["schema", "repoId", "alias", "remote", "integrationBranch", "provider", "workflow"],
+    "",
+  );
+  if (value["schema"] !== REPOSITORY_BINDING_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${REPOSITORY_BINDING_V1}` });
+  }
+  const repoId = requiredString(value, "repoId", "", errors);
+  const alias = requiredString(value, "alias", "", errors);
+  const integrationBranch = requiredString(value, "integrationBranch", "", errors);
+  const provider = requiredString(value, "provider", "", errors);
+  const workflow = parseWorkflow(value["workflow"], errors);
+  const normalized = normalizeRepositoryRemote(value["remote"]);
+  if (!normalized.ok) errors.push(...normalized.errors);
+
+  if (alias !== undefined && !isSafeAlias(alias)) {
+    errors.push({ code: "invalid_value", path: "alias", message: "repository alias must use lowercase letters, digits and hyphens" });
+  }
+  if (integrationBranch !== undefined && !isSafeGitRef(integrationBranch)) {
+    errors.push({ code: "invalid_value", path: "integrationBranch", message: "integration branch is not a safe Git ref" });
+  }
+  if (normalized.ok && repoId !== undefined) {
+    const expected = repositoryIdFromRemote(normalized.value);
+    if (!expected.ok || repoId !== expected.value) {
+      errors.push({ code: "repo_id_mismatch", path: "repoId", message: "repoId does not match the canonical remote" });
+    }
+  }
+
+  if (
+    errors.length > 0 || repoId === undefined || alias === undefined || integrationBranch === undefined ||
+    provider === undefined || workflow === undefined || !normalized.ok
+  ) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: REPOSITORY_BINDING_V1,
+      repoId,
+      alias,
+      remote: normalized.value,
+      integrationBranch,
+      provider,
+      workflow,
+    },
+  };
+}
+
+function prefixErrors(errors: readonly ContractError[], prefix: string): ContractError[] {
+  return errors.map((error) => ({ ...error, path: `${prefix}.${error.path}` }));
+}
+
+function duplicateErrors(repositories: readonly RepositoryBinding[]): ContractError[] {
+  const errors: ContractError[] = [];
+  const seenAliases = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenRemotes = new Set<string>();
+  for (const repository of repositories) {
+    const duplicates: Array<[string, Set<string>, string]> = [
+      [repository.alias, seenAliases, "alias"],
+      [repository.repoId, seenIds, "repoId"],
+      [repository.remote, seenRemotes, "remote"],
+    ];
+    for (const [identity, seen, field] of duplicates) {
+      if (seen.has(identity)) {
+        errors.push({ code: "duplicate_identity", path: `repositories.${field}`, message: `duplicate repository ${field}` });
+      }
+      seen.add(identity);
+    }
+  }
+  return errors;
+}
+
+export function parseWorkspaceManifest(
+  value: unknown,
+  expectations: WorkspaceManifestExpectations = {},
+): ContractResult<WorkspaceManifest> {
+  if (!isRecord(value)) return fail("invalid_type", "workspace", "Workspace manifest must be an object");
+  const errors = unknownFieldErrors(
+    value,
+    ["schema", "workspaceId", "displayName", "createdAt", "requirements", "repositories"],
+    "",
+  );
+  if (value["schema"] !== WORKSPACE_MANIFEST_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_MANIFEST_V1}` });
+  }
+  const workspaceId = requiredString(value, "workspaceId", "", errors);
+  const displayName = requiredString(value, "displayName", "", errors);
+  const createdAt = optionalString(value, "createdAt", "", errors);
+  const requirements = parseRequirementSources(value["requirements"], "requirements", errors);
+  const rawRepositories = value["repositories"];
+  const repositories: RepositoryBinding[] = [];
+  if (!Array.isArray(rawRepositories) || rawRepositories.length === 0) {
+    errors.push({ code: "invalid_type", path: "repositories", message: "repositories must be a non-empty array" });
+  } else {
+    for (const [index, raw] of rawRepositories.entries()) {
+      const parsed = parseRepositoryBinding(raw);
+      if (parsed.ok) repositories.push(parsed.value);
+      else errors.push(...prefixErrors(parsed.errors, `repositories[${index}]`));
+    }
+  }
+  errors.push(...duplicateErrors(repositories));
+
+  if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
+    errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });
+  }
+  if (workspaceId !== undefined && expectations.workspaceId !== undefined && workspaceId !== expectations.workspaceId) {
+    errors.push({ code: "identity_mismatch", path: "workspaceId", message: "Workspace ID does not match the expected identity" });
+  }
+  if (errors.length > 0 || workspaceId === undefined || displayName === undefined || requirements === undefined) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: WORKSPACE_MANIFEST_V1,
+      workspaceId,
+      displayName,
+      ...(createdAt !== undefined ? { createdAt } : {}),
+      requirements,
+      repositories,
+    },
+  };
 }

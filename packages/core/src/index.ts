@@ -12,6 +12,7 @@ export * from "./workspace/target.js";
 export * from "./workspace/lifecycle.js";
 export * from "./workspace/init-plan.js";
 export * from "./workspace/requirement-source.js";
+export * from "./workspace/issue-init-plan.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

@@ -219,69 +219,56 @@ function trimRepositorySuffix(pathname: string): string | null {
   return trimmed;
 }
 
-function normalizeUrlRemote(value: string): ContractResult<string> {
-  const hasClosedUrlPrefix =
-    /^https:\/\/[^/]/iu.test(value) ||
-    /^ssh:\/\/[^/]/iu.test(value) ||
-    /^file:\/\/\/[^/]/iu.test(value);
-  if (!hasClosedUrlPrefix) {
-    return remoteFailure("repository remote is not a supported absolute URL shape");
-  }
-  if (/^https:\/\/[^/]*@/iu.test(value)) {
-    return remoteFailure("HTTPS repository remote must not contain userinfo");
-  }
-  if (/^file:\/\//iu.test(value) && !/^file:\/\/\//iu.test(value)) {
-    return remoteFailure("file repository remote must not contain an authority");
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return remoteFailure("repository remote is not a supported absolute URL");
-  }
+const networkHostPattern = "(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\\[[0-9A-Fa-f:.]+\\])";
+const httpsRemotePattern = new RegExp(`^https://(${networkHostPattern})(?::443)?/(.+)$`, "u");
+const sshRemotePattern = new RegExp(`^ssh://[A-Za-z0-9._~-]+@(${networkHostPattern})(?::22)?/(.+)$`, "u");
 
-  const sshUsernameOnly = parsed.protocol === "ssh:" && parsed.username !== "" && parsed.password === "";
-  if (parsed.password !== "" || (parsed.username !== "" && !sshUsernameOnly)) {
-    return remoteFailure("repository remote must not contain credentials");
-  }
-  if (parsed.search !== "" || parsed.hash !== "") {
-    return remoteFailure("repository remote must not contain a query or fragment");
-  }
-
-  if (parsed.protocol === "file:") {
-    if (parsed.hostname !== "" || parsed.port !== "") {
-      return remoteFailure("file repository remote must use an absolute local file URL");
+function isSafeNetworkHost(host: string): boolean {
+  if (host.startsWith("[") && host.endsWith("]")) {
+    try {
+      return new URL(`https://${host}/`).hostname !== "";
+    } catch {
+      return false;
     }
-    const path = trimRepositorySuffix(parsed.pathname);
+  }
+  return host.split(".").every((label) =>
+    label.length >= 1 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label)
+  );
+}
+
+function normalizeNetworkRemote(value: string): ContractResult<string> {
+  const https = httpsRemotePattern.exec(value);
+  const ssh = sshRemotePattern.exec(value);
+  const match = https ?? ssh;
+  if (match === null) {
+    return remoteFailure("repository remote is not a supported network URL shape");
+  }
+  const host = match[1];
+  const rawPath = match[2];
+  if (host === undefined || rawPath === undefined || !isSafeNetworkHost(host)) {
+    return remoteFailure("repository remote must contain a host and safe repository path");
+  }
+  const path = trimRepositorySuffix(`/${rawPath}`);
+  if (path === null || path.slice(1).split("/").length < 2) {
+    return remoteFailure("network repository remote must contain an owner and repository path");
+  }
+  return { ok: true, value: `${https === null ? "ssh" : "https"}://${host.toLowerCase()}${path}` };
+}
+
+function normalizeUrlRemote(value: string): ContractResult<string> {
+  const file = /^file:\/\/(\/.+)$/u.exec(value);
+  if (file !== null) {
+    const rawPath = file[1];
+    if (rawPath === undefined) {
+      return remoteFailure("file repository remote must contain a safe absolute path");
+    }
+    const path = trimRepositorySuffix(rawPath);
     if (path === null || !path.startsWith("/") || /^\/[A-Za-z]:\//u.test(path)) {
       return remoteFailure("file repository remote must contain a safe absolute path");
     }
     return { ok: true, value: `file://${path}` };
   }
-
-  const isHttps = parsed.protocol === "https:";
-  const isSsh = parsed.protocol === "ssh:";
-  if (!isHttps && !isSsh) {
-    return remoteFailure("repository remote protocol is not supported by v1");
-  }
-  if (isSsh && parsed.username === "") {
-    return remoteFailure("SSH repository remote must contain a transport username");
-  }
-  const expectedPort = isHttps ? "443" : "22";
-  if (parsed.port !== "" && parsed.port !== expectedPort) {
-    return remoteFailure("repository remote uses a non-default port");
-  }
-  const path = trimRepositorySuffix(parsed.pathname);
-  if (parsed.hostname === "" || path === null || !path.startsWith("/")) {
-    return remoteFailure("repository remote must contain a host and safe repository path");
-  }
-  if (path.slice(1).split("/").length < 2) {
-    return remoteFailure("network repository remote must contain an owner and repository path");
-  }
-  return {
-    ok: true,
-    value: `${isHttps ? "https" : "ssh"}://${parsed.hostname.toLowerCase()}${path}`,
-  };
+  return normalizeNetworkRemote(value);
 }
 
 /** Normalize only the closed roll.repository-binding/v1 remote families. */
@@ -293,11 +280,11 @@ export function normalizeRepositoryRemote(value: unknown): ContractResult<string
     return remoteFailure("repository remote contains ambiguous or unsafe syntax");
   }
 
-  const scp = /^([^@:/\s]+)@([^:/\s]+):(.+)$/u.exec(value);
+  const scp = new RegExp(`^([A-Za-z0-9._~-]+)@(${networkHostPattern}):(.+)$`, "u").exec(value);
   if (scp !== null) {
     const host = scp[2];
     const rawPath = scp[3];
-    if (host === undefined || rawPath === undefined) {
+    if (host === undefined || rawPath === undefined || !isSafeNetworkHost(host)) {
       return remoteFailure("repository remote is not a supported SCP-style remote");
     }
     const path = trimRepositorySuffix(`/${rawPath}`);
@@ -679,7 +666,10 @@ function duplicateTargetErrors(targets: readonly IssueRepositoryTarget[]): Contr
   return errors;
 }
 
-function dependencyCycleErrors(targets: readonly IssueRepositoryTarget[]): ContractError[] {
+function dependencyCycleErrors(
+  targets: readonly IssueRepositoryTarget[],
+  sourceIndexes: readonly number[],
+): ContractError[] {
   const indexByAlias = new Map(targets.map((target, index) => [target.alias, index]));
   const dependencyIndexes = targets.map((target) =>
     target.dependsOnRepo === undefined ? undefined : indexByAlias.get(target.dependsOnRepo)
@@ -702,12 +692,12 @@ function dependencyCycleErrors(targets: readonly IssueRepositoryTarget[]): Contr
     if (nextIncoming === 0) queue.push(dependencyIndex);
   }
 
-  return targets.flatMap((target, index) =>
+  return targets.flatMap((_target, index) =>
     (incoming[index] ?? 0) > 0
       ? [{
           code: "invalid_value" as const,
-          path: `repositories[${index}].dependsOnRepo`,
-          message: `repository dependency cycle includes ${target.alias}`,
+          path: `repositories[${sourceIndexes[index] ?? index}].dependsOnRepo`,
+          message: "repository dependency graph contains a cycle",
         }]
       : []
   );
@@ -731,22 +721,30 @@ export function parseIssueManifest(
   const requirements = parseRequirementSources(value["requirements"], "requirements", errors);
   const rawTargets = value["repositories"];
   const targets: IssueRepositoryTarget[] = [];
+  const targetIndexes: number[] = [];
   if (!Array.isArray(rawTargets) || rawTargets.length === 0) {
     errors.push({ code: "invalid_type", path: "repositories", message: "repository targets must be a non-empty array" });
   } else {
     for (const [index, raw] of rawTargets.entries()) {
       const target = parseIssueTarget(raw, index, errors);
-      if (target !== undefined) targets.push(target);
+      if (target !== undefined) {
+        targets.push(target);
+        targetIndexes.push(index);
+      }
     }
   }
   errors.push(...duplicateTargetErrors(targets));
   const aliases = new Set(targets.map((target) => target.alias));
   for (const [index, target] of targets.entries()) {
     if (target.dependsOnRepo !== undefined && (!aliases.has(target.dependsOnRepo) || target.dependsOnRepo === target.alias)) {
-      errors.push({ code: "invalid_value", path: `repositories[${index}].dependsOnRepo`, message: "dependency must name a different declared repository alias" });
+      errors.push({
+        code: "invalid_value",
+        path: `repositories[${targetIndexes[index] ?? index}].dependsOnRepo`,
+        message: "dependency must name a different declared repository alias",
+      });
     }
   }
-  errors.push(...dependencyCycleErrors(targets));
+  errors.push(...dependencyCycleErrors(targets, targetIndexes));
 
   if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
     errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });

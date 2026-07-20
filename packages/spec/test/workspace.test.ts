@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as publicSpec from "../src/index.js";
 import {
   REPOSITORY_BINDING_V1,
@@ -154,6 +154,15 @@ describe("Workspace repository identity", () => {
     "https://example.com/Repo.git",
     "git@example.com:Repo.git",
     "ssh://git@example.com/Repo.git",
+    "ssh://git@@example.com/Owner/Repo.git",
+    "ssh://git@deploy@example.com/Owner/Repo.git",
+    "ssh://git:@example.com/Owner/Repo.git",
+    "https://example.com:/Owner/Repo.git",
+    "ssh://git@example.com:/Owner/Repo.git",
+    "https://example.com:0443/Owner/Repo.git",
+    "ssh://git@example.com:022/Owner/Repo.git",
+    "https://example..com/Owner/Repo.git",
+    "https://example-.com/Owner/Repo.git",
   ])("rejects ambiguous or credential-bearing remote input without echoing it: %s", (input) => {
     const result = normalizeRepositoryRemote(input);
     expect(result.ok).toBe(false);
@@ -170,6 +179,48 @@ describe("Workspace repository identity", () => {
     const rendered = JSON.stringify(result.errors);
     expect(rendered).not.toContain(input);
     expect(rendered).not.toContain("credential-sentinel");
+  });
+
+  it("keeps credential redaction through repository and Workspace parser errors", () => {
+    const input = "https://credential-sentinel@example.com/Owner/Repo.git";
+    const binding = { ...repository(), remote: input };
+    const repositoryResult = parseRepositoryBinding(binding);
+    const workspaceResult = parseWorkspaceManifest({ ...workspace(), repositories: [binding] }, {});
+    expect(repositoryResult.ok).toBe(false);
+    expect(workspaceResult.ok).toBe(false);
+    expect(JSON.stringify(repositoryResult)).not.toContain("credential-sentinel");
+    expect(JSON.stringify(workspaceResult)).not.toContain("credential-sentinel");
+    expect(JSON.stringify(repositoryResult)).not.toContain(input);
+    expect(JSON.stringify(workspaceResult)).not.toContain(input);
+  });
+
+  it("keeps parse entrypoints deterministic and input-immutable across environment and time changes", () => {
+    const inputs = [repository(), workspace(), issue()] as const;
+    const before = structuredClone(inputs);
+    const previousWorkspace = process.env["ROLL_WORKSPACE"];
+    vi.useFakeTimers();
+    try {
+      process.env["ROLL_WORKSPACE"] = "ws-environment-a";
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      const first = [
+        parseRepositoryBinding(inputs[0]),
+        parseWorkspaceManifest(inputs[1], {}),
+        parseIssueManifest(inputs[2], {}),
+      ];
+      process.env["ROLL_WORKSPACE"] = "ws-environment-b";
+      vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+      const second = [
+        parseRepositoryBinding(inputs[0]),
+        parseWorkspaceManifest(inputs[1], {}),
+        parseIssueManifest(inputs[2], {}),
+      ];
+      expect(second).toEqual(first);
+      expect(inputs).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+      if (previousWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+      else process.env["ROLL_WORKSPACE"] = previousWorkspace;
+    }
   });
 });
 
@@ -382,19 +433,37 @@ describe("IssueManifest repository targets", () => {
     const docs = {
       ...product,
       repoId: repository("https://github.com/Owner/Docs.git", "docs").repoId,
-      alias: "docs",
+      alias: "credential-sentinel-b",
     };
     const parsed = parseIssueManifest({
       ...issue(),
       repositories: [
-        { ...product, dependsOnRepo: "docs" },
-        { ...docs, dependsOnRepo: "product" },
+        { ...product, alias: "credential-sentinel-a", dependsOnRepo: "credential-sentinel-b" },
+        { ...docs, dependsOnRepo: "credential-sentinel-a" },
       ],
     }, {});
     expect(parsed).toMatchObject({
       ok: false,
       errors: expect.arrayContaining([
         expect.objectContaining({ code: "invalid_value", path: "repositories[0].dependsOnRepo" }),
+        expect.objectContaining({ code: "invalid_value", path: "repositories[1].dependsOnRepo" }),
+      ]),
+    });
+    expect(JSON.stringify(parsed)).not.toContain("credential-sentinel");
+  });
+
+  it("reports dependency errors against original target indexes after malformed entries", () => {
+    const parsed = parseIssueManifest({
+      ...issue(),
+      repositories: [
+        { ...issue().repositories[0], access: "admin" },
+        { ...issue().repositories[0], alias: "second", dependsOnRepo: "missing" },
+      ],
+    }, {});
+    expect(parsed).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_value", path: "repositories[0].access" }),
         expect.objectContaining({ code: "invalid_value", path: "repositories[1].dependsOnRepo" }),
       ]),
     });

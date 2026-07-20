@@ -44,6 +44,12 @@ const repositoryIssueIdentityIsNotAny: AssertFalse<IsAny<RepositoryIssueIdentity
 const parseWorkspaceResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseWorkspaceManifest>>> = false;
 const parseRepositoryResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseRepositoryBinding>>> = false;
 const parseIssueResultIsNotAny: AssertFalse<IsAny<ReturnType<typeof parseIssueManifest>>> = false;
+const workspaceRequirementsIsNotAny: AssertFalse<IsAny<WorkspaceManifest["requirements"]>> = false;
+const workspaceRequirementIsNotAny: AssertFalse<IsAny<WorkspaceManifest["requirements"][number]>> = false;
+const workspaceRepositoriesIsNotAny: AssertFalse<IsAny<WorkspaceManifest["repositories"]>> = false;
+const repositoryWorkflowIsNotAny: AssertFalse<IsAny<RepositoryBinding["workflow"]>> = false;
+const issueRepositoriesIsNotAny: AssertFalse<IsAny<IssueManifest["repositories"]>> = false;
+const issueRepositoryIsNotAny: AssertFalse<IsAny<IssueManifest["repositories"][number]>> = false;
 
 const read: IssueRepositoryTarget = {
   repoId: "repo-0123456789ab",
@@ -91,6 +97,12 @@ void [
   parseWorkspaceResultIsNotAny,
   parseRepositoryResultIsNotAny,
   parseIssueResultIsNotAny,
+  workspaceRequirementsIsNotAny,
+  workspaceRequirementIsNotAny,
+  workspaceRepositoriesIsNotAny,
+  repositoryWorkflowIsNotAny,
+  issueRepositoriesIsNotAny,
+  issueRepositoryIsNotAny,
   read,
   write,
   invalidRead,

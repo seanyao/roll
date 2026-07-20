@@ -155,6 +155,38 @@ describe("US-WS-008 roll workspace issue init", () => {
     });
   });
 
+  it("rolls back the clean first target's real worktree when the second repository's remote is unreachable, and writes a repair journal", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+
+    // Fault injection: destroy the SECOND repository's source remote entirely
+    // (a real, unmocked failure) so its cache clone genuinely fails once the
+    // first target's real git worktree has already been created.
+    rmSync(join(f.home, "read.git"), { recursive: true, force: true });
+
+    const failed = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(failed.status).toBe(1);
+    expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
+
+    const issueRoot = join(f.workspace, "issues", "US-XX1");
+    // sot (target 1, clean/newly-created) was rolled back — no leftover worktree.
+    expect(existsSync(join(issueRoot, "sot"))).toBe(false);
+    // docs (target 2) never got far enough to create anything.
+    expect(existsSync(join(issueRoot, "docs"))).toBe(false);
+    // A repair journal records the failed attempt for a future re-run.
+    const journal = JSON.parse(readFileSync(join(issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal).toMatchObject({ schema: "roll.issue-init-journal/v1", status: "repair_required" });
+
+    // Repair: restore the remote and re-run — the same CLI contract converges.
+    execFileSync("git", ["clone", "-q", "--bare", join(f.home, "read-source"), join(f.home, "read.git")], { stdio: "ignore" });
+    const repaired = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(repaired.status, repaired.stderr).toBe(0);
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired" });
+    expect(existsSync(join(issueRoot, "sot", ".git"))).toBe(true);
+    expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
+    expect(existsSync(join(issueRoot, "issue-init.pending.json"))).toBe(false);
+  });
+
   it("rejects invalid arguments and an unknown story id without any writes", async () => {
     const f = fixture();
     await initWorkspace(f);

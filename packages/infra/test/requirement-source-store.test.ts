@@ -23,6 +23,7 @@ import { acquireLock, releaseLock } from "../src/process.js";
 import {
   captureRequirementSource,
   requirementCaptureLockPath,
+  resolveRequirementSourcesForStoryOnDisk,
 } from "../src/requirement-source-store.js";
 
 const roots: string[] = [];
@@ -537,5 +538,30 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(repaired.outcome).toBe("reused");
     expect(process.memoryUsage().rss - rssBefore).toBeLessThan(64 * 1024 * 1024);
     expect(readFileSync(oversizedPath, "utf8")).toBe("domain context\n");
+  });
+
+  it("resolves a Story back to its Requirement sources by reading source.yaml from disk in a fresh call, not an in-memory cache", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    captureRequirementSource(request(f, { provider: "github-issue", ref: "Owner/Repo#12", storyIds: ["US-WS-009"] }));
+
+    const forWs007 = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(forWs007.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
+
+    const forWs009 = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-009");
+    expect(forWs009.map((manifest) => manifest.ref)).toEqual(["owner/repo#12"]);
+
+    expect(resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-UNKNOWN")).toEqual([]);
+  });
+
+  it("reflects an updated revision in the on-disk Story reverse lookup without any in-process state carried over", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.revision).toBe("43");
   });
 });

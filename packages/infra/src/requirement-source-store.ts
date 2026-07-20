@@ -23,6 +23,7 @@ import {
   planRequirementCapture,
   renderRequirementAttestProjection,
   requirementRevisionKey,
+  resolveRequirementSourcesForStory,
   type RequirementCaptureOutcome,
 } from "@roll/core";
 import {
@@ -597,6 +598,39 @@ function writeRevision(
 
 export function requirementCaptureLockPath(workspaceRoot: string, requirementId: string): string {
   return join(resolve(workspaceRoot), "runtime", "locks", "requirements", `${requirementId}.lock`);
+}
+
+function readAllRequirementManifests(workspaceRoot: string): readonly RequirementSourceManifest[] {
+  const requirementsRoot = join(resolve(workspaceRoot), "requirements");
+  if (!existsSync(requirementsRoot)) return [];
+  let providerStat;
+  try {
+    providerStat = lstatSync(requirementsRoot);
+  } catch {
+    return [];
+  }
+  if (providerStat.isSymbolicLink() || !providerStat.isDirectory()) return [];
+  const manifests: RequirementSourceManifest[] = [];
+  for (const providerEntry of readdirSync(requirementsRoot, { withFileTypes: true })) {
+    if (!providerEntry.isDirectory()) continue;
+    const providerPath = join(requirementsRoot, providerEntry.name);
+    if (lstatSync(providerPath).isSymbolicLink()) continue;
+    for (const requirementEntry of readdirSync(providerPath, { withFileTypes: true })) {
+      if (!requirementEntry.isDirectory()) continue;
+      const requirementPath = join(providerPath, requirementEntry.name);
+      if (lstatSync(requirementPath).isSymbolicLink()) continue;
+      const manifest = readExisting(join(requirementPath, "source.yaml"));
+      if (manifest !== undefined) manifests.push(manifest);
+    }
+  }
+  return manifests;
+}
+
+export function resolveRequirementSourcesForStoryOnDisk(
+  workspaceRoot: string,
+  storyId: string,
+): readonly RequirementSourceManifest[] {
+  return resolveRequirementSourcesForStory(readAllRequirementManifests(workspaceRoot), storyId);
 }
 
 export function captureRequirementSource(

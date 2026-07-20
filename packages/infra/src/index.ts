@@ -1,4 +1,5 @@
 export * from "./config.js";
+export * from "./workspace-registry.js";
 export * from "./git.js";
 export * from "./github.js";
 export * from "./pr-provider.js";

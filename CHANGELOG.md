@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 稳定性
+- loop 看门狗的"进展"判定从 stdout 改为 git 状态（新 commit / 工作区文件变动）：输出缓冲型 agent 写文件时不再被 15 分钟无进展误杀；新增 `no-state-change` 杀因——默认 25 分钟无 commit 且无文件变动即终止（即使 stdout 仍在输出），原地打转的 cycle 不再烧满 45 分钟墙钟；阈值可用 `ROLL_CYCLE_NO_STATE_CHANGE_SEC` 覆盖（FIX-1477）[loop]
+- attest 闸的"无 AC 块豁免"提前到渲染之前评估：无 AC 块的卡不再因渲染失败或空壳报告被硬拦，直接合法放行（FIX-1476）[loop]
+
 ## v4.720.1 — 2026-07-20
 
 ### 稳定性

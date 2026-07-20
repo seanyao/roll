@@ -1,8 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -12,6 +16,9 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  MAX_REQUIREMENT_BODY_BYTES,
+  MAX_REQUIREMENT_CONTEXT_BYTES,
+  MAX_REQUIREMENT_CONTEXT_FILES,
   normalizeRequirementSourceReference,
   planRequirementCapture,
   renderRequirementAttestProjection,
@@ -83,6 +90,11 @@ interface StableContextFile extends StableFile {
   readonly relativePath: string;
 }
 
+interface RevisionEvidence {
+  readonly body: StableFile;
+  readonly context: readonly StableContextFile[];
+}
+
 const PROJECTION_JOURNAL = "projection.pending.json";
 
 function fail(code: RequirementSourceStoreErrorCode, message: string, cause?: unknown): never {
@@ -104,36 +116,49 @@ function atomicWrite(path: string, content: string | Buffer, renameFile: (from: 
   }
 }
 
-function stableFile(path: string, deps: RequirementSourceStoreDeps): StableFile {
-  let before;
+function sameFile(left: ReturnType<typeof fstatSync>, right: ReturnType<typeof fstatSync>): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
+function stableFile(
+  path: string,
+  deps: RequirementSourceStoreDeps,
+  maximumBytes = Number.MAX_SAFE_INTEGER,
+  limitMessage = "Requirement capture input exceeds its byte limit",
+): StableFile {
+  let descriptor: number;
   try {
-    before = lstatSync(path);
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
     return fail("unsafe_context", "Requirement capture input could not be inspected", error);
   }
-  if (before.isSymbolicLink() || !before.isFile()) {
-    return fail("unsafe_context", "Requirement capture inputs must be regular files");
-  }
-  const content = readFileSync(path);
-  deps.afterReadFile?.(path);
-  let after;
   try {
-    after = lstatSync(path);
+    const before = fstatSync(descriptor);
+    if (!before.isFile()) fail("unsafe_context", "Requirement capture inputs must be regular files");
+    if (before.size > maximumBytes) fail("context_limit", limitMessage);
+    const pathBefore = lstatSync(path);
+    if (pathBefore.isSymbolicLink() || !pathBefore.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino) {
+      fail("unsafe_context", "Requirement capture input changed before it could be anchored");
+    }
+    const content = readFileSync(descriptor);
+    deps.afterReadFile?.(path);
+    const after = fstatSync(descriptor);
+    const pathAfter = lstatSync(path);
+    if (!sameFile(before, after) || pathAfter.isSymbolicLink() || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino) {
+      fail("source_changed", "Requirement capture input changed while it was read");
+    }
+    return {
+      path,
+      bytes: content.byteLength,
+      sha256: createHash("sha256").update(content).digest("hex"),
+      content,
+    };
   } catch (error) {
+    if (error instanceof RequirementSourceStoreError) throw error;
     return fail("source_changed", "Requirement capture input changed while it was read", error);
+  } finally {
+    closeSync(descriptor);
   }
-  if (
-    before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
-    before.mtimeMs !== after.mtimeMs
-  ) {
-    return fail("source_changed", "Requirement capture input changed while it was read");
-  }
-  return {
-    path,
-    bytes: content.byteLength,
-    sha256: createHash("sha256").update(content).digest("hex"),
-    content,
-  };
 }
 
 function safeRelativePath(value: string): boolean {
@@ -164,6 +189,9 @@ function rejectSymlinkSegments(root: string, relativePath: string): void {
 
 function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSourceStoreDeps): readonly StableContextFile[] {
   if (input.contextPaths.length === 0) return [];
+  if (input.contextPaths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
+    fail("context_limit", "Requirement context exceeds the file-count limit");
+  }
   if (input.contextRoot === undefined) fail("unsafe_context", "Requirement context root is required");
   let root: string;
   try {
@@ -174,6 +202,7 @@ function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSou
     if (error instanceof RequirementSourceStoreError) throw error;
     return fail("unsafe_context", "Requirement context root could not be resolved", error);
   }
+  let remainingBytes = MAX_REQUIREMENT_CONTEXT_BYTES;
   return input.contextPaths.map((relativePath) => {
     if (!safeRelativePath(relativePath)) fail("unsafe_context", "Requirement context paths must be safe and relative");
     rejectSymlinkSegments(root, relativePath);
@@ -184,8 +213,48 @@ function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSou
       return fail("unsafe_context", "Requirement context path could not be resolved", error);
     }
     if (!contained(root, path)) fail("unsafe_context", "Requirement context escapes its declared root");
-    return { ...stableFile(path, deps), relativePath };
+    const file = stableFile(path, deps, remainingBytes, "Requirement context exceeds the total byte limit");
+    remainingBytes -= file.bytes;
+    return { ...file, relativePath };
   }).sort((left, right) => left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0);
+}
+
+function ensureSafeDirectory(root: string, target: string, create: boolean): void {
+  if (!contained(root, target)) fail("unsafe_context", "Requirement output must remain inside the Workspace");
+  const rel = relative(root, target);
+  let cursor = root;
+  for (const segment of rel === "" ? [] : rel.split(sep)) {
+    cursor = join(cursor, segment);
+    try {
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        fail("unsafe_context", "Requirement output cannot traverse symbolic links or non-directories");
+      }
+    } catch (error) {
+      if (error instanceof RequirementSourceStoreError) throw error;
+      if (!create || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+        return fail("unsafe_context", "Requirement output path could not be inspected", error);
+      }
+      try {
+        mkdirSync(cursor);
+      } catch (mkdirError) {
+        if ((mkdirError as NodeJS.ErrnoException).code !== "EEXIST") {
+          return fail("io_failure", "Requirement output directory could not be created", mkdirError);
+        }
+      }
+      const created = lstatSync(cursor);
+      if (created.isSymbolicLink() || !created.isDirectory()) {
+        fail("unsafe_context", "Requirement output cannot traverse symbolic links or non-directories");
+      }
+    }
+    let canonical: string;
+    try {
+      canonical = realpathSync(cursor);
+    } catch (error) {
+      return fail("unsafe_context", "Requirement output directory could not be resolved", error);
+    }
+    if (!contained(root, canonical)) fail("unsafe_context", "Requirement output escaped the Workspace");
+  }
 }
 
 function readWorkspace(root: string): WorkspaceManifest {
@@ -238,7 +307,8 @@ function validateStories(workspaceRoot: string, storyIds: readonly string[]): vo
 function readExisting(path: string): RequirementSourceManifest | undefined {
   if (!existsSync(path)) return undefined;
   try {
-    const parsed = parseRequirementSourceManifest(JSON.parse(readFileSync(path, "utf8")));
+    const file = stableFile(path, {}, MAX_REQUIREMENT_CONTEXT_BYTES, "Requirement source index exceeds its byte limit");
+    const parsed = parseRequirementSourceManifest(JSON.parse(file.content.toString("utf8")));
     if (!parsed.ok) fail("io_failure", "Requirement source index is invalid");
     return parsed.value;
   } catch (error) {
@@ -248,7 +318,7 @@ function readExisting(path: string): RequirementSourceManifest | undefined {
 }
 
 function copyContextProjection(
-  revisionContext: string,
+  context: readonly StableContextFile[],
   requirementPath: string,
   renameFile: (from: string, to: string) => void,
 ): void {
@@ -256,19 +326,11 @@ function copyContextProjection(
   const target = join(requirementPath, "context");
   const backup = join(requirementPath, `.context.backup.${randomUUID()}`);
   mkdirSync(staging, { recursive: true });
-  const copy = (from: string, to: string): void => {
-    for (const entry of readdirSync(from, { withFileTypes: true })) {
-      const source = join(from, entry.name);
-      const destination = join(to, entry.name);
-      if (entry.isDirectory()) {
-        mkdirSync(destination);
-        copy(source, destination);
-      } else {
-        writeFileSync(destination, readFileSync(source), { flag: "wx" });
-      }
-    }
-  };
-  copy(revisionContext, staging);
+  for (const file of context) {
+    const destination = join(staging, file.relativePath);
+    mkdirSync(dirname(destination), { recursive: true });
+    writeFileSync(destination, file.content, { flag: "wx" });
+  }
   let movedOld = false;
   try {
     if (existsSync(target)) {
@@ -290,20 +352,111 @@ function copyContextProjection(
 function projectCurrent(
   requirementPath: string,
   manifest: RequirementSourceManifest,
+  evidence: RevisionEvidence,
   deps: RequirementSourceStoreDeps,
 ): void {
   const renameFile = deps.renameFile ?? renameSync;
-  const revision = join(requirementPath, "revisions", requirementRevisionKey(manifest.revision));
   const journal = join(requirementPath, PROJECTION_JOURNAL);
-  atomicWrite(journal, json({ schema: "roll.requirement-projection-journal/v1", revision: manifest.revision }), renameFile);
   try {
     deps.beforeProjection?.();
-    atomicWrite(join(requirementPath, "requirement.md"), readFileSync(join(revision, "requirement.md")), renameFile);
-    copyContextProjection(join(revision, "context"), requirementPath, renameFile);
+    atomicWrite(join(requirementPath, "requirement.md"), evidence.body.content, renameFile);
+    copyContextProjection(evidence.context, requirementPath, renameFile);
     atomicWrite(join(requirementPath, "attest.md"), renderRequirementAttestProjection(manifest), renameFile);
     rmSync(journal, { force: true });
   } catch (error) {
     return fail("projection_repair_required", "Requirement revision committed but its current projection needs repair", error);
+  }
+}
+
+function archiveContextPaths(root: string, relativeRoot = ""): readonly string[] {
+  const paths: string[] = [];
+  for (const entry of readdirSync(join(root, relativeRoot), { withFileTypes: true })) {
+    const relativePath = relativeRoot === "" ? entry.name : `${relativeRoot}/${entry.name}`;
+    const path = join(root, relativePath);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) fail("revision_conflict", "Immutable Requirement context contains a symbolic link");
+    if (entry.isDirectory()) paths.push(...archiveContextPaths(root, relativePath));
+    else if (entry.isFile()) paths.push(relativePath);
+    else fail("revision_conflict", "Immutable Requirement context contains a non-regular entry");
+    if (paths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
+      fail("revision_conflict", "Immutable Requirement context exceeds its file-count contract");
+    }
+  }
+  return paths;
+}
+
+function validateRevision(
+  requirementPath: string,
+  manifest: RequirementSourceManifest,
+): RevisionEvidence {
+  try {
+    const canonicalRequirementPath = realpathSync(requirementPath);
+    const revisionPath = join(canonicalRequirementPath, "revisions", requirementRevisionKey(manifest.revision));
+    ensureSafeDirectory(canonicalRequirementPath, revisionPath, false);
+    const capturedFile = stableFile(
+      join(revisionPath, "capture.yaml"),
+      {},
+      MAX_REQUIREMENT_CONTEXT_BYTES,
+      "Immutable Requirement capture index exceeds its byte limit",
+    );
+    const parsed = parseRequirementSourceManifest(JSON.parse(capturedFile.content.toString("utf8")));
+    if (!parsed.ok) fail("revision_conflict", "Immutable Requirement capture index is invalid");
+    const captured = parsed.value;
+    if (
+      captured.requirementId !== manifest.requirementId || captured.provider !== manifest.provider || captured.ref !== manifest.ref ||
+      captured.revision !== manifest.revision || captured.requirement.bytes !== manifest.requirement.bytes ||
+      captured.requirement.sha256 !== manifest.requirement.sha256 || JSON.stringify(captured.context) !== JSON.stringify(manifest.context)
+    ) {
+      fail("revision_conflict", "Immutable Requirement revision metadata does not match source authority");
+    }
+    const body = stableFile(
+      join(revisionPath, "requirement.md"),
+      {},
+      MAX_REQUIREMENT_BODY_BYTES,
+      "Immutable Requirement body exceeds its byte limit",
+    );
+    if (body.bytes !== manifest.requirement.bytes || body.sha256 !== manifest.requirement.sha256) {
+      fail("revision_conflict", "Immutable Requirement body does not match its recorded digest");
+    }
+    const contextRoot = join(revisionPath, "context");
+    ensureSafeDirectory(canonicalRequirementPath, contextRoot, false);
+    const actualPaths = archiveContextPaths(contextRoot).slice().sort();
+    const expectedPaths = manifest.context.map((entry) => entry.path).slice().sort();
+    if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) {
+      fail("revision_conflict", "Immutable Requirement context file set does not match source authority");
+    }
+    let remainingBytes = MAX_REQUIREMENT_CONTEXT_BYTES;
+    const context = manifest.context.map((descriptor) => {
+      rejectSymlinkSegments(contextRoot, descriptor.path);
+      const path = realpathSync(join(contextRoot, descriptor.path));
+      if (!contained(contextRoot, path)) fail("revision_conflict", "Immutable Requirement context escaped its revision");
+      const file = stableFile(path, {}, remainingBytes, "Immutable Requirement context exceeds its byte limit");
+      remainingBytes -= file.bytes;
+      if (file.bytes !== descriptor.bytes || file.sha256 !== descriptor.sha256) {
+        fail("revision_conflict", "Immutable Requirement context does not match its recorded digest");
+      }
+      return { ...file, relativePath: descriptor.path };
+    });
+    return { body, context };
+  } catch (error) {
+    if (error instanceof RequirementSourceStoreError && error.code === "revision_conflict") throw error;
+    return fail("revision_conflict", "Immutable Requirement revision is missing, unsafe, or unreadable", error);
+  }
+}
+
+function prepareProjectionJournal(
+  requirementPath: string,
+  manifest: RequirementSourceManifest,
+  renameFile: (from: string, to: string) => void,
+): void {
+  try {
+    atomicWrite(
+      join(requirementPath, PROJECTION_JOURNAL),
+      json({ schema: "roll.requirement-projection-journal/v1", revision: manifest.revision }),
+      renameFile,
+    );
+  } catch (error) {
+    return fail("projection_repair_required", "Requirement projection journal could not be prepared", error);
   }
 }
 
@@ -316,13 +469,7 @@ function writeRevision(
 ): void {
   const revisionPath = join(requirementPath, "revisions", requirementRevisionKey(manifest.revision));
   if (existsSync(revisionPath)) {
-    const captured = readExisting(join(revisionPath, "capture.yaml"));
-    if (
-      captured === undefined || captured.revision !== manifest.revision || captured.requirement.sha256 !== manifest.requirement.sha256 ||
-      JSON.stringify(captured.context) !== JSON.stringify(manifest.context)
-    ) {
-      fail("revision_conflict", "Immutable Requirement revision already contains different evidence");
-    }
+    validateRevision(requirementPath, manifest);
     return;
   }
   const staging = join(requirementPath, `.revision.${randomUUID()}`);
@@ -370,6 +517,8 @@ export function captureRequirementSource(
   validateStories(workspaceRoot, input.storyIds);
   const requirementPath = join(workspaceRoot, "requirements", source.value.provider, source.value.requirementId);
   const lockPath = requirementCaptureLockPath(workspaceRoot, source.value.requirementId);
+  ensureSafeDirectory(workspaceRoot, dirname(lockPath), true);
+  ensureSafeDirectory(workspaceRoot, requirementPath, true);
   const lock = acquireLock(lockPath, process.pid, {
     cycleId: `requirement:${workspace.workspaceId}:${source.value.requirementId}`,
     unparseableIsHeld: true,
@@ -380,9 +529,14 @@ export function captureRequirementSource(
     const sourcePath = join(requirementPath, "source.yaml");
     const existing = readExisting(sourcePath);
     if (existing !== undefined && existsSync(join(requirementPath, PROJECTION_JOURNAL))) {
-      projectCurrent(requirementPath, existing, deps);
+      projectCurrent(requirementPath, existing, validateRevision(requirementPath, existing), deps);
     }
-    const body = stableFile(resolve(input.bodyFile), deps);
+    const body = stableFile(
+      resolve(input.bodyFile),
+      deps,
+      MAX_REQUIREMENT_BODY_BYTES,
+      "Requirement body exceeds the capture byte limit",
+    );
     const context = contextFiles(input, deps);
     const descriptors: RequirementContextDescriptor[] = context.map((file) => ({
       path: file.relativePath,
@@ -405,6 +559,7 @@ export function captureRequirementSource(
     }
     const plan = planned.value;
     if (plan.outcome === "reused") {
+      validateRevision(requirementPath, plan.manifest);
       return {
         outcome: plan.outcome,
         workspaceId: workspace.workspaceId,
@@ -416,12 +571,14 @@ export function captureRequirementSource(
     if (plan.outcome === "created" || plan.outcome === "updated") {
       writeRevision(requirementPath, plan.manifest, body, context, renameFile);
     }
+    const evidence = validateRevision(requirementPath, plan.manifest);
+    prepareProjectionJournal(requirementPath, plan.manifest, renameFile);
     try {
       atomicWrite(sourcePath, json(plan.manifest), renameFile);
     } catch (error) {
       return fail("io_failure", "Requirement source index could not be committed", error);
     }
-    projectCurrent(requirementPath, plan.manifest, deps);
+    projectCurrent(requirementPath, plan.manifest, evidence, deps);
     return {
       outcome: plan.outcome,
       workspaceId: workspace.workspaceId,

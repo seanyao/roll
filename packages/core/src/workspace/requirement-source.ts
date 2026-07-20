@@ -11,6 +11,7 @@ import {
 
 export const MAX_REQUIREMENT_CONTEXT_FILES = 64;
 export const MAX_REQUIREMENT_CONTEXT_BYTES = 1024 * 1024;
+export const MAX_REQUIREMENT_BODY_BYTES = 4 * 1024 * 1024;
 
 export interface RequirementCaptureFacts {
   readonly provider: string;

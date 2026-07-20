@@ -140,9 +140,26 @@ describe("US-WS-007 RequirementSourceStore", () => {
       expect.objectContaining({ code: "unsafe_context" }),
     );
     write(join(f.contextRoot, "huge.bin"), "x".repeat(1024 * 1024 + 1));
+    const reads: string[] = [];
     expect(() => captureRequirementSource(request(f, { contextPaths: ["huge.bin"] }))).toThrowError(
       expect.objectContaining({ code: "context_limit" }),
     );
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["huge.bin"] }), {
+      afterReadFile: (path) => reads.push(path),
+    })).toThrowError(expect.objectContaining({ code: "context_limit" }));
+    expect(reads).not.toContain(join(f.contextRoot, "huge.bin"));
+  });
+
+  it("rejects Workspace output symlinks before committing any evidence", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(f.workspace, "requirements"));
+
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(readdirSync(outside)).toEqual([]);
   });
 
   it("fails closed on source mutation, revision rename failure and a concurrent writer", () => {
@@ -188,5 +205,32 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(repaired.outcome).toBe("reused");
     expect(existsSync(join(requirementPath, "projection.pending.json"))).toBe(false);
     expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
+  });
+
+  it("does not switch source authority when the projection journal cannot be prepared", () => {
+    const f = fixture();
+    expect(() => captureRequirementSource(request(f), {
+      renameFile: (from, to) => {
+        if (to.endsWith("projection.pending.json")) throw new Error("journal unavailable");
+        renameSync(from, to);
+      },
+    })).toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
+    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
+    expect(existsSync(join(requirementPath, "source.yaml"))).toBe(false);
+  });
+
+  it("fails loudly when an immutable revision is missing or tampered before reuse", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revision = join(first.requirementPath, "revisions", "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049");
+    writeFileSync(join(revision, "requirement.md"), "tampered evidence\n", "utf8");
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+
+    rmSync(revision, { recursive: true });
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
   });
 });

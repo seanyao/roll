@@ -323,6 +323,52 @@ describe("US-WS-007 RequirementSourceStore", () => {
     );
   });
 
+  it("rejects a source.yaml whose previousRevisions references a revision archive that was never committed", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const sourcePath = join(first.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    source.previousRevisions = [...source.previousRevisions, { revision: "99-forged", capturedAt: "2020-01-01T00:00:00.000Z" }];
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
+
+    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("rejects a source.yaml whose previousRevisions dropped a revision that still has a committed archive", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const sourcePath = join(first.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    expect(source.previousRevisions).toEqual([{ revision: "42", capturedAt: "2026-07-20T16:00:00.000Z" }]);
+    source.previousRevisions = [];
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
+
+    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("rejects a source.yaml whose previousRevisions capturedAt was forged away from its immutable archive", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const sourcePath = join(first.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    source.previousRevisions = [{ revision: "42", capturedAt: "2099-01-01T00:00:00.000Z" }];
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
+
+    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
   it("never follows a symlink planted inside the current projection's context/ during self-heal", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

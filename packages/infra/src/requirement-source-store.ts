@@ -438,12 +438,56 @@ function archiveContextPaths(root: string, relativeRoot = "", depth = 0): readon
   return paths;
 }
 
+function validateRevisionHistory(
+  canonicalRequirementPath: string,
+  manifest: RequirementSourceManifest,
+): void {
+  const revisionsRoot = join(canonicalRequirementPath, "revisions");
+  if (!existsSync(revisionsRoot)) {
+    if (manifest.previousRevisions.length > 0) {
+      fail("revision_conflict", "Immutable Requirement revision archive is missing recorded history");
+    }
+    return;
+  }
+  ensureSafeDirectory(canonicalRequirementPath, revisionsRoot, false);
+  const archivedKeys = new Set(
+    readdirSync(revisionsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !lstatSync(join(revisionsRoot, entry.name)).isSymbolicLink())
+      .map((entry) => entry.name),
+  );
+  const expectedKeys = new Set([
+    requirementRevisionKey(manifest.revision),
+    ...manifest.previousRevisions.map((entry) => requirementRevisionKey(entry.revision)),
+  ]);
+  for (const key of expectedKeys) {
+    if (!archivedKeys.has(key)) fail("revision_conflict", "Immutable Requirement history references a revision archive that was never committed");
+  }
+  for (const key of archivedKeys) {
+    if (!expectedKeys.has(key)) fail("revision_conflict", "Immutable Requirement revision archive contains history the source index dropped");
+  }
+  for (const previous of manifest.previousRevisions) {
+    const key = requirementRevisionKey(previous.revision);
+    const capturedFile = stableFile(
+      join(revisionsRoot, key, "capture.yaml"),
+      {},
+      MAX_REQUIREMENT_CONTEXT_BYTES,
+      "Immutable Requirement capture index exceeds its byte limit",
+    );
+    const parsed = parseRequirementSourceManifest(JSON.parse(capturedFile.content.toString("utf8")));
+    if (!parsed.ok) fail("revision_conflict", "Immutable Requirement capture index is invalid");
+    if (parsed.value.revision !== previous.revision || parsed.value.capturedAt !== previous.capturedAt) {
+      fail("revision_conflict", "Immutable Requirement previous revision metadata does not match its archive");
+    }
+  }
+}
+
 function validateRevision(
   requirementPath: string,
   manifest: RequirementSourceManifest,
 ): RevisionEvidence {
   try {
     const canonicalRequirementPath = realpathSync(requirementPath);
+    validateRevisionHistory(canonicalRequirementPath, manifest);
     const revisionPath = join(canonicalRequirementPath, "revisions", requirementRevisionKey(manifest.revision));
     ensureSafeDirectory(canonicalRequirementPath, revisionPath, false);
     const capturedFile = stableFile(

@@ -247,14 +247,14 @@ describe("US-WS-007 RequirementSourceStore", () => {
     }
   });
 
-  it("proves identical reuse never invokes mkdir/write/rename/unlink by instrumenting the fs seams", () => {
+  it("proves identical reuse invokes zero calls through the store's internal rename seam (full mkdir/write/rename/unlink coverage is in requirement-source-store.fs-seam.test.ts)", () => {
     const f = fixture();
     captureRequirementSource(request(f));
 
     const mutations: string[] = [];
     const reused = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
       renameFile: (from, to) => { mutations.push(`rename:${to}`); renameSync(from, to); },
-      afterReadFile: () => { /* reads are expected; only mutation seams are asserted */ },
+      afterReadFile: () => { /* reads are expected; only the rename seam is asserted here */ },
     });
     expect(reused.outcome).toBe("reused");
     expect(mutations).toEqual([]);

@@ -274,6 +274,20 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
+  it("caps the total directory-entry count in an archived context tree, counting empty directories, not only files", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    const contextRoot = join(first.requirementPath, "revisions", revisionKey, "context");
+    for (let index = 0; index < MAX_REQUIREMENT_CONTEXT_FILES + 10; index += 1) {
+      mkdirSync(join(contextRoot, `empty-dir-${index}`), { recursive: true });
+    }
+
+    expect(() => captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
   it("rejects a context root that is itself a symlink to an external location", () => {
     const f = fixture();
     const outsideContext = join(f.root, "outside-context");

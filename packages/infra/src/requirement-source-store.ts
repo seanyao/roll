@@ -445,24 +445,34 @@ function projectCurrent(
   }
 }
 
-function archiveContextPaths(root: string, relativeRoot = "", depth = 0): readonly string[] {
+function archiveContextPathsWalk(
+  root: string,
+  relativeRoot: string,
+  depth: number,
+  entryCount: { count: number },
+): readonly string[] {
   if (depth > PROJECTION_MAX_DEPTH) {
     fail("revision_conflict", "Requirement context tree exceeds its depth contract");
   }
   const paths: string[] = [];
   for (const entry of readdirSync(join(root, relativeRoot), { withFileTypes: true })) {
+    entryCount.count += 1;
+    if (entryCount.count > MAX_REQUIREMENT_CONTEXT_FILES) {
+      fail("revision_conflict", "Immutable Requirement context exceeds its directory-entry contract");
+    }
     const relativePath = relativeRoot === "" ? entry.name : `${relativeRoot}/${entry.name}`;
     const path = join(root, relativePath);
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) fail("revision_conflict", "Immutable Requirement context contains a symbolic link");
-    if (entry.isDirectory()) paths.push(...archiveContextPaths(root, relativePath, depth + 1));
+    if (entry.isDirectory()) paths.push(...archiveContextPathsWalk(root, relativePath, depth + 1, entryCount));
     else if (entry.isFile()) paths.push(relativePath);
     else fail("revision_conflict", "Immutable Requirement context contains a non-regular entry");
-    if (paths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
-      fail("revision_conflict", "Immutable Requirement context exceeds its file-count contract");
-    }
   }
   return paths;
+}
+
+function archiveContextPaths(root: string, relativeRoot = ""): readonly string[] {
+  return archiveContextPathsWalk(root, relativeRoot, 0, { count: 0 });
 }
 
 function validateRevisionHistory(

@@ -105,24 +105,38 @@ linked Story delivery but never replaces Issue-owned evidence.
 ### Issue initialization
 
 `roll workspace issue init` resolves one Story's Contract (the `repositories:`
-frontmatter block in its `spec.md`), the Workspace's repository bindings and its
-linked Requirement sources, then creates, reuses or repairs the Story's Issue —
-one manifest and one worktree per declared repository target:
+frontmatter block in the Story's `spec.md`, found inside the Workspace's own
+`backlog/**/<story-id>/spec.md` tree — never the caller's cwd), the Workspace's
+repository bindings and its linked Requirement sources, then creates, reuses or
+repairs the Story's Issue — one manifest and one worktree per declared
+repository target:
 
 ```bash
 roll workspace issue init US-WS-008 --workspace ws-demo --check --json
 roll workspace issue init US-WS-008 --workspace ws-demo --json
 ```
 
-`--check` performs no writes. Apply creates the immutable `roll.issue/v1`
-manifest, an append-only `issue:repository_bound` event per target, and
-`issues/<story-id>/<alias>` worktrees rooted at each target's cached base SHA —
-read targets get no write path or branch; write targets get a unique
-`roll/<workspace>/<story>/<alias>` branch. If a later target fails, clean
-newly-created targets already applied are rolled back (existing or dirty
-worktrees are always preserved) and a repair journal is written; re-running
-after a failure resumes and repairs the same Issue identity without
-duplicating worktrees or branches.
+`--check` fully resolves every declared target's repository cache and real git
+worktree identity with zero filesystem writes — including the machine Roll
+Home cache — and reports each target's alias, access, repoId, cache path and
+state, base SHA, worktree path, work branch and create/reuse/repair/conflict
+decision. Apply resolves every target's repository cache from the actual
+machine Roll Home (`~/.roll/repos`, never a Workspace-relative cache) before
+creating or mutating the Issue root, then creates the immutable `roll.issue/v1`
+manifest (schema/workspaceId/storyId/requirements/repositories only — no
+runtime SHA/path/branch), an append-only `issue:repository_bound` event per
+target carrying repoId, alias, access, base SHA, worktree path and work
+branch, and `issues/<story-id>/<alias>` worktrees rooted at each target's
+cached base SHA. Write targets get a unique branch rendered from the
+repository binding's `workflow.branchPattern`; read targets are created
+detached with no local branch and are never represented as a writable
+delivery leg. A changed requirement, repository or access set under the same
+Workspace/Story identity fails `manifest_conflict` with zero mutation. If a
+later target's worktree add genuinely fails, clean newly-created targets
+already applied are rolled back via `git worktree remove` (existing or dirty
+worktrees are always preserved, never force-removed) and a repair journal is
+written; re-running after a failure resumes and repairs the same Issue
+identity without duplicating worktrees, branches or events.
 
 ## Common Overrides
 

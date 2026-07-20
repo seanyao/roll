@@ -98,8 +98,9 @@ roll workspace requirement add \
 
 ### Issue 初始化
 
-`roll workspace issue init` 解析一个 Story 的 Contract（`spec.md` frontmatter 中的
-`repositories:` 块）、工作区的仓库绑定与其关联的 Requirement 来源，然后为该 Story
+`roll workspace issue init` 解析一个 Story 的 Contract（Story `spec.md` frontmatter 中的
+`repositories:` 块，该 spec 须位于所选工作区自身的 `backlog/**/<story-id>/spec.md` 树内——
+绝非调用方 cwd）、工作区的仓库绑定与其关联的 Requirement 来源，然后为该 Story
 创建、复用或修复其 Issue——每个声明的仓库目标各对应一份 manifest 与一个 worktree：
 
 ```bash
@@ -107,12 +108,20 @@ roll workspace issue init US-WS-008 --workspace ws-demo --check --json
 roll workspace issue init US-WS-008 --workspace ws-demo --json
 ```
 
-`--check` 零写入。Apply 会创建不可变的 `roll.issue/v1` manifest、每个目标各一条
-append-only 的 `issue:repository_bound` 事件，以及以每个目标缓存的 base SHA 为根的
-`issues/<story-id>/<alias>` worktree——只读目标不获得写权限或分支；可写目标获得唯一的
-`roll/<workspace>/<story>/<alias>` 分支。若后续目标失败，已应用的干净新建目标会被回滚
-（既有或脏的 worktree 始终被保留），并写入修复 journal；失败后重跑会恢复并修复同一个
-Issue 身份，不会重复创建 worktree 或分支。
+`--check` 零文件系统写入（含机器级 Roll Home 缓存）地完整解析每个声明目标的仓库缓存与
+真实 git worktree 身份，返回每个目标的别名、访问模式、repoId、缓存路径与状态、base SHA、
+worktree 路径、工作分支与 create/reuse/repair/conflict 决策。Apply 会先用真实的机器级
+Roll Home（`~/.roll/repos`，绝非工作区相对缓存）解析每个目标的仓库缓存，再创建或变更
+Issue root：不可变的 `roll.issue/v1` manifest（仅 schema/workspaceId/storyId/requirements/
+repositories——不含任何运行时 SHA/路径/分支）、每个目标各一条携带 repoId、别名、访问模式、
+base SHA、worktree 路径与工作分支的 append-only `issue:repository_bound` 事件，以及以每个
+目标缓存的 base SHA 为根的 `issues/<story-id>/<alias>` worktree。可写目标从仓库绑定的
+`workflow.branchPattern` 渲染出唯一分支；只读目标以 detached 方式创建、无本地分支，绝不
+被表示为可写的交付腿。同一工作区/Story 身份下 requirements、repositories 或 access 发生
+变化会以零变更失败 `manifest_conflict`。若后续目标的 worktree add 真的失败，已应用的干净
+新建目标会经由 `git worktree remove` 回滚（既有或脏的 worktree 始终被保留，绝不强制删除），
+并写入修复 journal；失败后重跑会恢复并修复同一个 Issue 身份，不会重复创建 worktree、分支
+或事件。
 
 ## 常见覆盖场景
 

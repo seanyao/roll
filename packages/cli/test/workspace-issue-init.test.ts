@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -83,14 +83,14 @@ repositories:
 `, "utf8");
 }
 
-async function run(args: string[], f: ReturnType<typeof fixture>): Promise<Run> {
+async function run(args: string[], f: ReturnType<typeof fixture>, opts: { lang?: "en" | "zh" } = {}): Promise<Run> {
   const saved: Partial<Record<typeof ENV_KEYS[number], string>> = {};
   for (const key of ENV_KEYS) {
     if (process.env[key] !== undefined) saved[key] = process.env[key];
   }
   process.env["HOME"] = f.home;
   process.env["ROLL_HOME"] = f.rollHome;
-  process.env["ROLL_LANG"] = "en";
+  process.env["ROLL_LANG"] = opts.lang ?? "en";
   process.env["NO_COLOR"] = "1";
   let stdout = "";
   let stderr = "";
@@ -122,6 +122,19 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 async function initWorkspace(f: ReturnType<typeof fixture>): Promise<void> {
   const result = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
   expect(result.status, result.stderr).toBe(0);
+}
+
+/** Scrub every volatile (host path, git SHA, timestamp) fragment from a
+ *  captured JSON contract so the frozen snapshot is stable across machines
+ *  and runs. */
+function scrub(text: string, f: ReturnType<typeof fixture>): string {
+  return text
+    .replaceAll(realpathSync(f.home), "<HOME>")
+    .replaceAll(f.home, "<HOME>")
+    .replace(/"repoId":\s*"repo-[0-9a-f]{12}"/g, '"repoId": "<REPO_ID>"')
+    .replace(/"baseSha":\s*"[0-9a-f]{40}"/g, '"baseSha": "<SHA>"')
+    .replace(/"ts":\s*\d+/g, '"ts": "<TS>"')
+    .replace(/repo-[0-9a-f]{12}\.git/g, "<REPO_ID>.git");
 }
 
 describe("US-WS-008 roll workspace issue init", () => {
@@ -286,5 +299,40 @@ repositories:
     expect(existsSync(join(f.workspace, "issues"))).toBe(true);
     expect(readFileSync(f.config, "utf8")).toBe(before);
     expect(readdirSync(join(f.workspace, "issues"))).toEqual([]);
+  });
+
+  it("freezes EN/ZH --help", async () => {
+    const workspaceHelp = await run(["workspace", "--help"], fixture(), { lang: "en" });
+    expect(workspaceHelp.stdout).toContain("issue init");
+
+    const en = await run(["workspace", "issue", "--help"], fixture(), { lang: "en" });
+    expect(en).toMatchObject({ status: 0, stderr: "" });
+    expect(en.stdout).toMatchSnapshot("help-en");
+
+    const zh = await run(["workspace", "issue", "--help"], fixture(), { lang: "zh" });
+    expect(zh).toMatchObject({ status: 0, stderr: "" });
+    expect(zh.stdout).toMatchSnapshot("help-zh");
+  });
+
+  it("freezes the scrubbed full JSON contract for check/create/reuse/failure", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    writeBacklogStorySpec(f);
+
+    const check = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], f);
+    expect(check).toMatchObject({ status: 0, stderr: "" });
+    expect(scrub(check.stdout, f)).toMatchSnapshot("check-json");
+
+    const created = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(created).toMatchObject({ status: 0, stderr: "" });
+    expect(scrub(created.stdout, f)).toMatchSnapshot("created-json");
+
+    const reused = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(reused).toMatchObject({ status: 0, stderr: "" });
+    expect(scrub(reused.stdout, f)).toMatchSnapshot("reused-json");
+
+    const failure = await run(["workspace", "issue", "init", "US-NOPE", "--workspace", "ws-demo", "--json"], f);
+    expect(failure.status).toBe(1);
+    expect(scrub(failure.stderr, f)).toMatchSnapshot("failure-json");
   });
 });

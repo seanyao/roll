@@ -304,3 +304,34 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
     }))).toMatchObject({ ok: false, error: { code: "identity_mismatch" } });
   });
 });
+
+describe("resolveWorkspaceTarget purity", () => {
+  it("returns byte-equivalent decisions for repeated identical inputs without mutating facts", () => {
+    const facts = input({
+      operation: "mutation",
+      explicit: path("/workspaces/alpha", "/real/workspaces/alpha"),
+      environment: id("ws-alpha"),
+      context: {
+        cwdManifest: {
+          workspaceId: "ws-alpha",
+          root: "/workspaces/alpha",
+          canonicalRoot: "/real/workspaces/alpha",
+          containment: "safe",
+        },
+        issueManifest: {
+          workspaceId: "ws-alpha",
+          root: "/workspaces/alpha",
+          canonicalRoot: "/real/workspaces/alpha",
+          containment: "safe",
+        },
+      },
+    });
+    const before = JSON.stringify(facts);
+
+    const first = resolveWorkspaceTarget(facts);
+    const second = resolveWorkspaceTarget(facts);
+
+    expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+    expect(JSON.stringify(facts)).toBe(before);
+  });
+});

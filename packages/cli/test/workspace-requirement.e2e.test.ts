@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,10 +53,10 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
     });
 
     const helpEn = run(["workspace", "requirement", "--help"]);
-    expect(helpEn.status, helpEn.stderr).toBe(0);
+    expect(helpEn).toMatchObject({ status: 0, stderr: "" });
     expect(helpEn.stdout).toContain("Usage: roll workspace requirement add");
     const helpZh = run(["workspace", "requirement", "--help"], "zh");
-    expect(helpZh.status, helpZh.stderr).toBe(0);
+    expect(helpZh).toMatchObject({ status: 0, stderr: "" });
     expect(helpZh.stdout).toContain("用法：roll workspace requirement add");
 
     expect(run(["workspace", "register", "ws-e2e", workspace]).status).toBe(0);
@@ -73,7 +74,7 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
       "--json",
     ] as const;
     const first = run(args);
-    expect(first.status, first.stderr).toBe(0);
+    expect(first).toMatchObject({ status: 0, stderr: "" });
     const firstResult = JSON.parse(first.stdout) as Record<string, unknown>;
     expect(firstResult).toMatchObject({
       schema: "roll.workspace-requirement-result/v1",
@@ -85,10 +86,39 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
       storyCount: 1,
     });
     const second = run(args);
-    expect(second.status, second.stderr).toBe(0);
+    expect(second).toMatchObject({ status: 0, stderr: "" });
     expect(JSON.parse(second.stdout)).toMatchObject({ outcome: "reused" });
+
+    function snapshotTree(root: string): ReadonlyMap<string, string> {
+      const entries = new Map<string, string>();
+      const walk = (dir: string, relativeDir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const path = join(dir, entry.name);
+          const relativePath = relativeDir === "" ? entry.name : `${relativeDir}/${entry.name}`;
+          const stat = lstatSync(path);
+          const digest = stat.isFile() ? createHash("sha256").update(readFileSync(path)).digest("hex") : "";
+          entries.set(relativePath, JSON.stringify({
+            type: stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "dir" : "file",
+            ino: stat.ino,
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            digest,
+          }));
+          if (stat.isDirectory() && !stat.isSymbolicLink()) walk(path, relativePath);
+        }
+      };
+      walk(root, "");
+      return entries;
+    }
+
+    const requirementsRoot = join(workspace, "requirements");
+    const beforeThird = snapshotTree(requirementsRoot);
     const third = run(args);
-    expect(third.status, third.stderr).toBe(0);
+    expect(third).toMatchObject({ status: 0, stderr: "" });
+    const afterThird = snapshotTree(requirementsRoot);
+    expect(Array.from(afterThird.keys()).sort()).toEqual(Array.from(beforeThird.keys()).sort());
+    for (const [path, entry] of beforeThird) expect(afterThird.get(path), `changed at ${path}`).toBe(entry);
+
     const secondResult = JSON.parse(second.stdout) as Record<string, unknown>;
     const thirdResult = JSON.parse(third.stdout) as Record<string, unknown>;
     expect(thirdResult).toEqual(secondResult);

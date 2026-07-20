@@ -108,16 +108,16 @@ describe("US-WS-007 roll workspace requirement add", () => {
   it("captures, repeats and updates a Jira-shaped local fixture through stable JSON", async () => {
     const f = fixture();
     const first = await run([...addArgs(f), "--json"], f);
-    expect(first.status, first.stderr).toBe(0);
+    expect(first).toMatchObject({ status: 0, stderr: "" });
     expect(scrub(first.stdout, f)).toMatchSnapshot("created-json");
     const repeated = await run([...addArgs(f), "--json"], f);
-    expect(repeated.status, repeated.stderr).toBe(0);
+    expect(repeated).toMatchObject({ status: 0, stderr: "" });
     expect(scrub(repeated.stdout, f)).toMatchSnapshot("reused-json");
 
     writeFileSync(f.body, "# SOT-15499\n\nRevision 43.\n", "utf8");
     const updatedArgs = addArgs(f).map((arg) => arg === "42" ? "43" : arg);
     const updated = await run([...updatedArgs, "--json"], f);
-    expect(updated.status, updated.stderr).toBe(0);
+    expect(updated).toMatchObject({ status: 0, stderr: "" });
     expect(scrub(updated.stdout, f)).toMatchSnapshot("updated-json");
     const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
     expect(existsSync(join(requirementPath, "source.yaml"))).toBe(true);
@@ -155,6 +155,23 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(escape.status).toBe(1);
     expect(JSON.parse(escape.stderr)).toMatchObject({ error: { code: "unsafe_context" } });
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("never leaks a credential sentinel embedded in the body or context content through stdout or stderr on success", async () => {
+    const f = fixture();
+    writeFileSync(f.body, "# SOT-15499\n\ncredential-sentinel-in-body access_token=body-secret-value\n", "utf8");
+    writeFileSync(join(f.contextRoot, "brief.md"), "credential-sentinel-in-context api_key=context-secret-value\n", "utf8");
+
+    const captured = await run([...addArgs(f), "--json"], f);
+    expect(captured).toMatchObject({ status: 0, stderr: "" });
+    expect(captured.stdout).not.toContain("credential-sentinel-in-body");
+    expect(captured.stdout).not.toContain("body-secret-value");
+    expect(captured.stdout).not.toContain("credential-sentinel-in-context");
+    expect(captured.stdout).not.toContain("context-secret-value");
+
+    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
+    expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("body-secret-value");
+    expect(readFileSync(join(requirementPath, "context", "brief.md"), "utf8")).toContain("context-secret-value");
   });
 
   it("exposes locale-specific nested help and includes requirement in Workspace help", async () => {

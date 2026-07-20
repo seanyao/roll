@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -206,7 +207,11 @@ export class WorkspaceRegistry {
       if (lifecycle === undefined) {
         throw new WorkspaceRegistryError("invalid_registry", `Workspace ${entry.workspaceId} has no registration event`);
       }
-      return { ...entry, ...lifecycle };
+      return {
+        ...entry,
+        pathState: entry.pathState === "stale" || !existsSync(entry.root) ? "stale" : "valid",
+        ...lifecycle,
+      };
     });
   }
 

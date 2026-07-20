@@ -387,10 +387,15 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
-  it("writes nothing to disk when every declared context path is invalid", () => {
+  it.each([
+    ["leading .. traversal", "../escape.md"],
+    ["absolute path", "/etc/passwd"],
+    ["Windows-style backslash traversal", "..\\escape.md"],
+    ["inner .. traversal past root via a subdirectory", "a/../../escape.md"],
+  ] as const)("writes nothing to disk when the declared context path is invalid: %s (%s)", (_label, contextPath) => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f, {
-      contextPaths: ["../escape.md", "/etc/passwd", "..\\escape.md", "a/../../escape.md"],
+      contextPaths: [contextPath],
     }))).toThrowError(expect.objectContaining({ code: "unsafe_context" }));
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });

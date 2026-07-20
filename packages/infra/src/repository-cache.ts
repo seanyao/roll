@@ -81,6 +81,8 @@ export interface RepositoryCacheResult {
   readonly event: RepositoryCacheEvent;
 }
 
+export type RepositoryCacheProbeState = "absent" | "compatible" | "repairable" | "conflict";
+
 export type RepositoryCacheGitRunner = (
   args: readonly string[],
   cwd?: string,
@@ -161,6 +163,52 @@ export function resolveRepositoryCacheIdentity(
     journalPath: childPath(reposRoot, `${repoId}.pending.json`),
     temporaryPath: childPath(reposRoot, `${repoId}.creating`),
   };
+}
+
+/** Inspect one cache without creating roots, locks, journals, temp files or fetching. */
+export async function inspectRepositoryCache(
+  input: ResolveRepositoryCacheIdentityInput & { readonly runGit?: RepositoryCacheGitRunner },
+): Promise<RepositoryCacheProbeState> {
+  const identity = resolveRepositoryCacheIdentity(input);
+  for (const path of [identity.reposRoot, identity.cachePath, identity.identityPath, identity.temporaryPath, identity.journalPath]) {
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink()) return "conflict";
+      if (path === identity.cachePath && !stat.isDirectory()) return "conflict";
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  if (existsSync(identity.journalPath) || existsSync(identity.temporaryPath)) return "repairable";
+  let recorded = false;
+  if (existsSync(identity.identityPath)) {
+    recorded = true;
+    try {
+      const value = JSON.parse(readFileSync(identity.identityPath, "utf8")) as Record<string, unknown>;
+      if (
+        value["schema"] !== REPOSITORY_CACHE_IDENTITY_V1 ||
+        value["repoId"] !== identity.repoId ||
+        value["remote"] !== identity.remote ||
+        value["cachePath"] !== identity.cachePath
+      ) return "conflict";
+    } catch {
+      return "conflict";
+    }
+  }
+  if (!existsSync(identity.cachePath)) return recorded ? "repairable" : "absent";
+  const runGit = input.runGit ?? git;
+  try {
+    const bare = await runGit(["rev-parse", "--is-bare-repository"], identity.cachePath);
+    if (bare.code !== 0 || bare.stdout.trim() !== "true") return "repairable";
+    const origin = await runGit(["remote", "get-url", "origin"], identity.cachePath);
+    if (origin.code !== 0) return "repairable";
+    const normalized = normalizeRepositoryRemote(origin.stdout.trim());
+    if (!normalized.ok || normalized.value !== identity.remote) return "conflict";
+    const fsck = await runGit(["fsck", "--connectivity-only", "--no-dangling"], identity.cachePath);
+    return fsck.code === 0 ? "compatible" : "repairable";
+  } catch {
+    return "repairable";
+  }
 }
 
 function parseIntegrationRefspec(value: string): ParsedIntegrationRefspec {

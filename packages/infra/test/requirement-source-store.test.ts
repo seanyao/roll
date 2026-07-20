@@ -693,6 +693,30 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).not.toContain("12 passed");
   });
 
+  it("aggregates a real reference to each linked Story's Issue evidence directory in attest.md, without embedding evidence content", () => {
+    const f = fixture();
+    const ws007Evidence = join(f.workspace, "issues", "US-WS-007", "evidence", "vitest.txt");
+    write(ws007Evidence, "US-WS-007 issue evidence: 12 passed\n");
+    const ws008Evidence = join(f.workspace, "issues", "US-WS-008", "evidence", "vitest.txt");
+    write(ws008Evidence, "US-WS-008 issue evidence: 9 passed\n");
+
+    const first = captureRequirementSource(request(f));
+    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
+    expect(attest).toContain("issues/US-WS-007/evidence");
+    expect(attest).toContain("issues/US-WS-008/evidence");
+    expect(attest).not.toContain("12 passed");
+    expect(attest).not.toContain("9 passed");
+  });
+
+  it("reports a linked Story with no captured Issue evidence yet as pending rather than silently omitting it", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
+    expect(attest).toContain("US-WS-007");
+    expect(attest).toContain("US-WS-008");
+    expect(attest).toMatch(/no evidence captured yet|pending/iu);
+  });
+
   it("reconstructs requirement.md, context/ and attest.md together from the immutable revision when all three are corrupted or missing at once", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { parseWorkspaceInitConfig, type WorkspaceInitPlan } from "@roll/core";
@@ -82,10 +82,8 @@ export async function workspaceInitCommand(args: string[]): Promise<number> {
   const parsedArgs = parseArgs(args);
   if (!parsedArgs.ok) return emitError("invalid_arguments", parsedArgs.json);
   let text: string;
-  let mtime: string;
   try {
     text = readFileSync(parsedArgs.configPath, "utf8");
-    mtime = statSync(parsedArgs.configPath).mtime.toISOString();
   } catch {
     return emitError("config_read_failed", parsedArgs.json);
   }
@@ -94,7 +92,6 @@ export async function workspaceInitCommand(args: string[]): Promise<number> {
     configPath: parsedArgs.configPath,
     homeDir: homedir(),
     rollHome: process.env["ROLL_HOME"] ?? resolve(homedir(), ".roll"),
-    nowIso: mtime,
   });
   if (!parsed.ok) return emitError(parsed.errors[0]?.code ?? "invalid_config", parsedArgs.json);
   try {
@@ -109,4 +106,3 @@ export async function workspaceInitCommand(args: string[]): Promise<number> {
     return emitError("apply_failed", parsedArgs.json);
   }
 }
-

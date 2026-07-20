@@ -8,6 +8,8 @@ import {
   applyWorkspaceInitialization,
   inspectWorkspaceInitialization,
   workspaceInitJournalPath,
+  workspaceInitLockPath,
+  workspaceRegistryTransactionPath,
   workspaceRegistryPath,
 } from "../src/index.js";
 
@@ -36,7 +38,6 @@ repositories:
     configPath: join(home, "workspace-init.yaml"),
     homeDir: home,
     rollHome,
-    nowIso: "2026-07-20T00:00:00.000Z",
   });
   if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
   return { home, rollHome, root, config: parsed.value };
@@ -167,7 +168,7 @@ describe("Workspace filesystem transaction", () => {
 
   it("fails closed when another process holds the Workspace init lock", async () => {
     const f = fixture();
-    const lock = join(f.rollHome, "locks", "workspace-init-ws-demo.lock");
+    const lock = workspaceInitLockPath(f.rollHome, "ws-other");
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, "meta.json"), `${JSON.stringify({
       pid: process.pid,
@@ -200,5 +201,34 @@ describe("Workspace filesystem transaction", () => {
       ensureCache: async () => ({ action: "reused" as const }),
     })).rejects.toMatchObject({ code: "rejected" });
     expect(tree(f.rollHome)).toEqual(before);
+  });
+
+  it("rejects a pending registry transaction before creating init state", async () => {
+    const f = fixture();
+    mkdirSync(f.rollHome, { recursive: true });
+    writeFileSync(workspaceRegistryTransactionPath(f.rollHome), "{}\n", "utf8");
+    const before = tree(f.rollHome);
+
+    await expect(applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "rejected" });
+    expect(tree(f.rollHome)).toEqual(before);
+  });
+
+  it("preserves committed Workspace state when cleanup fails after registry commit", async () => {
+    const f = fixture();
+    await expect(applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+      afterStep: (step) => {
+        if (step.kind === "registry") throw new Error("post-registry cleanup failure");
+      },
+    })).rejects.toThrow("post-registry cleanup failure");
+
+    expect(existsSync(join(f.root, "workspace.yaml"))).toBe(true);
+    expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(true);
+    expect(JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")))
+      .toMatchObject({ status: "repair_required" });
   });
 });

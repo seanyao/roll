@@ -43,7 +43,6 @@ describe("WorkspaceInitializationPlan", () => {
       configPath: "/tmp/config/workspace-init.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
-      nowIso: "2026-07-20T00:00:00.000Z",
     });
     expect(parsed).toMatchObject({
       ok: true,
@@ -55,7 +54,6 @@ describe("WorkspaceInitializationPlan", () => {
           schema: "roll.workspace/v1",
           workspaceId: "ws-demo",
           displayName: "Demo Workspace",
-          createdAt: "2026-07-20T00:00:00.000Z",
           requirements: [{ provider: "jira", ref: "SOT-15499" }],
           repositories: [
             { alias: "api", remote: "file:///tmp/remotes/api", integrationBranch: "main" },
@@ -98,7 +96,6 @@ describe("WorkspaceInitializationPlan", () => {
       configPath: "/tmp/workspace-init.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
-      nowIso: "2026-07-20T00:00:00.000Z",
     });
     if (!parsed.ok) throw new Error("fixture must parse");
     const compatiblePaths = Object.fromEntries(
@@ -136,9 +133,32 @@ describe("WorkspaceInitializationPlan", () => {
       configPath: "/tmp/workspace-init.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
-      nowIso: "2026-07-20T00:00:00.000Z",
     });
     expect(parsed).toMatchObject({ ok: false, errors: expect.arrayContaining([expect.objectContaining({ code })]) });
+  });
+
+  it("rejects an unsafe Workspace ID before deriving mutation paths", () => {
+    const parsed = parseWorkspaceInitConfig(config.replaceAll("ws-demo", "../../escape"), {
+      workspaceId: "../../escape",
+      configPath: "/tmp/workspace-init.yaml",
+      homeDir: "/tmp/home",
+      rollHome: "/tmp/home/.roll",
+    });
+    expect(parsed).toMatchObject({ ok: false, errors: expect.arrayContaining([
+      expect.objectContaining({ code: "invalid_value" }),
+    ]) });
+  });
+
+  it("does not derive manifest identity from config file metadata", () => {
+    const original = parseWorkspaceInitConfig(config, {
+      workspaceId: "ws-demo", configPath: "/tmp/original/workspace-init.yaml", homeDir: "/tmp/home",
+      rollHome: "/tmp/home/.roll",
+    });
+    const copied = parseWorkspaceInitConfig(config, {
+      workspaceId: "ws-demo", configPath: "/tmp/copied/workspace-init.yaml", homeDir: "/tmp/home",
+      rollHome: "/tmp/home/.roll",
+    });
+    expect(original).toEqual(copied);
   });
 
   it("rejects a Workspace root that contains the machine cache root", () => {
@@ -147,7 +167,6 @@ describe("WorkspaceInitializationPlan", () => {
       configPath: "/tmp/workspace-init.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
-      nowIso: "2026-07-20T00:00:00.000Z",
     });
     expect(parsed).toMatchObject({ ok: false, errors: [expect.objectContaining({ code: "path_conflict" })] });
   });
@@ -158,7 +177,6 @@ describe("WorkspaceInitializationPlan", () => {
       configPath: "/tmp/workspace-init.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
-      nowIso: "2026-07-20T00:00:00.000Z",
     });
     if (!parsed.ok) throw new Error("fixture must parse");
     const plan = buildWorkspaceInitPlan(parsed.value, probe({

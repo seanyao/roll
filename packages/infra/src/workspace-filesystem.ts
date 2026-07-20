@@ -27,8 +27,7 @@ import {
 } from "./repository-cache.js";
 import {
   WorkspaceRegistry,
-  parseWorkspaceRegistry,
-  workspaceRegistryPath,
+  workspaceRegistryTransactionPath,
 } from "./workspace-registry.js";
 import { acquireLock, releaseLock } from "./process.js";
 
@@ -70,7 +69,8 @@ export function workspaceInitJournalPath(rollHome: string, workspaceId: string):
 }
 
 export function workspaceInitLockPath(rollHome: string, workspaceId: string): string {
-  return join(resolve(rollHome), "locks", `workspace-init-${workspaceId}.lock`);
+  void workspaceId;
+  return join(resolve(rollHome), "locks", "workspace-init.lock");
 }
 
 function digest(text: string): string {
@@ -129,10 +129,9 @@ function nodeState(path: string, expectedKind: "file" | "directory", expectedTex
 }
 
 function registryState(config: WorkspaceInitConfig): WorkspaceInitState {
-  const path = workspaceRegistryPath(config.rollHome);
-  if (!existsSync(path)) return "absent";
+  if (existsSync(workspaceRegistryTransactionPath(config.rollHome))) return "conflict";
   try {
-    const snapshot = parseWorkspaceRegistry(readFileSync(path, "utf8"));
+    const snapshot = new WorkspaceRegistry({ rollHome: config.rollHome }).read();
     const canonicalRoot = canonicalProspectivePath(config.root);
     const byId = snapshot.entries.find((entry) => entry.workspaceId === config.workspaceId);
     const byPath = snapshot.entries.find((entry) => entry.root === config.root || entry.canonicalRoot === canonicalRoot);
@@ -269,66 +268,66 @@ export async function applyWorkspaceInitialization(
   try {
     const plan = await inspectWorkspaceInitialization(config, deps);
     if (plan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
-  const journalPath = workspaceInitJournalPath(config.rollHome, config.workspaceId);
-  const created: CreatedNode[] = [];
-  const preservedCaches: string[] = [];
-  let journal: InitJournal = {
-    schema: JOURNAL_V1,
-    transactionId: randomUUID(),
-    workspaceId: config.workspaceId,
-    root: config.root,
-    configDigest: configDigest(config),
-    status: "applying",
-    created,
-    preserved: [],
-    preservedCaches,
-  };
-  atomicWrite(journalPath, journalText(journal));
-  const files = expectedFiles(config);
-  const ensureCache = deps.ensureCache ?? (async (binding: RepositoryBinding, rollHome: string) => {
-    const branch = binding.integrationBranch;
-    return ensureRepositoryCache({
-      binding,
-      rollHome,
-      integrationRefspec: `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
-    });
-  });
-  try {
-    for (const step of plan.steps) {
-      if (step.kind === "journal" || step.kind === "registry") continue;
-      if (step.action === "reused" && step.kind !== "cache") continue;
-      if (step.kind === "directory") {
-        if (!existsSync(step.target)) {
-          mkdirTracked(step.target, created);
-        }
-      } else if (step.kind === "file") {
-        const text = files[step.target];
-        if (text === undefined) throw new WorkspaceInitializationError("apply_failed", `No content contract for ${step.target}`);
-        if (!existsSync(step.target)) {
-          atomicWrite(step.target, text);
-          created.push({ path: step.target, kind: "file", digest: digest(text) });
-        }
-      } else if (step.kind === "cache") {
-        const binding = config.manifest.repositories.find((entry) => entry.repoId === step.target);
-        if (binding === undefined) throw new WorkspaceInitializationError("apply_failed", `Missing binding ${step.target}`);
-        const result = await ensureCache(binding, config.rollHome);
-        if (result.action === "created") preservedCaches.push(binding.repoId);
-      }
-      journal = { ...journal, created: [...created], preservedCaches: [...preservedCaches] };
-      atomicWrite(journalPath, journalText(journal));
-      deps.afterStep?.(step);
-    }
-    const registry = new WorkspaceRegistry({ rollHome: config.rollHome });
-    registry.register({ workspaceId: config.workspaceId, root: config.root });
-    deps.afterStep?.(plan.steps.at(-1) as WorkspaceInitPlanStep);
-    rmSync(journalPath, { force: true });
-    return { outcome: plan.outcome, plan };
-  } catch (error) {
-    const preserved = rollback(created);
-    journal = { ...journal, status: "repair_required", created: [...created], preserved, preservedCaches: [...preservedCaches] };
+    const journalPath = workspaceInitJournalPath(config.rollHome, config.workspaceId);
+    const created: CreatedNode[] = [];
+    const preservedCaches: string[] = [];
+    let registered = false;
+    let journal: InitJournal = {
+      schema: JOURNAL_V1,
+      transactionId: randomUUID(),
+      workspaceId: config.workspaceId,
+      root: config.root,
+      configDigest: configDigest(config),
+      status: "applying",
+      created,
+      preserved: [],
+      preservedCaches,
+    };
     atomicWrite(journalPath, journalText(journal));
-    throw error;
-  }
+    const files = expectedFiles(config);
+    const ensureCache = deps.ensureCache ?? (async (binding: RepositoryBinding, rollHome: string) => {
+      const branch = binding.integrationBranch;
+      return ensureRepositoryCache({
+        binding,
+        rollHome,
+        integrationRefspec: `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      });
+    });
+    try {
+      for (const step of plan.steps) {
+        if (step.kind === "journal" || step.kind === "registry") continue;
+        if (step.action === "reused" && step.kind !== "cache") continue;
+        if (step.kind === "directory") {
+          if (!existsSync(step.target)) mkdirTracked(step.target, created);
+        } else if (step.kind === "file") {
+          const text = files[step.target];
+          if (text === undefined) throw new WorkspaceInitializationError("apply_failed", `No content contract for ${step.target}`);
+          if (!existsSync(step.target)) {
+            atomicWrite(step.target, text);
+            created.push({ path: step.target, kind: "file", digest: digest(text) });
+          }
+        } else if (step.kind === "cache") {
+          const binding = config.manifest.repositories.find((entry) => entry.repoId === step.target);
+          if (binding === undefined) throw new WorkspaceInitializationError("apply_failed", `Missing binding ${step.target}`);
+          const result = await ensureCache(binding, config.rollHome);
+          if (result.action === "created") preservedCaches.push(binding.repoId);
+        }
+        journal = { ...journal, created: [...created], preservedCaches: [...preservedCaches] };
+        atomicWrite(journalPath, journalText(journal));
+        deps.afterStep?.(step);
+      }
+      const registry = new WorkspaceRegistry({ rollHome: config.rollHome });
+      registry.register({ workspaceId: config.workspaceId, root: config.root });
+      registered = true;
+      deps.afterStep?.(plan.steps.at(-1) as WorkspaceInitPlanStep);
+      rmSync(journalPath, { force: true });
+      return { outcome: plan.outcome, plan };
+    } catch (error) {
+      const preserved = registered ? created.map((node) => node.path).sort() : rollback(created);
+      journal = { ...journal, status: "repair_required", created: [...created], preserved, preservedCaches: [...preservedCaches] };
+      atomicWrite(journalPath, journalText(journal));
+      throw error;
+    }
   } finally {
     releaseLock(lockPath);
   }

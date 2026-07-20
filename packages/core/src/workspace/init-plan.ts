@@ -59,7 +59,6 @@ export interface ParseWorkspaceInitOptions {
   readonly configPath: string;
   readonly homeDir: string;
   readonly rollHome: string;
-  readonly nowIso: string;
 }
 
 interface RawRepository {
@@ -189,6 +188,10 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && value === value.trim();
 }
 
+function safeWorkspaceId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value);
+}
+
 function contains(parent: string, child: string): boolean {
   const path = relative(parent, child);
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
@@ -284,7 +287,10 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
   if (unknown.length > 0) errors.push({ code: "unknown_field", path: unknown[0] ?? "config", message: "unknown config field" });
   if (raw.schema !== WORKSPACE_INIT_CONFIG_V1) errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_INIT_CONFIG_V1}` });
   if (!nonEmptyString(raw.id)) errors.push({ code: "invalid_value", path: "id", message: "id is required" });
-  else if (raw.id !== options.workspaceId) errors.push({ code: "identity_mismatch", path: "id", message: "config ID must match the command ID" });
+  else if (!safeWorkspaceId(raw.id)) {
+    errors.push({ code: "invalid_value", path: "id", message: "Workspace ID contains unsafe characters" });
+    return { ok: false, errors };
+  } else if (raw.id !== options.workspaceId) errors.push({ code: "identity_mismatch", path: "id", message: "config ID must match the command ID" });
   if (!nonEmptyString(raw.root)) errors.push({ code: "invalid_value", path: "root", message: "root is required" });
   const root = nonEmptyString(raw.root) ? resolveRoot(raw.root, options) : resolve(options.homeDir, ".roll", "workspaces", options.workspaceId);
   const rollHome = resolve(options.rollHome);
@@ -312,7 +318,7 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
     schema: WORKSPACE_MANIFEST_V1,
     workspaceId,
     displayName: nonEmptyString(raw.display_name) ? raw.display_name : workspaceId,
-    createdAt: nonEmptyString(raw.created_at) ? raw.created_at : options.nowIso,
+    ...(nonEmptyString(raw.created_at) ? { createdAt: raw.created_at } : {}),
     requirements,
     repositories,
   };

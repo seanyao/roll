@@ -10,9 +10,30 @@ import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
   "workspace.usage": {
-    en: "Usage: roll workspace <init|requirement|list|show|register|activate|pause|archive> [options]\n  `init <id> --config <file> [--check] [--json]`\n  `requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]`\n  `list [--json] [--all]`\n  `show <id|path> [--json]`\n  `register <id> <path> [--json]`\n  `activate|pause|archive <id|path> [--json]`\n  Init --check is read-only; lifecycle mutations require one explicit target; --all is read-only.\n",
-    zh: "用法：roll workspace <init|requirement|list|show|register|activate|pause|archive> [选项]\n  `init <ID> --config <文件> [--check] [--json]`\n  `requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]`\n  `list [--json] [--all]`\n  `show <ID|路径> [--json]`\n  `register <ID> <路径> [--json]`\n  `activate|pause|archive <ID|路径> [--json]`\n  init --check 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。\n",
+    en: "Usage: roll workspace <init|issue|requirement|list|show|register|activate|pause|archive> [options]\n  `init <id> --config <file> [--check] [--json]`\n  `issue init <story-id> --workspace <id> [--check] [--json]`\n  `requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]`\n  `list [--json] [--all]`\n  `show <id|path> [--json]`\n  `register <id> <path> [--json]`\n  `activate|pause|archive <id|path> [--json]`\n  Init/issue --check is read-only; lifecycle mutations require one explicit target; --all is read-only.\n",
+    zh: "用法：roll workspace <init|issue|requirement|list|show|register|activate|pause|archive> [选项]\n  `init <ID> --config <文件> [--check] [--json]`\n  `issue init <Story ID> --workspace <ID> [--check] [--json]`\n  `requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]`\n  `list [--json] [--all]`\n  `show <ID|路径> [--json]`\n  `register <ID> <路径> [--json]`\n  `activate|pause|archive <ID|路径> [--json]`\n  init/issue --check 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。\n",
   },
+  "workspace.issue.usage": {
+    en: "Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]\n  --check resolves the Story Contract, Workspace bindings and every repository target's state with zero writes.\n  Apply creates/reuses/repairs one Issue root: an immutable roll.issue/v1 manifest and one worktree per declared repository target.\n",
+    zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]\n  --check 只读解析 Story Contract、工作区绑定与每个仓库目标的状态，零写入。\n  Apply 创建/复用/修复一个 Issue root：不可变的 roll.issue/v1 manifest 与每个声明仓库目标各一个 worktree。\n",
+  },
+  "workspace.issue.check.title": { en: "Issue %s check: manifest %s", zh: "Issue %s 检查：manifest %s" },
+  "workspace.issue.check.header": { en: "Alias\tState", zh: "别名\t状态" },
+  "workspace.issue.apply.title": { en: "Issue %s apply: %s", zh: "Issue %s 应用：%s" },
+  "workspace.issue.error.line": { en: "workspace issue: %s — %s", zh: "工作区 Issue：%s — %s" },
+  "workspace.issue.error.invalid_arguments": { en: "Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]", zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]" },
+  "workspace.issue.error.invalid_workspace": { en: "Workspace facts could not be read", zh: "无法读取工作区事实" },
+  "workspace.issue.error.story_not_found": { en: "No Story spec was found for this id", zh: "找不到该 ID 对应的 Story spec" },
+  "workspace.issue.error.duplicate_story": { en: "This Story id resolves to more than one spec — must be unique", zh: "该 Story ID 解析到多份 spec —必须唯一" },
+  "workspace.issue.error.invalid_config": { en: "Story Contract frontmatter is invalid", zh: "Story Contract frontmatter 无效" },
+  "workspace.issue.error.invalid_value": { en: "Story Contract or Issue target state is invalid", zh: "Story Contract 或 Issue 目标状态无效" },
+  "workspace.issue.error.invalid_type": { en: "Story Contract contains an invalid type", zh: "Story Contract 包含无效类型" },
+  "workspace.issue.error.unknown_field": { en: "Story Contract declares an alias with no matching Workspace repository binding", zh: "Story Contract 声明的别名没有匹配的工作区仓库绑定" },
+  "workspace.issue.error.identity_mismatch": { en: "Story spec id does not match the requested Story", zh: "Story spec 中的 ID 与请求的 Story 不一致" },
+  "workspace.issue.error.duplicate_identity": { en: "Story Contract repository alias must be unique", zh: "Story Contract 中的仓库别名必须唯一" },
+  "workspace.issue.error.rejected": { en: "Issue init plan was rejected before mutation", zh: "Issue 初始化计划已在变更前被拒绝" },
+  "workspace.issue.error.manifest_conflict": { en: "Issue manifest on disk conflicts with the resolved Workspace/Story identity", zh: "磁盘上的 Issue manifest 与解析出的工作区/Story 身份冲突" },
+  "workspace.issue.error.apply_failed": { en: "Issue init failed; clean new targets were rolled back and a repair journal was written", zh: "Issue 初始化失败；已回滚新建目标并写入修复 journal" },
   "workspace.requirement.usage": {
     en: "Usage: roll workspace requirement add [--workspace <id|path>] --provider <jira|github-issue|local-file|user-input> --ref <ref> --revision <revision> --body-file <file> [--context-root <dir> --context <relative-path> ...] --story <id> ... [--json]",
     zh: "用法：roll workspace requirement add [--workspace <ID|路径>] --provider <jira|github-issue|local-file|user-input> --ref <引用> --revision <修订> --body-file <文件> [--context-root <目录> --context <相对路径> ...] --story <ID> ... [--json]",

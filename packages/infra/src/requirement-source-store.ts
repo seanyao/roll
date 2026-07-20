@@ -344,7 +344,7 @@ function ensureSafeDirectory(root: string, target: string, create: boolean): voi
   }
 }
 
-function readWorkspace(root: string): WorkspaceManifest {
+export function readWorkspace(root: string): WorkspaceManifest {
   let value: unknown;
   try {
     value = JSON.parse(readFileSync(join(root, "workspace.yaml"), "utf8"));

@@ -12,6 +12,7 @@ import {
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
 import { workspaceInitCommand } from "./workspace-init.js";
+import { workspaceIssueCommand } from "./workspace-issue.js";
 import { workspaceRequirementCommand } from "./workspace-requirement.js";
 import { workspaceRegistryCandidates, workspaceRollHome, workspaceTargetSelector } from "./workspace-target.js";
 
@@ -291,6 +292,7 @@ export function workspaceCommand(args: string[]): number | Promise<number> {
   }
   const rest = args.slice(1);
   if (subcommand === "init") return workspaceInitCommand(rest);
+  if (subcommand === "issue") return workspaceIssueCommand(rest);
   if (subcommand === "requirement") return workspaceRequirementCommand(rest);
   const store = new WorkspaceRegistry({ rollHome: workspaceRollHome() });
   if (subcommand === "list") return listCommand(rest, store);

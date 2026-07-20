@@ -233,10 +233,26 @@ function rejectSymlinkSegments(root: string, relativePath: string): void {
   }
 }
 
+function archiveEntryBudget(relativePaths: readonly string[]): number {
+  const entries = new Set<string>();
+  for (const relativePath of relativePaths) {
+    const segments = relativePath.split("/");
+    let cursor = "";
+    for (const segment of segments) {
+      cursor = cursor === "" ? segment : `${cursor}/${segment}`;
+      entries.add(cursor);
+    }
+  }
+  return entries.size;
+}
+
 function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSourceStoreDeps): readonly StableContextFile[] {
   if (input.contextPaths.length === 0) return [];
   if (input.contextPaths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
     fail("context_limit", "Requirement context exceeds the file-count limit");
+  }
+  if (archiveEntryBudget(input.contextPaths) > MAX_REQUIREMENT_CONTEXT_FILES) {
+    fail("context_limit", "Requirement context exceeds the archive directory-entry limit");
   }
   if (input.contextRoot === undefined) fail("unsafe_context", "Requirement context root is required");
   let root: string;

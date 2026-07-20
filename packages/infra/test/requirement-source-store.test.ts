@@ -371,6 +371,22 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
+  it("rejects an input context set whose files are each nested in a distinct new directory before writing any revision, when the combined directory-entry total exceeds the archive cap", () => {
+    const f = fixture();
+    const contextPaths: string[] = [];
+    for (let index = 0; index < MAX_REQUIREMENT_CONTEXT_FILES; index += 1) {
+      const relativePath = `d${index}/file.md`;
+      write(join(f.contextRoot, relativePath), "x");
+      contextPaths.push(relativePath);
+    }
+    expect(contextPaths).toHaveLength(MAX_REQUIREMENT_CONTEXT_FILES);
+
+    expect(() => captureRequirementSource(request(f, { contextPaths }))).toThrowError(
+      expect.objectContaining({ code: "context_limit" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
   it("writes nothing to disk when every declared context path is invalid", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f, {

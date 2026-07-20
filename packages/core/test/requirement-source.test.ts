@@ -6,6 +6,8 @@ import {
   requirementRevisionKey,
   renderRequirementAttestProjection,
   resolveRequirementSourcesForStory,
+  MAX_REQUIREMENT_CONTEXT_BYTES,
+  MAX_REQUIREMENT_CONTEXT_FILES,
   type RequirementCaptureFacts,
 } from "../src/index.js";
 
@@ -161,6 +163,48 @@ describe("US-WS-007 RequirementSource planning", () => {
         expect.objectContaining({ code: "invalid_value", path: "requirement.sha256" }),
         expect.objectContaining({ code: "unsafe_path", path: "context[0].path" }),
       ]),
+    });
+  });
+
+  it("rejects context beyond exact and aggregate bounds, absolute paths and duplicate paths", () => {
+    const overCount = Array.from({ length: MAX_REQUIREMENT_CONTEXT_FILES + 1 }, (_, index) => (
+      { path: `file-${index}.md`, bytes: 1, sha256: digest("f") }
+    ));
+    expect(planRequirementCapture(facts({ context: overCount }))).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "context_limit", path: "context" })]),
+    });
+
+    const overBytes = [{ path: "huge.md", bytes: MAX_REQUIREMENT_CONTEXT_BYTES + 1, sha256: digest("f") }];
+    expect(planRequirementCapture(facts({ context: overBytes }))).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "context_limit", path: "context" })]),
+    });
+
+    expect(planRequirementCapture(facts({ context: [{ path: "/etc/passwd", bytes: 1, sha256: digest("f") }] }))).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "unsafe_path", path: "context[0].path" })]),
+    });
+
+    expect(planRequirementCapture(facts({
+      context: [
+        { path: "dup.md", bytes: 1, sha256: digest("f") },
+        { path: "dup.md", bytes: 2, sha256: digest("g") },
+      ],
+    }))).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "duplicate_context", path: "context[1].path" })]),
+    });
+  });
+
+  it("rejects a same-revision recapture whose context differs even when the body is unchanged", () => {
+    const created = planRequirementCapture(facts());
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    expect(planRequirementCapture(facts({ context: [] }), created.value.manifest)).toMatchObject({
+      ok: false,
+      errors: [{ code: "revision_conflict", path: "revision" }],
     });
   });
 

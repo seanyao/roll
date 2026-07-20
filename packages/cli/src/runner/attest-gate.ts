@@ -1485,6 +1485,20 @@ export function runAttestGate(
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
     }
+    // FIX-1476: the no-AC exemption is evaluated BEFORE the render-exit block.
+    // Historically it sat below it, so a no-AC card whose attest render exited
+    // non-zero ("story not found" under `.roll/features/`) blocked here and the
+    // exemption was never reached — exactly the cards it exists for (production:
+    // ~40 blocked gate events / 30 days across 3 projects, e.g. roll-capture
+    // REFACTOR-001 which could never deliver). E9: the AC block lives in the
+    // SPEC (design truth) → read from specRepoCwd, so an uncommitted spec
+    // present only in the live checkout is seen. `null` (spec missing or
+    // unreadable) deliberately does NOT exempt — that would fail open.
+    if (storyHasAcBlock(specRepoCwd, storyId) === false) {
+      const reasons = ["story has no AC block; acceptance report not required"];
+      sinks.event({ cycleId, verdict: "produced", reasons });
+      return { verdict: "produced", mode, reasons, blocked: false };
+    }
     if (renderExitCode !== 0) {
       const reasons = [`attest render failed for ${storyId} (exit ${renderExitCode})`];
       const blocked = mode === "hard";
@@ -1494,14 +1508,6 @@ export function runAttestGate(
       );
       sinks.event({ cycleId, verdict: "skipped", reasons });
       return { verdict: "skipped", mode, reasons, blocked };
-    }
-    // E9: the AC block lives in the SPEC (design truth) → read from specRepoCwd,
-    // so an uncommitted spec present only in the live checkout is seen. This is
-    // the primary fix for the "story not found" mis-read on tracked-`.roll` repos.
-    if (storyHasAcBlock(specRepoCwd, storyId) === false) {
-      const reasons = ["story has no AC block; acceptance report not required"];
-      sinks.event({ cycleId, verdict: "produced", reasons });
-      return { verdict: "produced", mode, reasons, blocked: false };
     }
     // E9: must-declare is a SPEC-frontmatter diagnostic → read from design truth.
     const diagnostics = violatesMustDeclareSurface(specRepoCwd, storyId) ? [MUST_DECLARE_FAIL_REASON] : [];

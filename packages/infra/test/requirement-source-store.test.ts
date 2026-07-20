@@ -1,18 +1,23 @@
 import {
+  closeSync,
   existsSync,
+  ftruncateSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { MAX_REQUIREMENT_BODY_BYTES, MAX_REQUIREMENT_CONTEXT_BYTES } from "@roll/core";
 import { acquireLock, releaseLock } from "../src/process.js";
 import {
   captureRequirementSource,
@@ -269,5 +274,70 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(() => captureRequirementSource(request(f))).toThrowError(
       expect.objectContaining({ code: "revision_conflict" }),
     );
+  });
+
+  it("never follows a symlink planted inside the current projection's context/ during self-heal", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const outside = join(f.root, "outside-secret.txt");
+    write(outside, "secret outside projection\n");
+    rmSync(join(first.requirementPath, "context", "domain.md"), { force: true });
+    symlinkSync(outside, join(first.requirementPath, "context", "domain.md"));
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repaired.outcome).toBe("reused");
+    const healed = join(first.requirementPath, "context", "domain.md");
+    expect(lstatSync(healed).isSymbolicLink()).toBe(false);
+    expect(readFileSync(healed, "utf8")).toBe("domain context\n");
+  });
+
+  it("treats a projection context/ tree deeper than the revision depth cap as stale rather than recursing unbounded", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    let deep = join(first.requirementPath, "context");
+    for (let index = 0; index < 40; index += 1) {
+      deep = join(deep, `d${index}`);
+    }
+    mkdirSync(deep, { recursive: true });
+    write(join(deep, "extra.md"), "unexpected deep file\n");
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repaired.outcome).toBe("reused");
+    expect(existsSync(join(first.requirementPath, "context", "d0"))).toBe(false);
+    expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe("domain context\n");
+  });
+
+  it("never reads a sparse 500MB current requirement.md fully into memory before treating it as stale", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const oversizedPath = join(first.requirementPath, "requirement.md");
+    const fd = openSync(oversizedPath, "w");
+    ftruncateSync(fd, 500 * 1024 * 1024);
+    closeSync(fd);
+    expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_BODY_BYTES);
+    if (typeof global.gc === "function") global.gc();
+    const rssBefore = process.memoryUsage().rss;
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repaired.outcome).toBe("reused");
+    expect(process.memoryUsage().rss - rssBefore).toBeLessThan(64 * 1024 * 1024);
+    expect(readFileSync(oversizedPath, "utf8")).toContain("Jira requirement");
+  });
+
+  it("never reads a sparse 500MB current context/ file fully into memory before treating the projection as stale", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const oversizedPath = join(first.requirementPath, "context", "domain.md");
+    const fd = openSync(oversizedPath, "w");
+    ftruncateSync(fd, 500 * 1024 * 1024);
+    closeSync(fd);
+    expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_CONTEXT_BYTES);
+    if (typeof global.gc === "function") global.gc();
+    const rssBefore = process.memoryUsage().rss;
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repaired.outcome).toBe("reused");
+    expect(process.memoryUsage().rss - rssBefore).toBeLessThan(64 * 1024 * 1024);
+    expect(readFileSync(oversizedPath, "utf8")).toBe("domain context\n");
   });
 });

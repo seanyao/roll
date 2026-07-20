@@ -161,6 +161,26 @@ function stableFile(
   }
 }
 
+const PROJECTION_MAX_DEPTH = 32;
+
+function boundedReadCurrent(path: string, maximumBytes: number): Buffer | undefined {
+  let descriptor: number;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return undefined;
+  }
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > maximumBytes) return undefined;
+    return readFileSync(descriptor);
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function safeRelativePath(value: string): boolean {
   if (value === "" || value !== value.trim() || value.startsWith("/") || value.startsWith("~") || value.includes("\\") || /^[A-Za-z]:/u.test(value)) {
     return false;
@@ -356,15 +376,22 @@ function isProjectionCurrent(
 ): boolean {
   try {
     if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
-    if (!readFileSync(join(requirementPath, "requirement.md")).equals(evidence.body.content)) return false;
-    if (readFileSync(join(requirementPath, "attest.md"), "utf8") !== renderRequirementAttestProjection(manifest)) return false;
+    const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES);
+    if (body === undefined || !body.equals(evidence.body.content)) return false;
+    const attestMaxBytes = Buffer.byteLength(renderRequirementAttestProjection(manifest), "utf8") + 4096;
+    const attest = boundedReadCurrent(join(requirementPath, "attest.md"), attestMaxBytes);
+    if (attest === undefined || attest.toString("utf8") !== renderRequirementAttestProjection(manifest)) return false;
     const contextRoot = join(requirementPath, "context");
     const actualPaths = existsSync(contextRoot) ? archiveContextPaths(contextRoot).slice().sort() : [];
     const expectedPaths = evidence.context.map((file) => file.relativePath).slice().sort();
     if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) return false;
-    return evidence.context.every((file) => (
-      readFileSync(join(contextRoot, file.relativePath)).equals(file.content)
-    ));
+    let remainingBytes = MAX_REQUIREMENT_CONTEXT_BYTES;
+    return evidence.context.every((file) => {
+      const content = boundedReadCurrent(join(contextRoot, file.relativePath), Math.min(file.bytes, remainingBytes));
+      if (content === undefined) return false;
+      remainingBytes -= content.byteLength;
+      return remainingBytes >= 0 && content.equals(file.content);
+    });
   } catch {
     return false;
   }
@@ -389,14 +416,17 @@ function projectCurrent(
   }
 }
 
-function archiveContextPaths(root: string, relativeRoot = ""): readonly string[] {
+function archiveContextPaths(root: string, relativeRoot = "", depth = 0): readonly string[] {
+  if (depth > PROJECTION_MAX_DEPTH) {
+    fail("revision_conflict", "Requirement context tree exceeds its depth contract");
+  }
   const paths: string[] = [];
   for (const entry of readdirSync(join(root, relativeRoot), { withFileTypes: true })) {
     const relativePath = relativeRoot === "" ? entry.name : `${relativeRoot}/${entry.name}`;
     const path = join(root, relativePath);
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) fail("revision_conflict", "Immutable Requirement context contains a symbolic link");
-    if (entry.isDirectory()) paths.push(...archiveContextPaths(root, relativePath));
+    if (entry.isDirectory()) paths.push(...archiveContextPaths(root, relativePath, depth + 1));
     else if (entry.isFile()) paths.push(relativePath);
     else fail("revision_conflict", "Immutable Requirement context contains a non-regular entry");
     if (paths.length > MAX_REQUIREMENT_CONTEXT_FILES) {

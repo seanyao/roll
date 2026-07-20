@@ -21,9 +21,9 @@ export interface LegacyProjectEventPayload {
 }
 
 export interface LegacyProjectEventMigrationInput {
-  schema: typeof LEGACY_PROJECT_EVENT_MIGRATION_V1;
-  projectSlug: string;
-  event: LegacyProjectEventPayload;
+  readonly schema: typeof LEGACY_PROJECT_EVENT_MIGRATION_V1;
+  readonly projectSlug: string;
+  readonly event: LegacyProjectEventPayload;
 }
 
 export type RollEvent =

@@ -5,10 +5,6 @@ export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
 export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
 export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 
-export const ROLL_WORKSPACE_V1 = WORKSPACE_MANIFEST_V1;
-export const ROLL_REPOSITORY_BINDING_V1 = REPOSITORY_BINDING_V1;
-export const ROLL_ISSUE_V1 = ISSUE_MANIFEST_V1;
-
 export type ContractErrorCode =
   | "invalid_type"
   | "unknown_version"
@@ -20,9 +16,9 @@ export type ContractErrorCode =
   | "repo_id_mismatch";
 
 export interface ContractError {
-  code: ContractErrorCode;
-  path: string;
-  message: string;
+  readonly code: ContractErrorCode;
+  readonly path: string;
+  readonly message: string;
 }
 
 export type ContractResult<T> =
@@ -30,32 +26,32 @@ export type ContractResult<T> =
   | { ok: false; errors: readonly ContractError[] };
 
 export interface RequirementSourceReference {
-  provider: string;
-  ref: string;
+  readonly provider: string;
+  readonly ref: string;
 }
 
 export interface RepositoryWorkflowMetadata {
-  branchPattern: string;
-  requiredChecks: readonly string[];
+  readonly branchPattern: string;
+  readonly requiredChecks: readonly string[];
 }
 
 export interface RepositoryBinding {
-  schema: typeof REPOSITORY_BINDING_V1;
-  repoId: string;
-  alias: string;
-  remote: string;
-  integrationBranch: string;
-  provider: string;
-  workflow: RepositoryWorkflowMetadata;
+  readonly schema: typeof REPOSITORY_BINDING_V1;
+  readonly repoId: string;
+  readonly alias: string;
+  readonly remote: string;
+  readonly integrationBranch: string;
+  readonly provider: string;
+  readonly workflow: RepositoryWorkflowMetadata;
 }
 
 export interface WorkspaceManifest {
-  schema: typeof WORKSPACE_MANIFEST_V1;
-  workspaceId: string;
-  displayName: string;
-  createdAt?: string;
-  requirements: readonly RequirementSourceReference[];
-  repositories: readonly RepositoryBinding[];
+  readonly schema: typeof WORKSPACE_MANIFEST_V1;
+  readonly workspaceId: string;
+  readonly displayName: string;
+  readonly createdAt?: string;
+  readonly requirements: readonly RequirementSourceReference[];
+  readonly repositories: readonly RepositoryBinding[];
 }
 
 export interface WorkspaceManifestExpectations {
@@ -63,36 +59,47 @@ export interface WorkspaceManifestExpectations {
 }
 
 export interface WorkspaceIdentity {
-  workspaceId: string;
+  readonly workspaceId: string;
 }
 
 export interface IssueIdentity extends WorkspaceIdentity {
-  storyId: string;
+  readonly storyId: string;
 }
 
 export interface RepositoryIssueIdentity extends IssueIdentity {
-  repoId: string;
+  readonly repoId: string;
 }
 
 export type RepositoryAccess = "read" | "write";
 export type NoChangePolicy = "changes_required" | "no_change_allowed";
 
-export interface IssueRepositoryTarget {
-  repoId: string;
-  alias: string;
-  access: RepositoryAccess;
-  requiredDelivery: boolean;
-  noChangePolicy?: NoChangePolicy;
-  pathScope?: readonly string[];
-  dependsOnRepo?: string;
+interface IssueRepositoryTargetBase {
+  readonly repoId: string;
+  readonly alias: string;
+  readonly pathScope?: readonly string[];
+  readonly dependsOnRepo?: string;
 }
 
+export interface ReadIssueRepositoryTarget extends IssueRepositoryTargetBase {
+  readonly access: "read";
+  readonly requiredDelivery: false;
+  readonly noChangePolicy?: never;
+}
+
+export interface WriteIssueRepositoryTarget extends IssueRepositoryTargetBase {
+  readonly access: "write";
+  readonly requiredDelivery: boolean;
+  readonly noChangePolicy: NoChangePolicy;
+}
+
+export type IssueRepositoryTarget = ReadIssueRepositoryTarget | WriteIssueRepositoryTarget;
+
 export interface IssueManifest {
-  schema: typeof ISSUE_MANIFEST_V1;
-  workspaceId: string;
-  storyId: string;
-  requirements: readonly RequirementSourceReference[];
-  repositories: readonly IssueRepositoryTarget[];
+  readonly schema: typeof ISSUE_MANIFEST_V1;
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly requirements: readonly RequirementSourceReference[];
+  readonly repositories: readonly IssueRepositoryTarget[];
 }
 
 export interface IssueManifestExpectations {
@@ -139,7 +146,7 @@ export const workspaceManifestV1Schema: JsonSchema = objectSchema(
     displayName: stringSchema,
     createdAt: stringSchema,
     requirements: { type: "array", items: requirementSourceSchema },
-    repositories: { type: "array", items: repositoryBindingV1Schema },
+    repositories: { type: "array", items: repositoryBindingV1Schema, minItems: 1 },
   },
   ["schema", "workspaceId", "displayName", "requirements", "repositories"],
 );
@@ -189,7 +196,10 @@ function remoteFailure(message: string): ContractResult<string> {
 }
 
 function hasUnsafeRemoteSyntax(value: string): boolean {
-  if (value.includes("\\") || value.includes("%") || value.includes("?") || value.includes("#")) {
+  if (
+    /[\x00-\x20\x7f]/u.test(value) || value.includes("\\") || value.includes("%") ||
+    value.includes("?") || value.includes("#")
+  ) {
     return true;
   }
   const pathPart = value.startsWith("file://")
@@ -210,6 +220,12 @@ function trimRepositorySuffix(pathname: string): string | null {
 }
 
 function normalizeUrlRemote(value: string): ContractResult<string> {
+  if (/^https:\/\/[^/]*@/u.test(value)) {
+    return remoteFailure("HTTPS repository remote must not contain userinfo");
+  }
+  if (value.startsWith("file://") && !value.startsWith("file:///")) {
+    return remoteFailure("file repository remote must not contain an authority");
+  }
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -230,7 +246,7 @@ function normalizeUrlRemote(value: string): ContractResult<string> {
       return remoteFailure("file repository remote must use an absolute local file URL");
     }
     const path = trimRepositorySuffix(parsed.pathname);
-    if (path === null || !path.startsWith("/")) {
+    if (path === null || !path.startsWith("/") || /^\/[A-Za-z]:\//u.test(path)) {
       return remoteFailure("file repository remote must contain a safe absolute path");
     }
     return { ok: true, value: `file://${path}` };
@@ -240,6 +256,9 @@ function normalizeUrlRemote(value: string): ContractResult<string> {
   const isSsh = parsed.protocol === "ssh:";
   if (!isHttps && !isSsh) {
     return remoteFailure("repository remote protocol is not supported by v1");
+  }
+  if (isSsh && parsed.username === "") {
+    return remoteFailure("SSH repository remote must contain a transport username");
   }
   const expectedPort = isHttps ? "443" : "22";
   if (parsed.port !== "" && parsed.port !== expectedPort) {
@@ -346,9 +365,15 @@ function isSafeAlias(value: string): boolean {
 }
 
 function isSafeGitRef(value: string): boolean {
-  if (value.startsWith("/") || value.endsWith("/") || value.endsWith(".") || value.endsWith(".lock")) return false;
+  if (
+    value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.endsWith(".") ||
+    value === "@"
+  ) return false;
   if (value.includes("..") || value.includes("@{") || value.includes("//")) return false;
-  return !/[\x00-\x20~^:?*\\[]/u.test(value);
+  if (/[\x00-\x20\x7f~^:?*\\[]/u.test(value)) return false;
+  return value.split("/").every((component) =>
+    component !== "" && !component.startsWith(".") && !component.endsWith(".lock")
+  );
 }
 
 const WORKFLOW_TOKENS = [
@@ -556,7 +581,7 @@ function parseBoolean(
 function isSafeRelativeTargetPath(value: string): boolean {
   if (
     value === "" || value.startsWith("/") || value.startsWith("~") || value.includes("\\") ||
-    /^[A-Za-z]:\//u.test(value)
+    /[\x00-\x1f\x7f]/u.test(value) || /^[A-Za-z]:/u.test(value)
   ) return false;
   const segments = value.split("/");
   return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
@@ -613,17 +638,16 @@ function parseIssueTarget(value: unknown, index: number, errors: ContractError[]
   ) {
     return undefined;
   }
-  return {
-    repoId,
-    alias,
-    access,
-    requiredDelivery,
-    ...(access === "write" && (noChangePolicy === "changes_required" || noChangePolicy === "no_change_allowed")
-      ? { noChangePolicy }
-      : {}),
+  const optionalFields = {
     ...(pathScope !== undefined ? { pathScope } : {}),
     ...(dependsOnRepo !== undefined ? { dependsOnRepo } : {}),
   };
+  if (access === "read") {
+    if (requiredDelivery !== false) return undefined;
+    return { repoId, alias, access, requiredDelivery, ...optionalFields };
+  }
+  if (noChangePolicy !== "changes_required" && noChangePolicy !== "no_change_allowed") return undefined;
+  return { repoId, alias, access, requiredDelivery, noChangePolicy, ...optionalFields };
 }
 
 function duplicateTargetErrors(targets: readonly IssueRepositoryTarget[]): ContractError[] {

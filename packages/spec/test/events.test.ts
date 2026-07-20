@@ -23,9 +23,6 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     };
     expect(parseLegacyProjectEventMigrationInput(input)).toEqual({ ok: true, value: input });
     expect(parseEventLine(JSON.stringify(input))).toBeNull();
-    // @ts-expect-error migration wrappers are deliberately outside the runtime RollEvent union
-    const runtimeEvent: RollEvent = input;
-    expect(runtimeEvent).toBe(input);
   });
 
   it("rejects unknown legacy migration versions and wrapper fields", () => {

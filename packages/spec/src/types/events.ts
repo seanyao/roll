@@ -79,6 +79,14 @@ export type RollEvent =
   // killed, the inflight lock released, and the worktree branch PRESERVED
   // (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
   | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number; ts: number }
+  // FIX-1474 — the builder child process was detected DEAD/MISSING by the
+  // runner's liveness probe while its spawn await had NOT settled: an
+  // out-of-band death (external SIGKILL of a process-tree member, PTY leader
+  // death, lost exit delivery) that the FIX-907 watchdogs cannot see (they
+  // only cover a child that is ALIVE but hung/silent/thrashing). Recorded
+  // BEFORE the kill + `aborted` terminal teardown so the death is auditable
+  // (fail-loud, never a silent hang). `pid` is the probed child process id.
+  | { type: "cycle:agent_lost"; cycleId: string; agent: string; pid?: number; ts: number }
   // US-LOOP-088 — post-cycle environment cleanup is observable in the event stream.
   | { type: "cycle:cleanup"; cycleId: string; rule: string; path: string; ok: boolean; warning?: string; ts: number }
   | { type: "cycle:end"; cycleId: string; outcome: TerminalOutcome; cost: CycleCost; ts: number; failure_class?: FailureClass; root_cause_key?: string }

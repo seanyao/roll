@@ -26,7 +26,7 @@
  * Plus a kill-mid-execute test (I2): a watchdog breach during execute → terminal
  * event STILL written, lock released, and a fresh runCycleOnce takes over cleanly.
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -779,6 +779,83 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       restore("ROLL_TIMEOUT_POLL_MS", savedPoll);
       restore("ROLL_CYCLE_NO_PROGRESS_SEC", savedNp);
       restore("ROLL_CYCLE_WALL_TIMEOUT_SEC", savedWall);
+    }
+  }, 120_000);
+
+  it("FIX-1474 lost builder child (killed out-of-band, spawn never settles): liveness probe → aborted terminal + durable run row, lock released, bounded", async () => {
+    const { repo } = makeFixture("lost1474");
+    const rt = tmp("lost1474-rt");
+    const cycleId = "20260720-101010-1474";
+    const branch = `loop/cycle-${cycleId}`;
+    const p = paths(rt, cycleId);
+    const fc = fixedClock(4_000_000);
+
+    // Pin a short REAL poll cadence so the liveness probe trips in real
+    // wall-time inside the test (same seam style as ROLL_TIMEOUT_POLL_MS).
+    const savedPoll = process.env["ROLL_LIVENESS_POLL_MS"];
+    process.env["ROLL_LIVENESS_POLL_MS"] = "20";
+
+    // REAL process-death fixture: spawn a real sleeper as the "builder", report
+    // its pid through the onSpawn seam, then SIGKILL it OUT-OF-BAND (not via
+    // any runner watchdog) and NEVER settle the spawn promise — the lost
+    // exit-delivery shape the in-band watchdogs cannot see. Without FIX-1474
+    // this hangs the cycle forever.
+    const lostChild: AgentSpawn = (_agent, opts) => {
+      const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      opts.onChunk?.(Buffer.from("builder started\n"));
+      opts.onSpawn?.(child);
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already gone */
+        }
+      }, 50).unref();
+      return new Promise<AgentSpawnResult>(() => {}); // never settles
+    };
+
+    try {
+      const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps, clock: fc.clock });
+      const ports: Ports = { ...base, agentSpawn: lostChild, github: fakeGithub(0) };
+      const startedWallMs = Date.now();
+      const result = await runCycleOnce({
+        ports,
+        ctx: { cycleId, branch, loop: "ci" as never },
+      });
+      const elapsedWallMs = Date.now() - startedWallMs;
+
+      expect(result.ran).toBe(true);
+      // AC1: bounded detection — the cycle CONVERGED (did not hang)…
+      expect(result.terminal).toBe("aborted");
+      expect(elapsedWallMs).toBeLessThan(35_000);
+
+      const events = readFileSync(p.eventsPath, "utf8")
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .map((l) => JSON.parse(l) as { type: string; outcome?: string; cycleId?: string; status?: string });
+
+      // AC2: the auditable death event was recorded BEFORE the terminal.
+      const lost = events.find((e) => e.type === "cycle:agent_lost");
+      expect(lost).toBeDefined();
+      expect(lost?.cycleId).toBe(cycleId);
+
+      // AC2: explicit `aborted` terminal — a durable cycle:end…
+      const end = events.find((e) => e.type === "cycle:end");
+      expect(end?.outcome).toBe("aborted_no_delivery");
+
+      // AC2: …and a durable runs row with the aborted status.
+      const rows = readFileSync(p.runsPath, "utf8")
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .map((l) => JSON.parse(l) as { cycle_id?: string; status?: string });
+      const row = rows.find((r) => r.cycle_id === cycleId);
+      expect(row?.status).toBe("aborted");
+
+      // AC1: the inflight lock is RELEASED (the loop never wedges).
+      expect(existsSync(p.lockPath)).toBe(false);
+    } finally {
+      if (savedPoll === undefined) delete process.env["ROLL_LIVENESS_POLL_MS"];
+      else process.env["ROLL_LIVENESS_POLL_MS"] = savedPoll;
     }
   }, 120_000);
 

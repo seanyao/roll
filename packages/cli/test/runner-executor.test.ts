@@ -52,6 +52,7 @@ import {
   rescueLeakedMain,
   resetDirective,
   startSpawnTimeoutWatchdog,
+  startBuilderLivenessProbe,
   readCycleTimeoutThresholds,
   storyPinDirective,
   RESUME_DISABLED_ENV,
@@ -6556,6 +6557,164 @@ describe("FIX-1477 startSpawnTimeoutWatchdog — git-state progress + the no-sta
       await vi.advanceTimersByTimeAsync(10000);
       expect(kills).toBe(0);
       expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// FIX-1474 — builder-child LIVENESS probe (the lost-child killer). The FIX-907
+// watchdog covers a child that is ALIVE (hung / silent / thrashing); it cannot
+// see a child that DIED out-of-band while the spawn await never settled
+// (external SIGKILL of a process-tree member, PTY leader death, lost exit
+// delivery). The probe polls the child's pid and, after consecutive dead
+// observations, records cycle:agent_lost + reaps the tree + resolves the race.
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("FIX-1474 startBuilderLivenessProbe — bounded detection of a dead/missing builder child", () => {
+  it("a child that dies out-of-band is declared lost after consecutive dead probes: cycle:agent_lost + kill + onLost, then inert", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let lostCalls = 0;
+      let alive = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-lost",
+        agent: "kimi",
+        pid: () => 4242,
+        spawnPending: () => true,
+        isAlive: () => alive,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        onLost: () => (lostCalls += 1),
+        pollMs: 1000,
+      });
+      // Alive child: two ticks, nothing happens.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(kills).toBe(0);
+      // Death: the FIRST dead observation only starts the confirmation streak
+      // (one tick can race the OS reap/close handshake); the second declares it.
+      alive = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(lostCalls).toBe(1);
+      expect(probe.stop().lost).toBe(true);
+      const lost = events.find((e) => e.type === "cycle:agent_lost");
+      expect(lost).toMatchObject({ type: "cycle:agent_lost", cycleId: "c-lost", agent: "kimi", pid: 4242 });
+      // Bounded: once declared, no further kills/events on later ticks.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(kills).toBe(1);
+      expect(events.filter((e) => e.type === "cycle:agent_lost")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a live child NEVER fires (no event, no kill, stop().lost false)", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-live",
+        agent: "pi",
+        pid: () => 777,
+        spawnPending: () => true,
+        isAlive: () => true,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pid not yet reported (undefined) never fires; a later death is still caught", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let pid: number | undefined;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-late",
+        agent: "claude",
+        pid: () => pid,
+        spawnPending: () => true,
+        isAlive: () => false, // every probe of a real pid reads dead
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(kills).toBe(0); // no pid yet — nothing to accuse
+      pid = 31337;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(kills).toBe(1);
+      expect(probe.stop().lost).toBe(true);
+      expect(events.find((e) => e.type === "cycle:agent_lost")).toMatchObject({ pid: 31337 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("误杀-prevention: a single dead blip below the confirm streak recovers when the child is seen alive again", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let alive = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-blip",
+        agent: "reasonix",
+        pid: () => 555,
+        spawnPending: () => true,
+        isAlive: () => alive,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      alive = false; // one dead observation (e.g. mid-reap zombie race)…
+      await vi.advanceTimersByTimeAsync(1000);
+      alive = true; // …then the child reads alive again — streak resets
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a settled spawn makes the probe inert (never accuses a finished cycle)", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let pending = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-done",
+        agent: "kimi",
+        pid: () => 999,
+        spawnPending: () => pending,
+        isAlive: () => false,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      pending = false; // the spawn resolved — the probe must stand down
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
     } finally {
       vi.useRealTimers();
     }

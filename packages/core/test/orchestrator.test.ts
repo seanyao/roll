@@ -1054,6 +1054,43 @@ describe("timeout breach mid-execute → clean teardown ORDER", () => {
       "release_lock",
     ]);
   });
+
+  // FIX-1474 — the builder child died OUT-OF-BAND (external SIGKILL / PTY
+  // leader death / lost exit delivery): NOT a timeout (blocked) and NOT a code
+  // failure (retry/failed) — the cycle converges to the explicit `aborted`
+  // terminal with a durable cycle:end + runs row, and the lock is released.
+  it("FIX-1474 agent_exited with lost:true → aborted terminal teardown (no retry, no blocked)", () => {
+    let state = initialCycleState(CTX);
+    const drive = (ev: CycleEvent): CycleCommand[] => {
+      const r = cycleStep(state, ev);
+      state = r.state;
+      return r.commands;
+    };
+    drive({ type: "start", ctx: CTX });
+    drive({ type: "preflight_done" });
+    drive({ type: "worktree_created" });
+    drive({ type: "story_picked", storyId: "US-1" });
+    drive({ type: "route_resolved", agent: "claude", model: "sonnet" });
+    const cmds = drive({ type: "agent_exited", exit: 137, timedOut: false, lost: true });
+    expect(state.terminal).toBe("aborted");
+    expect(state.done).toBe(true);
+    expect(cmds.map((c) => c.kind)).toEqual([
+      "kill_agent",
+      "measure_worktree",
+      "emit_event",
+      "append_run",
+      "append_alert",
+      "release_lock",
+    ]);
+    // Lock release LAST; the worktree is PRESERVED (no cleanup command).
+    expect(cmds[cmds.length - 1]?.kind).toBe("release_lock");
+    expect(cmds.some((c) => c.kind === "cleanup_worktree")).toBe(false);
+    // The terminal records the aborted outcome — never the timeout's blocked.
+    const emit = cmds.find((c) => c.kind === "emit_event");
+    expect(emit).toMatchObject({ event: { type: "cycle:end", outcome: "aborted_no_delivery" } });
+    const run = cmds.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "aborted", outcome: "aborted_no_delivery" });
+  });
 });
 
 // ── retry / backoff ──────────────────────────────────────────────────────────

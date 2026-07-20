@@ -397,7 +397,10 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       targets[index] = { ...targets[index]!, created: true };
       journal = { ...journal, targets: [...targets] };
       writeJournal(input.issueRoot, journal);
-      if (isReadTarget) protectReadOnlyWorktree(targets[index]!.path);
+      if (isReadTarget) {
+        deps.beforeProtect?.(target.alias, targets[index]!.path);
+        protectReadOnlyWorktree(targets[index]!.path);
+      }
       deps.afterTargetCreated?.(target.alias, targets[index]!.path);
     }
     if (!manifestExists) {

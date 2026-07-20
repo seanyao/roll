@@ -300,35 +300,87 @@ describe("US-WS-008 roll workspace issue init", () => {
   it("rolls back the clean first target's real git worktree via git worktree remove when the SECOND target's worktree add genuinely fails", async () => {
     const f = fixture();
     await initWorkspace(f);
-    writeBacklogStorySpec(f);
+    // This fault needs the SECOND target to be a WRITE target too, so its
+    // real `worktree add -b <branch>` can genuinely collide on an
+    // already-existing branch — the same real git-level failure mode the
+    // infra-level suite already proves (see issue-worktrees.test.ts). `docs`
+    // is declared write-access ONLY for this one story id; every other test
+    // in this file keeps it read-access.
+    const storyId = "US-FAULT1";
+    const backlogStoryDir = join(f.workspace, "backlog", "workspace-orchestration", storyId);
+    mkdirSync(backlogStoryDir, { recursive: true });
+    writeFileSync(join(backlogStoryDir, "spec.md"), `---
+id: ${storyId}
+repositories:
+  - alias: sot
+    access: write
+    required_delivery: true
+  - alias: docs
+    access: write
+    required_delivery: true
+---
 
-    // A real, unmocked git-level failure at the worktree-ADD phase: apply
-    // once to create sot's real branch/worktree, then simulate an operator
-    // manually deleting the worktree DIRECTORY by hand (leaving the branch —
-    // and the Issue root's manifest/events — behind, an inconsistent-but-real
-    // state). Re-running must genuinely fail `worktree add -b` on the
-    // survived branch and roll back cleanly rather than duplicate anything.
-    const first = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
-    expect(first.status, first.stderr).toBe(0);
-    const issueRootPre = join(f.workspace, "issues", "US-XX1");
-    const sotCachePath = join(f.rollHome, "repos", `${f.sotRepoId}.git`);
-    execFileSync("git", ["worktree", "remove", "--force", join(issueRootPre, "sot")], { cwd: sotCachePath, stdio: "ignore" });
-    rmSync(join(issueRootPre, "docs"), { recursive: true, force: true });
+# ${storyId} fixture story
+`, "utf8");
 
-    const failed = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    // Warm docs's real machine cache through a SEPARATE throwaway Story/apply
+    // — leaves that throwaway Issue/worktree completely untouched; its only
+    // purpose is to make docs's bare cache exist on disk before we simulate
+    // an independent external process below.
+    const throwawayStoryId = "US-FAULT1-WARMUP";
+    const throwawayDir = join(f.workspace, "backlog", "workspace-orchestration", throwawayStoryId);
+    mkdirSync(throwawayDir, { recursive: true });
+    writeFileSync(join(throwawayDir, "spec.md"), `---
+id: ${throwawayStoryId}
+repositories:
+  - alias: docs
+    access: write
+    required_delivery: true
+---
+
+# ${throwawayStoryId} cache-warmup fixture story (left untouched)
+`, "utf8");
+    const warmup = await run(["workspace", "issue", "init", throwawayStoryId, "--workspace", "ws-demo", "--json"], f);
+    expect(warmup.status, warmup.stderr).toBe(0);
+    const throwawayIssueRoot = join(f.workspace, "issues", throwawayStoryId);
+
+    // Simulate an INDEPENDENT external process creating the TARGET story's
+    // governed branch directly in docs's real bare cache, pointed at the
+    // resolved integration base — a real, unmocked pre-existing fact with
+    // zero deletion of any Issue/worktree/manifest/event state anywhere.
+    const docsCachePath = join(f.rollHome, "repos", `${f.readRepoId}.git`);
+    const targetBranch = `roll/ws-demo/${storyId}/docs`;
+    execFileSync("git", ["branch", targetBranch, "refs/remotes/origin/main"], { cwd: docsCachePath, stdio: "ignore" });
+
+    // Run the target Story once for real: `sot` (target 1) is created fresh
+    // and clean; `docs` (target 2) genuinely fails `worktree add -b` because
+    // its governed branch for THIS story id already exists.
+    const failed = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(failed.status).toBe(1);
     expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
 
-    const issueRoot = join(f.workspace, "issues", "US-XX1");
+    const issueRoot = join(f.workspace, "issues", storyId);
+    // sot was newly-created and clean during THIS run -> rolled back via a
+    // real `git worktree remove`, never left behind.
+    expect(existsSync(join(issueRoot, "sot"))).toBe(false);
+    // docs never got a worktree created — the branch collision struck before
+    // any worktree-add for it could succeed.
     expect(existsSync(join(issueRoot, "docs"))).toBe(false);
     const journal = JSON.parse(readFileSync(join(issueRoot, "issue-init.pending.json"), "utf8"));
     expect(journal).toMatchObject({ schema: "roll.issue-init-journal/v1", status: "repair_required" });
 
-    // Repair: remove the colliding branch, then re-run — the same CLI contract converges.
-    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot"], { cwd: sotCachePath, stdio: "ignore" });
-    const repaired = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    // The throwaway warmup Issue and its real worktree are completely
+    // unaffected by the failed target Story's rollback.
+    expect(existsSync(join(throwawayIssueRoot, "docs", ".git"))).toBe(true);
+
+    // Repair: delete only the deliberately-injected colliding branch, then
+    // re-run — the same CLI contract converges.
+    execFileSync("git", ["branch", "-D", targetBranch], { cwd: docsCachePath, stdio: "ignore" });
+    const repaired = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(repaired.status, repaired.stderr).toBe(0);
-    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "created" });
+    // A journal survived the failed attempt (interrupted mid-apply), so the
+    // converged retry is honestly "repaired", not a fresh "created".
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired" });
     expect(existsSync(join(issueRoot, "sot", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "issue-init.pending.json"))).toBe(false);

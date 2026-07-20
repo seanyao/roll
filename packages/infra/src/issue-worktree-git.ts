@@ -58,24 +58,31 @@ export function protectReadOnlyWorktree(path: string): void {
   chmodSync(path, rootStat.mode & ~0o222);
 }
 
-/** Restore normal owner write permission across a previously-protected
- *  checkout (parents before children, mirroring how they must be reopened
- *  before their contents can be touched) — required before `git worktree
- *  remove` can unlink the tree, and before any repair/reuse can write into it
- *  again. Idempotent and safe to call on an unprotected worktree. Same
- *  symlink boundary as {@link protectReadOnlyWorktree}: a symlinked entry is
- *  never chmod'd, since doing so would follow it to its target. */
+/** Restore owner read+write across a previously-protected checkout (root
+ *  first, then every descendant) — required before `git worktree remove` can
+ *  unlink the tree, and before any repair/reuse can write into it again.
+ *  Directories additionally regain the owner EXECUTE bit (needed to traverse
+ *  them at all — `readdirSync` requires it, root included, regardless of what
+ *  state a directory was actually left in). A REGULAR FILE never gains an
+ *  execute bit it did not already have: git tracks a file's executable bit as
+ *  part of its tracked mode, so unconditionally adding `0o100` would make an
+ *  ordinary tracked file look modified to `git status` and make `git worktree
+ *  remove` refuse it as "contains modified or untracked files" even though
+ *  its content never changed. Idempotent and safe to call on an unprotected
+ *  worktree. Same symlink boundary as {@link protectReadOnlyWorktree}: a
+ *  symlinked entry is never chmod'd, since doing so would follow it to its
+ *  target. */
 export function unprotectReadOnlyWorktree(path: string): void {
   if (!existsSync(path)) return;
   const rootStat = statSync(path);
-  chmodSync(path, rootStat.mode | 0o200);
+  chmodSync(path, rootStat.mode | 0o600 | (rootStat.isDirectory() ? 0o100 : 0));
   function restore(root: string): void {
     for (const name of readdirSync(root)) {
       if (name === ".git") continue;
       const entryPath = join(root, name);
       const stat = lstatSync(entryPath);
       if (stat.isSymbolicLink()) continue;
-      chmodSync(entryPath, stat.mode | 0o200);
+      chmodSync(entryPath, stat.mode | 0o600 | (stat.isDirectory() ? 0o100 : 0));
       if (stat.isDirectory()) restore(entryPath);
     }
   }

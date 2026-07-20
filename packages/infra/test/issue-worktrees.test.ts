@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IssueStoryContract } from "@roll/core";
@@ -324,5 +324,37 @@ describe("applyIssueInit", () => {
     const sot1CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot1")?.repoId}.git`);
     const branches = git(sot1CachePath, ["branch", "--list", "roll/*"]).split("\n").filter(Boolean);
     expect(branches).toHaveLength(1); // sot1 never got a duplicate branch across the two attempts
+  });
+
+  it("rolls back a target the journal already marked created even when read-only PROTECTION itself genuinely fails afterward", async () => {
+    const f = fixture();
+    let sot3Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      // Real fault injection: right after sot3's real git worktree is created
+      // and the journal has recorded it as created, but BEFORE
+      // protectReadOnlyWorktree runs, strip read permission from sot3's own
+      // checkout root. protectReadOnlyWorktree's readdirSync then genuinely
+      // fails with EACCES — a real OS-level failure, not a mock. `git status`
+      // / `git rev-parse` still succeed (they only need the execute/traverse
+      // bit, which this mode keeps), so rollback's own identity probe still
+      // sees a real, clean, compatible worktree it can act on.
+      beforeProtect: (alias, path) => {
+        if (alias === "sot3") {
+          sot3Path = path;
+          chmodSync(path, 0o311);
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    // sot3 was journaled as created BEFORE protection ran, so rollback knows
+    // about it and removes it via a real `git worktree remove` — never left
+    // behind ungoverned just because protection itself failed.
+    expect(existsSync(sot3Path)).toBe(false);
+    // sot1/sot2 (created earlier in the SAME run, never touched again) were
+    // also clean -> rolled back too.
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+    expect(existsSync(join(f.issueRoot, "sot2"))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
   });
 });

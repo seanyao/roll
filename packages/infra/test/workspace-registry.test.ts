@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +15,7 @@ import {
 const homes: string[] = [];
 
 afterEach(() => {
-  homes.length = 0;
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });
 
 function sandbox(): string {
@@ -101,6 +101,93 @@ describe("Workspace registry v1 persistence", () => {
     writeFileSync(join(shared, "workspace.yaml"), `${JSON.stringify({ workspaceId: "ws-beta" })}\n`, "utf8");
     expect(() => store.register({ workspaceId: "ws-beta", root: shared })).toThrowError(
       expect.objectContaining({ code: "path_conflict" }),
+    );
+    expect(store.read().entries.map((entry) => entry.workspaceId)).toEqual(["ws-alpha"]);
+  });
+});
+
+describe("Workspace lifecycle, moves, and concurrent writers", () => {
+  it("derives multiple active Workspaces from events and isolates later transitions", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
+    const store = new WorkspaceRegistry({ rollHome, now: (() => {
+      let ts = 0;
+      return () => ++ts;
+    })() });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    store.register({ workspaceId: "ws-beta", root: beta });
+    store.activate("ws-alpha");
+    store.activate("ws-beta");
+    expect(store.list().map(({ workspaceId, lifecycle }) => ({ workspaceId, lifecycle }))).toEqual([
+      { workspaceId: "ws-alpha", lifecycle: "active" },
+      { workspaceId: "ws-beta", lifecycle: "active" },
+    ]);
+
+    store.pause("ws-alpha");
+    store.archive("ws-beta");
+    expect(existsSync(beta)).toBe(true);
+    expect(new WorkspaceRegistry({ rollHome }).list().map(({ workspaceId, lifecycle }) => ({ workspaceId, lifecycle }))).toEqual([
+      { workspaceId: "ws-alpha", lifecycle: "paused" },
+      { workspaceId: "ws-beta", lifecycle: "archived" },
+    ]);
+  });
+
+  it("moves only after explicit old/new manifest validation", () => {
+    const rollHome = sandbox();
+    const oldRoot = workspace(join(rollHome, "roots", "old"), "ws-alpha");
+    const newRoot = workspace(join(rollHome, "roots", "new"), "ws-alpha");
+    const wrongRoot = workspace(join(rollHome, "roots", "wrong"), "ws-other");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-alpha", root: oldRoot });
+
+    expect(() => store.move({ workspaceId: "ws-alpha", oldRoot, newRoot: wrongRoot })).toThrowError(
+      expect.objectContaining({ code: "identity_mismatch" }),
+    );
+    expect(store.move({ workspaceId: "ws-alpha", oldRoot, newRoot })).toMatchObject({
+      workspaceId: "ws-alpha",
+      root: newRoot,
+      pathState: "valid",
+    });
+    expect(store.read().entries).toHaveLength(1);
+    expect(store.readEvents().at(-1)).toMatchObject({
+      type: "workspace:path_updated",
+      oldRoot,
+      newRoot,
+    });
+  });
+
+  it("keeps a missing old path visible as stale until an explicit repair", () => {
+    const rollHome = sandbox();
+    const oldRoot = workspace(join(rollHome, "roots", "old"), "ws-alpha");
+    const recoveredRoot = workspace(join(rollHome, "roots", "recovered"), "ws-alpha");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-alpha", root: oldRoot });
+    rmSync(oldRoot, { recursive: true });
+
+    expect(() => store.move({ workspaceId: "ws-alpha", oldRoot, newRoot: recoveredRoot })).toThrowError(
+      expect.objectContaining({ code: "stale_path" }),
+    );
+    expect(store.read().entries).toEqual([
+      expect.objectContaining({ workspaceId: "ws-alpha", root: oldRoot, pathState: "stale" }),
+    ]);
+    expect(store.repair({ workspaceId: "ws-alpha", oldRoot, newRoot: recoveredRoot })).toMatchObject({
+      workspaceId: "ws-alpha",
+      root: recoveredRoot,
+      pathState: "valid",
+    });
+  });
+
+  it("detects a concurrent writer fail-loud and preserves every existing row", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    mkdirSync(join(rollHome, "locks", "workspace-registry.lock"));
+
+    expect(() => store.register({ workspaceId: "ws-beta", root: beta })).toThrowError(
+      expect.objectContaining({ code: "concurrent_write" }),
     );
     expect(store.read().entries.map((entry) => entry.workspaceId)).toEqual(["ws-alpha"]);
   });

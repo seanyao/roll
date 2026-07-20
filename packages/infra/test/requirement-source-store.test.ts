@@ -637,6 +637,48 @@ describe("US-WS-007 RequirementSourceStore", () => {
     );
   });
 
+  it("fails loudly when the CURRENT revision's own capture.yaml capturedAt is tampered away from source authority, on reuse", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const firstRevisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    const capturePath = join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml");
+    const capture = JSON.parse(readFileSync(capturePath, "utf8"));
+    expect(capture.capturedAt).toBe("2026-07-20T16:00:00.000Z");
+    capture.capturedAt = "2099-01-01T00:00:00.000Z";
+    writeFileSync(capturePath, `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+
+    const before = snapshotRequirementsTree(join(f.workspace, "requirements"));
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+    const after = snapshotRequirementsTree(join(f.workspace, "requirements"));
+    expectNoTreeChange(before, after);
+  });
+
+  it("fails loudly when the CURRENT revision's own capture.yaml previousRevisions is tampered away from source authority, on update", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const secondRevisionKey = "rev-" + createHash("sha256").update("43").digest("hex");
+    const capturePath = join(first.requirementPath, "revisions", secondRevisionKey, "capture.yaml");
+    const capture = JSON.parse(readFileSync(capturePath, "utf8"));
+    expect(capture.previousRevisions).toEqual([{ revision: "42", capturedAt: "2026-07-20T16:00:00.000Z" }]);
+    capture.previousRevisions = [];
+    writeFileSync(capturePath, `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+
+    const before = snapshotRequirementsTree(join(f.workspace, "requirements"));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 44.\n", "utf8");
+    expect(() => captureRequirementSource(request(f, { revision: "44", capturedAt: "2026-07-20T18:00:00.000Z" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+    const after = snapshotRequirementsTree(join(f.workspace, "requirements"));
+    expectNoTreeChange(before, after);
+
+    const newRevisionKey = "rev-" + createHash("sha256").update("44").digest("hex");
+    expect(existsSync(join(first.requirementPath, "revisions", newRevisionKey))).toBe(false);
+  });
+
   function snapshotRequirementsTree(root: string): ReadonlyMap<string, string> {
     const entries = new Map<string, string>();
     const walk = (dir: string, relativeDir: string): void => {

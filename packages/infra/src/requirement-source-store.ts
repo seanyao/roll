@@ -583,8 +583,10 @@ function validateRevision(
     const captured = parsed.value;
     if (
       captured.requirementId !== manifest.requirementId || captured.provider !== manifest.provider || captured.ref !== manifest.ref ||
-      captured.revision !== manifest.revision || captured.requirement.bytes !== manifest.requirement.bytes ||
-      captured.requirement.sha256 !== manifest.requirement.sha256 || JSON.stringify(captured.context) !== JSON.stringify(manifest.context)
+      captured.revision !== manifest.revision || captured.capturedAt !== manifest.capturedAt ||
+      captured.requirement.bytes !== manifest.requirement.bytes || captured.requirement.sha256 !== manifest.requirement.sha256 ||
+      JSON.stringify(captured.context) !== JSON.stringify(manifest.context) ||
+      JSON.stringify(captured.previousRevisions) !== JSON.stringify(manifest.previousRevisions)
     ) {
       fail("revision_conflict", "Immutable Requirement revision metadata does not match source authority");
     }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -112,8 +112,11 @@ describe("Workspace filesystem transaction", () => {
     expect(ensureCache).toHaveBeenCalledTimes(2);
   });
 
-  it("writes the journal first and preserves a transaction-created file that became dirty", async () => {
+  it("rolls back clean transaction artifacts after several steps while preserving pre-existing and dirty content", async () => {
     const f = fixture();
+    mkdirSync(f.rollHome, { recursive: true });
+    const preExisting = join(f.rollHome, "operator-owned.txt");
+    writeFileSync(preExisting, "keep\n", "utf8");
     await expect(applyWorkspaceInitialization(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
@@ -121,12 +124,21 @@ describe("Workspace filesystem transaction", () => {
         if (step.target.endsWith("workspace.yaml")) {
           expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(true);
           writeFileSync(step.target, "operator changed this file\n", "utf8");
+        }
+        if (step.target.endsWith(join("backlog", "index.md"))) {
           throw new Error("injected failure");
         }
       },
     })).rejects.toThrow("injected failure");
 
+    expect(readFileSync(preExisting, "utf8")).toBe("keep\n");
     expect(readFileSync(join(f.root, "workspace.yaml"), "utf8")).toBe("operator changed this file\n");
+    for (const clean of ["charter.md", "agents.yaml", "policy.yaml", join("backlog", "index.md")]) {
+      expect(existsSync(join(f.root, clean)), clean).toBe(false);
+    }
+    for (const cleanDirectory of ["requirements", "design", "backlog"]) {
+      expect(existsSync(join(f.root, cleanDirectory)), cleanDirectory).toBe(false);
+    }
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(false);
     const journal = JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")) as Record<string, unknown>;
     expect(journal).toMatchObject({
@@ -135,6 +147,23 @@ describe("Workspace filesystem transaction", () => {
       status: "repair_required",
     });
     expect(journal["preserved"]).toEqual(expect.arrayContaining([expect.stringContaining("workspace.yaml")]));
+  });
+
+  it("removes a failed atomic write temporary without exposing partial target content", async () => {
+    const f = fixture();
+    await expect(applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+      renameFile: (from, to) => {
+        if (to.endsWith("charter.md")) throw new Error("atomic rename failure");
+        renameSync(from, to);
+      },
+    })).rejects.toThrow("atomic rename failure");
+
+    expect(existsSync(join(f.root, "charter.md"))).toBe(false);
+    expect(tree(f.home).filter((row) => row.includes(".tmp."))).toEqual([]);
+    expect(JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")))
+      .toMatchObject({ status: "repair_required" });
   });
 
   it("rejects incompatible pre-existing content without creating registry, cache or journal state", async () => {
@@ -201,6 +230,32 @@ describe("Workspace filesystem transaction", () => {
       ensureCache: async () => ({ action: "reused" as const }),
     })).rejects.toMatchObject({ code: "rejected" });
     expect(tree(f.rollHome)).toEqual(before);
+  });
+
+  it("keeps the winner when another Workspace ID targets the same canonical root", async () => {
+    const f = fixture();
+    await applyWorkspaceInitialization(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    });
+    const winner = tree(f.rollHome);
+    const loser = {
+      ...f.config,
+      workspaceId: "ws-other",
+      manifest: { ...f.config.manifest, workspaceId: "ws-other" },
+    };
+
+    await expect(applyWorkspaceInitialization(loser, {
+      inspectCache: async () => "compatible",
+      ensureCache: async () => ({ action: "reused" as const }),
+    })).rejects.toMatchObject({ code: "rejected" });
+
+    expect(tree(f.rollHome)).toEqual(winner);
+    expect(JSON.parse(readFileSync(join(f.root, "workspace.yaml"), "utf8"))).toMatchObject({ workspaceId: "ws-demo" });
+    expect(JSON.parse(readFileSync(workspaceRegistryPath(f.rollHome), "utf8"))).toMatchObject({
+      entries: [{ workspaceId: "ws-demo", root: f.root }],
+    });
+    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-other"))).toBe(false);
   });
 
   it("rejects a pending registry transaction before creating init state", async () => {

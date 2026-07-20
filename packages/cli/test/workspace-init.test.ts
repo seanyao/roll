@@ -4,10 +4,13 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { repositoryIdFromRemote } from "@roll/spec";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 
 interface Run { readonly status: number; readonly stdout: string; readonly stderr: string }
+interface InitStep { readonly kind: "journal" | "directory" | "file" | "cache" | "registry"; readonly target: string; readonly action: "created" | "reused" | "repaired" | "rejected" }
+interface InitResult { readonly schema: string; readonly mode: "check" | "apply"; readonly outcome: string; readonly workspaceId: string; readonly root: string; readonly steps: readonly InitStep[] }
 const roots: string[] = [];
 const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_LANG", "NO_COLOR"] as const;
 
@@ -31,6 +34,9 @@ function fixture() {
   const rollHome = join(home, ".roll");
   const workspace = join(home, "workspace");
   const config = join(home, "workspace-init.yaml");
+  const remoteUrl = `file://${remote}`;
+  const repoId = repositoryIdFromRemote(remoteUrl);
+  if (!repoId.ok) throw new Error("fixture remote must be valid");
   writeFileSync(config, `
 schema: roll.workspace-init/v1
 id: ws-demo
@@ -38,10 +44,26 @@ root: ${workspace}
 display_name: Demo Workspace
 repositories:
   - alias: product
-    source: file://${remote}
+    source: ${remoteUrl}
     integration_branch: main
 `, "utf8");
-  return { home, rollHome, workspace, config, remote };
+  return { home, rollHome, workspace, config, remote, remoteUrl, repoId: repoId.value };
+}
+
+function expectedSteps(f: ReturnType<typeof fixture>, action: "created" | "reused"): readonly InitStep[] {
+  return [
+    { kind: "journal", target: join(f.rollHome, "workspace-init", "ws-demo.pending.json"), action: "created" },
+    { kind: "directory", target: f.workspace, action },
+    ...["workspace.yaml", "charter.md", "agents.yaml", "policy.yaml"].map((name) => ({ kind: "file" as const, target: join(f.workspace, name), action })),
+    { kind: "directory", target: join(f.workspace, "requirements"), action },
+    { kind: "directory", target: join(f.workspace, "design"), action },
+    { kind: "directory", target: join(f.workspace, "backlog"), action },
+    { kind: "file", target: join(f.workspace, "backlog", "index.md"), action },
+    ...["issues", "runtime", join("runtime", "locks"), join("runtime", "heartbeats"), join("runtime", "alerts")]
+      .map((name) => ({ kind: "directory" as const, target: join(f.workspace, name), action })),
+    { kind: "cache", target: f.repoId, action },
+    { kind: "registry", target: "ws-demo", action },
+  ];
 }
 
 function tree(root: string): readonly string[] {
@@ -64,14 +86,14 @@ function tree(root: string): readonly string[] {
   return rows;
 }
 
-async function run(args: string[], f: ReturnType<typeof fixture>): Promise<Run> {
+async function run(args: string[], f: ReturnType<typeof fixture>, language = "en"): Promise<Run> {
   const saved: Partial<Record<typeof ENV_KEYS[number], string>> = {};
   for (const key of ENV_KEYS) {
     if (process.env[key] !== undefined) saved[key] = process.env[key];
   }
   process.env["HOME"] = f.home;
   process.env["ROLL_HOME"] = f.rollHome;
-  process.env["ROLL_LANG"] = "en";
+  process.env["ROLL_LANG"] = language;
   process.env["NO_COLOR"] = "1";
   let stdout = "";
   let stderr = "";
@@ -103,24 +125,36 @@ describe("US-WS-006 roll workspace init", () => {
     const before = tree(f.home);
     const check = await run(["workspace", "init", "ws-demo", "--config", f.config, "--check", "--json"], f);
     expect(check.status, check.stderr).toBe(0);
-    expect(JSON.parse(check.stdout)).toMatchObject({
+    const checkResult = JSON.parse(check.stdout) as InitResult;
+    expect(checkResult).toMatchObject({
       schema: "roll.workspace-init-result/v1",
       mode: "check",
       outcome: "created",
       workspaceId: "ws-demo",
     });
+    expect(checkResult.steps).toEqual(expectedSteps(f, "created"));
     expect(tree(f.home)).toEqual(before);
 
     const first = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
     expect(first.status, first.stderr).toBe(0);
-    expect(JSON.parse(first.stdout)).toMatchObject({ mode: "apply", outcome: "created" });
+    const firstResult = JSON.parse(first.stdout) as InitResult;
+    expect(firstResult).toMatchObject({ mode: "apply", outcome: "created" });
+    expect(firstResult.steps).toEqual(expectedSteps(f, "created"));
     expect(existsSync(join(f.workspace, ".git"))).toBe(false);
-    expect(readdirSync(join(f.rollHome, "repos")).filter((name) => name.endsWith(".git"))).toHaveLength(1);
+    const cachePath = join(f.rollHome, "repos", `${f.repoId}.git`);
+    const identityPath = join(f.rollHome, "repos", `${f.repoId}.json`);
+    const firstIdentity = JSON.parse(readFileSync(identityPath, "utf8")) as Record<string, unknown>;
+    expect(firstIdentity).toMatchObject({ repoId: f.repoId, remote: f.remoteUrl.replace(/\.git$/u, ""), cachePath });
+    expect(git(cachePath, ["remote", "get-url", "origin"])).toBe(f.remoteUrl.replace(/\.git$/u, ""));
 
     const second = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
     expect(second.status, second.stderr).toBe(0);
-    expect(JSON.parse(second.stdout)).toMatchObject({ mode: "apply", outcome: "reused" });
-    expect(readdirSync(join(f.rollHome, "repos")).filter((name) => name.endsWith(".git"))).toHaveLength(1);
+    const secondResult = JSON.parse(second.stdout) as InitResult;
+    expect(secondResult).toMatchObject({ mode: "apply", outcome: "reused" });
+    expect(secondResult.steps).toEqual(expectedSteps(f, "reused"));
+    const secondIdentity = JSON.parse(readFileSync(identityPath, "utf8")) as Record<string, unknown>;
+    expect(secondIdentity).toMatchObject({ repoId: f.repoId, remote: firstIdentity["remote"], cachePath });
+    expect(readdirSync(join(f.rollHome, "repos")).filter((name) => name.endsWith(".git"))).toEqual([`${f.repoId}.git`]);
   });
 
   it("rejects identity mismatch and invalid arguments without any initialization writes", async () => {
@@ -138,7 +172,12 @@ describe("US-WS-006 roll workspace init", () => {
   it("exposes init in locale-specific Workspace help", async () => {
     const f = fixture();
     const en = await run(["workspace", "--help"], f);
-    process.env["ROLL_LANG"] = "zh";
+    const initEn = await run(["workspace", "init", "--help"], f, "en");
+    const initZh = await run(["workspace", "init", "--help"], f, "zh");
     expect(en.stdout).toContain("init <id> --config <file> [--check] [--json]");
+    expect(initEn).toMatchObject({ status: 0, stderr: "" });
+    expect(initEn.stdout).toContain("Usage: roll workspace init <id> --config <file> [--check] [--json]");
+    expect(initZh).toMatchObject({ status: 0, stderr: "" });
+    expect(initZh.stdout).toContain("用法：roll workspace init <ID> --config <文件> [--check] [--json]");
   });
 });

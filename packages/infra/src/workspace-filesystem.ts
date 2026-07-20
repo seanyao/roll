@@ -44,6 +44,7 @@ interface WorkspaceInitDeps {
   readonly inspectCache?: (binding: RepositoryBinding, rollHome: string) => Promise<RepositoryCacheProbeState>;
   readonly ensureCache?: (binding: RepositoryBinding, rollHome: string) => Promise<{ readonly action: "created" | "reused" | "repaired" }>;
   readonly afterStep?: (step: WorkspaceInitPlanStep) => void;
+  readonly renameFile?: (from: string, to: string) => void;
 }
 
 interface CreatedNode {
@@ -91,12 +92,12 @@ function expectedFiles(config: WorkspaceInitConfig): Readonly<Record<string, str
   };
 }
 
-function atomicWrite(path: string, text: string): void {
+function atomicWrite(path: string, text: string, renameFile: (from: string, to: string) => void = renameSync): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporary = `${path}.tmp.${process.pid}.${randomUUID()}`;
   try {
     writeFileSync(temporary, text, { encoding: "utf8", flag: "wx" });
-    renameSync(temporary, path);
+    renameFile(temporary, path);
   } finally {
     rmSync(temporary, { force: true });
   }
@@ -283,7 +284,7 @@ export async function applyWorkspaceInitialization(
       preserved: [],
       preservedCaches,
     };
-    atomicWrite(journalPath, journalText(journal));
+    atomicWrite(journalPath, journalText(journal), deps.renameFile);
     const files = expectedFiles(config);
     const ensureCache = deps.ensureCache ?? (async (binding: RepositoryBinding, rollHome: string) => {
       const branch = binding.integrationBranch;
@@ -303,7 +304,7 @@ export async function applyWorkspaceInitialization(
           const text = files[step.target];
           if (text === undefined) throw new WorkspaceInitializationError("apply_failed", `No content contract for ${step.target}`);
           if (!existsSync(step.target)) {
-            atomicWrite(step.target, text);
+            atomicWrite(step.target, text, deps.renameFile);
             created.push({ path: step.target, kind: "file", digest: digest(text) });
           }
         } else if (step.kind === "cache") {
@@ -313,7 +314,7 @@ export async function applyWorkspaceInitialization(
           if (result.action === "created") preservedCaches.push(binding.repoId);
         }
         journal = { ...journal, created: [...created], preservedCaches: [...preservedCaches] };
-        atomicWrite(journalPath, journalText(journal));
+        atomicWrite(journalPath, journalText(journal), deps.renameFile);
         deps.afterStep?.(step);
       }
       const registry = new WorkspaceRegistry({ rollHome: config.rollHome });
@@ -325,7 +326,7 @@ export async function applyWorkspaceInitialization(
     } catch (error) {
       const preserved = registered ? created.map((node) => node.path).sort() : rollback(created);
       journal = { ...journal, status: "repair_required", created: [...created], preserved, preservedCaches: [...preservedCaches] };
-      atomicWrite(journalPath, journalText(journal));
+      atomicWrite(journalPath, journalText(journal), deps.renameFile);
       throw error;
     }
   } finally {

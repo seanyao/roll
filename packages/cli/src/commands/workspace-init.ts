@@ -36,6 +36,11 @@ function emitError(code: string, json: boolean): number {
   return 1;
 }
 
+function emitHelp(): number {
+  process.stdout.write(`${msg("workspace.init.error.invalid_arguments")}\n`);
+  return 0;
+}
+
 function parseArgs(args: readonly string[]):
   | { readonly ok: true; readonly workspaceId: string; readonly configPath: string; readonly check: boolean; readonly json: boolean }
   | { readonly ok: false; readonly json: boolean } {
@@ -79,6 +84,7 @@ function emitResult(plan: WorkspaceInitPlan, mode: "check" | "apply", json: bool
 }
 
 export async function workspaceInitCommand(args: string[]): Promise<number> {
+  if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) return emitHelp();
   const parsedArgs = parseArgs(args);
   if (!parsedArgs.ok) return emitError("invalid_arguments", parsedArgs.json);
   let text: string;

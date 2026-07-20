@@ -9,12 +9,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import {
-  WORKSPACE_EVENT_V1,
-  foldWorkspaceLifecycles,
-  type WorkspaceLifecycleEvent,
-  type WorkspaceLifecycleState,
-} from "@roll/core";
+import { foldWorkspaceLifecycles, type WorkspaceLifecycleState } from "@roll/core";
+import { WORKSPACE_EVENT_V1, type WorkspaceLifecycleEvent } from "@roll/spec";
+import { acquireLock, releaseLock } from "./process.js";
 
 export const WORKSPACE_REGISTRY_V1 = "roll.workspace-registry/v1" as const;
 
@@ -26,11 +23,12 @@ export type WorkspaceRegistryErrorCode =
   | "path_change_requires_move"
   | "stale_path"
   | "not_found"
+  | "io_failure"
   | "concurrent_write";
 
 export class WorkspaceRegistryError extends Error {
-  constructor(readonly code: WorkspaceRegistryErrorCode, message: string) {
-    super(message);
+  constructor(readonly code: WorkspaceRegistryErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "WorkspaceRegistryError";
   }
 }
@@ -59,6 +57,24 @@ export interface WorkspaceMoveInput {
   readonly workspaceId: string;
   readonly oldRoot: string;
   readonly newRoot: string;
+}
+
+type WorkspaceTransitionEventType = Exclude<
+  WorkspaceLifecycleEvent["type"],
+  "workspace:registered" | "workspace:path_updated"
+>;
+
+const WORKSPACE_TRANSITION_EVENT_TYPES = [
+  "workspace:registered",
+  "workspace:activated",
+  "workspace:paused",
+  "workspace:archived",
+] as const;
+
+function isWorkspaceTransitionOrRegistrationType(
+  value: unknown,
+): value is typeof WORKSPACE_TRANSITION_EVENT_TYPES[number] {
+  return typeof value === "string" && WORKSPACE_TRANSITION_EVENT_TYPES.some((type) => type === value);
 }
 
 function compareCodeUnits(left: string, right: string): number {
@@ -169,6 +185,46 @@ function readManifestWorkspaceId(root: string): string {
   throw new WorkspaceRegistryError("identity_mismatch", "workspace.yaml does not declare a Workspace ID");
 }
 
+function validatedCanonicalRoot(root: string, workspaceId: string): string {
+  let before: string;
+  try {
+    before = realpathSync(root);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      throw new WorkspaceRegistryError("stale_path", "Workspace root does not exist");
+    }
+    throw new WorkspaceRegistryError("io_failure", "Workspace root could not be resolved", { cause: error });
+  }
+  const manifestWorkspaceId = readManifestWorkspaceId(root);
+  let after: string;
+  try {
+    after = realpathSync(root);
+  } catch {
+    throw new WorkspaceRegistryError("invalid_path", "Workspace root changed during validation");
+  }
+  if (before !== after) {
+    throw new WorkspaceRegistryError("invalid_path", "Workspace root changed during validation");
+  }
+  if (manifestWorkspaceId !== workspaceId) {
+    throw new WorkspaceRegistryError("identity_mismatch", "workspace.yaml ID does not match the requested Workspace ID");
+  }
+  return before;
+}
+
+function entryIsCurrent(entry: WorkspaceRegistryEntry): boolean {
+  if (entry.pathState === "stale" || !existsSync(entry.root)) return false;
+  try {
+    return validatedCanonicalRoot(entry.root, entry.workspaceId) === entry.canonicalRoot;
+  } catch (error) {
+    if (
+      error instanceof WorkspaceRegistryError &&
+      (error.code === "stale_path" || error.code === "identity_mismatch" || error.code === "invalid_path")
+    ) return false;
+    throw error;
+  }
+}
+
 export class WorkspaceRegistry {
   private readonly now: () => number;
   private tempCounter = 0;
@@ -184,7 +240,8 @@ export class WorkspaceRegistry {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return { schema: WORKSPACE_REGISTRY_V1, revision: 0, entries: [] };
       }
-      throw error;
+      if (error instanceof WorkspaceRegistryError) throw error;
+      throw new WorkspaceRegistryError("io_failure", "Workspace registry could not be read", { cause: error });
     }
   }
 
@@ -194,7 +251,8 @@ export class WorkspaceRegistry {
       text = readFileSync(workspaceEventsPath(this.options.rollHome), "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
+      if (error instanceof WorkspaceRegistryError) throw error;
+      throw new WorkspaceRegistryError("io_failure", "Workspace event stream could not be read", { cause: error });
     }
     return text.split("\n").filter((line) => line !== "").map((line) => this.parseEvent(line));
   }
@@ -209,7 +267,7 @@ export class WorkspaceRegistry {
       }
       return {
         ...entry,
-        pathState: entry.pathState === "stale" || !existsSync(entry.root) ? "stale" : "valid",
+        pathState: entryIsCurrent(entry) ? "valid" : "stale",
         ...lifecycle,
       };
     });
@@ -221,12 +279,12 @@ export class WorkspaceRegistry {
       const root = resolve(input.root);
       let canonicalRoot: string;
       try {
-        canonicalRoot = realpathSync(root);
-      } catch {
-        throw new WorkspaceRegistryError("invalid_path", "Workspace root does not exist");
-      }
-      if (readManifestWorkspaceId(root) !== input.workspaceId) {
-        throw new WorkspaceRegistryError("identity_mismatch", "workspace.yaml ID does not match the requested Workspace ID");
+        canonicalRoot = validatedCanonicalRoot(root, input.workspaceId);
+      } catch (error) {
+        if (error instanceof WorkspaceRegistryError && error.code === "stale_path") {
+          throw new WorkspaceRegistryError("invalid_path", "Workspace root does not exist", { cause: error });
+        }
+        throw error;
       }
       const snapshot = this.read();
       const existing = snapshot.entries.find((entry) => entry.workspaceId === input.workspaceId);
@@ -234,14 +292,17 @@ export class WorkspaceRegistry {
         if (existing.root !== root || existing.canonicalRoot !== canonicalRoot) {
           throw new WorkspaceRegistryError("path_change_requires_move", "Workspace path changes require an explicit move");
         }
+        if (!this.readEvents().some((event) => event.type === "workspace:registered" && event.workspaceId === input.workspaceId)) {
+          this.appendEvent({ schema: WORKSPACE_EVENT_V1, type: "workspace:registered", workspaceId: input.workspaceId, ts: this.now() });
+        }
         return existing;
       }
       if (snapshot.entries.some((entry) => entry.canonicalRoot === canonicalRoot)) {
         throw new WorkspaceRegistryError("path_conflict", "Canonical Workspace path is already registered");
       }
       const entry: WorkspaceRegistryEntry = { workspaceId: input.workspaceId, root, canonicalRoot, pathState: "valid" };
-      this.write({ ...snapshot, revision: snapshot.revision + 1, entries: [...snapshot.entries, entry] });
       this.appendEvent({ schema: WORKSPACE_EVENT_V1, type: "workspace:registered", workspaceId: input.workspaceId, ts: this.now() });
+      this.write({ ...snapshot, revision: snapshot.revision + 1, entries: [...snapshot.entries, entry] });
       return entry;
     });
   }
@@ -259,16 +320,16 @@ export class WorkspaceRegistry {
   }
 
   move(input: WorkspaceMoveInput): WorkspaceRegistryEntry {
-    return this.updatePath(input, false);
+    return this.updatePath(input, "move");
   }
 
   repair(input: WorkspaceMoveInput): WorkspaceRegistryEntry {
-    return this.updatePath(input, true);
+    return this.updatePath(input, "repair");
   }
 
   private transition(
     workspaceId: string,
-    type: "workspace:activated" | "workspace:paused" | "workspace:archived",
+    type: WorkspaceTransitionEventType,
   ): void {
     this.withLock(() => {
       if (!this.read().entries.some((entry) => entry.workspaceId === workspaceId)) {
@@ -278,7 +339,7 @@ export class WorkspaceRegistry {
     });
   }
 
-  private updatePath(input: WorkspaceMoveInput, repair: boolean): WorkspaceRegistryEntry {
+  private updatePath(input: WorkspaceMoveInput, mode: "move" | "repair"): WorkspaceRegistryEntry {
     return this.withLock(() => {
       if (!isAbsolute(input.oldRoot) || !isAbsolute(input.newRoot)) {
         throw new WorkspaceRegistryError("invalid_path", "Workspace move paths must be absolute");
@@ -297,15 +358,15 @@ export class WorkspaceRegistry {
 
       let oldExists = true;
       try {
-        const canonicalOld = realpathSync(oldRoot);
-        if (canonicalOld !== existing.canonicalRoot || readManifestWorkspaceId(oldRoot) !== input.workspaceId) {
+        const canonicalOld = validatedCanonicalRoot(oldRoot, input.workspaceId);
+        if (canonicalOld !== existing.canonicalRoot) {
           throw new WorkspaceRegistryError("identity_mismatch", "Old path does not match the registered Workspace identity");
         }
       } catch (error) {
-        if (error instanceof WorkspaceRegistryError) throw error;
-        oldExists = false;
+        if (error instanceof WorkspaceRegistryError && error.code === "stale_path") oldExists = false;
+        else throw error;
       }
-      if (!oldExists && !repair) {
+      if (!oldExists && mode === "move") {
         if (existing.pathState !== "stale") {
           const stale: WorkspaceRegistryEntry = { ...existing, pathState: "stale" };
           const entries = snapshot.entries.map((entry, entryIndex) => entryIndex === index ? stale : entry);
@@ -313,18 +374,18 @@ export class WorkspaceRegistry {
         }
         throw new WorkspaceRegistryError("stale_path", "Registered Workspace path is missing; explicit repair is required");
       }
-      if (oldExists && repair && existing.pathState !== "stale") {
+      if (oldExists && mode === "repair" && existing.pathState !== "stale") {
         throw new WorkspaceRegistryError("invalid_path", "Workspace repair requires a stale registry path");
       }
 
       let canonicalRoot: string;
       try {
-        canonicalRoot = realpathSync(newRoot);
-      } catch {
-        throw new WorkspaceRegistryError("invalid_path", "New Workspace root does not exist");
-      }
-      if (readManifestWorkspaceId(newRoot) !== input.workspaceId) {
-        throw new WorkspaceRegistryError("identity_mismatch", "New workspace.yaml ID does not match the registered Workspace ID");
+        canonicalRoot = validatedCanonicalRoot(newRoot, input.workspaceId);
+      } catch (error) {
+        if (error instanceof WorkspaceRegistryError && error.code === "stale_path") {
+          throw new WorkspaceRegistryError("invalid_path", "New Workspace root does not exist", { cause: error });
+        }
+        throw error;
       }
       if (snapshot.entries.some((entry) => entry.workspaceId !== input.workspaceId && entry.canonicalRoot === canonicalRoot)) {
         throw new WorkspaceRegistryError("path_conflict", "New canonical Workspace path is already registered");
@@ -336,7 +397,6 @@ export class WorkspaceRegistry {
         pathState: "valid",
       };
       const entries = snapshot.entries.map((entry, entryIndex) => entryIndex === index ? moved : entry);
-      this.write({ ...snapshot, revision: snapshot.revision + 1, entries });
       this.appendEvent({
         schema: WORKSPACE_EVENT_V1,
         type: "workspace:path_updated",
@@ -345,6 +405,7 @@ export class WorkspaceRegistry {
         oldRoot,
         newRoot,
       });
+      this.write({ ...snapshot, revision: snapshot.revision + 1, entries });
       return moved;
     });
   }
@@ -356,15 +417,21 @@ export class WorkspaceRegistry {
     try {
       writeFileSync(temp, serializeWorkspaceRegistry(snapshot), "utf8");
       renameSync(temp, path);
+    } catch (error) {
+      throw new WorkspaceRegistryError("io_failure", "Workspace registry atomic write failed", { cause: error });
     } finally {
-      rmSync(temp, { force: true });
+      rmSync(temp, { recursive: true, force: true });
     }
   }
 
   private appendEvent(event: WorkspaceLifecycleEvent): void {
     const path = workspaceEventsPath(this.options.rollHome);
-    mkdirSync(dirname(path), { recursive: true });
-    appendFileSync(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
+    try {
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
+    } catch (error) {
+      throw new WorkspaceRegistryError("io_failure", "Workspace event append failed", { cause: error });
+    }
   }
 
   private parseEvent(line: string): WorkspaceLifecycleEvent {
@@ -376,44 +443,58 @@ export class WorkspaceRegistry {
     }
     if (!isRecord(value)) throw new WorkspaceRegistryError("invalid_registry", "Workspace event must be an object");
     const type = value["type"];
+    const workspaceId = value["workspaceId"];
+    const ts = value["ts"];
     const baseKeys = ["schema", "type", "workspaceId", "ts"];
-    const allowedTypes = ["workspace:registered", "workspace:activated", "workspace:paused", "workspace:archived"];
     const pathUpdate = type === "workspace:path_updated";
     if (!exactKeys(value, pathUpdate ? [...baseKeys, "oldRoot", "newRoot"] : baseKeys)) {
       throw new WorkspaceRegistryError("invalid_registry", "Workspace event has an invalid or open shape");
     }
     if (
       value["schema"] !== WORKSPACE_EVENT_V1 ||
-      typeof value["workspaceId"] !== "string" || value["workspaceId"] === "" ||
-      typeof value["ts"] !== "number" || !Number.isFinite(value["ts"]) ||
-      (!pathUpdate && !allowedTypes.includes(type as string))
+      typeof workspaceId !== "string" || workspaceId === "" ||
+      typeof ts !== "number" || !Number.isFinite(ts) ||
+      (!pathUpdate && !isWorkspaceTransitionOrRegistrationType(type))
     ) {
       throw new WorkspaceRegistryError("invalid_registry", "Workspace event contains invalid values");
     }
     if (pathUpdate) {
-      if (typeof value["oldRoot"] !== "string" || typeof value["newRoot"] !== "string") {
+      if (
+        typeof value["oldRoot"] !== "string" || !isAbsolute(value["oldRoot"]) ||
+        typeof value["newRoot"] !== "string" || !isAbsolute(value["newRoot"])
+      ) {
         throw new WorkspaceRegistryError("invalid_registry", "Workspace path update contains invalid paths");
       }
-      return value as unknown as WorkspaceLifecycleEvent;
+      return {
+        schema: WORKSPACE_EVENT_V1,
+        type: "workspace:path_updated",
+        workspaceId,
+        ts,
+        oldRoot: value["oldRoot"],
+        newRoot: value["newRoot"],
+      };
     }
-    return value as unknown as WorkspaceLifecycleEvent;
+    if (!isWorkspaceTransitionOrRegistrationType(type)) {
+      throw new WorkspaceRegistryError("invalid_registry", "Workspace event type is unsupported");
+    }
+    return {
+      schema: WORKSPACE_EVENT_V1,
+      type,
+      workspaceId,
+      ts,
+    };
   }
 
   private withLock<T>(run: () => T): T {
     const lock = join(this.options.rollHome, "locks", "workspace-registry.lock");
-    mkdirSync(dirname(lock), { recursive: true });
-    try {
-      mkdirSync(lock);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new WorkspaceRegistryError("concurrent_write", "Workspace registry is locked by another writer");
-      }
-      throw error;
+    const acquired = acquireLock(lock, process.pid, { cycleId: "workspace-registry" });
+    if (!acquired.acquired) {
+      throw new WorkspaceRegistryError("concurrent_write", "Workspace registry is locked by another writer");
     }
     try {
       return run();
     } finally {
-      rmSync(lock, { recursive: true, force: true });
+      releaseLock(lock);
     }
   }
 }

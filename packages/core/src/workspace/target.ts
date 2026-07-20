@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
-import type { WorkspaceIdentity } from "@roll/spec";
+import type { WorkspaceIdentity, WorkspaceLifecycle } from "@roll/spec";
 
-export type WorkspaceLifecycle = "registered" | "active" | "paused" | "archived";
+export type { WorkspaceLifecycle } from "@roll/spec";
 export type WorkspaceTargetOperation = "read" | "mutation";
 export type WorkspaceTargetSource = "explicit" | "environment" | "cwd_manifest" | "issue_manifest" | "all";
 

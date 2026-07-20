@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   WORKSPACE_EVENT_V1,
+  WorkspaceLifecycleError,
   foldWorkspaceLifecycles,
   type WorkspaceLifecycleEvent,
 } from "../src/workspace/lifecycle.js";
@@ -67,8 +68,12 @@ describe("foldWorkspaceLifecycles", () => {
   });
 
   it("fails loud when a transition has no prior registration", () => {
-    expect(() => foldWorkspaceLifecycles([
-      event("workspace:activated", "ws-missing", 1),
-    ])).toThrowError(/not registered/u);
+    try {
+      foldWorkspaceLifecycles([event("workspace:activated", "ws-missing", 1)]);
+      throw new Error("expected lifecycle fold to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkspaceLifecycleError);
+      expect(error).toMatchObject({ code: "transition_before_registration" });
+    }
   });
 });

@@ -522,7 +522,7 @@ describe("resolveWorkspaceTarget purity", () => {
     const source = readFileSync(new URL("../src/workspace/target.ts", import.meta.url), "utf8");
     expect(source.match(/^import .*$/gm)).toEqual([
       'import { isAbsolute } from "node:path";',
-      'import type { WorkspaceIdentity } from "@roll/spec";',
+      'import type { WorkspaceIdentity, WorkspaceLifecycle } from "@roll/spec";',
     ]);
     expect(source).not.toMatch(/\b(?:process|globalThis|require|Deno|Bun|eval|Function)\b|import\s*\(/);
   });

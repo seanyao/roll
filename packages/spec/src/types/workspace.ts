@@ -62,6 +62,26 @@ export interface WorkspaceIdentity {
   readonly workspaceId: string;
 }
 
+export const WORKSPACE_EVENT_V1 = "roll.workspace-event/v1" as const;
+
+export type WorkspaceLifecycle = "registered" | "active" | "paused" | "archived";
+
+interface WorkspaceEventBase extends WorkspaceIdentity {
+  readonly schema: typeof WORKSPACE_EVENT_V1;
+  readonly ts: number;
+}
+
+export type WorkspaceLifecycleEvent =
+  | (WorkspaceEventBase & { readonly type: "workspace:registered" })
+  | (WorkspaceEventBase & { readonly type: "workspace:activated" })
+  | (WorkspaceEventBase & { readonly type: "workspace:paused" })
+  | (WorkspaceEventBase & { readonly type: "workspace:archived" })
+  | (WorkspaceEventBase & {
+      readonly type: "workspace:path_updated";
+      readonly oldRoot: string;
+      readonly newRoot: string;
+    });
+
 export interface IssueIdentity extends WorkspaceIdentity {
   readonly storyId: string;
 }

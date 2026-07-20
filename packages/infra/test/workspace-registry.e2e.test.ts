@@ -12,7 +12,7 @@ afterEach(() => {
 
 function workspace(root: string, workspaceId: string): string {
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({ workspaceId })}\n`, "utf8");
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({ id: workspaceId })}\n`, "utf8");
   return root;
 }
 

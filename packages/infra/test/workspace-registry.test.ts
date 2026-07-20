@@ -1,7 +1,9 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { acquireLock } from "../src/process.js";
 import {
   WORKSPACE_REGISTRY_V1,
   WorkspaceRegistry,
@@ -26,7 +28,7 @@ function sandbox(): string {
 
 function workspace(root: string, workspaceId: string): string {
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({ workspaceId })}\n`, "utf8");
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({ id: workspaceId })}\n`, "utf8");
   return root;
 }
 
@@ -68,6 +70,14 @@ describe("Workspace registry v1 persistence", () => {
     });
     expect(() => parseWorkspaceRegistry(JSON.stringify({ ...snapshot, activeWorkspaceId: "ws-z" })))
       .toThrowError(WorkspaceRegistryError);
+    expect(() => parseWorkspaceRegistry(JSON.stringify({
+      ...snapshot,
+      entries: [{ ...snapshot.entries[0], extra: true }],
+    }))).toThrowError(expect.objectContaining({ code: "invalid_registry" }));
+    expect(() => parseWorkspaceRegistry(JSON.stringify({
+      ...snapshot,
+      entries: [{ workspaceId: "ws-z", root: "/z", canonicalRoot: "/z" }],
+    }))).toThrowError(expect.objectContaining({ code: "invalid_registry" }));
   });
 
   it("atomically registers and idempotently upserts by immutable Workspace ID", () => {
@@ -98,11 +108,77 @@ describe("Workspace registry v1 persistence", () => {
     expect(() => store.register({ workspaceId: "ws-beta", root: mismatch })).toThrowError(
       expect.objectContaining({ code: "identity_mismatch" }),
     );
-    writeFileSync(join(shared, "workspace.yaml"), `${JSON.stringify({ workspaceId: "ws-beta" })}\n`, "utf8");
-    expect(() => store.register({ workspaceId: "ws-beta", root: shared })).toThrowError(
+    const sharedAlias = join(rollHome, "roots", "shared-alias");
+    symlinkSync(shared, sharedAlias, "dir");
+    writeFileSync(join(shared, "workspace.yaml"), `${JSON.stringify({ id: "ws-beta" })}\n`, "utf8");
+    expect(() => store.register({ workspaceId: "ws-beta", root: sharedAlias })).toThrowError(
       expect.objectContaining({ code: "path_conflict" }),
     );
     expect(store.read().entries.map((entry) => entry.workspaceId)).toEqual(["ws-alpha"]);
+  });
+
+  it("requires explicit move when an existing Workspace ID is registered at another root", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const moved = workspace(join(rollHome, "roots", "moved"), "ws-alpha");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    expect(() => store.register({ workspaceId: "ws-alpha", root: moved })).toThrowError(
+      expect.objectContaining({ code: "path_change_requires_move" }),
+    );
+    expect(store.read().entries).toEqual([
+      expect.objectContaining({ workspaceId: "ws-alpha", root: alpha }),
+    ]);
+  });
+
+  it("rejects open or unsafe Workspace event records through the public reader", () => {
+    const rollHome = sandbox();
+    writeFileSync(workspaceEventsPath(rollHome), `${JSON.stringify({
+      schema: "roll.workspace-event/v1",
+      type: "workspace:path_updated",
+      workspaceId: "ws-alpha",
+      ts: 1,
+      oldRoot: "relative/old",
+      newRoot: "/new",
+    })}\n`, "utf8");
+    expect(() => new WorkspaceRegistry({ rollHome }).readEvents()).toThrowError(
+      expect.objectContaining({ code: "invalid_registry" }),
+    );
+  });
+
+  it("wraps registry and event filesystem failures in the typed public error model", () => {
+    const rollHome = sandbox();
+    mkdirSync(workspaceRegistryPath(rollHome));
+    expect(() => new WorkspaceRegistry({ rollHome }).read()).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+    rmSync(workspaceRegistryPath(rollHome), { recursive: true });
+    mkdirSync(workspaceEventsPath(rollHome));
+    expect(() => new WorkspaceRegistry({ rollHome }).readEvents()).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("writes the registration event before the registry projection so retry repairs a failed commit", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const registryPath = workspaceRegistryPath(rollHome);
+    const blockedTempPath = `${registryPath}.tmp.${process.pid}.0`;
+    mkdirSync(blockedTempPath);
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+
+    expect(() => store.register({ workspaceId: "ws-alpha", root: alpha })).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+    expect(store.readEvents()).toEqual([
+      { schema: "roll.workspace-event/v1", type: "workspace:registered", workspaceId: "ws-alpha", ts: 100 },
+    ]);
+
+    rmSync(blockedTempPath, { recursive: true, force: true });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    expect(store.list()).toEqual([
+      expect.objectContaining({ workspaceId: "ws-alpha", lifecycle: "registered" }),
+    ]);
   });
 });
 
@@ -131,6 +207,18 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
       { workspaceId: "ws-alpha", lifecycle: "paused" },
       { workspaceId: "ws-beta", lifecycle: "archived" },
     ]);
+    expect(store.readEvents().map((event) => event.type)).toEqual([
+      "workspace:registered",
+      "workspace:registered",
+      "workspace:activated",
+      "workspace:activated",
+      "workspace:paused",
+      "workspace:archived",
+    ]);
+    rmSync(workspaceEventsPath(rollHome));
+    expect(() => new WorkspaceRegistry({ rollHome }).list()).toThrowError(
+      expect.objectContaining({ code: "invalid_registry" }),
+    );
   });
 
   it("moves only after explicit old/new manifest validation", () => {
@@ -138,12 +226,21 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
     const oldRoot = workspace(join(rollHome, "roots", "old"), "ws-alpha");
     const newRoot = workspace(join(rollHome, "roots", "new"), "ws-alpha");
     const wrongRoot = workspace(join(rollHome, "roots", "wrong"), "ws-other");
+    const unrelatedOld = workspace(join(rollHome, "roots", "unrelated-old"), "ws-alpha");
     const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
     store.register({ workspaceId: "ws-alpha", root: oldRoot });
 
     expect(() => store.move({ workspaceId: "ws-alpha", oldRoot, newRoot: wrongRoot })).toThrowError(
       expect.objectContaining({ code: "identity_mismatch" }),
     );
+    expect(() => store.move({ workspaceId: "ws-alpha", oldRoot: unrelatedOld, newRoot })).toThrowError(
+      expect.objectContaining({ code: "identity_mismatch" }),
+    );
+    writeFileSync(join(oldRoot, "workspace.yaml"), `${JSON.stringify({ id: "ws-other" })}\n`, "utf8");
+    expect(() => store.move({ workspaceId: "ws-alpha", oldRoot, newRoot })).toThrowError(
+      expect.objectContaining({ code: "identity_mismatch" }),
+    );
+    writeFileSync(join(oldRoot, "workspace.yaml"), `${JSON.stringify({ id: "ws-alpha" })}\n`, "utf8");
     expect(store.move({ workspaceId: "ws-alpha", oldRoot, newRoot })).toMatchObject({
       workspaceId: "ws-alpha",
       root: newRoot,
@@ -178,17 +275,80 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
     });
   });
 
+  it("reports canonical-path or manifest identity drift as stale", () => {
+    const rollHome = sandbox();
+    const alphaReal = workspace(join(rollHome, "roots", "alpha-real"), "ws-alpha");
+    const foreignReal = workspace(join(rollHome, "roots", "foreign-real"), "ws-foreign");
+    const alphaLink = join(rollHome, "roots", "alpha-link");
+    symlinkSync(alphaReal, alphaLink, "dir");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-alpha", root: alphaLink });
+
+    rmSync(alphaLink);
+    symlinkSync(foreignReal, alphaLink, "dir");
+    expect(store.list()).toEqual([
+      expect.objectContaining({ workspaceId: "ws-alpha", root: alphaLink, pathState: "stale" }),
+    ]);
+  });
+
   it("detects a concurrent writer fail-loud and preserves every existing row", () => {
     const rollHome = sandbox();
     const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
     const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
     const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
     store.register({ workspaceId: "ws-alpha", root: alpha });
-    mkdirSync(join(rollHome, "locks", "workspace-registry.lock"));
+    const lock = join(rollHome, "locks", "workspace-registry.lock");
+    expect(acquireLock(lock, process.pid).acquired).toBe(true);
 
     expect(() => store.register({ workspaceId: "ws-beta", root: beta })).toThrowError(
       expect.objectContaining({ code: "concurrent_write" }),
     );
     expect(store.read().entries.map((entry) => entry.workspaceId)).toEqual(["ws-alpha"]);
+  });
+
+  it("recovers a stale same-host lock instead of permanently blocking the registry", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const lock = join(rollHome, "locks", "workspace-registry.lock");
+    expect(acquireLock(lock, 999_999_999, { pidAlive: () => true }).acquired).toBe(true);
+
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    expect(store.register({ workspaceId: "ws-alpha", root: alpha })).toMatchObject({ workspaceId: "ws-alpha" });
+  });
+
+  it("serializes or rejects two real writers without losing a successful row", async () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
+    const moduleUrl = new URL("../dist/workspace-registry.js", import.meta.url).href;
+    const script = [
+      `import { WorkspaceRegistry } from ${JSON.stringify(moduleUrl)};`,
+      "const [rollHome, workspaceId, root] = process.argv.slice(1);",
+      "try { new WorkspaceRegistry({ rollHome }).register({ workspaceId, root });",
+      "process.stdout.write(JSON.stringify({ ok: true, workspaceId })); }",
+      "catch (error) { process.stdout.write(JSON.stringify({ ok: false, workspaceId, code: error.code })); }",
+    ].join("\n");
+    const run = (workspaceId: string, root: string): Promise<{ ok: boolean; workspaceId: string; code?: string }> =>
+      new Promise((resolveResult, rejectResult) => {
+        const child = spawn(process.execPath, ["--input-type=module", "-e", script, rollHome, workspaceId, root], {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+        child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+        child.on("error", rejectResult);
+        child.on("close", (code) => {
+          if (code !== 0) rejectResult(new Error(stderr));
+          else resolveResult(JSON.parse(stdout) as { ok: boolean; workspaceId: string; code?: string });
+        });
+      });
+
+    const results = await Promise.all([run("ws-alpha", alpha), run("ws-beta", beta)]);
+    const succeeded = results.filter((result) => result.ok).map((result) => result.workspaceId).sort();
+    const rejected = results.filter((result) => !result.ok);
+    expect(succeeded.length).toBeGreaterThanOrEqual(1);
+    expect(rejected.every((result) => result.code === "concurrent_write")).toBe(true);
+    expect(new WorkspaceRegistry({ rollHome }).read().entries.map((entry) => entry.workspaceId).sort()).toEqual(succeeded);
   });
 });

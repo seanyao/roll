@@ -1,27 +1,24 @@
-export const WORKSPACE_EVENT_V1 = "roll.workspace-event/v1" as const;
+import {
+  WORKSPACE_EVENT_V1,
+  type WorkspaceLifecycle,
+  type WorkspaceLifecycleEvent,
+} from "@roll/spec";
 
-export type WorkspaceLifecycleStatus = "registered" | "active" | "paused" | "archived";
+export { WORKSPACE_EVENT_V1 } from "@roll/spec";
+export type { WorkspaceLifecycleEvent } from "@roll/spec";
 
-interface WorkspaceEventBase {
-  readonly schema: typeof WORKSPACE_EVENT_V1;
-  readonly workspaceId: string;
-  readonly ts: number;
+export class WorkspaceLifecycleError extends Error {
+  readonly code = "transition_before_registration" as const;
+
+  constructor(readonly workspaceId: string) {
+    super(`Workspace ${workspaceId} is not registered`);
+    this.name = "WorkspaceLifecycleError";
+  }
 }
-
-export type WorkspaceLifecycleEvent =
-  | (WorkspaceEventBase & { readonly type: "workspace:registered" })
-  | (WorkspaceEventBase & { readonly type: "workspace:activated" })
-  | (WorkspaceEventBase & { readonly type: "workspace:paused" })
-  | (WorkspaceEventBase & { readonly type: "workspace:archived" })
-  | (WorkspaceEventBase & {
-      readonly type: "workspace:path_updated";
-      readonly oldRoot: string;
-      readonly newRoot: string;
-    });
 
 export interface WorkspaceLifecycleState {
   readonly workspaceId: string;
-  readonly lifecycle: WorkspaceLifecycleStatus;
+  readonly lifecycle: WorkspaceLifecycle;
   readonly lastEventTs: number;
 }
 
@@ -31,7 +28,7 @@ function compareCodeUnits(left: string, right: string): number {
   return 0;
 }
 
-function lifecycleForEvent(event: WorkspaceLifecycleEvent): WorkspaceLifecycleStatus | undefined {
+function lifecycleForEvent(event: WorkspaceLifecycleEvent): WorkspaceLifecycle | undefined {
   switch (event.type) {
     case "workspace:registered": return "registered";
     case "workspace:activated": return "active";
@@ -50,7 +47,7 @@ export function foldWorkspaceLifecycles(
     const lifecycle = lifecycleForEvent(event);
     if (lifecycle === undefined) continue;
     if (event.type !== "workspace:registered" && !states.has(event.workspaceId)) {
-      throw new Error(`Workspace ${event.workspaceId} is not registered`);
+      throw new WorkspaceLifecycleError(event.workspaceId);
     }
     states.set(event.workspaceId, {
       workspaceId: event.workspaceId,

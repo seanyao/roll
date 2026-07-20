@@ -177,6 +177,67 @@ describe("RepositoryCache lifecycle", () => {
     expect(existsSync(resolveRepositoryCacheIdentity({ rollHome, binding: repository }).journalPath)).toBe(false);
   });
 
+  it("serializes two Workspace acquisitions onto one complete cache", async () => {
+    const rollHome = sandbox();
+    const upstream = localRemote(sandbox(), "concurrent");
+    const repository = binding(upstream.remote);
+
+    const [alpha, beta] = await Promise.all([
+      ensureRepositoryCache({
+        rollHome,
+        binding: repository,
+        integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      }),
+      ensureRepositoryCache({
+        rollHome,
+        binding: repository,
+        integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      }),
+    ]);
+
+    expect(new Set([alpha.cachePath, beta.cachePath])).toEqual(new Set([alpha.cachePath]));
+    expect(new Set([alpha.action, beta.action])).toEqual(new Set(["created", "reused"]));
+    expect(alpha.baseSha).toBe(beta.baseSha);
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    expect(existsSync(identity.temporaryPath)).toBe(false);
+    expect(existsSync(identity.journalPath)).toBe(false);
+    expect(runGit(identity.cachePath, ["fsck", "--connectivity-only"])).toBe("");
+  });
+
+  it("repairs a deleted cache without changing Workspace, Issue, backlog or completion truth", async () => {
+    const rollHome = sandbox();
+    const upstream = localRemote(sandbox(), "rebuild");
+    const repository = binding(upstream.remote);
+    const workspaceRoot = join(rollHome, "workspaces", "ws-alpha");
+    const issueRoot = join(workspaceRoot, "issues", "US-WS-004");
+    mkdirSync(issueRoot, { recursive: true });
+    const truthFiles = [
+      join(rollHome, "workspaces.json"),
+      join(workspaceRoot, "workspace.yaml"),
+      join(issueRoot, "issue.yaml"),
+      join(workspaceRoot, "backlog.md"),
+      join(issueRoot, "completion.ndjson"),
+    ];
+    for (const [index, path] of truthFiles.entries()) {
+      writeFileSync(path, `truth-${index}\n`, "utf8");
+    }
+    const before = new Map(truthFiles.map((path) => [path, readFileSync(path, "utf8")]));
+    const created = await ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+    });
+    rmSync(created.cachePath, { recursive: true, force: true });
+
+    const rebuilt = await ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+    });
+    expect(rebuilt).toMatchObject({ action: "repaired", event: { type: "repo:cache_repaired" } });
+    for (const path of truthFiles) expect(readFileSync(path, "utf8")).toBe(before.get(path));
+  });
+
   it("fails loud on an existing cache origin mismatch", async () => {
     const rollHome = sandbox();
     const upstream = localRemote(sandbox(), "expected");

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -38,6 +39,7 @@ export interface RepositoryCacheIdentity {
   readonly remote: string;
   readonly reposRoot: string;
   readonly cachePath: string;
+  readonly identityPath: string;
   readonly lockPath: string;
   readonly journalPath: string;
   readonly temporaryPath: string;
@@ -92,6 +94,7 @@ interface ParsedIntegrationRefspec {
 }
 
 const REPOSITORY_CACHE_JOURNAL_V1 = "roll.repository-cache-journal/v1" as const;
+const REPOSITORY_CACHE_IDENTITY_V1 = "roll.repository-cache-identity/v1" as const;
 
 function childPath(root: string, name: string): string {
   const candidate = resolve(root, name);
@@ -128,6 +131,7 @@ export function resolveRepositoryCacheIdentity(
     remote: parsed.value.remote,
     reposRoot,
     cachePath: childPath(reposRoot, `${repoId}.git`),
+    identityPath: childPath(reposRoot, `${repoId}.json`),
     lockPath: childPath(locksRoot, `${repoId}.lock`),
     journalPath: childPath(reposRoot, `${repoId}.pending.json`),
     temporaryPath: childPath(reposRoot, `${repoId}.creating`),
@@ -172,9 +176,45 @@ function prepareMachineRoots(identity: RepositoryCacheIdentity, rollHome: string
   assertSafeExistingPath(repoLocksRoot, "directory");
   mkdirSync(repoLocksRoot, { recursive: true });
   assertSafeExistingPath(identity.cachePath, "directory");
+  assertSafeExistingPath(identity.identityPath, "file-or-directory");
   assertSafeExistingPath(identity.temporaryPath, "directory");
   assertSafeExistingPath(identity.journalPath, "file-or-directory");
   assertSafeExistingPath(identity.lockPath, "file-or-directory");
+}
+
+function hasRecordedIdentity(identity: RepositoryCacheIdentity): boolean {
+  if (!existsSync(identity.identityPath)) return false;
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(identity.identityPath, "utf8"));
+  } catch {
+    throw new RepositoryCacheError("origin_mismatch", "Repository cache identity record is invalid");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new RepositoryCacheError("origin_mismatch", "Repository cache identity record is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record["schema"] !== REPOSITORY_CACHE_IDENTITY_V1 ||
+    record["repoId"] !== identity.repoId ||
+    record["remote"] !== identity.remote ||
+    record["cachePath"] !== identity.cachePath
+  ) {
+    throw new RepositoryCacheError("origin_mismatch", "Repository cache identity record conflicts with its path");
+  }
+  return true;
+}
+
+function writeCacheIdentity(identity: RepositoryCacheIdentity, now: number): void {
+  const temporary = `${identity.identityPath}.tmp.${process.pid}.${randomUUID()}`;
+  writeFileSync(temporary, `${JSON.stringify({
+    schema: REPOSITORY_CACHE_IDENTITY_V1,
+    repoId: identity.repoId,
+    remote: identity.remote,
+    cachePath: identity.cachePath,
+    updatedAt: now,
+  }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  renameSync(temporary, identity.identityPath);
 }
 
 async function takeRepositoryLock(
@@ -308,8 +348,9 @@ export async function ensureRepositoryCache(
   const now = input.now ?? Date.now;
   try {
     const interrupted = existsSync(identity.journalPath) || existsSync(identity.temporaryPath);
+    const recordedIdentity = hasRecordedIdentity(identity);
     const state = await inspectExistingCache(identity, runGit);
-    const action: RepositoryCacheAction = interrupted || state === "corrupt"
+    const action: RepositoryCacheAction = interrupted || state === "corrupt" || (state === "missing" && recordedIdentity)
       ? "repaired"
       : state === "missing" ? "created" : "reused";
     writeJournal(identity, action, refspec.value, now());
@@ -322,6 +363,7 @@ export async function ensureRepositoryCache(
       rmSync(identity.cachePath, { recursive: true, force: true });
       baseSha = await createCache(identity, refspec, runGit);
     }
+    writeCacheIdentity(identity, now());
     rmSync(identity.journalPath, { force: true });
     const event: RepositoryCacheEvent = {
       type: eventType(action),

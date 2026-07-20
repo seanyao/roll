@@ -265,6 +265,13 @@ function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSou
   }).sort((left, right) => left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0);
 }
 
+// Re-anchors containment by walking segment-by-segment with lstat + realpath, and callers
+// re-invoke this immediately before each mutating write (see projectCurrent/writeRevision/
+// prepareProjectionJournal). This closes the check-then-write window between call sites, but
+// pathname-based checks cannot close the window inside a single write syscall itself (e.g. a
+// path swapped for a symlink between this function's last stat and the write call that follows
+// it): only fd-anchored operations (O_NOFOLLOW opens, *at() syscalls) eliminate that residual
+// race, and this store does not have that available for directory creation/rename targets.
 function ensureSafeDirectory(root: string, target: string, create: boolean): void {
   if (!contained(root, target)) fail("unsafe_context", "Requirement output must remain inside the Workspace");
   const rel = relative(root, target);

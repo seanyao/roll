@@ -41,8 +41,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Closed Story id syntax: US-/FIX-/REFACTOR-/IDEA-/BUG- prefix, uppercase
- *  alphanumeric segments joined by single hyphens, no separators or traversal. */
-const STORY_ID_RE = /^(US|FIX|REFACTOR|IDEA|BUG)(-[A-Z0-9]+)+[a-z]?$/;
+ *  alphanumeric segments joined by single hyphens, no separators or traversal.
+ *  The trailing `[a-z]?\d*` admits existing shorthand-split suffixes like
+ *  "079f1" (a lowercase split letter followed by more digits), not just a
+ *  single bare trailing letter. */
+const STORY_ID_RE = /^(US|FIX|REFACTOR|IDEA|BUG)(-[A-Z0-9]+)+[a-z]?\d*$/;
 
 export type ValidateStoryIdResult =
   | { readonly ok: true; readonly value: string }

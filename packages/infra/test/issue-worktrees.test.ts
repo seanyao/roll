@@ -10,7 +10,7 @@ import {
   applyIssueInit,
   inspectIssueInit,
 } from "../src/issue-worktrees.js";
-import { unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
+import { protectReadOnlyWorktree, unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -449,5 +449,216 @@ describe("applyIssueInit", () => {
     expect(() => writeFileSync(join(sot3Path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
 
     git(sot3CachePath, ["worktree", "unlock", sot3Path]);
+  });
+
+  it("reports conflict (never reused) for a WRITE target checked out on the WRONG branch", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // Real, unmocked drift: create the wrong branch FROM the actual worktree
+    // (not the bare cache's HEAD, which may not even resolve) and switch
+    // onto it — still perfectly clean and perfectly valid git-wise.
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(sot1Path, ["switch", "-c", "wrong-branch"]);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+  });
+
+  it("stays reused/compatible for a WRITE target with LATER real story commits on its own governed branch", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // Real, unmocked forward progress: commit real story work onto sot1's
+    // OWN governed branch — exactly what a Builder is expected to do. The
+    // pinned base remains an ANCESTOR of the new HEAD, so this must stay
+    // fully compatible, not become a conflict.
+    const sot1Path = join(f.issueRoot, "sot1");
+    writeFileSync(join(sot1Path, "story-work.txt"), "real story commit\n", "utf8");
+    git(sot1Path, ["add", "story-work.txt"]);
+    git(sot1Path, ["commit", "-q", "-m", "real story commit"]);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("reused");
+
+    const applied = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(applied.outcome).toBe("reused");
+    // The real story commit is untouched — apply never resets/discards it.
+    expect(existsSync(join(sot1Path, "story-work.txt"))).toBe(true);
+  });
+
+  it("reports conflict for a WRITE target with DIVERGED history (pinned base is NOT an ancestor of HEAD)", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // Real divergence: reset sot1's OWN governed branch onto an orphan
+    // history sharing NO ancestry with the pinned base.
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(sot1Path, ["checkout", "--orphan", "unrelated-history"]);
+    git(sot1Path, ["rm", "-rf", "."]);
+    writeFileSync(join(sot1Path, "unrelated.txt"), "unrelated root commit\n", "utf8");
+    git(sot1Path, ["add", "unrelated.txt"]);
+    git(sot1Path, ["commit", "-q", "-m", "unrelated root commit"]);
+    git(sot1Path, ["branch", "-f", "roll/ws-demo/US-XX1/sot1", "unrelated-history"]);
+    git(sot1Path, ["checkout", "roll/ws-demo/US-XX1/sot1"]);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+  });
+
+  it("reports conflict for a READ target detached at the WRONG HEAD commit (real apply-side rejection too)", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // sot3 is protected (read-only) — unprotect ONLY inside this test before
+    // creating the real drift commit, then the checkout is left non-writable
+    // again by the immediately-following `checkout --detach`, which git
+    // performs regardless of the write-bit (it only touches its own index
+    // and HEAD ref, not the tracked working files that changed).
+    const sot3Path = join(f.issueRoot, "sot3");
+    unprotectReadOnlyWorktree(sot3Path);
+    writeFileSync(join(sot3Path, "extra.txt"), "real extra commit on the read target\n", "utf8");
+    git(sot3Path, ["add", "extra.txt"]);
+    git(sot3Path, ["commit", "-q", "-m", "real drift commit"]);
+    git(sot3Path, ["checkout", "--detach", "HEAD"]);
+    protectReadOnlyWorktree(sot3Path);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot3"]?.decision).toBe("conflict");
+
+    // apply must ALSO reject — never silently repair/reuse an incompatible
+    // actual worktree just because --check alone caught it.
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+  });
+
+  it("keeps an existing Issue pinned and reusable after the shared cache's integration ref advances independently", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsAfterCreate = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const pinnedBase = eventsAfterCreate.find((event) => event.alias === "sot1").baseSha as string;
+
+    // Real, unmocked simulation of ANOTHER Workspace sharing this SAME
+    // machine cache advancing the integration branch — push a brand-new
+    // commit to sot1's real remote, then refresh the shared cache's
+    // tracking ref for it directly (mirrors what ensureRepositoryCache's own
+    // fetch would do on the next apply for some OTHER Issue).
+    const sourceDir = f.remotes.sot1.replace(/\.git$/, "-source");
+    writeFileSync(join(sourceDir, "new-upstream-work.txt"), "advanced upstream\n", "utf8");
+    git(sourceDir, ["add", "new-upstream-work.txt"]);
+    git(sourceDir, ["commit", "-q", "-m", "advanced upstream work"]);
+    execFileSync("git", ["push", f.remotes.sot1, "HEAD:main"], { cwd: sourceDir, stdio: "ignore" });
+    const sot1CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot1")?.repoId}.git`);
+    git(sot1CachePath, ["fetch", "--prune", f.remotes.sot1, "+refs/heads/main:refs/remotes/origin/main"]);
+    const advancedRef = git(sot1CachePath, ["rev-parse", "refs/remotes/origin/main"]);
+    expect(advancedRef).not.toBe(pinnedBase);
+
+    // The existing Issue's check/reuse/repair must remain pinned at the
+    // ORIGINAL base — never silently reflect the advanced shared ref.
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.baseSha).toBe(pinnedBase);
+    expect(report.targets["sot1"]?.decision).toBe("reused");
+
+    const reapplied = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(reapplied.outcome).toBe("reused");
+  });
+
+  it("repairs an absent existing target from the Issue-PINNED base, not the shared cache's advanced integration head", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const events = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const pinnedBaseSot3 = events.find((event) => event.alias === "sot3").baseSha as string;
+
+    // Advance sot3's real upstream AFTER the Issue already pinned its base.
+    const sourceDir = f.remotes.sot3.replace(/\.git$/, "-source");
+    writeFileSync(join(sourceDir, "new-upstream-work.txt"), "advanced upstream\n", "utf8");
+    git(sourceDir, ["add", "new-upstream-work.txt"]);
+    git(sourceDir, ["commit", "-q", "-m", "advanced upstream work"]);
+    execFileSync("git", ["push", f.remotes.sot3, "HEAD:main"], { cwd: sourceDir, stdio: "ignore" });
+
+    // Now delete sot3's real worktree directory by hand (a real operator
+    // action, not a mock) — its path is absent, but the Issue already has a
+    // completed issue:repository_bound fact pinning its original base.
+    // sot3 is protected (read-only), so `git worktree remove` needs its
+    // write bits restored first — the same real filesystem state a genuine
+    // operator would need to deal with.
+    unprotectReadOnlyWorktree(join(f.issueRoot, "sot3"));
+    const sot3CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot3")?.repoId}.git`);
+    execFileSync("git", ["worktree", "remove", "--force", join(f.issueRoot, "sot3")], { cwd: sot3CachePath, stdio: "ignore" });
+
+    const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(repaired.outcome).toBe("repaired");
+    const recreatedHead = git(join(f.issueRoot, "sot3"), ["rev-parse", "HEAD"]);
+    expect(recreatedHead).toBe(pinnedBaseSot3);
+  });
+
+  it("fails loud with zero destructive mutation when the journal and a completed event disagree on a target's pinned facts", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const manifestBefore = readFileSync(join(f.issueRoot, "manifest.json"), "utf8");
+
+    // Plant a STALE, CONFLICTING journal alongside the already-completed
+    // events — a real malformed-state scenario (e.g. a leftover journal
+    // from an old, already-superseded interrupted attempt with a different
+    // pinned base than what actually completed).
+    const staleJournal = {
+      schema: "roll.issue-init-journal/v1",
+      transactionId: "stale-transaction",
+      workspaceId: "ws-demo",
+      storyId: "US-XX1",
+      status: "repair_required",
+      targets: [
+        { alias: "sot1", path: join(f.issueRoot, "sot1"), created: false, workBranch: "roll/ws-demo/US-XX1/sot1", access: "write", baseSha: "0".repeat(40) },
+      ],
+    };
+    writeFileSync(join(f.issueRoot, "issue-init.pending.json"), `${JSON.stringify(staleJournal, null, 2)}\n`, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    // Zero destructive mutation: events and manifest are byte-identical.
+    expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
+    expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true); // untouched real worktree
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+
+    rmSync(join(f.issueRoot, "issue-init.pending.json"), { force: true });
+  });
+
+  it("never leaves a stale success fact (issue:repository_bound event) for a target that was rolled back on a failed apply", async () => {
+    const f = fixture();
+    // A real, unmocked git-level failure at the worktree-ADD phase: sot2's
+    // governed branch already exists in its own cache (left by some other
+    // process), so git's own `worktree add -b` refuses to recreate it.
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    // sot1 was rolled back — no events.jsonl was ever created for THIS
+    // Issue at all, since the whole run failed before reaching the
+    // event-write step (sot1 succeeded, sot2 genuinely failed).
+    expect(existsSync(join(f.issueRoot, "events.jsonl"))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
+
+    // Repair: remove the colliding branch, then re-run — the same contract converges.
+    const sot2CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
+    execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: sot2CachePath, stdio: "ignore" });
+    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: sot2CachePath, stdio: "ignore" });
+    const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(repaired.outcome).toBe("repaired");
+    const events = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(events).toHaveLength(3); // sot1, sot2, sot3 — exactly once each, no stale/duplicate facts.
+    expect(new Set(events.map((e) => e.alias)).size).toBe(3);
   });
 });

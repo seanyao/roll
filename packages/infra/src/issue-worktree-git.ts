@@ -102,10 +102,29 @@ export function unprotectReadOnlyWorktree(path: string): void {
   const rootStat = statSync(path);
   chmodSync(path, rootStat.mode | 0o600 | (rootStat.isDirectory() ? 0o100 : 0));
   function restore(root: string): void {
-    for (const name of readdirSync(root)) {
+    let names: string[];
+    try {
+      names = readdirSync(root);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return; // the directory itself vanished concurrently.
+      throw error;
+    }
+    for (const name of names) {
       if (name === ".git") continue;
       const entryPath = join(root, name);
-      const stat = lstatSync(entryPath);
+      let stat: ReturnType<typeof lstatSync>;
+      try {
+        stat = lstatSync(entryPath);
+      } catch (error) {
+        // Real TOCTOU: git itself (worktree remove/branch -D/prune running
+        // concurrently, or its own transient lock files like
+        // `packed-refs.lock`) can remove an entry between the `readdirSync`
+        // snapshot above and this `lstatSync` — that entry no longer needs
+        // unprotecting since it no longer exists. Any OTHER error is a real
+        // failure and must not be swallowed.
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
       if (stat.isSymbolicLink()) continue;
       chmodSync(entryPath, stat.mode | 0o600 | (stat.isDirectory() ? 0o100 : 0));
       if (stat.isDirectory()) restore(entryPath);
@@ -188,6 +207,49 @@ export async function issueWorktreeIdentity(path: string, expectedCachePath: str
   const dirty = status.code !== 0 || status.stdout.trim() !== "";
 
   return { state: "compatible", dirty, branch: branch === "" ? null : branch, baseSha: head.stdout.trim() };
+}
+
+export interface ExpectedWorktreeFacts {
+  readonly access: "read" | "write";
+  /** The exact governed Story branch for a write target; null for a read
+   *  target (must be detached). */
+  readonly workBranch: string | null;
+  /** The Issue-pinned immutable base SHA — NEVER the shared cache's current
+   *  `refs/remotes/origin/<branch>`, which can advance independently of any
+   *  one Issue (another Workspace sharing the same machine cache can refresh
+   *  it at any time). Null means the pinned base itself is unavailable
+   *  (e.g. its object is missing from the cache) — compatibility can never
+   *  be claimed in that case. */
+  readonly baseSha: string | null;
+}
+
+/** Compare a real worktree's ACTUAL identity against what THIS Issue target
+ *  expects, per the corrected compatibility contract:
+ *   - READ target: branch must be detached (null) AND HEAD must equal the
+ *     pinned base EXACTLY.
+ *   - WRITE target: branch must equal the expected governed branch EXACTLY
+ *     AND the pinned base must be an ancestor of HEAD (HEAD may equal the
+ *     base or contain later story commits — that's the whole point of a
+ *     write target). A diverged/unrelated HEAD (base NOT an ancestor) is a
+ *     conflict, never silently reused.
+ *  A `null` expected baseSha (pinned base unavailable) can never be
+ *  compatible — this function reports conflict rather than let a caller
+ *  guess from a shared, mutable ref. Never mutates anything — pure git
+ *  introspection (`merge-base --is-ancestor`) plus the pre-computed identity. */
+export async function checkWorktreeCompatibility(
+  identity: IssueWorktreeIdentity,
+  expectedCachePath: string,
+  expected: ExpectedWorktreeFacts,
+): Promise<boolean> {
+  if (identity.state !== "compatible") return false;
+  if (expected.baseSha === null) return false;
+  if (expected.access === "read") {
+    return identity.branch === null && identity.baseSha === expected.baseSha;
+  }
+  if (identity.branch !== expected.workBranch) return false;
+  if (identity.baseSha === expected.baseSha) return true;
+  const ancestor = await git(["merge-base", "--is-ancestor", expected.baseSha, identity.baseSha ?? ""], expectedCachePath);
+  return ancestor.code === 0;
 }
 
 export interface IssueWorktreeRemoveOptions {

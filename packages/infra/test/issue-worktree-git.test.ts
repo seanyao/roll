@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ReadOnlyWorktreeSymlinkError,
+  checkWorktreeCompatibility,
   issueWorktreeAdd,
   issueWorktreeIdentity,
   issueWorktreeRemove,
@@ -238,5 +239,96 @@ describe("protectReadOnlyWorktree / unprotectReadOnlyWorktree", () => {
     // untouched (protection threw before reaching ANY chmod, not just this one).
     expect(statSync(outsidePath).mode & 0o777).toBe(outsideModeBefore);
     expect(readFileSync(outsidePath, "utf8")).toBe("external content, never owned by any worktree\n");
+  });
+});
+
+describe("checkWorktreeCompatibility", () => {
+  it("is compatible for a READ target whose detached HEAD equals the pinned base exactly", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "read", workBranch: null, baseSha });
+    expect(ok).toBe(true);
+  });
+
+  it("is a conflict for a READ target detached at a DIFFERENT commit than the pinned base", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    // Real drift: move the detached HEAD to a different real commit.
+    writeFileSync(join(path, "extra.txt"), "drift\n", "utf8");
+    git(path, ["add", "extra.txt"]);
+    git(path, ["commit", "-q", "-m", "drift"]);
+    git(path, ["checkout", "--detach", "HEAD"]);
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "read", workBranch: null, baseSha });
+    expect(ok).toBe(false);
+  });
+
+  it("is compatible for a WRITE target on the exact governed branch, pinned base equal to HEAD", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "write", workBranch: "roll/ws-demo/US-XX1/sot", baseSha });
+    expect(ok).toBe(true);
+  });
+
+  it("is compatible for a WRITE target with LATER real commits on the exact governed branch (pinned base is an ancestor)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    writeFileSync(join(path, "story-work.txt"), "real story commit\n", "utf8");
+    git(path, ["add", "story-work.txt"]);
+    git(path, ["commit", "-q", "-m", "real story commit"]);
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "write", workBranch: "roll/ws-demo/US-XX1/sot", baseSha });
+    expect(ok).toBe(true);
+  });
+
+  it("is a conflict for a WRITE target on the WRONG branch name entirely", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    git(path, ["switch", "-c", "wrong-branch"]);
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "write", workBranch: "roll/ws-demo/US-XX1/sot", baseSha });
+    expect(ok).toBe(false);
+  });
+
+  it("is a conflict for a WRITE target with DIVERGED history (pinned base is NOT an ancestor of HEAD)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    // Real divergence: reset the governed branch onto an unrelated history
+    // (an orphan commit sharing no ancestry with the pinned base) rather
+    // than committing forward from it.
+    git(path, ["checkout", "--orphan", "unrelated-history"]);
+    git(path, ["rm", "-rf", "."]);
+    writeFileSync(join(path, "unrelated.txt"), "unrelated root commit\n", "utf8");
+    git(path, ["add", "unrelated.txt"]);
+    git(path, ["commit", "-q", "-m", "unrelated root commit"]);
+    git(path, ["branch", "-f", "roll/ws-demo/US-XX1/sot", "unrelated-history"]);
+    git(path, ["checkout", "roll/ws-demo/US-XX1/sot"]);
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "write", workBranch: "roll/ws-demo/US-XX1/sot", baseSha });
+    expect(ok).toBe(false);
+  });
+
+  it("is never compatible when the expected pinned base itself is unavailable (null)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    const identity = await issueWorktreeIdentity(path, cachePath);
+    const ok = await checkWorktreeCompatibility(identity, cachePath, { access: "write", workBranch: "roll/ws-demo/US-XX1/sot", baseSha: null });
+    expect(ok).toBe(false);
   });
 });

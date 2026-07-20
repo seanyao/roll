@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   parseIssueStoryContract,
   resolveWorkspaceTarget,
+  validateStoryId,
   type IssueInitProbe,
   type IssueStoryContract,
   type WorkspaceContextCandidate,
@@ -173,6 +174,7 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
   const parsed = parseArgs(args);
   const jsonOutput = args.includes("--json");
   if (parsed === undefined) return emitError("invalid_arguments", jsonOutput);
+  if (!validateStoryId(parsed.storyId).ok) return emitError("invalid_story_id", parsed.json);
 
   const registry = new WorkspaceRegistry({ rollHome: workspaceRollHome() });
   let entries: readonly InspectedWorkspace[];

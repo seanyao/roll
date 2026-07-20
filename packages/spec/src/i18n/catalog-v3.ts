@@ -23,6 +23,7 @@ export const v3Catalog: Catalog = {
   "workspace.issue.error.line": { en: "workspace issue: %s — %s", zh: "工作区 Issue：%s — %s" },
   "workspace.issue.error.invalid_arguments": { en: "Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]", zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]" },
   "workspace.issue.error.invalid_workspace": { en: "Workspace facts could not be read", zh: "无法读取工作区事实" },
+  "workspace.issue.error.invalid_story_id": { en: "Story id must match the closed US-/FIX-/REFACTOR-/IDEA-/BUG- syntax with no path separators or traversal", zh: "Story ID 必须符合 US-/FIX-/REFACTOR-/IDEA-/BUG- 闭合语法，不含路径分隔符或路径穿越" },
   "workspace.issue.error.story_not_found": { en: "No Story spec was found for this id", zh: "找不到该 ID 对应的 Story spec" },
   "workspace.issue.error.duplicate_story": { en: "This Story id resolves to more than one spec — must be unique", zh: "该 Story ID 解析到多份 spec —必须唯一" },
   "workspace.issue.error.invalid_config": { en: "Story Contract frontmatter is invalid", zh: "Story Contract frontmatter 无效" },

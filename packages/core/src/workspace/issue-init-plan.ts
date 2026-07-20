@@ -40,6 +40,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Closed Story id syntax: US-/FIX-/REFACTOR-/IDEA-/BUG- prefix, uppercase
+ *  alphanumeric segments joined by single hyphens, no separators or traversal. */
+const STORY_ID_RE = /^(US|FIX|REFACTOR|IDEA|BUG)(-[A-Z0-9]+)+[a-z]?$/;
+
+export type ValidateStoryIdResult =
+  | { readonly ok: true; readonly value: string }
+  | { readonly ok: false; readonly code: "invalid_value"; readonly message: string };
+
+/** Validate a Story id as a safe closed identifier before ANY path use — rejects
+ *  '.', '..', path separators and any character outside the closed id syntax. */
+export function validateStoryId(storyId: string): ValidateStoryIdResult {
+  if (!STORY_ID_RE.test(storyId)) {
+    return { ok: false, code: "invalid_value", message: "Story id must match the closed US-/FIX-/REFACTOR-/IDEA-/BUG- syntax with no path separators or traversal" };
+  }
+  return { ok: true, value: storyId };
+}
+
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && value === value.trim();
 }

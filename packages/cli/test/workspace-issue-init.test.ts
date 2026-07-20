@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -198,5 +198,24 @@ describe("US-WS-008 roll workspace issue init", () => {
     expect(missing.status).toBe(1);
     expect(JSON.parse(missing.stderr)).toMatchObject({ error: { code: "story_not_found" } });
     expect(existsSync(join(f.workspace, "issues", "US-NOPE"))).toBe(false);
+  });
+
+  it.each([
+    ["dot", "."],
+    ["dot-dot", ".."],
+    ["traversal", "../../etc/passwd"],
+    ["embedded traversal", "US-../../XX1"],
+    ["contains slash", "US-XX/1"],
+  ])("rejects a %s story id as unsafe before any path use, with zero writes", async (_name, storyId) => {
+    const f = fixture();
+    await initWorkspace(f);
+    const before = readFileSync(f.config, "utf8"); // sentinel: config untouched proves no writes escaped
+    const result = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "invalid_story_id" } });
+    // The pre-existing empty issues/ dir (from workspace init) must gain no new entries.
+    expect(existsSync(join(f.workspace, "issues"))).toBe(true);
+    expect(readFileSync(f.config, "utf8")).toBe(before);
+    expect(readdirSync(join(f.workspace, "issues"))).toEqual([]);
   });
 });

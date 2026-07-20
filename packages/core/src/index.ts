@@ -9,6 +9,7 @@ export * from "./agent/role-cast-ranker.js";
 export * from "./agent/roster-gate.js";
 export * from "./projects/reachability.js";
 export * from "./workspace/target.js";
+export * from "./workspace/lifecycle.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

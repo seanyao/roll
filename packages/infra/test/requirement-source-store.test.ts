@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -17,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_REQUIREMENT_BODY_BYTES, MAX_REQUIREMENT_CONTEXT_BYTES } from "@roll/core";
+import { MAX_REQUIREMENT_BODY_BYTES, MAX_REQUIREMENT_CONTEXT_BYTES, MAX_REQUIREMENT_CONTEXT_FILES } from "@roll/core";
 import { acquireLock, releaseLock } from "../src/process.js";
 import {
   captureRequirementSource,
@@ -153,6 +154,110 @@ describe("US-WS-007 RequirementSourceStore", () => {
       afterReadFile: (path) => reads.push(path),
     })).toThrowError(expect.objectContaining({ code: "context_limit" }));
     expect(reads).not.toContain(join(f.contextRoot, "huge.bin"));
+  });
+
+  it("proves an identical reuse capture makes truly zero filesystem mutations across the whole Workspace tree", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+
+    function snapshotTree(root: string): ReadonlyMap<string, string> {
+      const entries = new Map<string, string>();
+      const walk = (dir: string, relativeDir: string): void => {
+        for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
+          const path = join(dir, entry.name);
+          const relativePath = relativeDir === "" ? entry.name : `${relativeDir}/${entry.name}`;
+          const stat = lstatSync(path);
+          const digest = stat.isFile() ? createHash("sha256").update(readFileSync(path)).digest("hex") : "";
+          entries.set(relativePath, JSON.stringify({
+            type: stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "dir" : "file",
+            ino: stat.ino,
+            dev: stat.dev,
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            digest,
+          }));
+          if (stat.isDirectory() && !stat.isSymbolicLink()) walk(path, relativePath);
+        }
+      };
+      walk(root, "");
+      return entries;
+    }
+
+    const evidenceRoot = join(f.workspace, "requirements");
+    const before = snapshotTree(evidenceRoot);
+    const reused = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(reused.outcome).toBe("reused");
+    const after = snapshotTree(evidenceRoot);
+
+    expect(before.size).toBeGreaterThan(0);
+    expect(Array.from(after.keys()).sort()).toEqual(Array.from(before.keys()).sort());
+    for (const [path, beforeEntry] of before) {
+      expect(after.get(path), `entry changed at ${path}`).toBe(beforeEntry);
+    }
+  });
+
+  it("proves identical reuse never invokes mkdir/write/rename/unlink by instrumenting the fs seams", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+
+    const mutations: string[] = [];
+    const reused = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      renameFile: (from, to) => { mutations.push(`rename:${to}`); renameSync(from, to); },
+      afterReadFile: () => { /* reads are expected; only mutation seams are asserted */ },
+    });
+    expect(reused.outcome).toBe("reused");
+    expect(mutations).toEqual([]);
+  });
+
+  it("rejects a symlink nested inside a legitimate context subdirectory, not only at the top level", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-nested.txt");
+    write(outside, "nested escape target\n");
+    symlinkSync(outside, join(f.contextRoot, "brief", "nested-link.md"));
+    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/nested-link.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("accepts exactly MAX_REQUIREMENT_CONTEXT_FILES files and exactly MAX_REQUIREMENT_CONTEXT_BYTES total bytes", () => {
+    const f = fixture();
+    const perFileBytes = Math.floor(MAX_REQUIREMENT_CONTEXT_BYTES / MAX_REQUIREMENT_CONTEXT_FILES);
+    const contextPaths: string[] = [];
+    let used = 0;
+    for (let index = 0; index < MAX_REQUIREMENT_CONTEXT_FILES; index += 1) {
+      const isLast = index === MAX_REQUIREMENT_CONTEXT_FILES - 1;
+      const bytes = isLast ? MAX_REQUIREMENT_CONTEXT_BYTES - used : perFileBytes;
+      write(join(f.contextRoot, `bulk-${index}.md`), "x".repeat(bytes));
+      contextPaths.push(`bulk-${index}.md`);
+      used += bytes;
+    }
+    expect(used).toBe(MAX_REQUIREMENT_CONTEXT_BYTES);
+
+    const result = captureRequirementSource(request(f, { contextPaths }));
+    expect(result.contextCount).toBe(MAX_REQUIREMENT_CONTEXT_FILES);
+  });
+
+  it("rejects a multi-file context set whose aggregate exceeds the byte limit even though every single file is under it", () => {
+    const f = fixture();
+    const perFileBytes = Math.floor(MAX_REQUIREMENT_CONTEXT_BYTES / 4);
+    const contextPaths: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      write(join(f.contextRoot, `agg-${index}.md`), "x".repeat(perFileBytes));
+      contextPaths.push(`agg-${index}.md`);
+    }
+    expect(() => captureRequirementSource(request(f, { contextPaths }))).toThrowError(
+      expect.objectContaining({ code: "context_limit" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
+  it("writes nothing to disk when every declared context path is invalid", () => {
+    const f = fixture();
+    expect(() => captureRequirementSource(request(f, {
+      contextPaths: ["../escape.md", "/etc/passwd", "..\\escape.md", "a/../../escape.md"],
+    }))).toThrowError(expect.objectContaining({ code: "unsafe_context" }));
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
   it("rejects a context root that is itself a symlink to an external location", () => {

@@ -206,7 +206,7 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
   const rollHome = workspaceRollHome();
 
   if (parsed.check) {
-    const report = await inspectIssueInit({ workspaceId, rollHome, issueRoot, contract: contract.value, bindings });
+    const report = await inspectIssueInit({ workspaceId, rollHome, workspaceRoot, issueRoot, contract: contract.value, bindings });
     if (parsed.json) {
       process.stdout.write(`${JSON.stringify({ schema: CHECK_RESULT_V1, storyId: parsed.storyId, workspaceId, report }, null, 2)}\n`);
     } else {
@@ -219,6 +219,7 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
     const result = await applyIssueInit({
       workspaceId,
       rollHome,
+      workspaceRoot,
       issueRoot,
       contract: contract.value,
       bindings,

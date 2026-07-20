@@ -35,6 +35,7 @@ export const v3Catalog: Catalog = {
   "workspace.issue.error.rejected": { en: "Issue init plan was rejected before mutation", zh: "Issue 初始化计划已在变更前被拒绝" },
   "workspace.issue.error.manifest_conflict": { en: "Issue manifest on disk conflicts with the resolved Workspace/Story identity", zh: "磁盘上的 Issue manifest 与解析出的工作区/Story 身份冲突" },
   "workspace.issue.error.apply_failed": { en: "Issue init failed; clean new targets were rolled back and a repair journal was written", zh: "Issue 初始化失败；已回滚新建目标并写入修复 journal" },
+  "workspace.issue.error.symlink_escape": { en: "Issue root or Story spec path escapes its Workspace via a symlink", zh: "Issue 根目录或 Story spec 路径通过符号链接逃逸出工作区" },
   "workspace.requirement.usage": {
     en: "Usage: roll workspace requirement add [--workspace <id|path>] --provider <jira|github-issue|local-file|user-input> --ref <ref> --revision <revision> --body-file <file> [--context-root <dir> --context <relative-path> ...] --story <id> ... [--json]",
     zh: "用法：roll workspace requirement add [--workspace <ID|路径>] --provider <jira|github-issue|local-file|user-input> --ref <引用> --revision <修订> --body-file <文件> [--context-root <目录> --context <相对路径> ...] --story <ID> ... [--json]",

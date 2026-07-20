@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,5 +67,38 @@ describe("resolveWorkspaceBacklogStoryContract", () => {
     const workspaceRoot = sandbox();
     const result = resolveWorkspaceBacklogStoryContract(workspaceRoot, "US-XX1");
     expect(result).toMatchObject({ ok: false, code: "story_not_found" });
+  });
+
+  it("refuses a symlinked spec.md pointing outside the Workspace, fail-loud rather than reading through it", () => {
+    const workspaceRoot = sandbox();
+    const outside = sandbox();
+    writeFileSync(join(outside, "external-spec.md"), `---
+id: US-XX1
+repositories:
+  - alias: sot
+    access: write
+    required_delivery: true
+---
+
+# planted outside the Workspace — must never be read
+`, "utf8");
+    const storyDir = join(workspaceRoot, "backlog", "workspace-orchestration", "US-XX1");
+    mkdirSync(storyDir, { recursive: true });
+    symlinkSync(join(outside, "external-spec.md"), join(storyDir, "spec.md"));
+
+    const result = resolveWorkspaceBacklogStoryContract(workspaceRoot, "US-XX1");
+    expect(result).toMatchObject({ ok: false, code: "symlink_escape" });
+  });
+
+  it("refuses a spec.md reached through a symlinked ANCESTOR directory escaping the Workspace", () => {
+    const workspaceRoot = sandbox();
+    const outside = sandbox();
+    writeSpec(join(outside, "US-XX1"), "US-XX1");
+    mkdirSync(join(workspaceRoot, "backlog"), { recursive: true });
+    // The story directory ITSELF is a symlink to somewhere outside the Workspace.
+    symlinkSync(join(outside, "US-XX1"), join(workspaceRoot, "backlog", "US-XX1"));
+
+    const result = resolveWorkspaceBacklogStoryContract(workspaceRoot, "US-XX1");
+    expect(result).toMatchObject({ ok: false, code: "symlink_escape" });
   });
 });

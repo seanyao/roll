@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -398,6 +398,50 @@ repositories:
     expect(missing.status).toBe(1);
     expect(JSON.parse(missing.stderr)).toMatchObject({ error: { code: "story_not_found" } });
     expect(existsSync(join(f.workspace, "issues", "US-NOPE"))).toBe(false);
+  });
+
+  it("rejects a symlinked Issue root (workspace/issues/<story>) escaping the Workspace, with zero writes for both check and apply", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    writeBacklogStorySpec(f);
+    const outsideTarget = join(f.home, "outside-issue-escape");
+    mkdirSync(outsideTarget, { recursive: true });
+    symlinkSync(outsideTarget, join(f.workspace, "issues", "US-XX1"));
+
+    const check = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], f);
+    expect(check.status, check.stderr).toBe(0);
+    expect(JSON.parse(check.stdout).report.manifest.state).toBe("conflict");
+    expect(existsSync(join(outsideTarget, "manifest.json"))).toBe(false);
+
+    const apply = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(apply.status).toBe(1);
+    expect(JSON.parse(apply.stderr)).toMatchObject({ error: { code: "symlink_escape" } });
+    expect(existsSync(join(outsideTarget, "manifest.json"))).toBe(false);
+    expect(existsSync(join(outsideTarget, "sot"))).toBe(false);
+  });
+
+  it("rejects a symlinked backlog spec.md escaping the Workspace, fail-loud with zero writes", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    const outsideSpec = join(f.home, "outside-spec.md");
+    writeFileSync(outsideSpec, `---
+id: US-XX1
+repositories:
+  - alias: sot
+    access: write
+    required_delivery: true
+---
+
+# planted outside the Workspace — must never be read
+`, "utf8");
+    const storyDir = join(f.workspace, "backlog", "workspace-orchestration", "US-XX1");
+    mkdirSync(storyDir, { recursive: true });
+    symlinkSync(outsideSpec, join(storyDir, "spec.md"));
+
+    const result = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "symlink_escape" } });
+    expect(existsSync(join(f.workspace, "issues", "US-XX1"))).toBe(false);
   });
 
   it("never resolves a Story Contract from the caller cwd's .roll/features tree, only from the Workspace's own backlog tree", async () => {

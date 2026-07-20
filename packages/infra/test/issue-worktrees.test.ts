@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IssueStoryContract } from "@roll/core";
@@ -83,8 +83,9 @@ function fixture() {
     ],
   };
   const requirementManifests: readonly RequirementSourceManifest[] = [];
-  const issueRoot = join(root, "workspace", "issues", "US-XX1");
-  return { root, rollHome, bindings, contract, requirementManifests, issueRoot, remotes: { sot1: sot1Remote, sot2: sot2Remote, sot3: sot3Remote } };
+  const workspaceRoot = join(root, "workspace");
+  const issueRoot = join(workspaceRoot, "issues", "US-XX1");
+  return { root, rollHome, bindings, contract, requirementManifests, workspaceRoot, issueRoot, remotes: { sot1: sot1Remote, sot2: sot2Remote, sot3: sot3Remote } };
 }
 
 describe("inspectIssueInit", () => {
@@ -94,6 +95,7 @@ describe("inspectIssueInit", () => {
     const report = await inspectIssueInit({
       workspaceId: "ws-demo",
       rollHome: f.rollHome,
+      workspaceRoot: f.workspaceRoot,
       issueRoot: f.issueRoot,
       contract: f.contract,
       bindings: f.bindings,
@@ -112,10 +114,10 @@ describe("inspectIssueInit", () => {
 
   it("reports compatible cache/worktree facts after a real apply, still with zero writes on re-check", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
     const beforeDigest = statSync(f.rollHome).mtimeMs;
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
     expect(statSync(f.rollHome).mtimeMs).toBe(beforeDigest); // zero writes on re-check
 
     expect(report.manifest.state).toBe("compatible");
@@ -132,7 +134,7 @@ describe("inspectIssueInit", () => {
 describe("applyIssueInit", () => {
   it("creates the Issue root with real git worktrees, the immutable manifest, and one issue:repository_bound event per target with full facts", async () => {
     const f = fixture();
-    const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
     expect(result.outcome).toBe("created");
     expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true);
@@ -172,14 +174,14 @@ describe("applyIssueInit", () => {
     // target must fail BEFORE the Issue root is created at all.
     rmSync(f.remotes.sot2, { recursive: true, force: true });
 
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
     expect(existsSync(f.issueRoot)).toBe(false);
   });
 
   it("uses the real machine Roll Home cache under <rollHome>/repos, never a Workspace-relative cache", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(existsSync(join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot1")?.repoId}.git`))).toBe(true);
     expect(existsSync(join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`))).toBe(true);
     expect(existsSync(join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot3")?.repoId}.git`))).toBe(true);
@@ -189,23 +191,23 @@ describe("applyIssueInit", () => {
 
   it("never mutates the manifest once written, and reuses it verbatim on a compatible retry", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     const manifestPath = join(f.issueRoot, "manifest.json");
     const before = readFileSync(manifestPath, "utf8");
 
-    const retry = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const retry = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(retry.outcome).toBe("reused");
     expect(readFileSync(manifestPath, "utf8")).toBe(before);
   });
 
   it("real-git idempotent retry creates no duplicate worktrees, branches or events; manifest bytes unchanged", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot1")?.repoId}.git`);
     const listBefore = git(cachePath, ["worktree", "list", "--porcelain"]);
     const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
 
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     const listAfter = git(cachePath, ["worktree", "list", "--porcelain"]);
     expect(listAfter).toBe(listBefore);
     expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
@@ -219,13 +221,13 @@ describe("applyIssueInit", () => {
     writeFileSync(join(f.issueRoot, "manifest.json"), JSON.stringify({
       schema: "roll.issue/v1", workspaceId: "ws-other", storyId: "US-XX1", requirements: [], repositories: [],
     }));
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
   });
 
   it("rejects a manifest_conflict when requirements/repositories changed under the same identity, with zero mutation", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     const manifestPath = join(f.issueRoot, "manifest.json");
     const before = readFileSync(manifestPath, "utf8");
 
@@ -238,9 +240,42 @@ describe("applyIssueInit", () => {
         { alias: "sot3", access: "read", requiredDelivery: false },
       ],
     };
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: changedContract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: changedContract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
     expect(readFileSync(manifestPath, "utf8")).toBe(before);
+  });
+
+  it("rejects a symlinked Issue root (workspace/issues/<story> escaping the Workspace) with zero writes, for both check and apply", async () => {
+    const f = fixture();
+    const outsideTarget = join(f.root, "outside-escape-target");
+    mkdirSync(outsideTarget, { recursive: true });
+    // Replace the Issue root ITSELF with a symlink pointing outside the
+    // Workspace tree — a real escape, not a mock.
+    mkdirSync(join(f.root, "workspace", "issues"), { recursive: true });
+    symlinkSync(outsideTarget, f.issueRoot);
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+    // Zero writes: the outside target must remain completely empty.
+    expect(existsSync(join(outsideTarget, "manifest.json"))).toBe(false);
+    expect(existsSync(join(outsideTarget, "sot1"))).toBe(false);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.manifest.state).toBe("conflict");
+  });
+
+  it("rejects a symlinked workspace/issues ANCESTOR directory escaping the Workspace, before any mutation", async () => {
+    const f = fixture();
+    const outsideTarget = join(f.root, "outside-escape-ancestor");
+    mkdirSync(outsideTarget, { recursive: true });
+    mkdirSync(join(f.root, "workspace"), { recursive: true });
+    // The Issue root's own PARENT ("issues" dir) is a symlink — every child
+    // path underneath (including f.issueRoot) resolves outside the Workspace.
+    symlinkSync(outsideTarget, join(f.root, "workspace", "issues"));
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+    expect(existsSync(join(outsideTarget, "US-XX1"))).toBe(false);
   });
 
   it("resolves no target and creates nothing when even ONE target's repository cache cannot be resolved", async () => {
@@ -249,7 +284,7 @@ describe("applyIssueInit", () => {
     // any worktree is created, so this must leave the Issue root untouched.
     rmSync(f.remotes.sot3, { recursive: true, force: true });
 
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
 
     expect(existsSync(f.issueRoot)).toBe(false);
@@ -261,9 +296,9 @@ describe("applyIssueInit", () => {
     // every target's cache already resolved): sot2's governed branch name
     // already exists in its OWN cache (e.g. left by some other process) —
     // git's own `worktree add -b` refuses to recreate an existing branch.
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
 
     // sot1 was newly-created and clean -> rolled back via git worktree remove.
@@ -277,11 +312,11 @@ describe("applyIssueInit", () => {
     // A real, unmocked git-level failure at the worktree-ADD phase: sot2's
     // governed branch already exists in its own cache (left by some other
     // process), so git's own `worktree add -b` refuses to recreate it.
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
     let firstAttemptError: unknown;
     try {
-      await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
         // Real fault injection: the instant sot1's real worktree is created,
         // make it genuinely dirty — BEFORE sot2's real git failure triggers rollback.
         afterTargetCreated: (alias, path) => {
@@ -299,7 +334,7 @@ describe("applyIssueInit", () => {
     const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
     execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: cachePath, stdio: "ignore" });
     execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: cachePath, stdio: "ignore" });
-    const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(repaired.outcome).toBe("repaired");
     expect(existsSync(join(f.issueRoot, "sot1", "dirty.txt"))).toBe(true);
     expect(existsSync(join(f.issueRoot, "sot2", ".git"))).toBe(true);
@@ -307,8 +342,8 @@ describe("applyIssueInit", () => {
 
   it("resumes and repairs the same Issue identity after interruption without duplicating worktrees or branches", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
     // sot1 was newly-created and clean -> rolled back on the failed attempt.
     expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
@@ -316,7 +351,7 @@ describe("applyIssueInit", () => {
     const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
     execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: cachePath, stdio: "ignore" });
     execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: cachePath, stdio: "ignore" });
-    const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(result.outcome).toBe("repaired");
     expect(existsSync(join(f.issueRoot, "sot2", ".git"))).toBe(true);
     expect(existsSync(join(f.issueRoot, "sot3", ".git"))).toBe(true);
@@ -329,7 +364,7 @@ describe("applyIssueInit", () => {
   it("rolls back a target the journal already marked created even when read-only PROTECTION itself genuinely fails afterward", async () => {
     const f = fixture();
     let sot3Path = "";
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
       // Real fault injection: right after sot3's real git worktree is created
       // and the journal has recorded it as created, but BEFORE
       // protectReadOnlyWorktree runs, strip read permission from sot3's own

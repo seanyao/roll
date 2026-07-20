@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { relative, resolve, sep, join } from "node:path";
 import {
   renderBranchPattern,
   resolveIssueInitPlan,
@@ -31,12 +33,89 @@ const ISSUE_INIT_JOURNAL_V1 = "roll.issue-init-journal/v1" as const;
 export type IssueInitializationErrorCode =
   | "rejected"
   | "manifest_conflict"
-  | "apply_failed";
+  | "apply_failed"
+  | "symlink_escape";
 
 export class IssueInitializationError extends Error {
   constructor(readonly code: IssueInitializationErrorCode, message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "IssueInitializationError";
+  }
+}
+
+/** Every ancestor segment from `root` down to (and including) `target`,
+ *  shallowest first — used to walk a path's containing directories without
+ *  ever following a symlink partway through. */
+function ancestorSegments(root: string, target: string): string[] {
+  const rel = relative(root, target);
+  if (rel === "") return [root];
+  const parts = rel.split(sep);
+  const segments = [root];
+  let cursor = root;
+  for (const part of parts) {
+    cursor = join(cursor, part);
+    segments.push(cursor);
+  }
+  return segments;
+}
+
+/** Resolve `path`'s real path using the deepest EXISTING ancestor (walking
+ *  up until one is found — the root itself, e.g. a tmpdir, always exists),
+ *  then re-appending whatever suffix does not exist yet on disk. This keeps
+ *  the "not created yet" case (the common one — `issueRoot` is usually
+ *  absent until apply creates it) resolved on the SAME basis as an already-
+ *  existing path, so comparing two `realpathOrPending` results never
+ *  produces a false mismatch purely from one side being real-resolved (e.g.
+ *  macOS `/tmp` → `/private/tmp`) and the other not. */
+function realpathOrPending(path: string): string {
+  let existing = path;
+  const pending: string[] = [];
+  while (!existsSync(existing)) {
+    const parent = resolve(existing, "..");
+    if (parent === existing) break; // filesystem root; stop rather than loop forever.
+    pending.unshift(existing.slice(parent.length + 1));
+    existing = parent;
+  }
+  const real = realpathSync(existing);
+  return pending.length === 0 ? real : join(real, ...pending);
+}
+
+/** Refuse an Issue root that escapes its Workspace — either because
+ *  `issueRoot` (or `workspace/issues`, or any other ancestor between
+ *  `workspaceRoot` and `issueRoot`) is ITSELF a symlink, or because its
+ *  resolved real path lands outside the Workspace's own real path. Every
+ *  ancestor is checked with `lstatSync` (never following a symlink to probe
+ *  what it is), so a symlinked `issues/` directory is caught even though its
+ *  target might coincidentally still resolve somewhere that LOOKS contained.
+ *  A missing ancestor (ENOENT) is fine — creation happens later, after this
+ *  check passes; only an EXISTING symlink anywhere in the chain is refused. */
+function assertContainedIssueRoot(workspaceRoot: string, issueRoot: string): void {
+  const root = resolve(workspaceRoot);
+  const target = resolve(issueRoot);
+  const rel = relative(root, target);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || resolve(rel) === rel) {
+    throw new IssueInitializationError("symlink_escape", "Issue root is not contained within its Workspace");
+  }
+  for (const segment of ancestorSegments(root, target)) {
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(segment);
+    } catch {
+      continue; // ENOENT: not created yet, nothing to escape through.
+    }
+    if (stat.isSymbolicLink()) {
+      throw new IssueInitializationError("symlink_escape", `Issue root path contains a symlink at ${segment}`);
+    }
+  }
+  // Backstop: even if every segment individually looked like a plain
+  // directory, the REAL path (after resolving any deeper symlink a bind
+  // mount or a component we don't control might introduce) must still land
+  // inside the Workspace's real path.
+  const realRoot = realpathOrPending(root);
+  const realTarget = realpathOrPending(target);
+  const realRel = relative(realRoot, realTarget);
+  if (realRel === ".." || realRel.startsWith(`..${sep}`) || resolve(realRel) === realRel) {
+    throw new IssueInitializationError("symlink_escape", "Issue root's real path escapes its Workspace's real path");
   }
 }
 
@@ -116,6 +195,10 @@ export interface IssueCheckReport {
 export interface InspectIssueInitInput {
   readonly workspaceId: string;
   readonly rollHome: string;
+  /** The Workspace root `issueRoot` must resolve inside of — required so a
+   *  symlinked Issue root (or a symlinked ancestor, e.g. `workspace/issues`
+   *  itself) escaping the Workspace is caught before any read/report. */
+  readonly workspaceRoot: string;
   readonly issueRoot: string;
   readonly contract: IssueStoryContract;
   readonly bindings: readonly RepositoryBinding[];
@@ -157,6 +240,14 @@ async function probeWorktreeState(path: string, cachePath: string): Promise<Issu
  *  cache): `inspectRepositoryCache` never creates roots/locks/journals, and
  *  worktree identity is read-only `git` introspection. */
 export async function inspectIssueInit(input: InspectIssueInitInput): Promise<IssueCheckReport> {
+  try {
+    assertContainedIssueRoot(input.workspaceRoot, input.issueRoot);
+  } catch {
+    // --check is a zero-write preflight: a contained-root violation is
+    // reported as a manifest conflict rather than thrown, so the operator
+    // sees a truthful "conflict" decision instead of a crash.
+    return { manifest: { state: "conflict" }, targets: {} };
+  }
   const bindingsByAlias = new Map(input.bindings.map((binding) => [binding.alias, binding]));
   const manifestState = probeManifestState(input.issueRoot, {
     workspaceId: input.workspaceId,
@@ -209,6 +300,9 @@ export interface ApplyIssueInitDeps {
 export interface ApplyIssueInitInput {
   readonly workspaceId: string;
   readonly rollHome: string;
+  /** The Workspace root `issueRoot` must resolve inside of — see
+   *  {@link InspectIssueInitInput.workspaceRoot}. */
+  readonly workspaceRoot: string;
   readonly issueRoot: string;
   readonly contract: IssueStoryContract;
   readonly bindings: readonly RepositoryBinding[];
@@ -294,6 +388,11 @@ async function rollbackCreatedTargets(
  *  contract) — never a Workspace-relative cache. ALL targets/cache/base SHA
  *  are resolved before the Issue root is created or mutated. */
 export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssueInitDeps = {}): Promise<ApplyIssueInitResult> {
+  // Containment MUST be checked before any read/write below — a symlinked
+  // Issue root (or a symlinked ancestor like `workspace/issues` itself)
+  // escaping the Workspace would otherwise let every subsequent manifest,
+  // journal, event and worktree mutation land outside the Workspace entirely.
+  assertContainedIssueRoot(input.workspaceRoot, input.issueRoot);
   const bindingsByAlias = new Map(input.bindings.map((binding) => [binding.alias, binding]));
   const manifestOnDiskPath = manifestPath(input.issueRoot);
   const manifestExists = existsSync(manifestOnDiskPath);

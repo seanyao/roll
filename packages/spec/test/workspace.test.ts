@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as publicSpec from "../src/index.js";
 import {
   REPOSITORY_BINDING_V1,
   ISSUE_MANIFEST_V1,
@@ -70,6 +71,19 @@ function issue() {
 }
 
 describe("Workspace repository identity", () => {
+  it("exports the complete v1 contract from the public spec surface", () => {
+    expect(publicSpec).toMatchObject({
+      parseWorkspaceManifest: expect.any(Function),
+      parseRepositoryBinding: expect.any(Function),
+      parseIssueManifest: expect.any(Function),
+      normalizeRepositoryRemote: expect.any(Function),
+      repositoryIdFromRemote: expect.any(Function),
+      workspaceManifestV1Schema: expect.any(Object),
+      repositoryBindingV1Schema: expect.any(Object),
+      issueManifestV1Schema: expect.any(Object),
+    });
+  });
+
   it.each([
     ["https://GitHub.com/Owner/Repo.git/", "https://github.com/Owner/Repo"],
     ["https://github.com:443/Owner/Repo", "https://github.com/Owner/Repo"],

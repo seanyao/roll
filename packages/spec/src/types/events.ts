@@ -10,6 +10,21 @@ import type { LoopType } from "./loop.js";
 import type { BlockCause, FailureClass, TerminalEvent, TerminalOutcome } from "./terminal.js";
 import type { TaskLevel } from "./story.js";
 import type { BuilderFinalizationFacts, BuilderFinalizationVerdict } from "./builder.js";
+import type { ContractError, ContractResult } from "./workspace.js";
+
+export const LEGACY_PROJECT_EVENT_MIGRATION_V1 = "roll.legacy-project-event-migration/v1" as const;
+
+export interface LegacyProjectEventPayload {
+  readonly type: string;
+  readonly ts: number;
+  readonly [key: string]: unknown;
+}
+
+export interface LegacyProjectEventMigrationInput {
+  schema: typeof LEGACY_PROJECT_EVENT_MIGRATION_V1;
+  projectSlug: string;
+  event: LegacyProjectEventPayload;
+}
 
 export type RollEvent =
   // Loop lifecycle (BC2)
@@ -585,4 +600,58 @@ export function parseEventLine(line: string): RollEvent | null {
   const rec = obj as Record<string, unknown>;
   if (typeof rec["type"] !== "string" || typeof rec["ts"] !== "number") return null;
   return obj as RollEvent;
+}
+
+/**
+ * Migration-only parser for historical single-Project event records. The
+ * wrapper deliberately has no top-level event `type`/`ts`, so it cannot enter
+ * the runtime RollEvent stream through parseEventLine.
+ */
+export function parseLegacyProjectEventMigrationInput(
+  value: unknown,
+): ContractResult<LegacyProjectEventMigrationInput> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      errors: [{ code: "invalid_type", path: "migration", message: "legacy migration input must be an object" }],
+    };
+  }
+  const input = value as Record<string, unknown>;
+  const errors: ContractError[] = [];
+  const allowed = new Set(["schema", "projectSlug", "event"]);
+  for (const key of Object.keys(input)) {
+    if (!allowed.has(key)) {
+      errors.push({ code: "unknown_field", path: key, message: "legacy migration input contains an unknown field" });
+    }
+  }
+  if (input["schema"] !== LEGACY_PROJECT_EVENT_MIGRATION_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${LEGACY_PROJECT_EVENT_MIGRATION_V1}` });
+  }
+  const projectSlug = input["projectSlug"];
+  if (typeof projectSlug !== "string" || projectSlug.trim() === "") {
+    errors.push({ code: "invalid_type", path: "projectSlug", message: "projectSlug must be a non-empty string" });
+  }
+  const event = input["event"];
+  if (typeof event !== "object" || event === null || Array.isArray(event)) {
+    errors.push({ code: "invalid_type", path: "event", message: "legacy event must be an object" });
+  } else {
+    const record = event as Record<string, unknown>;
+    if (typeof record["type"] !== "string" || record["type"].trim() === "") {
+      errors.push({ code: "invalid_type", path: "event.type", message: "legacy event type must be a non-empty string" });
+    }
+    if (typeof record["ts"] !== "number" || !Number.isFinite(record["ts"])) {
+      errors.push({ code: "invalid_type", path: "event.ts", message: "legacy event ts must be a finite number" });
+    }
+  }
+  if (errors.length > 0 || typeof projectSlug !== "string" || typeof event !== "object" || event === null || Array.isArray(event)) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: LEGACY_PROJECT_EVENT_MIGRATION_V1,
+      projectSlug,
+      event: event as LegacyProjectEventPayload,
+    },
+  };
 }

@@ -62,6 +62,18 @@ export interface WorkspaceManifestExpectations {
   workspaceId?: string;
 }
 
+export interface WorkspaceIdentity {
+  workspaceId: string;
+}
+
+export interface IssueIdentity extends WorkspaceIdentity {
+  storyId: string;
+}
+
+export interface RepositoryIssueIdentity extends IssueIdentity {
+  repoId: string;
+}
+
 export type RepositoryAccess = "read" | "write";
 export type NoChangePolicy = "changes_required" | "no_change_allowed";
 

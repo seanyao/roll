@@ -1,7 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { parseEventLine, type RollEvent } from "../src/types/events.js";
+import {
+  LEGACY_PROJECT_EVENT_MIGRATION_V1,
+  parseEventLine,
+  parseLegacyProjectEventMigrationInput,
+  type RollEvent,
+} from "../src/types/events.js";
+import type { IssueIdentity, RepositoryIssueIdentity, WorkspaceIdentity } from "../src/types/workspace.js";
 
 describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
+  it("keeps Workspace identity envelopes composable without adding runtime events", () => {
+    const workspace: WorkspaceIdentity = { workspaceId: "ws-sot" };
+    const issue: IssueIdentity = { ...workspace, storyId: "US-WS-001" };
+    const repository: RepositoryIssueIdentity = { ...issue, repoId: "repo-0123456789ab" };
+    expect(repository).toEqual({ workspaceId: "ws-sot", storyId: "US-WS-001", repoId: "repo-0123456789ab" });
+  });
+
+  it("parses legacy Project events only through the migration input API", () => {
+    const input = {
+      schema: LEGACY_PROJECT_EVENT_MIGRATION_V1,
+      projectSlug: "roll-ecf079",
+      event: { type: "cycle:start", cycleId: "legacy-c1", storyId: "US-1", agent: "claude", model: "opus", ts: 1 },
+    };
+    expect(parseLegacyProjectEventMigrationInput(input)).toEqual({ ok: true, value: input });
+    expect(parseEventLine(JSON.stringify(input))).toBeNull();
+    // @ts-expect-error migration wrappers are deliberately outside the runtime RollEvent union
+    const runtimeEvent: RollEvent = input;
+    expect(runtimeEvent).toBe(input);
+  });
+
+  it("rejects unknown legacy migration versions and wrapper fields", () => {
+    const parsed = parseLegacyProjectEventMigrationInput({
+      schema: "roll.legacy-project-event-migration/v2",
+      projectSlug: "roll-ecf079",
+      event: { type: "cycle:start", ts: 1 },
+      compatibilityMode: true,
+    });
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["unknown_version", "unknown_field"]),
+    );
+  });
   it("parses a valid cycle:start line", () => {
     const e = parseEventLine(
       '{"type":"cycle:start","cycleId":"c1","storyId":"US-1","agent":"claude","model":"opus","ts":1}',

@@ -247,6 +247,18 @@ export function nodePorts(opts: {
         const n = Number((r.stdout ?? "0").trim());
         return Number.isFinite(n) ? n : 0;
       },
+      async worktreeStatusSignature(worktreeCwd) {
+        // FIX-1477: raw porcelain output IS the fingerprint (string compare in
+        // the watchdog — no hashing needed). NO catch: a git error must
+        // propagate so the watchdog skips the tick as a blip instead of
+        // misreading a failed probe as "worktree suddenly clean" (a false
+        // state change → false progress) or as stale state.
+        const r = await execFileAsync("git", ["status", "--porcelain"], {
+          cwd: worktreeCwd,
+          encoding: "utf8",
+        });
+        return r.stdout ?? "";
+      },
       async mainAhead(repoCwd) {
         const r = await execFileAsync("git", ["rev-list", "--count", "origin/main..main"], {
           cwd: repoCwd,

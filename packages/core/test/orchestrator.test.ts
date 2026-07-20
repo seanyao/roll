@@ -39,6 +39,7 @@ import {
   CYCLE_TIMEOUT_SEC,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  CYCLE_NO_STATE_CHANGE_SEC,
   CYCLE_STALL_THRESHOLD_SEC,
   STALL_STARTUP_GRACE_SEC,
 } from "../src/index.js";
@@ -870,6 +871,83 @@ describe("FIX-907 — cycleTimeoutVerdict (per-cycle hard timeout: wall + no-pro
     expect(cycleTimeoutVerdict({ elapsedSec: 2700, idleSec: 0 })).toMatchObject({ timedOut: true, reason: "wall" });
     expect(cycleTimeoutVerdict({ elapsedSec: 1000, idleSec: 900 })).toMatchObject({ timedOut: true, reason: "no-progress" });
     expect(cycleTimeoutVerdict({ elapsedSec: 10, idleSec: 10 }).timedOut).toBe(false);
+  });
+});
+
+describe("FIX-1477 — cycleTimeoutVerdict no-state-change criterion (git-state progress)", () => {
+  it("default no-state-change window is 25min (1500s)", () => {
+    expect(CYCLE_NO_STATE_CHANGE_SEC).toBe(1500);
+  });
+
+  it("NO-STATE-CHANGE breach: stdout keeps the silence fuse reset but git state is frozen past the window (thrash)", () => {
+    // The kimi-thrash shape: stdout flowed 5s ago (silence fuse happy), but no
+    // commit AND no dirty-state change for the full 1500s window.
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1600,
+      idleSec: 5,
+      stateIdleSec: 1500,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v).toEqual({ timedOut: true, reason: "no-state-change", elapsedSec: 1600, idleSec: 5 });
+  });
+
+  it("does NOT trip while git state keeps changing (the pi冤杀 shape frozen as a contract)", () => {
+    // Dirty-state signature changed 10s ago; stdout silent for 20min — the
+    // watchdog bumps BOTH clocks on a state change, so idleSec stays low too.
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1300,
+      idleSec: 10,
+      stateIdleSec: 10,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v.timedOut).toBe(false);
+  });
+
+  it("no-progress still wins when a fully silent hang breaches BOTH idle fuses (attribution unchanged)", () => {
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1600,
+      idleSec: 1000,
+      stateIdleSec: 1600,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v).toMatchObject({ timedOut: true, reason: "no-progress" });
+  });
+
+  it("the criterion is skipped when stateIdleSec is not supplied (legacy callers byte-identical)", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 100, idleSec: 10, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v).toEqual({ timedOut: false, remainingSec: 890 });
+  });
+
+  it("a 0 / negative no-state-change limit DISABLES the criterion (operator escape hatch)", () => {
+    expect(
+      cycleTimeoutVerdict({
+        elapsedSec: 100,
+        idleSec: 10,
+        stateIdleSec: 1e9,
+        wallLimitSec: 2700,
+        noProgressLimitSec: 900,
+        noStateChangeLimitSec: 0,
+      }).timedOut,
+    ).toBe(false);
+  });
+
+  it("the remaining budget folds in the state window when it is the tightest", () => {
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 100,
+      idleSec: 10,
+      stateIdleSec: 1400,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    // state remaining 100 < idle remaining 890 < wall remaining 2600.
+    expect(v).toEqual({ timedOut: false, remainingSec: 100 });
   });
 });
 

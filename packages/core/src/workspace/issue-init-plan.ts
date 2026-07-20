@@ -220,8 +220,30 @@ export interface IssueInitProbe {
 export interface IssueInitTargetPlan {
   readonly alias: string;
   readonly repoId: string;
+  readonly access: "read" | "write";
   readonly action: IssueTargetAction;
   readonly worktreePath: string;
+  /** Unique governed Story branch for a write target; null for a read target
+   *  (created detached, never represented as a writable delivery leg). */
+  readonly workBranch: string | null;
+}
+
+export interface RenderBranchPatternInput {
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly repoAlias: string;
+}
+
+/** Render a RepositoryBinding.workflow.branchPattern into a concrete, unique
+ *  work branch name. `{workspace_id}`/`{story_id}`/`{repo_alias}` placeholders
+ *  are substituted where present; when the pattern omits `{repo_alias}`, the
+ *  alias is appended so distinct write targets never collide on one branch. */
+export function renderBranchPattern(pattern: string, input: RenderBranchPatternInput): string {
+  const rendered = pattern
+    .replaceAll("{workspace_id}", input.workspaceId)
+    .replaceAll("{story_id}", input.storyId)
+    .replaceAll("{repo_alias}", input.repoAlias);
+  return pattern.includes("{repo_alias}") ? rendered : `${rendered}/${input.repoAlias}`;
 }
 
 export type IssueInitOutcome = "created" | "reused" | "repaired";
@@ -301,8 +323,16 @@ export function resolveIssueInitPlan(
     targets.push({
       alias: declared.alias,
       repoId: binding.repoId,
+      access: declared.access,
       action,
       worktreePath: join("issues", input.contract.storyId, declared.alias),
+      workBranch: declared.access === "write"
+        ? renderBranchPattern(binding.workflow.branchPattern, {
+          workspaceId: input.workspaceId,
+          storyId: input.contract.storyId,
+          repoAlias: declared.alias,
+        })
+        : null,
     });
   }
   if (errors.length > 0) return { ok: false, errors };

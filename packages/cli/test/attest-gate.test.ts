@@ -2510,3 +2510,78 @@ describe("runAttestGate — EvidenceHealth separation (US-EVID-031)", () => {
     expect(alerts.some((a) => a.includes("DEGRADED") || a.includes("visual evidence"))).toBe(false);
   });
 });
+
+// ── FIX-1476 — the no-AC exemption is evaluated BEFORE the render-exit block ──
+// Production evidence (30 days, 3 projects): ~40 blocked gate events on cards
+// whose spec carries NO AC block — the render (`roll attest`) exits non-zero
+// ("story not found" under `.roll/features/`), the gate hit the render-exit
+// block first, and the exemption below it was never reached. The exemption must
+// be hoisted ahead of the render-exit check; stories WITH an AC block keep the
+// exact prior ordering (byte-compat).
+describe("FIX-1476 — no-AC exemption precedes the attest render-exit block", () => {
+  function withSpecOnly(storyId: string, specText: string): string {
+    const wt = tmp("fix1476");
+    const dir = join(wt, ".roll", "features", "uncategorized", storyId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "spec.md"), specText);
+    return wt;
+  }
+
+  it("(a) no-AC story + FAILED render (exit 1) → produced with the not-required reason, never blocked, no render-fail alert", () => {
+    // The production shape (roll-capture REFACTOR-001, APE-PR REFACTOR-001/002):
+    // a card with no AC block whose render exits non-zero must take the exemption
+    // WITHOUT the render result being consulted — before the fix this blocked in
+    // hard mode and the card could NEVER deliver.
+    const wt = withSpecOnly("FIX-1476-NOAC", "# FIX-1476-NOAC\n\nChore, no acceptance criteria.\n");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-1476-NOAC", "c-1476-noac", "hard", 1000, s, wt, "", 1);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(r.reasons).toEqual(["story has no AC block; acceptance report not required"]);
+    expect(alerts).toHaveLength(0);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ cycleId: "c-1476-noac", verdict: "produced" });
+    expect(events[0]?.reasons[0]).toContain("no AC block");
+  });
+
+  it("(b) regression: AC story + FAILED render (exit 1) → still skipped/blocked on the render-exit block (byte-compat)", () => {
+    const wt = withSpecOnly("FIX-1476-AC", "# FIX-1476-AC\n\n**AC:**\n- [ ] does a thing\n");
+    const { alerts, events, s } = sinks();
+    const r = runAttestGate(wt, "FIX-1476-AC", "c-1476-ac", "hard", 1000, s, wt, "", 1);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons).toEqual(["attest render failed for FIX-1476-AC (exit 1)"]);
+    expect(alerts[0]).toContain("attest render failed");
+    expect(alerts[0]).toContain("BLOCKED");
+    expect(events[0]?.verdict).toBe("skipped");
+  });
+
+  it("(c) regression: AC story happy path (render exit 0, fresh report + independent peer score) → produced, unchanged", () => {
+    const storyId = "FIX-1476-HAPPY";
+    const wt = withReport(storyId, 2000);
+    const specDir = join(wt, ".roll", "features", "uncategorized", storyId);
+    writeFileSync(join(specDir, "spec.md"), `# ${storyId}\n\n**AC:**\n- [x] does a thing\n`);
+    withPeerScore(wt, storyId, 8, "good", "c-1476-happy");
+    const { events, s } = sinks();
+    const r = runAttestGate(wt, storyId, "c-1476-happy", "hard", 1000, s, wt, "", 0);
+    expect(r.verdict).toBe("produced");
+    expect(r.blocked).toBe(false);
+    expect(r.reasons[0]).toBe("fresh acceptance report present");
+    expect(events[0]?.verdict).toBe("produced");
+  });
+
+  it("(d) missing spec file → storyHasAcBlock returns null (NOT false): spec-less cards stay outside the exemption", () => {
+    // Semantics lock: `storyHasAcBlock` is tri-state — true (AC block), false
+    // (spec present, no AC block), null (spec missing/unreadable). Only `false`
+    // takes the exemption; treating "no spec file" as "no AC block" would fail
+    // OPEN on an unreadable spec, so FIX-1476 deliberately keeps null on the
+    // full-check path (a failed render still blocks in hard mode).
+    const wt = tmp("fix1476-nospec");
+    expect(storyHasAcBlock(wt, "FIX-1476-NOSPEC")).toBeNull();
+    const { s } = sinks();
+    const r = runAttestGate(wt, "FIX-1476-NOSPEC", "c-1476-nospec", "hard", 1000, s, wt, "", 1);
+    expect(r.verdict).toBe("skipped");
+    expect(r.blocked).toBe(true);
+    expect(r.reasons[0]).toContain("attest render failed");
+  });
+});

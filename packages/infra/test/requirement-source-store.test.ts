@@ -887,6 +887,28 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(growingPath, "utf8")).toContain("Jira requirement");
   });
 
+  it("does not trust a stale fd once its pathname is renamed away and replaced by a symlink during the read", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const targetPath = join(first.requirementPath, "requirement.md");
+    const outsideSecret = join(f.root, "outside-secret-during-read.md");
+    writeFileSync(outsideSecret, "leaked outside content\n", "utf8");
+    let swapped = false;
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      afterProjectionStat: (path) => {
+        if (path !== targetPath || swapped) return;
+        swapped = true;
+        rmSync(targetPath, { force: true });
+        symlinkSync(outsideSecret, targetPath);
+      },
+    });
+    expect(swapped).toBe(true);
+    expect(repaired.outcome).toBe("reused");
+    expect(lstatSync(targetPath).isSymbolicLink()).toBe(false);
+    expect(readFileSync(targetPath, "utf8")).toContain("Jira requirement");
+  });
+
   it("rejects an oversized current context/ file by its pre-read fstat size, proven by a deterministic stat-seam call count", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

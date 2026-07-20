@@ -197,6 +197,13 @@ function boundedReadCurrent(path: string, maximumBytes: number, hooks: BoundedRe
     hooks.afterRead?.(path);
     const after = fstatSync(descriptor);
     if (after.size !== total || after.dev !== before.dev || after.ino !== before.ino) return undefined;
+    let pathAfter;
+    try {
+      pathAfter = lstatSync(path);
+    } catch {
+      return undefined;
+    }
+    if (pathAfter.isSymbolicLink() || pathAfter.dev !== after.dev || pathAfter.ino !== after.ino) return undefined;
     return Buffer.concat(chunks, total);
   } catch {
     return undefined;

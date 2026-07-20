@@ -247,6 +247,10 @@ function rejectSymlinkSegments(root: string, relativePath: string): void {
   }
 }
 
+// Infra-only physical-archive concern: how many directory entries readdirSync will walk once
+// these paths are materialized on disk, reusing core's MAX_REQUIREMENT_CONTEXT_FILES as the
+// shared numeric budget. Core/spec only own the file-count domain contract; they have no notion
+// of directory entries, so this stays local to the store rather than sinking into @roll/core.
 function archiveEntryBudget(relativePaths: readonly string[]): number {
   const entries = new Set<string>();
   for (const relativePath of relativePaths) {

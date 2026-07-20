@@ -209,6 +209,13 @@ describe("Workspace repository identity", () => {
     const workspaceResult = parseWorkspaceManifest({ ...workspace(), repositories: [binding] }, {});
     expect(repositoryResult.ok).toBe(false);
     expect(workspaceResult.ok).toBe(false);
+    if (repositoryResult.ok || workspaceResult.ok) return;
+    expect(repositoryResult.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unsafe_remote", path: "remote" }),
+    ]));
+    expect(workspaceResult.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "unsafe_remote", path: "repositories[0].remote" }),
+    ]));
     expect(JSON.stringify(repositoryResult)).not.toContain("credential-sentinel");
     expect(JSON.stringify(workspaceResult)).not.toContain("credential-sentinel");
     expect(JSON.stringify(repositoryResult)).not.toContain(input);

@@ -150,6 +150,19 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(reads).not.toContain(join(f.contextRoot, "huge.bin"));
   });
 
+  it("copies context as independent evidence so later source edits never reach the archived revision", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revisionKey = "rev-" + "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    const archivedContext = join(first.requirementPath, "revisions", revisionKey, "context", "domain.md");
+    expect(lstatSync(archivedContext).isSymbolicLink()).toBe(false);
+    const before = readFileSync(archivedContext, "utf8");
+
+    writeFileSync(join(f.contextRoot, "domain.md"), "mutated after capture\n", "utf8");
+    expect(readFileSync(archivedContext, "utf8")).toBe(before);
+    expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe(before);
+  });
+
   it("rejects Workspace output symlinks before committing any evidence", () => {
     const f = fixture();
     const outside = join(f.root, "outside");

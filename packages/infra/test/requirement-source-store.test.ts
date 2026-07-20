@@ -14,6 +14,7 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -518,37 +519,59 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe("domain context\n");
   });
 
-  it("never reads a sparse 500MB current requirement.md fully into memory before treating it as stale", () => {
+  it("rejects an oversized current requirement.md by its pre-read fstat size, proven by a deterministic stat-seam call count", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
     const oversizedPath = join(first.requirementPath, "requirement.md");
     const fd = openSync(oversizedPath, "w");
-    ftruncateSync(fd, 500 * 1024 * 1024);
+    ftruncateSync(fd, MAX_REQUIREMENT_BODY_BYTES + 4096);
     closeSync(fd);
     expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_BODY_BYTES);
-    if (typeof global.gc === "function") global.gc();
-    const rssBefore = process.memoryUsage().rss;
 
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    const statSeenPaths: string[] = [];
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      afterProjectionStat: (path) => statSeenPaths.push(path),
+    });
     expect(repaired.outcome).toBe("reused");
-    expect(process.memoryUsage().rss - rssBefore).toBeLessThan(64 * 1024 * 1024);
+    expect(statSeenPaths).not.toContain(oversizedPath);
     expect(readFileSync(oversizedPath, "utf8")).toContain("Jira requirement");
   });
 
-  it("never reads a sparse 500MB current context/ file fully into memory before treating the projection as stale", () => {
+  it("treats a current requirement.md that grows past the cap between stat and read completion as stale rather than trusting a stale size check", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const growingPath = join(first.requirementPath, "requirement.md");
+    writeFileSync(growingPath, "small\n", "utf8");
+    let grew = false;
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      afterProjectionStat: (path) => {
+        if (path !== growingPath || grew) return;
+        grew = true;
+        const fd = openSync(growingPath, "a");
+        writeSync(fd, "x".repeat(1024));
+        closeSync(fd);
+      },
+    });
+    expect(repaired.outcome).toBe("reused");
+    expect(readFileSync(growingPath, "utf8")).toContain("Jira requirement");
+  });
+
+  it("rejects an oversized current context/ file by its pre-read fstat size, proven by a deterministic stat-seam call count", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
     const oversizedPath = join(first.requirementPath, "context", "domain.md");
     const fd = openSync(oversizedPath, "w");
-    ftruncateSync(fd, 500 * 1024 * 1024);
+    ftruncateSync(fd, MAX_REQUIREMENT_CONTEXT_BYTES + 4096);
     closeSync(fd);
     expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_CONTEXT_BYTES);
-    if (typeof global.gc === "function") global.gc();
-    const rssBefore = process.memoryUsage().rss;
 
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    const statSeenPaths: string[] = [];
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
+      afterProjectionStat: (path) => statSeenPaths.push(path),
+    });
     expect(repaired.outcome).toBe("reused");
-    expect(process.memoryUsage().rss - rssBefore).toBeLessThan(64 * 1024 * 1024);
+    expect(statSeenPaths).not.toContain(oversizedPath);
     expect(readFileSync(oversizedPath, "utf8")).toBe("domain context\n");
   });
 

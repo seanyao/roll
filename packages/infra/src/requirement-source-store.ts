@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -78,6 +79,7 @@ export interface RequirementSourceStoreDeps {
   readonly renameFile?: (from: string, to: string) => void;
   readonly afterReadFile?: (path: string) => void;
   readonly beforeProjection?: () => void;
+  readonly afterProjectionStat?: (path: string) => void;
 }
 
 interface StableFile {
@@ -163,8 +165,14 @@ function stableFile(
 }
 
 const PROJECTION_MAX_DEPTH = 32;
+const PROJECTION_READ_CHUNK_BYTES = 64 * 1024;
 
-function boundedReadCurrent(path: string, maximumBytes: number): Buffer | undefined {
+interface BoundedReadHooks {
+  readonly afterStat?: (path: string) => void;
+  readonly afterRead?: (path: string) => void;
+}
+
+function boundedReadCurrent(path: string, maximumBytes: number, hooks: BoundedReadHooks = {}): Buffer | undefined {
   let descriptor: number;
   try {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -172,9 +180,23 @@ function boundedReadCurrent(path: string, maximumBytes: number): Buffer | undefi
     return undefined;
   }
   try {
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile() || stat.size > maximumBytes) return undefined;
-    return readFileSync(descriptor);
+    const before = fstatSync(descriptor);
+    if (!before.isFile() || before.size > maximumBytes) return undefined;
+    hooks.afterStat?.(path);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const buffer = Buffer.allocUnsafe(PROJECTION_READ_CHUNK_BYTES);
+    for (;;) {
+      const bytesRead = readSync(descriptor, buffer, 0, PROJECTION_READ_CHUNK_BYTES, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maximumBytes) return undefined;
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    hooks.afterRead?.(path);
+    const after = fstatSync(descriptor);
+    if (after.size !== total || after.dev !== before.dev || after.ino !== before.ino) return undefined;
+    return Buffer.concat(chunks, total);
   } catch {
     return undefined;
   } finally {
@@ -376,13 +398,15 @@ function isProjectionCurrent(
   requirementPath: string,
   manifest: RequirementSourceManifest,
   evidence: RevisionEvidence,
+  deps: RequirementSourceStoreDeps = {},
 ): boolean {
+  const hooks: BoundedReadHooks = { afterStat: deps.afterProjectionStat };
   try {
     if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
-    const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES);
+    const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES, hooks);
     if (body === undefined || !body.equals(evidence.body.content)) return false;
     const attestMaxBytes = Buffer.byteLength(renderRequirementAttestProjection(manifest), "utf8") + 4096;
-    const attest = boundedReadCurrent(join(requirementPath, "attest.md"), attestMaxBytes);
+    const attest = boundedReadCurrent(join(requirementPath, "attest.md"), attestMaxBytes, hooks);
     if (attest === undefined || attest.toString("utf8") !== renderRequirementAttestProjection(manifest)) return false;
     const contextRoot = join(requirementPath, "context");
     const actualPaths = existsSync(contextRoot) ? archiveContextPaths(contextRoot).slice().sort() : [];
@@ -390,7 +414,7 @@ function isProjectionCurrent(
     if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) return false;
     let remainingBytes = MAX_REQUIREMENT_CONTEXT_BYTES;
     return evidence.context.every((file) => {
-      const content = boundedReadCurrent(join(contextRoot, file.relativePath), Math.min(file.bytes, remainingBytes));
+      const content = boundedReadCurrent(join(contextRoot, file.relativePath), Math.min(file.bytes, remainingBytes), hooks);
       if (content === undefined) return false;
       remainingBytes -= content.byteLength;
       return remainingBytes >= 0 && content.equals(file.content);
@@ -714,7 +738,7 @@ export function captureRequirementSource(
     const plan = planned.value;
     if (plan.outcome === "reused") {
       const evidence = validateRevision(requirementPath, plan.manifest);
-      if (!isProjectionCurrent(requirementPath, plan.manifest, evidence)) {
+      if (!isProjectionCurrent(requirementPath, plan.manifest, evidence, deps)) {
         projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
       }
       return {

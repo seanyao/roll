@@ -129,9 +129,11 @@ describe("Workspace repository identity", () => {
     "https://example.com/Owner/%52epo.git",
     "https://example.com/Owner/My Repo.git",
     "https://@example.com/Owner/Repo.git",
+    "HTTPS://@example.com/Owner/Repo.git",
     "https://example.com/Owner/Repo\n.git",
     "ssh://git@example.com/Owner/Repo\t.git",
     "file://localhost/Users/Example/Repo.git",
+    "FILE://localhost/Users/Example/Repo.git",
     "file:///C:/Owner/Repo.git",
   ])("rejects ambiguous or credential-bearing remote input without echoing it: %s", (input) => {
     const result = normalizeRepositoryRemote(input);

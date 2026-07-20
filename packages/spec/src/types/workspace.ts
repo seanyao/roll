@@ -220,10 +220,10 @@ function trimRepositorySuffix(pathname: string): string | null {
 }
 
 function normalizeUrlRemote(value: string): ContractResult<string> {
-  if (/^https:\/\/[^/]*@/u.test(value)) {
+  if (/^https:\/\/[^/]*@/iu.test(value)) {
     return remoteFailure("HTTPS repository remote must not contain userinfo");
   }
-  if (value.startsWith("file://") && !value.startsWith("file:///")) {
+  if (/^file:\/\//iu.test(value) && !/^file:\/\/\//iu.test(value)) {
     return remoteFailure("file repository remote must not contain an authority");
   }
   let parsed: URL;

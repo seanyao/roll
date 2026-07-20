@@ -220,6 +220,13 @@ function trimRepositorySuffix(pathname: string): string | null {
 }
 
 function normalizeUrlRemote(value: string): ContractResult<string> {
+  const hasClosedUrlPrefix =
+    /^https:\/\/[^/]/iu.test(value) ||
+    /^ssh:\/\/[^/]/iu.test(value) ||
+    /^file:\/\/\/[^/]/iu.test(value);
+  if (!hasClosedUrlPrefix) {
+    return remoteFailure("repository remote is not a supported absolute URL shape");
+  }
   if (/^https:\/\/[^/]*@/iu.test(value)) {
     return remoteFailure("HTTPS repository remote must not contain userinfo");
   }
@@ -268,6 +275,9 @@ function normalizeUrlRemote(value: string): ContractResult<string> {
   if (parsed.hostname === "" || path === null || !path.startsWith("/")) {
     return remoteFailure("repository remote must contain a host and safe repository path");
   }
+  if (path.slice(1).split("/").length < 2) {
+    return remoteFailure("network repository remote must contain an owner and repository path");
+  }
   return {
     ok: true,
     value: `${isHttps ? "https" : "ssh"}://${parsed.hostname.toLowerCase()}${path}`,
@@ -291,7 +301,9 @@ export function normalizeRepositoryRemote(value: unknown): ContractResult<string
       return remoteFailure("repository remote is not a supported SCP-style remote");
     }
     const path = trimRepositorySuffix(`/${rawPath}`);
-    if (path === null) return remoteFailure("repository remote must contain a safe repository path");
+    if (path === null || path.slice(1).split("/").length < 2) {
+      return remoteFailure("repository remote must contain an owner and repository path");
+    }
     return { ok: true, value: `ssh://${host.toLowerCase()}${path}` };
   }
   return normalizeUrlRemote(value);
@@ -367,7 +379,7 @@ function isSafeAlias(value: string): boolean {
 function isSafeGitRef(value: string): boolean {
   if (
     value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.endsWith(".") ||
-    value === "@"
+    value === "@" || value === "HEAD"
   ) return false;
   if (value.includes("..") || value.includes("@{") || value.includes("//")) return false;
   if (/[\x00-\x20\x7f~^:?*\\[]/u.test(value)) return false;
@@ -667,6 +679,40 @@ function duplicateTargetErrors(targets: readonly IssueRepositoryTarget[]): Contr
   return errors;
 }
 
+function dependencyCycleErrors(targets: readonly IssueRepositoryTarget[]): ContractError[] {
+  const indexByAlias = new Map(targets.map((target, index) => [target.alias, index]));
+  const dependencyIndexes = targets.map((target) =>
+    target.dependsOnRepo === undefined ? undefined : indexByAlias.get(target.dependsOnRepo)
+  );
+  const incoming = targets.map(() => 0);
+  for (const dependencyIndex of dependencyIndexes) {
+    if (dependencyIndex !== undefined) {
+      incoming[dependencyIndex] = (incoming[dependencyIndex] ?? 0) + 1;
+    }
+  }
+
+  const queue = incoming.flatMap((count, index) => count === 0 ? [index] : []);
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const index = queue[cursor];
+    if (index === undefined) continue;
+    const dependencyIndex = dependencyIndexes[index];
+    if (dependencyIndex === undefined) continue;
+    const nextIncoming = (incoming[dependencyIndex] ?? 0) - 1;
+    incoming[dependencyIndex] = nextIncoming;
+    if (nextIncoming === 0) queue.push(dependencyIndex);
+  }
+
+  return targets.flatMap((target, index) =>
+    (incoming[index] ?? 0) > 0
+      ? [{
+          code: "invalid_value" as const,
+          path: `repositories[${index}].dependsOnRepo`,
+          message: `repository dependency cycle includes ${target.alias}`,
+        }]
+      : []
+  );
+}
+
 export function parseIssueManifest(
   value: unknown,
   expectations: IssueManifestExpectations = {},
@@ -700,6 +746,7 @@ export function parseIssueManifest(
       errors.push({ code: "invalid_value", path: `repositories[${index}].dependsOnRepo`, message: "dependency must name a different declared repository alias" });
     }
   }
+  errors.push(...dependencyCycleErrors(targets));
 
   if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
     errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });

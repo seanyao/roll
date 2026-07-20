@@ -105,6 +105,17 @@ describe("Workspace repository identity", () => {
     expect(normalizeRepositoryRemote(input)).toEqual({ ok: true, value: expected });
   });
 
+  it.each([
+    "http://example.com/Owner/Repo.git",
+    "ftp://example.com/Owner/Repo.git",
+    "git://example.com/Owner/Repo.git",
+  ])("rejects protocols outside the closed v1 remote table: %s", (input) => {
+    expect(normalizeRepositoryRemote(input)).toMatchObject({
+      ok: false,
+      errors: [expect.objectContaining({ code: "unsafe_remote", path: "remote" })],
+    });
+  });
+
   it("derives a stable repository ID from the canonical remote", () => {
     const https = repositoryIdFromRemote("https://GitHub.com/Owner/Repo.git");
     const canonical = repositoryIdFromRemote("https://github.com/Owner/Repo");
@@ -135,13 +146,30 @@ describe("Workspace repository identity", () => {
     "file://localhost/Users/Example/Repo.git",
     "FILE://localhost/Users/Example/Repo.git",
     "file:///C:/Owner/Repo.git",
+    "https:example.com/Owner/Repo.git",
+    "https:/example.com/Owner/Repo.git",
+    "https:///example.com/Owner/Repo.git",
+    "ssh:/git@example.com/Owner/Repo.git",
+    "file:/Users/Example/Repo.git",
+    "https://example.com/Repo.git",
+    "git@example.com:Repo.git",
+    "ssh://git@example.com/Repo.git",
   ])("rejects ambiguous or credential-bearing remote input without echoing it: %s", (input) => {
     const result = normalizeRepositoryRemote(input);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors.every((error) => error.code === "unsafe_remote" && error.path === "remote")).toBe(true);
-    expect(JSON.stringify(result.errors)).not.toContain("token");
-    expect(JSON.stringify(result.errors)).not.toContain("secret");
+    expect(JSON.stringify(result.errors)).not.toContain(input);
+  });
+
+  it("redacts credential sentinels from remote validation errors", () => {
+    const input = "https://credential-sentinel@example.com/Owner/Repo.git";
+    const result = normalizeRepositoryRemote(input);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const rendered = JSON.stringify(result.errors);
+    expect(rendered).not.toContain(input);
+    expect(rendered).not.toContain("credential-sentinel");
   });
 });
 
@@ -223,7 +251,7 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     expect(JSON.stringify(parsed.errors)).not.toContain("must-not-be-accepted");
   });
 
-  it.each([".hidden", "feature/.hidden", "-danger", "feature.lock/child"])(
+  it.each([".hidden", "feature/.hidden", "-danger", "feature.lock/child", "HEAD"])(
     "rejects Git refs forbidden by check-ref-format: %s",
     (integrationBranch) => {
       const parsed = parseRepositoryBinding({ ...repository(), integrationBranch });
@@ -236,18 +264,21 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     },
   );
 
-  it("rejects unsafe Git ref templates after substituting supported identity tokens", () => {
-    const parsed = parseRepositoryBinding({
-      ...repository(),
-      workflow: { ...repository().workflow, branchPattern: "roll/{workspace_id}/.hidden" },
-    });
-    expect(parsed).toMatchObject({
-      ok: false,
-      errors: expect.arrayContaining([
-        expect.objectContaining({ code: "invalid_value", path: "workflow.branchPattern" }),
-      ]),
-    });
-  });
+  it.each(["roll/{workspace_id}/.hidden", "HEAD"])(
+    "rejects unsafe Git ref template %s after substituting supported identity tokens",
+    (branchPattern) => {
+      const parsed = parseRepositoryBinding({
+        ...repository(),
+        workflow: { ...repository().workflow, branchPattern },
+      });
+      expect(parsed).toMatchObject({
+        ok: false,
+        errors: expect.arrayContaining([
+          expect.objectContaining({ code: "invalid_value", path: "workflow.branchPattern" }),
+        ]),
+      });
+    },
+  );
 
   it("rejects unknown repository and nested Workspace fields with typed paths", () => {
     const bindingVersion = parseRepositoryBinding({ ...repository(), schema: "roll.repository-binding/v2" });
@@ -277,15 +308,25 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     });
   });
 
-  it.each([
-    ["alias", [repository(), repository("https://github.com/Owner/Other.git")]],
-    ["repoId", [repository(), { ...repository(), alias: "other" }]],
-    ["remote", [repository(), { ...repository("https://GITHUB.com/Owner/Repo"), alias: "other" }]],
-  ])("rejects duplicate repository %s", (_kind, repositories) => {
+  it("rejects a duplicate repository alias at the alias path", () => {
+    const repositories = [repository(), repository("https://github.com/Owner/Other.git")];
     const parsed = parseWorkspaceManifest({ ...workspace(), repositories }, {});
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.errors.map((error) => error.code)).toContain("duplicate_identity");
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate_identity", path: "repositories.alias" }),
+    ]));
+  });
+
+  it("rejects duplicate canonical remote and its derived repository ID at both paths", () => {
+    const repositories = [repository(), { ...repository("https://GITHUB.com/Owner/Repo"), alias: "other" }];
+    const parsed = parseWorkspaceManifest({ ...workspace(), repositories }, {});
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "duplicate_identity", path: "repositories.repoId" }),
+      expect.objectContaining({ code: "duplicate_identity", path: "repositories.remote" }),
+    ]));
   });
 });
 
@@ -317,6 +358,46 @@ describe("IssueManifest repository targets", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.errors).toEqual(expect.arrayContaining([expect.objectContaining({ code: "invalid_value", path })]));
+  });
+
+  it.each([
+    ["access", { access: "admin" }, "invalid_value", "repositories[0].access"],
+    ["no-change policy", { noChangePolicy: "best_effort" }, "invalid_value", "repositories[0].noChangePolicy"],
+    ["delivery type", { requiredDelivery: "yes" }, "invalid_type", "repositories[0].requiredDelivery"],
+    ["repo ID", { repoId: "repo-not-a-hash" }, "invalid_value", "repositories[0].repoId"],
+    ["alias", { alias: "Unsafe_Alias" }, "invalid_value", "repositories[0].alias"],
+  ])("rejects malformed target field %s", (_label, targetOverride, code, path) => {
+    const parsed = parseIssueManifest({
+      ...issue(),
+      repositories: [{ ...issue().repositories[0], ...targetOverride }],
+    }, {});
+    expect(parsed).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code, path })]),
+    });
+  });
+
+  it("rejects repository dependency cycles", () => {
+    const product = issue().repositories[0];
+    const docs = {
+      ...product,
+      repoId: repository("https://github.com/Owner/Docs.git", "docs").repoId,
+      alias: "docs",
+    };
+    const parsed = parseIssueManifest({
+      ...issue(),
+      repositories: [
+        { ...product, dependsOnRepo: "docs" },
+        { ...docs, dependsOnRepo: "product" },
+      ],
+    }, {});
+    expect(parsed).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_value", path: "repositories[0].dependsOnRepo" }),
+        expect.objectContaining({ code: "invalid_value", path: "repositories[1].dependsOnRepo" }),
+      ]),
+    });
   });
 
   it.each(["baseSha", "worktreePath", "branch", "status", "deliverySet"])(

@@ -4,6 +4,8 @@ import type { JsonSchema } from "./json-schema.js";
 export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
 export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
 export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
+export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
+export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
 
 export type ContractErrorCode =
   | "invalid_type"
@@ -28,6 +30,42 @@ export type ContractResult<T> =
 export interface RequirementSourceReference {
   readonly provider: string;
   readonly ref: string;
+}
+
+export type RequirementProvider = "jira" | "github_issue" | "local_file" | "user_input";
+
+export interface RequirementEvidenceDescriptor {
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+export interface RequirementContextDescriptor extends RequirementEvidenceDescriptor {
+  readonly path: string;
+}
+
+export interface RequirementPreviousRevision {
+  readonly revision: string;
+  readonly capturedAt: string;
+}
+
+export interface RequirementAttestProjectionContract {
+  readonly schema: typeof REQUIREMENT_ATTEST_PROJECTION_V1;
+  readonly mode: "generated_aggregate";
+  readonly evidenceAuthority: "issue";
+}
+
+export interface RequirementSourceManifest {
+  readonly schema: typeof REQUIREMENT_SOURCE_V1;
+  readonly requirementId: string;
+  readonly provider: RequirementProvider;
+  readonly ref: string;
+  readonly revision: string;
+  readonly capturedAt: string;
+  readonly previousRevisions: readonly RequirementPreviousRevision[];
+  readonly requirement: RequirementEvidenceDescriptor;
+  readonly context: readonly RequirementContextDescriptor[];
+  readonly stories: readonly string[];
+  readonly attest: RequirementAttestProjectionContract;
 }
 
 export interface RepositoryWorkflowMetadata {
@@ -205,6 +243,56 @@ export const issueManifestV1Schema: JsonSchema = objectSchema(
     repositories: { type: "array", items: issueRepositoryTargetSchema, minItems: 1 },
   },
   ["schema", "workspaceId", "storyId", "requirements", "repositories"],
+);
+
+const requirementEvidenceSchema = objectSchema(
+  { bytes: { type: "integer", minimum: 0 }, sha256: { type: "string", minLength: 64 } },
+  ["bytes", "sha256"],
+);
+
+export const requirementSourceV1Schema: JsonSchema = objectSchema(
+  {
+    schema: { const: REQUIREMENT_SOURCE_V1 },
+    requirementId: stringSchema,
+    provider: { type: "string", enum: ["jira", "github_issue", "local_file", "user_input"] },
+    ref: stringSchema,
+    revision: stringSchema,
+    capturedAt: stringSchema,
+    previousRevisions: {
+      type: "array",
+      items: objectSchema({ revision: stringSchema, capturedAt: stringSchema }, ["revision", "capturedAt"]),
+    },
+    requirement: requirementEvidenceSchema,
+    context: {
+      type: "array",
+      items: objectSchema(
+        { path: stringSchema, bytes: { type: "integer", minimum: 0 }, sha256: { type: "string", minLength: 64 } },
+        ["path", "bytes", "sha256"],
+      ),
+    },
+    stories: { type: "array", items: stringSchema },
+    attest: objectSchema(
+      {
+        schema: { const: REQUIREMENT_ATTEST_PROJECTION_V1 },
+        mode: { const: "generated_aggregate" },
+        evidenceAuthority: { const: "issue" },
+      },
+      ["schema", "mode", "evidenceAuthority"],
+    ),
+  },
+  [
+    "schema",
+    "requirementId",
+    "provider",
+    "ref",
+    "revision",
+    "capturedAt",
+    "previousRevisions",
+    "requirement",
+    "context",
+    "stories",
+    "attest",
+  ],
 );
 
 function fail<T>(code: ContractErrorCode, path: string, message: string): ContractResult<T> {
@@ -457,6 +545,188 @@ function parseRequirementSources(value: unknown, path: string, errors: ContractE
   return parsed.every((entry) => entry !== undefined)
     ? (parsed as readonly RequirementSourceReference[])
     : undefined;
+}
+
+function parseRequirementEvidence(
+  value: unknown,
+  path: string,
+  errors: ContractError[],
+): RequirementEvidenceDescriptor | undefined {
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path, message: "evidence descriptor must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(value, ["bytes", "sha256"], path));
+  const bytes = value["bytes"];
+  const sha256 = value["sha256"];
+  if (!Number.isSafeInteger(bytes) || (bytes as number) < 0) {
+    errors.push({ code: "invalid_value", path: `${path}.bytes`, message: "evidence bytes must be a non-negative safe integer" });
+  }
+  if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) {
+    errors.push({ code: "invalid_value", path: `${path}.sha256`, message: "evidence digest must be lowercase SHA-256" });
+  }
+  return Number.isSafeInteger(bytes) && (bytes as number) >= 0 && typeof sha256 === "string" && /^[0-9a-f]{64}$/u.test(sha256)
+    ? { bytes: bytes as number, sha256 }
+    : undefined;
+}
+
+function parseRequirementContext(
+  value: unknown,
+  errors: ContractError[],
+): readonly RequirementContextDescriptor[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path: "context", message: "context must be an array" });
+    return undefined;
+  }
+  const entries: RequirementContextDescriptor[] = [];
+  for (const [index, entry] of value.entries()) {
+    const path = `context[${index}]`;
+    if (!isRecord(entry)) {
+      errors.push({ code: "invalid_type", path, message: "context entry must be an object" });
+      continue;
+    }
+    errors.push(...unknownFieldErrors(entry, ["path", "bytes", "sha256"], path));
+    const relativePath = requiredString(entry, "path", `${path}.`, errors);
+    const evidence = parseRequirementEvidence({ bytes: entry["bytes"], sha256: entry["sha256"] }, path, errors);
+    if (relativePath !== undefined && !isSafeRelativeTargetPath(relativePath)) {
+      errors.push({ code: "invalid_value", path: `${path}.path`, message: "context path must be safe and relative" });
+    }
+    if (relativePath !== undefined && isSafeRelativeTargetPath(relativePath) && evidence !== undefined) {
+      entries.push({ path: relativePath, ...evidence });
+    }
+  }
+  return entries.length === value.length ? entries : undefined;
+}
+
+function parsePreviousRevisions(
+  value: unknown,
+  errors: ContractError[],
+): readonly RequirementPreviousRevision[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path: "previousRevisions", message: "previous revisions must be an array" });
+    return undefined;
+  }
+  const revisions: RequirementPreviousRevision[] = [];
+  for (const [index, entry] of value.entries()) {
+    const path = `previousRevisions[${index}]`;
+    if (!isRecord(entry)) {
+      errors.push({ code: "invalid_type", path, message: "previous revision must be an object" });
+      continue;
+    }
+    errors.push(...unknownFieldErrors(entry, ["revision", "capturedAt"], path));
+    const revision = requiredString(entry, "revision", `${path}.`, errors);
+    const capturedAt = requiredString(entry, "capturedAt", `${path}.`, errors);
+    if (revision !== undefined && capturedAt !== undefined) revisions.push({ revision, capturedAt });
+  }
+  return revisions.length === value.length ? revisions : undefined;
+}
+
+function parseRequirementAttest(
+  value: unknown,
+  errors: ContractError[],
+): RequirementAttestProjectionContract | undefined {
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path: "attest", message: "attest contract must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(value, ["schema", "mode", "evidenceAuthority"], "attest"));
+  if (value["schema"] !== REQUIREMENT_ATTEST_PROJECTION_V1) {
+    errors.push({ code: "unknown_version", path: "attest.schema", message: `expected ${REQUIREMENT_ATTEST_PROJECTION_V1}` });
+  }
+  if (value["mode"] !== "generated_aggregate") {
+    errors.push({ code: "invalid_value", path: "attest.mode", message: "Requirement attest must remain a generated aggregate" });
+  }
+  if (value["evidenceAuthority"] !== "issue") {
+    errors.push({ code: "invalid_value", path: "attest.evidenceAuthority", message: "Issue evidence must remain authoritative" });
+  }
+  return value["schema"] === REQUIREMENT_ATTEST_PROJECTION_V1 &&
+      value["mode"] === "generated_aggregate" && value["evidenceAuthority"] === "issue"
+    ? { schema: REQUIREMENT_ATTEST_PROJECTION_V1, mode: "generated_aggregate", evidenceAuthority: "issue" }
+    : undefined;
+}
+
+function safeRequirementReference(value: string): boolean {
+  return value === value.trim() && !/[\x00-\x1f\x7f]/u.test(value) && !/:\/\//u.test(value) &&
+    !/(?:^|[?&;\s_-])(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret)=?/iu.test(value);
+}
+
+function requirementSourceId(provider: RequirementProvider, ref: string): string {
+  return `req-${createHash("sha256").update(`${provider}\0${ref}`).digest("hex").slice(0, 12)}`;
+}
+
+export function parseRequirementSourceManifest(value: unknown): ContractResult<RequirementSourceManifest> {
+  if (!isRecord(value)) return fail("invalid_type", "requirement", "Requirement source manifest must be an object");
+  const errors = unknownFieldErrors(value, [
+    "schema",
+    "requirementId",
+    "provider",
+    "ref",
+    "revision",
+    "capturedAt",
+    "previousRevisions",
+    "requirement",
+    "context",
+    "stories",
+    "attest",
+  ], "");
+  if (value["schema"] !== REQUIREMENT_SOURCE_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${REQUIREMENT_SOURCE_V1}` });
+  }
+  const requirementId = requiredString(value, "requirementId", "", errors);
+  const ref = requiredString(value, "ref", "", errors);
+  const revision = requiredString(value, "revision", "", errors);
+  const capturedAt = requiredString(value, "capturedAt", "", errors);
+  const provider = value["provider"];
+  if (provider !== "jira" && provider !== "github_issue" && provider !== "local_file" && provider !== "user_input") {
+    errors.push({ code: "invalid_value", path: "provider", message: "unsupported Requirement source provider" });
+  }
+  if (ref !== undefined && !safeRequirementReference(ref)) {
+    errors.push({ code: "invalid_value", path: "ref", message: "Requirement source reference is unsafe" });
+  }
+  if (revision !== undefined && !isSafeIdentifier(revision)) {
+    errors.push({ code: "invalid_value", path: "revision", message: "Requirement source revision is invalid" });
+  }
+  if (requirementId !== undefined && !/^req-[0-9a-f]{12}$/u.test(requirementId)) {
+    errors.push({ code: "invalid_value", path: "requirementId", message: "Requirement identity is invalid" });
+  }
+  if (
+    requirementId !== undefined && ref !== undefined &&
+    (provider === "jira" || provider === "github_issue" || provider === "local_file" || provider === "user_input") &&
+    requirementId !== requirementSourceId(provider, ref)
+  ) {
+    errors.push({ code: "identity_mismatch", path: "requirementId", message: "Requirement identity does not match provider and reference" });
+  }
+  const previousRevisions = parsePreviousRevisions(value["previousRevisions"], errors);
+  const requirement = parseRequirementEvidence(value["requirement"], "requirement", errors);
+  const context = parseRequirementContext(value["context"], errors);
+  const stories = parseStringArray(value["stories"], "stories", errors);
+  if (stories !== undefined && stories.some((storyId) => !isSafeIdentifier(storyId))) {
+    errors.push({ code: "invalid_value", path: "stories", message: "Story IDs must use safe identifiers" });
+  }
+  const attest = parseRequirementAttest(value["attest"], errors);
+  if (
+    errors.length > 0 || requirementId === undefined || ref === undefined || revision === undefined ||
+    capturedAt === undefined || (provider !== "jira" && provider !== "github_issue" && provider !== "local_file" && provider !== "user_input") ||
+    previousRevisions === undefined || requirement === undefined || context === undefined || stories === undefined || attest === undefined
+  ) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: REQUIREMENT_SOURCE_V1,
+      requirementId,
+      provider,
+      ref,
+      revision,
+      capturedAt,
+      previousRevisions,
+      requirement,
+      context,
+      stories,
+      attest,
+    },
+  };
 }
 
 export function parseRepositoryBinding(value: unknown): ContractResult<RepositoryBinding> {

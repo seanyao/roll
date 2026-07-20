@@ -23,7 +23,7 @@ import {
   RepositoryCacheError,
   resolveRepositoryCacheIdentity,
 } from "../src/repository-cache.js";
-import { git as typedGit } from "../src/git.js";
+import { git as typedGit, rawGit } from "../src/git.js";
 import { acquireLock, readLockOwner, releaseLock } from "../src/process.js";
 
 const sandboxes: string[] = [];
@@ -54,6 +54,16 @@ function binding(remote: string): RepositoryBinding {
 
 function runGit(cwd: string, args: readonly string[]): string {
   return execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    throw error;
+  }
 }
 
 function localRemote(root: string, name = "upstream"): { remote: string; source: string; bare: string } {
@@ -206,6 +216,19 @@ describe("RepositoryCache identity and path safety", () => {
     expect(runGitAdapter).not.toHaveBeenCalled();
   });
 
+  it("rejects an invalid Git operation timeout before invoking Git", async () => {
+    const rollHome = sandbox();
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: binding("https://example.test/team/product.git"),
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      operationTimeoutMs: 0,
+      runGit: runGitAdapter,
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "invalid_operation_options" });
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
   it("rejects a repos symlink escape before invoking Git", async () => {
     const rollHome = sandbox();
     const outside = sandbox();
@@ -238,6 +261,54 @@ describe("RepositoryCache identity and path safety", () => {
     })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
     expect(runGitAdapter).not.toHaveBeenCalled();
   });
+
+  it.each(["identityPath", "temporaryPath", "journalPath", "lockPath"] as const)(
+    "rejects a %s symlink without touching its external target",
+    async (pathKey) => {
+      const rollHome = sandbox();
+      const outside = sandbox();
+      const sentinel = join(outside, "sentinel.txt");
+      writeFileSync(sentinel, "outside\n", "utf8");
+      const repository = binding("https://example.test/team/product.git");
+      const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+      mkdirSync(identity.reposRoot, { recursive: true });
+      mkdirSync(join(rollHome, "locks", "repos"), { recursive: true });
+      symlinkSync(outside, identity[pathKey], "dir");
+      const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+
+      await expect(ensureRepositoryCache({
+        rollHome,
+        binding: repository,
+        integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+        runGit: runGitAdapter,
+      })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
+      expect(readFileSync(sentinel, "utf8")).toBe("outside\n");
+      expect(runGitAdapter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["locks", "locks/repos"])(
+    "rejects a %s parent symlink without touching its external target",
+    async (relativeLockPath) => {
+      const rollHome = sandbox();
+      const outside = sandbox();
+      const sentinel = join(outside, "sentinel.txt");
+      writeFileSync(sentinel, "outside\n", "utf8");
+      const parent = join(rollHome, relativeLockPath === "locks" ? "." : "locks");
+      mkdirSync(parent, { recursive: true });
+      symlinkSync(outside, join(rollHome, relativeLockPath), "dir");
+      const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+
+      await expect(ensureRepositoryCache({
+        rollHome,
+        binding: binding("https://example.test/team/product.git"),
+        integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+        runGit: runGitAdapter,
+      })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
+      expect(readFileSync(sentinel, "utf8")).toBe("outside\n");
+      expect(runGitAdapter).not.toHaveBeenCalled();
+    },
+  );
 
   it("rechecks path safety after waiting for the repository lock", async () => {
     const rollHome = sandbox();
@@ -362,13 +433,17 @@ describe("RepositoryCache lifecycle", () => {
       unblockFetch = resolveFetch;
     });
     let blocked = false;
-    const runGitAdapter = async (args: readonly string[], cwd?: string) => {
+    const runGitAdapter = async (
+      args: readonly string[],
+      cwd?: string,
+      options?: { readonly timeoutMs?: number },
+    ) => {
       if (!blocked && args[0] === "fetch") {
         blocked = true;
         markFetchStarted?.();
         await fetchBlock;
       }
-      return typedGit(args, cwd);
+      return typedGit(args, cwd, options);
     };
 
     const pending = ensureRepositoryCache({
@@ -400,6 +475,93 @@ describe("RepositoryCache lifecycle", () => {
     expect(result.error).toMatchObject<Partial<RepositoryCacheError>>({ code: "lock_lost" });
     expect(readLockOwner(identity.lockPath)).toMatchObject({ pid: 424242, cycleId: "new-owner" });
     releaseLock(identity.lockPath);
+  });
+
+  it("terminates a hung Git operation and leaves repair evidence", async () => {
+    const rollHome = sandbox();
+    const upstream = localRemote(sandbox(), "hung-git");
+    const repository = binding(upstream.remote);
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    const startedAt = Date.now();
+    let timedOutPid: number | undefined;
+    let timedOut = false;
+
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      operationTimeoutMs: 50,
+      runGit: async (args, cwd, options) => {
+        if (args[0] === "fetch") {
+          const result = await rawGit(["cat-file", "--batch"], cwd, options);
+          timedOutPid = result.pid;
+          timedOut = result.timedOut === true;
+          return result;
+        }
+        return typedGit(args, cwd, options);
+      },
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "git_failure" });
+
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    expect(timedOut).toBe(true);
+    expect(timedOutPid).toEqual(expect.any(Number));
+    expect(processExists(timedOutPid as number)).toBe(false);
+    expect(existsSync(identity.lockPath)).toBe(false);
+    expect(existsSync(identity.journalPath)).toBe(true);
+    expect(existsSync(identity.temporaryPath)).toBe(true);
+
+    const repaired = await ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+    });
+    expect(repaired.action).toBe("repaired");
+    expect(runGit(repaired.cachePath, ["fsck", "--connectivity-only"])).toBe("");
+    expect(existsSync(identity.lockPath)).toBe(false);
+    expect(existsSync(identity.journalPath)).toBe(false);
+    expect(existsSync(identity.temporaryPath)).toBe(false);
+  });
+
+  it("holds the repository lock throughout an interrupted-cache repair", async () => {
+    const rollHome = sandbox();
+    const upstream = localRemote(sandbox(), "locked-repair");
+    const repository = binding(upstream.remote);
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    mkdirSync(identity.reposRoot, { recursive: true });
+    mkdirSync(identity.temporaryPath);
+    const temporarySentinel = join(identity.temporaryPath, "sentinel.txt");
+    const journal = JSON.stringify({ interrupted: true });
+    writeFileSync(temporarySentinel, "untouched\n", "utf8");
+    writeFileSync(identity.journalPath, journal, "utf8");
+    mkdirSync(join(rollHome, "locks", "repos"), { recursive: true });
+    expect(acquireLock(identity.lockPath, process.pid, { cycleId: "repair-blocker" }).acquired).toBe(true);
+    let observedRepairGit = false;
+
+    const pending = ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      lockTimeoutMs: 1_000,
+      lockRetryMs: 5,
+      runGit: async (args, cwd, options) => {
+        observedRepairGit = true;
+        expect(readLockOwner(identity.lockPath)).toMatchObject({
+          pid: process.pid,
+          cycleId: expect.stringMatching(new RegExp(`^${identity.repoId}:`, "u")),
+        });
+        return typedGit(args, cwd, options);
+      },
+    });
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
+    expect(readFileSync(temporarySentinel, "utf8")).toBe("untouched\n");
+    expect(readFileSync(identity.journalPath, "utf8")).toBe(journal);
+    expect(observedRepairGit).toBe(false);
+    releaseLock(identity.lockPath);
+    const repaired = await pending;
+
+    expect(observedRepairGit).toBe(true);
+    expect(repaired.action).toBe("repaired");
+    expect(existsSync(identity.lockPath)).toBe(false);
   });
 
   it("repairs a deleted cache without changing Workspace, Issue, backlog or completion truth", async () => {

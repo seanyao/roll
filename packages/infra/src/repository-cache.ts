@@ -14,7 +14,7 @@ import {
   parseRepositoryBinding,
   type RepositoryBinding,
 } from "@roll/spec";
-import { git, type GitResult } from "./git.js";
+import { git, type GitExecutionOptions, type GitResult } from "./git.js";
 import { acquireLock, readLockOwner, releaseLock } from "./process.js";
 
 export type RepositoryCacheErrorCode =
@@ -24,6 +24,7 @@ export type RepositoryCacheErrorCode =
   | "unsupported_refspec"
   | "unsafe_path"
   | "invalid_lock_options"
+  | "invalid_operation_options"
   | "lock_timeout"
   | "lock_lost"
   | "origin_mismatch"
@@ -83,6 +84,7 @@ export interface RepositoryCacheResult {
 export type RepositoryCacheGitRunner = (
   args: readonly string[],
   cwd?: string,
+  options?: GitExecutionOptions,
 ) => Promise<GitResult>;
 
 export interface EnsureRepositoryCacheInput extends ResolveRepositoryCacheIdentityInput {
@@ -90,6 +92,7 @@ export interface EnsureRepositoryCacheInput extends ResolveRepositoryCacheIdenti
   readonly runGit?: RepositoryCacheGitRunner;
   readonly lockTimeoutMs?: number;
   readonly lockRetryMs?: number;
+  readonly operationTimeoutMs?: number;
   readonly now?: () => number;
 }
 
@@ -448,15 +451,27 @@ export async function ensureRepositoryCache(
   }
   const lockTimeoutMs = input.lockTimeoutMs ?? 300_000;
   const lockRetryMs = input.lockRetryMs ?? 25;
+  const operationTimeoutMs = input.operationTimeoutMs ?? 60_000;
   if (!Number.isFinite(lockTimeoutMs) || lockTimeoutMs < 0 || !Number.isFinite(lockRetryMs) || lockRetryMs <= 0) {
     throw new RepositoryCacheError(
       "invalid_lock_options",
       "Repository cache lock timeout must be non-negative and retry delay must be positive",
     );
   }
+  if (!Number.isFinite(operationTimeoutMs) || operationTimeoutMs <= 0) {
+    throw new RepositoryCacheError(
+      "invalid_operation_options",
+      "Repository cache Git operation timeout must be positive",
+    );
+  }
   prepareMachineRoots(identity, resolve(input.rollHome));
   const lease = await takeRepositoryLock(identity, lockTimeoutMs, lockRetryMs);
-  const runGit = input.runGit ?? git;
+  const rawRunGit = input.runGit ?? git;
+  const runGit: RepositoryCacheGitRunner = (args, cwd) => rawRunGit(
+    args,
+    cwd,
+    { timeoutMs: operationTimeoutMs },
+  );
   const now = input.now ?? Date.now;
   try {
     prepareMachineRoots(identity, resolve(input.rollHome));

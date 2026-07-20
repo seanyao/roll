@@ -19,9 +19,9 @@ if (rollHome === undefined || remote === undefined || repoId === undefined || ou
       rollHome,
       binding,
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
-      runGit: async (args, cwd) => {
+      runGit: async (args, cwd, options) => {
         if (args[0] === "fetch") await new Promise((resolveDelay) => setTimeout(resolveDelay, 150));
-        return git(args, cwd);
+        return git(args, cwd, options);
       },
     });
     writeFileSync(outputPath, `${JSON.stringify({ ok: true, result })}\n`, "utf8");

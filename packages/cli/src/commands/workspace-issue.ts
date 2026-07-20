@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  parseIssueStoryContract,
   resolveWorkspaceTarget,
   validateStoryId,
   type IssueInitProbe,
@@ -15,10 +14,10 @@ import {
   inspectIssueInit,
   readWorkspace,
   resolveRequirementSourcesForStoryOnDisk,
+  resolveWorkspaceBacklogStoryContract,
   type InspectedWorkspace,
 } from "@roll/infra";
 import { parseWorkspaceManifest, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
-import { storySpecPath, DuplicateStoryIdError } from "../runner/attest-gate.js";
 import { configLang } from "./lang.js";
 import { workspaceRegistryCandidates, workspaceRollHome, workspaceTargetSelector } from "./workspace-target.js";
 
@@ -133,24 +132,10 @@ function cwdContext(cwd: string, entries: readonly InspectedWorkspace[]): Worksp
   }
 }
 
-function loadContract(worktreeCwd: string, storyId: string): { readonly ok: true; readonly value: IssueStoryContract } | { readonly ok: false; readonly code: string } {
-  let specPath: string | null;
-  try {
-    specPath = storySpecPath(worktreeCwd, storyId);
-  } catch (error) {
-    if (error instanceof DuplicateStoryIdError) return { ok: false, code: "duplicate_story" };
-    throw error;
-  }
-  if (specPath === null) return { ok: false, code: "story_not_found" };
-  let specText: string;
-  try {
-    specText = readFileSync(specPath, "utf8");
-  } catch {
-    return { ok: false, code: "story_not_found" };
-  }
-  const parsed = parseIssueStoryContract(specText, { storyId });
-  if (!parsed.ok) return { ok: false, code: parsed.errors[0]?.code ?? "invalid_config" };
-  return { ok: true, value: parsed.value };
+function loadContract(workspaceRoot: string, storyId: string): { readonly ok: true; readonly value: IssueStoryContract } | { readonly ok: false; readonly code: string } {
+  const resolved = resolveWorkspaceBacklogStoryContract(workspaceRoot, storyId);
+  if (!resolved.ok) return { ok: false, code: resolved.code };
+  return { ok: true, value: resolved.value };
 }
 
 function renderCheck(probe: IssueInitProbe, storyId: string): string {
@@ -197,7 +182,7 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
   const workspaceRoot = decision.target.root;
   const workspaceId = decision.target.workspaceId;
 
-  const contract = loadContract(cwd, parsed.storyId);
+  const contract = loadContract(workspaceRoot, parsed.storyId);
   if (!contract.ok) return emitError(contract.code, parsed.json);
 
   let bindings;

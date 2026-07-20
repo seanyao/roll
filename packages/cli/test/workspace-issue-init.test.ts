@@ -60,10 +60,17 @@ repositories:
     integration_branch: main
 `, "utf8");
 
-  const epicDir = join(cwd, ".roll", "features", "workspace-orchestration", "US-XX1");
-  mkdirSync(epicDir, { recursive: true });
-  writeFileSync(join(epicDir, "spec.md"), `---
-id: US-XX1
+  return { home, rollHome, workspace, config, cwd, sotRepoId: sotRepoId.value, readRepoId: readRepoId.value };
+}
+
+/** Write the Story Contract INSIDE the Workspace's own backlog tree
+ *  (`backlog/**\/<story-id>/spec.md`) — its only valid runtime home. Called
+ *  after `workspace init` so it never collides with the fresh-workspace plan. */
+function writeBacklogStorySpec(f: ReturnType<typeof fixture>, storyId = "US-XX1"): void {
+  const backlogStoryDir = join(f.workspace, "backlog", "workspace-orchestration", storyId);
+  mkdirSync(backlogStoryDir, { recursive: true });
+  writeFileSync(join(backlogStoryDir, "spec.md"), `---
+id: ${storyId}
 repositories:
   - alias: sot
     access: write
@@ -72,10 +79,8 @@ repositories:
     access: read
 ---
 
-# US-XX1 fixture story
+# ${storyId} fixture story
 `, "utf8");
-
-  return { home, rollHome, workspace, config, cwd, sotRepoId: sotRepoId.value, readRepoId: readRepoId.value };
 }
 
 async function run(args: string[], f: ReturnType<typeof fixture>): Promise<Run> {
@@ -123,6 +128,7 @@ describe("US-WS-008 roll workspace issue init", () => {
   it("resolves the Story contract and creates real worktrees across two repositories, then reuses them idempotently", async () => {
     const f = fixture();
     await initWorkspace(f);
+    writeBacklogStorySpec(f);
 
     const check = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], f);
     expect(check.status, check.stderr).toBe(0);
@@ -158,6 +164,7 @@ describe("US-WS-008 roll workspace issue init", () => {
   it("rolls back the clean first target's real worktree when the second repository's remote is unreachable, and writes a repair journal", async () => {
     const f = fixture();
     await initWorkspace(f);
+    writeBacklogStorySpec(f);
 
     // Fault injection: destroy the SECOND repository's source remote entirely
     // (a real, unmocked failure) so its cache clone genuinely fails once the
@@ -190,6 +197,7 @@ describe("US-WS-008 roll workspace issue init", () => {
   it("rejects invalid arguments and an unknown story id without any writes", async () => {
     const f = fixture();
     await initWorkspace(f);
+    writeBacklogStorySpec(f);
     const invalid = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--unknown", "--json"], f);
     expect(invalid.status).toBe(1);
     expect(JSON.parse(invalid.stderr)).toMatchObject({ error: { code: "invalid_arguments" } });
@@ -198,6 +206,32 @@ describe("US-WS-008 roll workspace issue init", () => {
     expect(missing.status).toBe(1);
     expect(JSON.parse(missing.stderr)).toMatchObject({ error: { code: "story_not_found" } });
     expect(existsSync(join(f.workspace, "issues", "US-NOPE"))).toBe(false);
+  });
+
+  it("never resolves a Story Contract from the caller cwd's .roll/features tree, only from the Workspace's own backlog tree", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    // Deliberately place a spec in the CALLER cwd's .roll/features layout —
+    // this must be completely invisible to the Workspace-scoped resolver.
+    const cwdEpicDir = join(f.cwd, ".roll", "features", "workspace-orchestration", "US-XX1");
+    mkdirSync(cwdEpicDir, { recursive: true });
+    writeFileSync(join(cwdEpicDir, "spec.md"), `---
+id: US-XX1
+repositories:
+  - alias: sot
+    access: write
+    required_delivery: true
+  - alias: docs
+    access: read
+---
+
+# US-XX1 fixture story (cwd — must be ignored)
+`, "utf8");
+
+    const result = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: "story_not_found" } });
+    expect(existsSync(join(f.workspace, "issues", "US-XX1"))).toBe(false);
   });
 
   it.each([

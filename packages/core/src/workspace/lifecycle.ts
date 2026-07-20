@@ -22,6 +22,30 @@ export interface WorkspaceLifecycleState {
   readonly lastEventTs: number;
 }
 
+export type WorkspaceLifecycleMutation = "activate" | "pause" | "archive";
+export type WorkspaceLifecycleDecision =
+  | { readonly ok: true; readonly eventType: "workspace:activated" | "workspace:paused" | "workspace:archived" | null }
+  | { readonly ok: false; readonly code: "archived_requires_activation" | "already_archived" };
+
+/** Decide one lifecycle mutation without performing persistence or filesystem I/O. */
+export function decideWorkspaceTransition(
+  current: WorkspaceLifecycle,
+  mutation: WorkspaceLifecycleMutation,
+): WorkspaceLifecycleDecision {
+  if (current === "archived") {
+    if (mutation === "activate") return { ok: true, eventType: "workspace:activated" };
+    if (mutation === "archive") return { ok: false, code: "already_archived" };
+    return { ok: false, code: "archived_requires_activation" };
+  }
+  if (mutation === "activate") {
+    return { ok: true, eventType: current === "active" ? null : "workspace:activated" };
+  }
+  if (mutation === "pause") {
+    return { ok: true, eventType: current === "paused" ? null : "workspace:paused" };
+  }
+  return { ok: true, eventType: "workspace:archived" };
+}
+
 function compareCodeUnits(left: string, right: string): number {
   if (left < right) return -1;
   if (left > right) return 1;

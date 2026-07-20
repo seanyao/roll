@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
+  decideWorkspaceTransition,
   foldWorkspaceLifecycles,
   nodeEventStore,
   type EventStore,
@@ -31,7 +32,9 @@ export type WorkspaceRegistryErrorCode =
   | "stale_path"
   | "not_found"
   | "io_failure"
-  | "concurrent_write";
+  | "concurrent_write"
+  | "archived_requires_activation"
+  | "already_archived";
 
 export class WorkspaceRegistryError extends Error {
   constructor(readonly code: WorkspaceRegistryErrorCode, message: string, options?: ErrorOptions) {
@@ -62,6 +65,17 @@ export interface WorkspaceRegistryOptions {
 }
 
 export interface ListedWorkspace extends WorkspaceRegistryEntry, WorkspaceLifecycleState {}
+
+export type WorkspaceManifestConsistency =
+  | "consistent"
+  | "stale_path"
+  | "identity_mismatch"
+  | "invalid_manifest";
+
+export interface InspectedWorkspace extends WorkspaceRegistryEntry, WorkspaceLifecycleState {
+  readonly manifestWorkspaceId: string | null;
+  readonly consistency: WorkspaceManifestConsistency;
+}
 
 export interface WorkspaceMoveInput {
   readonly workspaceId: string;
@@ -254,6 +268,33 @@ function entryIsCurrent(entry: WorkspaceRegistryEntry): boolean {
   }
 }
 
+function inspectManifest(entry: WorkspaceRegistryEntry): {
+  readonly manifestWorkspaceId: string | null;
+  readonly consistency: WorkspaceManifestConsistency;
+} {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = realpathSync(entry.root);
+  } catch {
+    return { manifestWorkspaceId: null, consistency: "stale_path" };
+  }
+  if (canonicalRoot !== entry.canonicalRoot) {
+    return { manifestWorkspaceId: null, consistency: "stale_path" };
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(join(canonicalRoot, "workspace.yaml"), "utf8"));
+  } catch {
+    return { manifestWorkspaceId: null, consistency: "invalid_manifest" };
+  }
+  const parsed = parseWorkspaceManifest(value);
+  if (!parsed.ok) return { manifestWorkspaceId: null, consistency: "invalid_manifest" };
+  if (parsed.value.workspaceId !== entry.workspaceId) {
+    return { manifestWorkspaceId: parsed.value.workspaceId, consistency: "identity_mismatch" };
+  }
+  return { manifestWorkspaceId: parsed.value.workspaceId, consistency: "consistent" };
+}
+
 export class WorkspaceRegistry {
   private readonly now: () => number;
   private readonly eventStore: Pick<EventStore, "readText" | "appendLine">;
@@ -302,6 +343,27 @@ export class WorkspaceRegistry {
         ...entry,
         pathState: entryIsCurrent(entry) ? "valid" : "stale",
         ...lifecycle,
+      };
+    });
+  }
+
+  inspect(): readonly InspectedWorkspace[] {
+    if (this.readPendingTransaction() !== undefined) {
+      throw new WorkspaceRegistryError("concurrent_write", "Workspace registry has an incomplete transaction pending recovery");
+    }
+    const snapshot = this.read();
+    const lifecycles = new Map(foldWorkspaceLifecycles(this.readEvents()).map((state) => [state.workspaceId, state]));
+    return snapshot.entries.map((entry) => {
+      const lifecycle = lifecycles.get(entry.workspaceId);
+      if (lifecycle === undefined) {
+        throw new WorkspaceRegistryError("invalid_registry", `Workspace ${entry.workspaceId} has no registration event`);
+      }
+      const manifest = inspectManifest(entry);
+      return {
+        ...entry,
+        pathState: manifest.consistency === "stale_path" ? "stale" : "valid",
+        ...lifecycle,
+        ...manifest,
       };
     });
   }
@@ -370,10 +432,15 @@ export class WorkspaceRegistry {
     type: WorkspaceTransitionEventType,
   ): void {
     this.withLock(() => {
-      if (!this.read().entries.some((entry) => entry.workspaceId === workspaceId)) {
+      const current = this.list().find((entry) => entry.workspaceId === workspaceId);
+      if (current === undefined) {
         throw new WorkspaceRegistryError("not_found", `Workspace ${workspaceId} is not registered`);
       }
-      this.appendEvent({ schema: WORKSPACE_EVENT_V1, type, workspaceId, ts: this.now() });
+      const mutation = type === "workspace:activated" ? "activate" : type === "workspace:paused" ? "pause" : "archive";
+      const decision = decideWorkspaceTransition(current.lifecycle, mutation);
+      if (!decision.ok) throw new WorkspaceRegistryError(decision.code, decision.code);
+      if (decision.eventType === null) return;
+      this.appendEvent({ schema: WORKSPACE_EVENT_V1, type: decision.eventType, workspaceId, ts: this.now() });
     });
   }
 

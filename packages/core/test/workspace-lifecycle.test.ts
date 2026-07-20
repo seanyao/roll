@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   WORKSPACE_EVENT_V1,
   WorkspaceLifecycleError,
+  decideWorkspaceTransition,
   foldWorkspaceLifecycles,
   type WorkspaceLifecycleEvent,
 } from "../src/workspace/lifecycle.js";
@@ -75,5 +76,31 @@ describe("foldWorkspaceLifecycles", () => {
       expect(error).toBeInstanceOf(WorkspaceLifecycleError);
       expect(error).toMatchObject({ code: "transition_before_registration" });
     }
+  });
+});
+
+describe("decideWorkspaceTransition", () => {
+  it("keeps archive reversible only through an explicit activation", () => {
+    expect(decideWorkspaceTransition("archived", "activate")).toEqual({
+      ok: true,
+      eventType: "workspace:activated",
+    });
+    expect(decideWorkspaceTransition("archived", "pause")).toEqual({
+      ok: false,
+      code: "archived_requires_activation",
+    });
+    expect(decideWorkspaceTransition("archived", "archive")).toEqual({
+      ok: false,
+      code: "already_archived",
+    });
+  });
+
+  it("makes repeated active and paused transitions explicit no-ops", () => {
+    expect(decideWorkspaceTransition("active", "activate")).toEqual({ ok: true, eventType: null });
+    expect(decideWorkspaceTransition("paused", "pause")).toEqual({ ok: true, eventType: null });
+    expect(decideWorkspaceTransition("registered", "archive")).toEqual({
+      ok: true,
+      eventType: "workspace:archived",
+    });
   });
 });

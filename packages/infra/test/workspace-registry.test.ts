@@ -307,6 +307,49 @@ describe("Workspace registry v1 persistence", () => {
 });
 
 describe("Workspace lifecycle, moves, and concurrent writers", () => {
+  it("inspects manifest consistency without collapsing ID mismatch into stale path", () => {
+    const rollHome = sandbox();
+    const stale = workspace(join(rollHome, "roots", "stale"), "ws-stale");
+    const mismatch = workspace(join(rollHome, "roots", "mismatch"), "ws-mismatch");
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    store.register({ workspaceId: "ws-stale", root: stale });
+    store.register({ workspaceId: "ws-mismatch", root: mismatch });
+    rmSync(stale, { recursive: true, force: true });
+    workspace(mismatch, "ws-other");
+
+    expect(store.inspect().map(({ workspaceId, consistency, manifestWorkspaceId }) => ({
+      workspaceId,
+      consistency,
+      manifestWorkspaceId,
+    }))).toEqual([
+      { workspaceId: "ws-mismatch", consistency: "identity_mismatch", manifestWorkspaceId: "ws-other" },
+      { workspaceId: "ws-stale", consistency: "stale_path", manifestWorkspaceId: null },
+    ]);
+  });
+
+  it("rejects archived pause/archive without appending events and permits explicit activation", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    const store = new WorkspaceRegistry({ rollHome, now: (() => {
+      let ts = 0;
+      return () => ++ts;
+    })() });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    store.archive("ws-alpha");
+    const before = readFileSync(workspaceEventsPath(rollHome), "utf8");
+
+    expect(() => store.pause("ws-alpha")).toThrowError(
+      expect.objectContaining({ code: "archived_requires_activation" }),
+    );
+    expect(() => store.archive("ws-alpha")).toThrowError(
+      expect.objectContaining({ code: "already_archived" }),
+    );
+    expect(readFileSync(workspaceEventsPath(rollHome), "utf8")).toBe(before);
+
+    store.activate("ws-alpha");
+    expect(store.list().find((entry) => entry.workspaceId === "ws-alpha")?.lifecycle).toBe("active");
+  });
+
   it("derives multiple active Workspaces from events and isolates later transitions", () => {
     const rollHome = sandbox();
     const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");

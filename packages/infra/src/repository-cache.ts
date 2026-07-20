@@ -15,7 +15,7 @@ import {
   type RepositoryBinding,
 } from "@roll/spec";
 import { git, type GitResult } from "./git.js";
-import { acquireLock, INNER_LOCK_STALE_SEC, releaseLock } from "./process.js";
+import { acquireLock, INNER_LOCK_STALE_SEC, readLockOwner, releaseLock } from "./process.js";
 
 export type RepositoryCacheErrorCode =
   | "invalid_roll_home"
@@ -23,6 +23,7 @@ export type RepositoryCacheErrorCode =
   | "unsafe_remote"
   | "unsupported_refspec"
   | "unsafe_path"
+  | "invalid_lock_options"
   | "lock_timeout"
   | "origin_mismatch"
   | "git_failure";
@@ -37,6 +38,8 @@ export class RepositoryCacheError extends Error {
 export interface RepositoryCacheIdentity {
   readonly repoId: string;
   readonly remote: string;
+  readonly transportRemote: string;
+  readonly integrationBranch: string;
   readonly reposRoot: string;
   readonly cachePath: string;
   readonly identityPath: string;
@@ -48,6 +51,7 @@ export interface RepositoryCacheIdentity {
 export interface ResolveRepositoryCacheIdentityInput {
   readonly rollHome: string;
   readonly binding: RepositoryBinding;
+  readonly transportRemote?: string;
 }
 
 export type RepositoryCacheAction = "created" | "reused" | "repaired";
@@ -90,7 +94,12 @@ export interface EnsureRepositoryCacheInput extends ResolveRepositoryCacheIdenti
 
 interface ParsedIntegrationRefspec {
   readonly value: string;
+  readonly branch: string;
   readonly destination: string;
+}
+
+interface RepositoryLockLease {
+  readonly token: string;
 }
 
 const REPOSITORY_CACHE_JOURNAL_V1 = "roll.repository-cache-journal/v1" as const;
@@ -122,6 +131,14 @@ export function resolveRepositoryCacheIdentity(
       : "invalid_binding";
     throw new RepositoryCacheError(code, "Repository binding is invalid or unsafe");
   }
+  const transportRemote = input.transportRemote ?? input.binding.remote;
+  const parsedTransport = normalizeRepositoryRemote(transportRemote);
+  if (!parsedTransport.ok) {
+    throw new RepositoryCacheError("unsafe_remote", "Repository transport remote is invalid or unsafe");
+  }
+  if (parsedTransport.value !== parsed.value.remote) {
+    throw new RepositoryCacheError("invalid_binding", "Repository transport remote conflicts with cache identity");
+  }
   const rollHome = resolve(input.rollHome);
   const reposRoot = childPath(rollHome, "repos");
   const locksRoot = childPath(rollHome, join("locks", "repos"));
@@ -129,6 +146,8 @@ export function resolveRepositoryCacheIdentity(
   return {
     repoId,
     remote: parsed.value.remote,
+    transportRemote,
+    integrationBranch: parsed.value.integrationBranch,
     reposRoot,
     cachePath: childPath(reposRoot, `${repoId}.git`),
     identityPath: childPath(reposRoot, `${repoId}.json`),
@@ -153,12 +172,17 @@ function parseIntegrationRefspec(value: string): ParsedIntegrationRefspec {
       "Integration refspec must map one safe branch head to its origin tracking ref",
     );
   }
-  return { value, destination };
+  return { value, branch, destination };
 }
 
 function assertSafeExistingPath(path: string, expected: "directory" | "file-or-directory"): void {
-  if (!existsSync(path)) return;
-  const stat = lstatSync(path);
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
   if (stat.isSymbolicLink() || (expected === "directory" && !stat.isDirectory())) {
     throw new RepositoryCacheError("unsafe_path", "Repository cache path contains a symlink or wrong node type");
   }
@@ -180,6 +204,14 @@ function prepareMachineRoots(identity: RepositoryCacheIdentity, rollHome: string
   assertSafeExistingPath(identity.temporaryPath, "directory");
   assertSafeExistingPath(identity.journalPath, "file-or-directory");
   assertSafeExistingPath(identity.lockPath, "file-or-directory");
+}
+
+function assertRepositoryCacheBoundary(identity: RepositoryCacheIdentity): void {
+  assertSafeExistingPath(identity.reposRoot, "directory");
+  assertSafeExistingPath(identity.cachePath, "directory");
+  assertSafeExistingPath(identity.identityPath, "file-or-directory");
+  assertSafeExistingPath(identity.temporaryPath, "directory");
+  assertSafeExistingPath(identity.journalPath, "file-or-directory");
 }
 
 function hasRecordedIdentity(identity: RepositoryCacheIdentity): boolean {
@@ -205,35 +237,54 @@ function hasRecordedIdentity(identity: RepositoryCacheIdentity): boolean {
   return true;
 }
 
+function atomicWrite(path: string, text: string): void {
+  const temporary = `${path}.tmp.${process.pid}.${randomUUID()}`;
+  try {
+    writeFileSync(temporary, text, { encoding: "utf8", flag: "wx" });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
 function writeCacheIdentity(identity: RepositoryCacheIdentity, now: number): void {
-  const temporary = `${identity.identityPath}.tmp.${process.pid}.${randomUUID()}`;
-  writeFileSync(temporary, `${JSON.stringify({
+  assertRepositoryCacheBoundary(identity);
+  atomicWrite(identity.identityPath, `${JSON.stringify({
     schema: REPOSITORY_CACHE_IDENTITY_V1,
     repoId: identity.repoId,
     remote: identity.remote,
     cachePath: identity.cachePath,
     updatedAt: now,
-  }, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
-  renameSync(temporary, identity.identityPath);
+  }, null, 2)}\n`);
 }
 
 async function takeRepositoryLock(
   identity: RepositoryCacheIdentity,
   timeoutMs: number,
   retryMs: number,
-): Promise<void> {
+): Promise<RepositoryLockLease> {
   const deadline = Date.now() + timeoutMs;
+  const token = `${identity.repoId}:${randomUUID()}`;
   for (;;) {
     const acquired = acquireLock(identity.lockPath, process.pid, {
       staleSec: INNER_LOCK_STALE_SEC,
-      cycleId: identity.repoId,
+      cycleId: token,
     });
-    if (acquired.acquired) return;
+    if (acquired.acquired) {
+      const owner = readLockOwner(identity.lockPath);
+      if (owner?.pid === process.pid && owner.cycleId === token) return { token };
+      throw new RepositoryCacheError("lock_timeout", "Repository cache lock owner metadata is unavailable");
+    }
     if (Date.now() >= deadline) {
       throw new RepositoryCacheError("lock_timeout", "Repository cache lock is held by another owner");
     }
     await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, retryMs));
   }
+}
+
+function releaseRepositoryLock(identity: RepositoryCacheIdentity, lease: RepositoryLockLease): void {
+  const owner = readLockOwner(identity.lockPath);
+  if (owner?.pid === process.pid && owner.cycleId === lease.token) releaseLock(identity.lockPath);
 }
 
 async function checkedGit(
@@ -259,18 +310,21 @@ async function inspectExistingCache(
   runGit: RepositoryCacheGitRunner,
 ): Promise<"valid" | "corrupt" | "missing"> {
   if (!existsSync(identity.cachePath)) return "missing";
+  assertRepositoryCacheBoundary(identity);
   let bare: GitResult;
   let origin: GitResult;
   let fsck: GitResult;
   try {
     bare = await runGit(["rev-parse", "--is-bare-repository"], identity.cachePath);
     if (bare.code !== 0 || bare.stdout.trim() !== "true") return "corrupt";
+    assertRepositoryCacheBoundary(identity);
     origin = await runGit(["remote", "get-url", "origin"], identity.cachePath);
     if (origin.code !== 0) return "corrupt";
     const normalizedOrigin = normalizeRepositoryRemote(origin.stdout.trim());
     if (!normalizedOrigin.ok || normalizedOrigin.value !== identity.remote) {
       throw new RepositoryCacheError("origin_mismatch", "Existing repository cache origin conflicts with its identity");
     }
+    assertRepositoryCacheBoundary(identity);
     fsck = await runGit(["fsck", "--connectivity-only", "--no-dangling"], identity.cachePath);
   } catch (error) {
     if (error instanceof RepositoryCacheError) throw error;
@@ -285,7 +339,8 @@ function writeJournal(
   refspec: string,
   now: number,
 ): void {
-  writeFileSync(identity.journalPath, `${JSON.stringify({
+  assertRepositoryCacheBoundary(identity);
+  atomicWrite(identity.journalPath, `${JSON.stringify({
     schema: REPOSITORY_CACHE_JOURNAL_V1,
     repoId: identity.repoId,
     remote: identity.remote,
@@ -294,7 +349,24 @@ function writeJournal(
     action,
     integrationRefspec: refspec,
     startedAt: now,
-  }, null, 2)}\n`, "utf8");
+  }, null, 2)}\n`);
+}
+
+async function fetchAndResolveBaseSha(
+  identity: RepositoryCacheIdentity,
+  cwd: string,
+  refspec: ParsedIntegrationRefspec,
+  runGit: RepositoryCacheGitRunner,
+): Promise<string> {
+  assertRepositoryCacheBoundary(identity);
+  await checkedGit(runGit, ["fetch", "--prune", "origin", refspec.value], cwd, "fetch");
+  assertRepositoryCacheBoundary(identity);
+  const resolved = await checkedGit(runGit, ["rev-parse", refspec.destination], cwd, "base resolve");
+  const baseSha = resolved.stdout.trim();
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseSha)) {
+    throw new RepositoryCacheError("git_failure", "Git base resolve did not return an immutable object ID");
+  }
+  return baseSha;
 }
 
 async function createCache(
@@ -302,16 +374,21 @@ async function createCache(
   refspec: ParsedIntegrationRefspec,
   runGit: RepositoryCacheGitRunner,
 ): Promise<string> {
+  assertRepositoryCacheBoundary(identity);
   rmSync(identity.temporaryPath, { recursive: true, force: true });
+  assertRepositoryCacheBoundary(identity);
   await checkedGit(runGit, ["init", "--bare", identity.temporaryPath], undefined, "bare init");
-  await checkedGit(runGit, ["remote", "add", "origin", identity.remote], identity.temporaryPath, "origin setup");
-  await checkedGit(runGit, ["fetch", "--prune", "origin", refspec.value], identity.temporaryPath, "fetch");
+  assertRepositoryCacheBoundary(identity);
+  await checkedGit(
+    runGit,
+    ["remote", "add", "origin", identity.transportRemote],
+    identity.temporaryPath,
+    "origin setup",
+  );
+  const baseSha = await fetchAndResolveBaseSha(identity, identity.temporaryPath, refspec, runGit);
+  assertRepositoryCacheBoundary(identity);
   await checkedGit(runGit, ["fsck", "--connectivity-only", "--no-dangling"], identity.temporaryPath, "fsck");
-  const resolved = await checkedGit(runGit, ["rev-parse", refspec.destination], identity.temporaryPath, "base resolve");
-  const baseSha = resolved.stdout.trim();
-  if (!/^[0-9a-f]{40,64}$/u.test(baseSha)) {
-    throw new RepositoryCacheError("git_failure", "Git base resolve did not return an immutable object ID");
-  }
+  assertRepositoryCacheBoundary(identity);
   renameSync(identity.temporaryPath, identity.cachePath);
   return baseSha;
 }
@@ -321,13 +398,7 @@ async function fetchCache(
   refspec: ParsedIntegrationRefspec,
   runGit: RepositoryCacheGitRunner,
 ): Promise<string> {
-  await checkedGit(runGit, ["fetch", "--prune", "origin", refspec.value], identity.cachePath, "fetch");
-  const resolved = await checkedGit(runGit, ["rev-parse", refspec.destination], identity.cachePath, "base resolve");
-  const baseSha = resolved.stdout.trim();
-  if (!/^[0-9a-f]{40,64}$/u.test(baseSha)) {
-    throw new RepositoryCacheError("git_failure", "Git base resolve did not return an immutable object ID");
-  }
-  return baseSha;
+  return fetchAndResolveBaseSha(identity, identity.cachePath, refspec, runGit);
 }
 
 function eventType(action: RepositoryCacheAction): RepositoryCacheEventType {
@@ -342,11 +413,24 @@ export async function ensureRepositoryCache(
 ): Promise<RepositoryCacheResult> {
   const identity = resolveRepositoryCacheIdentity(input);
   const refspec = parseIntegrationRefspec(input.integrationRefspec);
+  if (refspec.branch !== identity.integrationBranch) {
+    throw new RepositoryCacheError("unsupported_refspec", "Integration refspec must match the repository binding branch");
+  }
+  const lockTimeoutMs = input.lockTimeoutMs ?? 300_000;
+  const lockRetryMs = input.lockRetryMs ?? 25;
+  if (!Number.isFinite(lockTimeoutMs) || lockTimeoutMs < 0 || !Number.isFinite(lockRetryMs) || lockRetryMs <= 0) {
+    throw new RepositoryCacheError(
+      "invalid_lock_options",
+      "Repository cache lock timeout must be non-negative and retry delay must be positive",
+    );
+  }
   prepareMachineRoots(identity, resolve(input.rollHome));
-  await takeRepositoryLock(identity, input.lockTimeoutMs ?? 10_000, input.lockRetryMs ?? 20);
+  const lease = await takeRepositoryLock(identity, lockTimeoutMs, lockRetryMs);
   const runGit = input.runGit ?? git;
   const now = input.now ?? Date.now;
   try {
+    prepareMachineRoots(identity, resolve(input.rollHome));
+    assertRepositoryCacheBoundary(identity);
     const interrupted = existsSync(identity.journalPath) || existsSync(identity.temporaryPath);
     const recordedIdentity = hasRecordedIdentity(identity);
     const state = await inspectExistingCache(identity, runGit);
@@ -357,9 +441,11 @@ export async function ensureRepositoryCache(
 
     let baseSha: string;
     if (state === "valid") {
+      assertRepositoryCacheBoundary(identity);
       rmSync(identity.temporaryPath, { recursive: true, force: true });
       baseSha = await fetchCache(identity, refspec, runGit);
     } else {
+      assertRepositoryCacheBoundary(identity);
       rmSync(identity.cachePath, { recursive: true, force: true });
       baseSha = await createCache(identity, refspec, runGit);
     }
@@ -382,6 +468,6 @@ export async function ensureRepositoryCache(
       event,
     };
   } finally {
-    releaseLock(identity.lockPath);
+    releaseRepositoryLock(identity, lease);
   }
 }

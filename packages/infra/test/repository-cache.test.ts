@@ -22,6 +22,8 @@ import {
   RepositoryCacheError,
   resolveRepositoryCacheIdentity,
 } from "../src/repository-cache.js";
+import { git as typedGit } from "../src/git.js";
+import { acquireLock, readLockOwner, releaseLock } from "../src/process.js";
 
 const sandboxes: string[] = [];
 
@@ -91,7 +93,11 @@ describe("RepositoryCache identity and path safety", () => {
       binding: binding("git@example.test:team/other.git"),
     });
 
-    expect(canonical).toEqual(scp);
+    expect(canonical.repoId).toBe(scp.repoId);
+    expect(canonical.remote).toBe(scp.remote);
+    expect(canonical.cachePath).toBe(scp.cachePath);
+    expect(canonical.transportRemote).toBe("ssh://git@Example.TEST:22/team/product.git/");
+    expect(scp.transportRemote).toBe("git@example.test:team/product.git");
     expect(canonical.cachePath).toBe(join(rollHome, "repos", `${canonical.repoId}.git`));
     expect(basename(canonical.cachePath)).toMatch(/^repo-[0-9a-f]{12}\.git$/u);
     expect(other.cachePath).not.toBe(canonical.cachePath);
@@ -134,6 +140,31 @@ describe("RepositoryCache identity and path safety", () => {
     expect(runGitAdapter).not.toHaveBeenCalled();
   });
 
+  it("rejects an integration refspec that disagrees with the binding branch", async () => {
+    const rollHome = sandbox();
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: binding("https://example.test/team/product.git"),
+      integrationRefspec: "+refs/heads/release:refs/remotes/origin/release",
+      runGit: runGitAdapter,
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsupported_refspec" });
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid lock timing instead of waiting forever", async () => {
+    const rollHome = sandbox();
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: binding("https://example.test/team/product.git"),
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      lockTimeoutMs: Number.NaN,
+      runGit: runGitAdapter,
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "invalid_lock_options" });
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
   it("rejects a repos symlink escape before invoking Git", async () => {
     const rollHome = sandbox();
     const outside = sandbox();
@@ -146,6 +177,39 @@ describe("RepositoryCache identity and path safety", () => {
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
       runGit: runGitAdapter,
     })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
+  it("rechecks path safety after waiting for the repository lock", async () => {
+    const rollHome = sandbox();
+    const outside = sandbox();
+    const repository = binding("https://example.test/team/product.git");
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    mkdirSync(identity.reposRoot, { recursive: true });
+    mkdirSync(join(rollHome, "locks", "repos"), { recursive: true });
+    expect(acquireLock(identity.lockPath, process.pid, { cycleId: "blocker" }).acquired).toBe(true);
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+
+    const pending = ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      lockTimeoutMs: 1_000,
+      lockRetryMs: 5,
+      runGit: runGitAdapter,
+    });
+    const pendingResult = pending.then(
+      () => ({ ok: true as const, error: undefined }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
+    rmSync(identity.reposRoot, { recursive: true, force: true });
+    symlinkSync(outside, identity.reposRoot, "dir");
+    releaseLock(identity.lockPath);
+
+    const result = await pendingResult;
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
     expect(runGitAdapter).not.toHaveBeenCalled();
   });
 });
@@ -202,6 +266,54 @@ describe("RepositoryCache lifecycle", () => {
     expect(existsSync(identity.temporaryPath)).toBe(false);
     expect(existsSync(identity.journalPath)).toBe(false);
     expect(runGit(identity.cachePath, ["fsck", "--connectivity-only"])).toBe("");
+  });
+
+  it("does not release a newer owner lock after a stale takeover", async () => {
+    const rollHome = sandbox();
+    const upstream = localRemote(sandbox(), "owner-token");
+    const repository = binding(upstream.remote);
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    let unblockFetch: (() => void) | undefined;
+    let markFetchStarted: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolveStarted) => {
+      markFetchStarted = resolveStarted;
+    });
+    const fetchBlock = new Promise<void>((resolveFetch) => {
+      unblockFetch = resolveFetch;
+    });
+    let blocked = false;
+    const runGitAdapter = async (args: readonly string[], cwd?: string) => {
+      if (!blocked && args[0] === "fetch") {
+        blocked = true;
+        markFetchStarted?.();
+        await fetchBlock;
+      }
+      return typedGit(args, cwd);
+    };
+
+    const pending = ensureRepositoryCache({
+      rollHome,
+      binding: repository,
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      runGit: runGitAdapter,
+    });
+    await fetchStarted;
+    expect(existsSync(identity.journalPath)).toBe(true);
+    expect(readLockOwner(identity.lockPath)).toMatchObject({
+      pid: process.pid,
+      cycleId: expect.stringMatching(new RegExp(`^${identity.repoId}:`, "u")),
+    });
+    const takeover = acquireLock(identity.lockPath, 424242, {
+      staleSec: 0,
+      pidAlive: () => true,
+      cycleId: "new-owner",
+    });
+    expect(takeover.acquired).toBe(true);
+    unblockFetch?.();
+    await pending;
+
+    expect(readLockOwner(identity.lockPath)).toMatchObject({ pid: 424242, cycleId: "new-owner" });
+    releaseLock(identity.lockPath);
   });
 
   it("repairs a deleted cache without changing Workspace, Issue, backlog or completion truth", async () => {

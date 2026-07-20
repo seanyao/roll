@@ -92,6 +92,80 @@ describe("issueWorktreeAdd", () => {
     await issueWorktreeAdd(cachePath, path, baseSha, null);
     expect(existsSync(join(path, ".git"))).toBe(true);
   });
+
+  it("recovers an ORPHAN governed branch (real: created by an interrupted prior run, path now absent) whose tip has the pinned base as an ancestor", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    const branch = "roll/ws-demo/US-XX1/sot";
+    // Real orphan: an earlier interrupted run created the governed branch
+    // and a worktree, then the worktree directory was deleted by hand
+    // (leaving the branch — and git's stale worktree admin metadata —
+    // behind) without the branch itself ever being cleaned up.
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    rmSync(path, { recursive: true, force: true });
+
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    expect(existsSync(join(path, ".git"))).toBe(true);
+    expect(git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(branch);
+    expect(git(path, ["rev-parse", "HEAD"])).toBe(baseSha);
+  });
+
+  it("recovers an ORPHAN governed branch that has LATER real story commits (pinned base is an ancestor, not equal)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    const branch = "roll/ws-demo/US-XX1/sot";
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    writeFileSync(join(path, "story-work.txt"), "real story commit\n", "utf8");
+    git(path, ["add", "story-work.txt"]);
+    git(path, ["commit", "-q", "-m", "real story commit"]);
+    const advancedHead = git(path, ["rev-parse", "HEAD"]);
+    rmSync(path, { recursive: true, force: true });
+
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    expect(git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(branch);
+    // Recovery checks out the branch's REAL current tip — the real story
+    // commit is preserved, never reset back to the base.
+    expect(git(path, ["rev-parse", "HEAD"])).toBe(advancedHead);
+    expect(existsSync(join(path, "story-work.txt"))).toBe(true);
+  });
+
+  it("REFUSES to recover an orphan branch whose history DIVERGED from the pinned base (base is not an ancestor)", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    const branch = "roll/ws-demo/US-XX1/sot";
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    // Real divergence: reset the branch onto an unrelated orphan history.
+    git(path, ["checkout", "--orphan", "unrelated-history"]);
+    git(path, ["rm", "-rf", "."]);
+    writeFileSync(join(path, "unrelated.txt"), "unrelated root commit\n", "utf8");
+    git(path, ["add", "unrelated.txt"]);
+    git(path, ["commit", "-q", "-m", "unrelated root commit"]);
+    git(path, ["branch", "-f", branch, "unrelated-history"]);
+    rmSync(path, { recursive: true, force: true });
+
+    await expect(issueWorktreeAdd(cachePath, path, baseSha, branch)).rejects.toThrow();
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("REFUSES to recover an orphan branch that is ALREADY checked out in ANOTHER real worktree", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    const branch = "roll/ws-demo/US-XX1/sot";
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    // Real orphan admin metadata: the branch is registered as checked out
+    // at `path`, but `path` itself never got deleted here — instead, a
+    // SECOND real worktree independently tries to claim the SAME branch,
+    // which git itself must refuse since one branch = one live worktree.
+    const otherPath = join(root, "issues", "US-XX1", "sot-elsewhere");
+    await expect(issueWorktreeAdd(cachePath, otherPath, baseSha, branch)).rejects.toThrow();
+    expect(existsSync(otherPath)).toBe(false);
+    // The original worktree is completely unaffected.
+    expect(existsSync(join(path, ".git"))).toBe(true);
+  });
 });
 
 describe("issueWorktreeIdentity", () => {

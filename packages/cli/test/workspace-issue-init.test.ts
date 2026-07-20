@@ -345,16 +345,32 @@ repositories:
     const throwawayIssueRoot = join(f.workspace, "issues", throwawayStoryId);
 
     // Simulate an INDEPENDENT external process creating the TARGET story's
-    // governed branch directly in docs's real bare cache, pointed at the
-    // resolved integration base — a real, unmocked pre-existing fact with
-    // zero deletion of any Issue/worktree/manifest/event state anywhere.
+    // governed branch directly in docs's real bare cache — a real, unmocked
+    // pre-existing fact with zero deletion of any Issue/worktree/manifest/
+    // event state anywhere. Its history is made to DIVERGE from the pinned
+    // base (an unrelated orphan root commit) so this is a genuinely
+    // non-recoverable collision, not an orphan branch recovery could
+    // legitimately reuse: orphan governed branch recovery (US-WS-008) only
+    // ever reuses a same-named branch when the pinned base is confirmed an
+    // ANCESTOR of its tip, so this branch's diverged history must make the
+    // recovery attempt itself fail loud, exactly like any other real
+    // second-target apply failure.
     const docsCachePath = join(f.rollHome, "repos", `${f.readRepoId}.git`);
     const targetBranch = `roll/ws-demo/${storyId}/docs`;
-    execFileSync("git", ["branch", targetBranch, "refs/remotes/origin/main"], { cwd: docsCachePath, stdio: "ignore" });
+    const scratchDir = join(f.home, "docs-branch-scratch");
+    execFileSync("git", ["clone", "-q", docsCachePath, scratchDir], { cwd: f.home, stdio: "ignore" });
+    execFileSync("git", ["checkout", "-q", "--orphan", targetBranch], { cwd: scratchDir, stdio: "ignore" });
+    execFileSync("git", ["reset", "-q", "--hard"], { cwd: scratchDir, stdio: "ignore" });
+    execFileSync("rm", ["-rf", join(scratchDir, "README.md")], { stdio: "ignore" });
+    writeFileSync(join(scratchDir, "unrelated.txt"), "unrelated root commit\n", "utf8");
+    execFileSync("git", ["add", "-A"], { cwd: scratchDir, stdio: "ignore" });
+    execFileSync("git", ["-c", "user.email=roll@example.test", "-c", "user.name=Roll Test", "commit", "-q", "-m", "unrelated root commit"], { cwd: scratchDir, stdio: "ignore" });
+    execFileSync("git", ["push", docsCachePath, `${targetBranch}:${targetBranch}`], { cwd: scratchDir, stdio: "ignore" });
 
     // Run the target Story once for real: `sot` (target 1) is created fresh
-    // and clean; `docs` (target 2) genuinely fails `worktree add -b` because
-    // its governed branch for THIS story id already exists.
+    // and clean; `docs` (target 2) genuinely fails to recover its orphan
+    // governed branch because that branch's diverged history does not have
+    // the pinned base as an ancestor.
     const failed = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(failed.status).toBe(1);
     expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });

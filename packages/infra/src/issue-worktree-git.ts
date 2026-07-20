@@ -133,12 +133,31 @@ export function unprotectReadOnlyWorktree(path: string): void {
   restore(path);
 }
 
+/** True when `branch` already exists as a real ref in this cache. */
+async function branchExists(cachePath: string, branch: string): Promise<boolean> {
+  const result = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], cachePath);
+  return result.code === 0;
+}
+
 /** Create a REAL git worktree for one Issue repository target. Never touches a
  *  pre-existing path — the caller must have already probed it as absent.
- *  `branch === null` creates a detached worktree (no local branch); `-b
- *  branch` creates a NEW named branch for a write target. Deliberately does
- *  NOT apply read-only filesystem protection itself — the CALLER must record
- *  the target as created (journal) BEFORE calling
+ *  `branch === null` creates a detached worktree (no local branch).
+ *
+ *  For a write target (`branch !== null`), a NEW branch is created UNLESS
+ *  that exact branch name already exists as a real ref (ORPHAN GOVERNED
+ *  BRANCH RECOVERY — e.g. an earlier interrupted run created the branch and
+ *  a worktree, then the worktree path was deleted by hand without the
+ *  branch itself ever being cleaned up). In that case the branch is REUSED
+ *  — but ONLY when `baseSha` is confirmed an ancestor of the branch's real
+ *  current tip (so a diverged/unrelated branch of the same name is refused,
+ *  never silently adopted) — checking out its ACTUAL tip, which may already
+ *  hold later real story commits made before the interruption. Git's own
+ *  one-worktree-per-branch guard naturally refuses the reuse if that branch
+ *  is already checked out somewhere else; this function does not re-derive
+ *  that check itself.
+ *
+ *  Deliberately does NOT apply read-only filesystem protection itself —
+ *  the CALLER must record the target as created (journal) BEFORE calling
  *  {@link protectReadOnlyWorktree} separately, so a protection failure can
  *  never leave a real, ungoverned worktree the journal doesn't know to roll
  *  back (see applyIssueInit). */
@@ -157,6 +176,24 @@ export async function issueWorktreeAdd(
   // remove`) — prune only ever drops registrations already missing on disk,
   // never a live worktree, so this is always safe before `worktree add`.
   await git(["worktree", "prune"], cachePath);
+
+  if (branch !== null && await branchExists(cachePath, branch)) {
+    const ancestor = await git(["merge-base", "--is-ancestor", baseSha, branch], cachePath);
+    if (ancestor.code !== 0) {
+      throw new Error(
+        `refusing to recover orphan governed branch "${branch}" for ${path}: its current tip does not have the pinned base ${baseSha} as an ancestor (diverged history)`,
+      );
+    }
+    // Reuse the existing branch at its REAL current tip — git's own
+    // one-worktree-per-branch guard is what actually refuses this if the
+    // branch is checked out elsewhere; no separate check is duplicated here.
+    const reuse = await git(["worktree", "add", path, branch], cachePath);
+    if (reuse.code !== 0) {
+      throw new Error(`git worktree add (orphan branch recovery) failed for ${path}: ${reuse.stderr || reuse.stdout}`);
+    }
+    return;
+  }
+
   const args = branch === null
     ? ["worktree", "add", "--detach", path, baseSha]
     : ["worktree", "add", "-b", branch, path, baseSha];

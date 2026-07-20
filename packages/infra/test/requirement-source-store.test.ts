@@ -1096,6 +1096,42 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(attest).toMatch(/no evidence captured yet|pending/iu);
   });
 
+  it("never leaks an outside path into attest.md when the top-level issues/ directory itself is a symlink", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-issues-root");
+    mkdirSync(join(outside, "US-WS-007", "evidence"), { recursive: true });
+    symlinkSync(outside, join(f.workspace, "issues"));
+
+    const first = captureRequirementSource(request(f));
+    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
+    expect(attest).not.toContain(outside);
+    expect(attest).toMatch(/US-WS-007: no evidence captured yet|pending/iu);
+  });
+
+  it("never leaks an outside path into attest.md when issues/<story> itself is a symlink to an outside directory", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-story-dir");
+    mkdirSync(join(outside, "evidence"), { recursive: true });
+    write(join(outside, "evidence", "secret.txt"), "outside secret evidence\n");
+    mkdirSync(join(f.workspace, "issues"), { recursive: true });
+    symlinkSync(outside, join(f.workspace, "issues", "US-WS-007"));
+
+    const first = captureRequirementSource(request(f));
+    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
+    expect(attest).not.toContain(outside);
+    expect(attest).toMatch(/US-WS-007: no evidence captured yet|pending/iu);
+  });
+
+  it("never leaks an outside path into attest.md when issues/<story>/evidence's ancestor is a non-directory file", () => {
+    const f = fixture();
+    mkdirSync(join(f.workspace, "issues"), { recursive: true });
+    write(join(f.workspace, "issues", "US-WS-007"), "this is a file, not a Story directory\n");
+
+    const first = captureRequirementSource(request(f));
+    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
+    expect(attest).toMatch(/US-WS-007: no evidence captured yet|pending/iu);
+  });
+
   it("reconstructs requirement.md, context/ and attest.md together from the immutable revision when all three are corrupted or missing at once", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

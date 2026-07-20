@@ -358,6 +358,23 @@ function declaredSource(
   });
 }
 
+function realContainedDirectory(root: string, target: string): boolean {
+  if (!contained(root, target)) return false;
+  const rel = relative(root, target);
+  let cursor = root;
+  for (const segment of rel === "" ? [] : rel.split(sep)) {
+    cursor = join(cursor, segment);
+    let stat;
+    try {
+      stat = lstatSync(cursor);
+    } catch {
+      return false;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+  }
+  return true;
+}
+
 function discoverIssueEvidence(
   workspaceRoot: string,
   stories: readonly string[],
@@ -365,12 +382,7 @@ function discoverIssueEvidence(
   return stories.map((storyId) => {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(storyId)) return { storyId, evidencePath: null };
     const evidencePath = join(workspaceRoot, "issues", storyId, "evidence");
-    try {
-      const stat = lstatSync(evidencePath);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) return { storyId, evidencePath: null };
-    } catch {
-      return { storyId, evidencePath: null };
-    }
+    if (!realContainedDirectory(workspaceRoot, evidencePath)) return { storyId, evidencePath: null };
     return { storyId, evidencePath: `issues/${storyId}/evidence` };
   });
 }

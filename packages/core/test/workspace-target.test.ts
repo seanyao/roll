@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   resolveWorkspaceTarget,
@@ -105,6 +106,52 @@ describe("resolveWorkspaceTarget precedence and registry identity", () => {
     });
   });
 
+  it.each([
+    {
+      name: "environment over injected nearest cwd and Issue facts",
+      value: input({
+        environment: id("ws-alpha"),
+        context: {
+          cwdManifest: {
+            workspaceId: "ws-alpha",
+            root: "/workspaces/alpha",
+            canonicalRoot: "/real/workspaces/alpha",
+            containment: "safe",
+          },
+          issueManifest: {
+            workspaceId: "ws-alpha",
+            root: "/workspaces/alpha",
+            canonicalRoot: "/real/workspaces/alpha",
+            containment: "safe",
+          },
+        },
+      }),
+      source: "environment",
+    },
+    {
+      name: "injected nearest cwd manifest over Issue reverse lookup",
+      value: input({
+        context: {
+          cwdManifest: {
+            workspaceId: "ws-beta",
+            root: "/workspaces/beta",
+            canonicalRoot: "/real/workspaces/beta",
+            containment: "safe",
+          },
+          issueManifest: {
+            workspaceId: "ws-beta",
+            root: "/workspaces/beta",
+            canonicalRoot: "/real/workspaces/beta",
+            containment: "safe",
+          },
+        },
+      }),
+      source: "cwd_manifest",
+    },
+  ])("applies $name", ({ value, source }) => {
+    expect(resolveWorkspaceTarget(value)).toMatchObject({ ok: true, source });
+  });
+
   it("resolves registered absolute and canonical paths while preserving workspaceId", () => {
     expect(resolveWorkspaceTarget(input({ explicit: path("/workspaces/alpha", "/real/workspaces/alpha") }))).toMatchObject({
       ok: true,
@@ -114,6 +161,18 @@ describe("resolveWorkspaceTarget precedence and registry identity", () => {
       ok: true,
       target: { kind: "workspace", workspaceId: "ws-beta" },
     });
+    const windowsRegistry: readonly WorkspaceRegistryCandidate[] = [{
+      workspaceId: "ws-windows",
+      root: "C:\\workspaces\\product",
+      canonicalRoot: "C:\\workspaces\\product",
+      manifestWorkspaceId: "ws-windows",
+      pathState: "valid",
+      lifecycle: "registered",
+    }];
+    expect(resolveWorkspaceTarget(input({
+      registry: windowsRegistry,
+      explicit: path("C:\\workspaces\\product"),
+    }))).toMatchObject({ ok: true, target: { workspaceId: "ws-windows" } });
   });
 
   it("represents --all as a stable read-only aggregate and rejects mutation", () => {
@@ -209,6 +268,10 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
       ok: false,
       error: { code: "target_missing" },
     });
+    expect(resolveWorkspaceTarget(input({ registry: [registry[0]!] }))).toMatchObject({
+      ok: false,
+      error: { code: "target_missing", candidates: [{ workspaceId: "ws-alpha" }] },
+    });
   });
 
   it.each([
@@ -236,6 +299,18 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
       target: id("ws-alpha"),
       code: "duplicate_candidate",
     },
+    {
+      name: "relative registry root",
+      entries: [{ ...registry[0]!, root: "relative/alpha" }, registry[1]!],
+      target: id("ws-alpha"),
+      code: "invalid_target",
+    },
+    {
+      name: "relative canonical root",
+      entries: [{ ...registry[0]!, canonicalRoot: "relative/alpha" }, registry[1]!],
+      target: id("ws-alpha"),
+      code: "invalid_target",
+    },
   ])("rejects $name", ({ entries, target, code }) => {
     expect(resolveWorkspaceTarget(input({ registry: entries, explicit: target }))).toMatchObject({
       ok: false,
@@ -261,6 +336,16 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
     expect(resolveWorkspaceTarget(input({
       context: {
         issueManifest: {
+          workspaceId: "ws-alpha",
+          root: "/workspaces/alpha",
+          canonicalRoot: "/real/workspaces/alpha",
+          containment: "unrelated_worktree",
+        },
+      },
+    }))).toMatchObject({ ok: false, error: { code: "unrelated_worktree" } });
+    expect(resolveWorkspaceTarget(input({
+      context: {
+        cwdManifest: {
           workspaceId: "ws-alpha",
           root: "/workspaces/alpha",
           canonicalRoot: "/real/workspaces/alpha",
@@ -303,6 +388,59 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
       registry: [registry[0]!, { ...registry[1]!, manifestWorkspaceId: "ws-other" }],
     }))).toMatchObject({ ok: false, error: { code: "identity_mismatch" } });
   });
+
+  it("retains non-active selected candidates in typed failure evidence", () => {
+    const pausedStale: WorkspaceRegistryCandidate = {
+      ...registry[0]!,
+      lifecycle: "paused",
+      pathState: "stale",
+    };
+    expect(resolveWorkspaceTarget(input({ registry: [pausedStale], explicit: id("ws-alpha") }))).toEqual({
+      ok: false,
+      error: {
+        code: "stale_registry",
+        message: "Workspace registry target is stale",
+        candidates: [
+          {
+            workspaceId: "ws-alpha",
+            root: "/workspaces/alpha",
+            canonicalRoot: "/real/workspaces/alpha",
+            lifecycle: "paused",
+          },
+        ],
+      },
+    });
+  });
+
+  it("retains candidate evidence for manifest mismatch without leaking unrelated credential-like facts", () => {
+    const mismatched: WorkspaceRegistryCandidate = {
+      ...registry[0]!,
+      lifecycle: "archived",
+      manifestWorkspaceId: "ws-other",
+    };
+    const credentialSentinel = "https://token-sentinel@example.test/private.git";
+    const facts: WorkspaceTargetInput & { readonly remote: string } = {
+      ...input({ registry: [mismatched], explicit: id("ws-alpha") }),
+      remote: credentialSentinel,
+    };
+    const decision = resolveWorkspaceTarget(facts);
+    expect(decision).toEqual({
+      ok: false,
+      error: {
+        code: "identity_mismatch",
+        message: "Workspace registry and manifest identities do not match",
+        candidates: [
+          {
+            workspaceId: "ws-alpha",
+            root: "/workspaces/alpha",
+            canonicalRoot: "/real/workspaces/alpha",
+            lifecycle: "archived",
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(decision)).not.toContain("token-sentinel");
+  });
 });
 
 describe("resolveWorkspaceTarget purity", () => {
@@ -333,5 +471,22 @@ describe("resolveWorkspaceTarget purity", () => {
 
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
     expect(JSON.stringify(facts)).toBe(before);
+  });
+
+  it("uses locale-independent code-unit ordering for aggregate and error evidence", () => {
+    const entries: readonly WorkspaceRegistryCandidate[] = [
+      { ...registry[0]!, workspaceId: "ws-ä", manifestWorkspaceId: "ws-ä" },
+      { ...registry[1]!, workspaceId: "ws-z", manifestWorkspaceId: "ws-z" },
+    ];
+    const aggregate = resolveWorkspaceTarget(input({ all: true, registry: entries }));
+    expect(aggregate).toMatchObject({
+      ok: true,
+      target: { workspaces: [{ workspaceId: "ws-z" }, { workspaceId: "ws-ä" }] },
+    });
+  });
+
+  it("keeps the core resolver free of filesystem and process reads", () => {
+    const source = readFileSync(new URL("../src/workspace/target.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/node:fs|process\.|process\[|Deno\.|Bun\.|\.cwd\s*\(/);
   });
 });

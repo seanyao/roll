@@ -14,8 +14,7 @@ export type WorkspaceTargetFailureCode =
   | "target_missing"
   | "unrelated_worktree";
 
-export interface WorkspaceRegistryCandidate {
-  readonly workspaceId: string;
+export interface WorkspaceRegistryCandidate extends WorkspaceIdentity {
   readonly root: string;
   readonly canonicalRoot: string;
   readonly manifestWorkspaceId: string;
@@ -27,8 +26,7 @@ export type WorkspaceTargetSelector =
   | { readonly kind: "id"; readonly workspaceId: string }
   | { readonly kind: "path"; readonly absolutePath: string; readonly canonicalPath: string };
 
-export interface WorkspaceContextCandidate {
-  readonly workspaceId: string;
+export interface WorkspaceContextCandidate extends WorkspaceIdentity {
   readonly root: string;
   readonly canonicalRoot: string;
   readonly containment: "safe" | "symlink_escape" | "unrelated_worktree";
@@ -49,16 +47,14 @@ export interface WorkspaceTargetInput {
   readonly context?: WorkspaceTargetContext;
 }
 
-export interface WorkspaceTargetSummary {
-  readonly workspaceId: string;
+export interface WorkspaceTargetSummary extends WorkspaceIdentity {
   readonly root: string;
   readonly canonicalRoot: string;
   readonly lifecycle: WorkspaceLifecycle;
 }
 
-export interface ResolvedWorkspaceTarget {
+export interface ResolvedWorkspaceTarget extends WorkspaceIdentity {
   readonly kind: "workspace";
-  readonly workspaceId: string;
   readonly root: string;
   readonly canonicalRoot: string;
 }
@@ -88,8 +84,18 @@ interface SourceCandidate {
   readonly workspace: WorkspaceRegistryCandidate;
 }
 
+function compareText(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
 function compareWorkspace(a: WorkspaceRegistryCandidate, b: WorkspaceRegistryCandidate): number {
-  return a.workspaceId.localeCompare(b.workspaceId) || a.root.localeCompare(b.root);
+  return compareText(a.workspaceId, b.workspaceId) || compareText(a.root, b.root);
+}
+
+function isAbsoluteWorkspacePath(value: string): boolean {
+  return isAbsolute(value) || win32.isAbsolute(value);
 }
 
 function summary(candidate: WorkspaceRegistryCandidate): WorkspaceTargetSummary {
@@ -101,9 +107,8 @@ function summary(candidate: WorkspaceRegistryCandidate): WorkspaceTargetSummary 
   };
 }
 
-function summaries(registry: readonly WorkspaceRegistryCandidate[], activeOnly = false): WorkspaceTargetSummary[] {
+function summaries(registry: readonly WorkspaceRegistryCandidate[]): WorkspaceTargetSummary[] {
   return registry
-    .filter((candidate) => !activeOnly || candidate.lifecycle === "active")
     .slice()
     .sort(compareWorkspace)
     .map(summary);
@@ -120,7 +125,7 @@ function failure(
     error: {
       code,
       message,
-      candidates: summaries(input.registry, true),
+      candidates: summaries(input.registry),
       ...(sources === undefined ? {} : { sources: sources.slice().sort() }),
     },
   };
@@ -129,7 +134,10 @@ function failure(
 function registryIntegrityFailure(input: WorkspaceTargetInput): WorkspaceTargetDecision | null {
   const ids = new Set<string>();
   const paths = new Map<string, string>();
-  for (const candidate of input.registry.slice().sort(compareWorkspace)) {
+  for (const candidate of input.registry) {
+    if (!isAbsoluteWorkspacePath(candidate.root) || !isAbsoluteWorkspacePath(candidate.canonicalRoot)) {
+      return failure(input, "invalid_target", "Workspace registry paths must be absolute and canonicalized");
+    }
     if (ids.has(candidate.workspaceId)) {
       return failure(input, "duplicate_candidate", "Workspace registry contains a duplicate workspace identity");
     }
@@ -167,22 +175,28 @@ function findBySelector(
     return candidate ?? failure(input, "target_missing", "Workspace identity is not registered");
   }
 
-  if (!selector.absolutePath.startsWith("/") || !selector.canonicalPath.startsWith("/")) {
+  if (!isAbsoluteWorkspacePath(selector.absolutePath) || !isAbsoluteWorkspacePath(selector.canonicalPath)) {
     return failure(input, "invalid_target", "Workspace path target must be absolute and canonicalized");
   }
-  const absoluteMatches = input.registry.filter(
-    (entry) => entry.root === selector.absolutePath || entry.canonicalRoot === selector.absolutePath,
-  );
-  const canonicalMatches = input.registry.filter(
-    (entry) => entry.canonicalRoot === selector.canonicalPath || entry.root === selector.canonicalPath,
-  );
-  const identities = new Set([...absoluteMatches, ...canonicalMatches].map((entry) => entry.workspaceId));
+  let absoluteMatch: WorkspaceRegistryCandidate | undefined;
+  let canonicalMatch: WorkspaceRegistryCandidate | undefined;
+  const identities = new Set<string>();
+  for (const entry of input.registry) {
+    if (entry.root === selector.absolutePath || entry.canonicalRoot === selector.absolutePath) {
+      absoluteMatch = entry;
+      identities.add(entry.workspaceId);
+    }
+    if (entry.canonicalRoot === selector.canonicalPath || entry.root === selector.canonicalPath) {
+      canonicalMatch = entry;
+      identities.add(entry.workspaceId);
+    }
+  }
   if (identities.size > 1) {
     return failure(input, "conflicting_candidates", "Workspace path facts resolve to conflicting identities");
   }
-  const candidate = canonicalMatches[0] ?? absoluteMatches[0];
+  const candidate = canonicalMatch ?? absoluteMatch;
   if (candidate === undefined) return failure(input, "target_missing", "Workspace path is not registered");
-  if (absoluteMatches.length > 0 && canonicalMatches.length === 0) {
+  if (absoluteMatch !== undefined && canonicalMatch === undefined) {
     return failure(input, "symlink_escape", "Workspace path canonicalizes outside the registered root");
   }
   return candidate;
@@ -253,11 +267,12 @@ export function resolveWorkspaceTarget(input: WorkspaceTargetInput): WorkspaceTa
   if (integrityFailure !== null) return integrityFailure;
 
   if (input.all === true) {
-    for (const candidate of input.registry.slice().sort(compareWorkspace)) {
+    const sortedRegistry = input.registry.slice().sort(compareWorkspace);
+    for (const candidate of sortedRegistry) {
       const invalid = candidateValidityFailure(input, candidate);
       if (invalid !== null) return invalid;
     }
-    return { ok: true, source: "all", target: { kind: "all", workspaces: summaries(input.registry) } };
+    return { ok: true, source: "all", target: { kind: "all", workspaces: sortedRegistry.map(summary) } };
   }
 
   const sourceCandidates = resolveSourceCandidates(input);
@@ -294,3 +309,5 @@ export function resolveWorkspaceTarget(input: WorkspaceTargetInput): WorkspaceTa
     },
   };
 }
+import { isAbsolute, win32 } from "node:path";
+import type { WorkspaceIdentity } from "@roll/spec";

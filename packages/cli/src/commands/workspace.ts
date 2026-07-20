@@ -15,6 +15,7 @@ import {
 } from "@roll/infra";
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
+import { workspaceInitCommand } from "./workspace-init.js";
 
 const WORKSPACE_LIST_V1 = "roll.workspace-list/v1" as const;
 const WORKSPACE_VIEW_V1 = "roll.workspace-view/v1" as const;
@@ -313,13 +314,14 @@ function lifecycleCommand(
   }
 }
 
-export function workspaceCommand(args: string[]): number {
+export function workspaceCommand(args: string[]): number | Promise<number> {
   const subcommand = args[0];
   if (subcommand === undefined || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
     process.stdout.write(workspaceUsage());
     return 0;
   }
   const rest = args.slice(1);
+  if (subcommand === "init") return workspaceInitCommand(rest);
   const store = new WorkspaceRegistry({ rollHome: rollHome() });
   if (subcommand === "list") return listCommand(rest, store);
   if (subcommand === "show") return showCommand(rest, store);

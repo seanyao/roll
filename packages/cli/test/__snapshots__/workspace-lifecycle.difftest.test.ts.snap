@@ -87,19 +87,21 @@ exports[`US-WS-005 roll workspace lifecycle surface > freezes fail-loud ambiguit
 
 exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific help without adjacent bilingual copy 1`] = `
 {
-  "en": "Usage: roll workspace <list|show|register|activate|pause|archive> [options]
+  "en": "Usage: roll workspace <init|list|show|register|activate|pause|archive> [options]
+  \`init <id> --config <file> [--check] [--json]\`
   \`list [--json] [--all]\`
   \`show <id|path> [--json]\`
   \`register <id> <path> [--json]\`
   \`activate|pause|archive <id|path> [--json]\`
-  Lifecycle mutations require one explicit target; --all is read-only.
+  Init --check is read-only; lifecycle mutations require one explicit target; --all is read-only.
 ",
-  "zh": "用法：roll workspace <list|show|register|activate|pause|archive> [选项]
+  "zh": "用法：roll workspace <init|list|show|register|activate|pause|archive> [选项]
+  \`init <ID> --config <文件> [--check] [--json]\`
   \`list [--json] [--all]\`
   \`show <ID|路径> [--json]\`
   \`register <ID> <路径> [--json]\`
   \`activate|pause|archive <ID|路径> [--json]\`
-  生命周期变更必须显式指定一个目标；--all 仅限只读。
+  init --check 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。
 ",
 }
 `;

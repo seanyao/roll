@@ -647,7 +647,8 @@ function parseRequirementAttest(
 
 function safeRequirementReference(value: string): boolean {
   return value === value.trim() && !/[\x00-\x1f\x7f]/u.test(value) && !/:\/\//u.test(value) &&
-    !/(?:^|[?&;#\s_-])(?:(?:access|api)?[_-]?(?:token|key)|authorization|credential|password|secret)=?/iu.test(value);
+    !/(?:^|[?&;#\s_-])(?:access|api)?[_-]?(?:token|key)=/iu.test(value) &&
+    !/(?:^|[?&;#\s_-])(?:authorization|credential|password|secret)=?/iu.test(value);
 }
 
 function requirementSourceId(provider: RequirementProvider, ref: string): string {

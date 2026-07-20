@@ -84,7 +84,8 @@ function isSafeOpaqueValue(value: string): boolean {
 
 function isCredentialShaped(value: string): boolean {
   return /:\/\//u.test(value) ||
-    /(?:^|[?&;#\s_-])(?:(?:access|api)?[_-]?(?:token|key)|authorization|credential|password|secret)=?/iu.test(value);
+    /(?:^|[?&;#\s_-])(?:access|api)?[_-]?(?:token|key)=/iu.test(value) ||
+    /(?:^|[?&;#\s_-])(?:authorization|credential|password|secret)=?/iu.test(value);
 }
 
 function isSafeRelativePath(value: string): boolean {

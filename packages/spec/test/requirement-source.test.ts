@@ -81,4 +81,11 @@ describe("US-WS-007 RequirementSource spec contract (direct, package-boundary te
     });
     expect(JSON.stringify(result)).not.toContain("credential-sentinel");
   });
+
+  it.each([
+    ["jira-style project key", { ...manifest(), requirementId: `req-${createHash("sha256").update("jira\0KEY-123").digest("hex").slice(0, 12)}`, ref: "KEY-123" }],
+    ["user-input token-shaped id", { ...manifest(), provider: "user_input", requirementId: `req-${createHash("sha256").update("user_input\0TOKEN-1").digest("hex").slice(0, 12)}`, ref: "TOKEN-1" }],
+  ] as const)("accepts a legitimate %s reference without an assignment", (_label, value) => {
+    expect(parseRequirementSourceManifest(value)).toMatchObject({ ok: true, value: { ref: value.ref } });
+  });
 });

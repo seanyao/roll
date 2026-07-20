@@ -39,6 +39,24 @@ describe("US-WS-007 RequirementSource planning", () => {
     expect(normalizeRequirementSourceReference(provider, ref)).toMatchObject({ ok: true, value: expected });
   });
 
+  it.each([
+    ["jira", "KEY-123"],
+    ["user-input", "TOKEN-1"],
+    ["user-input", "api-brief"],
+  ] as const)("accepts a legitimate %s reference that merely contains a credential-shaped word without an assignment", (provider, ref) => {
+    expect(normalizeRequirementSourceReference(provider, ref)).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    ["user-input", "token=credential-sentinel"],
+    ["user-input", "api_key=credential-sentinel"],
+    ["user-input", "SOT-15499?access_token=credential-sentinel"],
+    ["user-input", "SOT-15499#password=credential-sentinel"],
+    ["user-input", "secret-project-notes"],
+  ] as const)("rejects an assignment-shaped or bare-suspicious-word credential in %s reference %s", (provider, ref) => {
+    expect(normalizeRequirementSourceReference(provider, ref)).toMatchObject({ ok: false });
+  });
+
   it("derives revision directories only from a normalized digest", () => {
     expect(requirementRevisionKey("release-42")).toBe(`rev-${"717e81e2c69e106ad7cb5c8c712e0921cb04c25d5c06fc31c805d7538fe3fc52"}`);
     expect(requirementRevisionKey("e\u0301")).toBe(requirementRevisionKey("é"));

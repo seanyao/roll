@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -10,6 +10,22 @@ import { registerAll } from "../src/commands/index.js";
 interface Run { readonly status: number; readonly stdout: string; readonly stderr: string }
 const roots: string[] = [];
 const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_LANG", "NO_COLOR"] as const;
+
+/** Restore owner write permission across an entire fixture root before test
+ *  cleanup — a read-only Issue worktree (real filesystem write-denial, not
+ *  just a detached HEAD) would otherwise make `rmSync(recursive)` fail with
+ *  EACCES on its protected files/directories. */
+function restoreWritePermissions(root: string): void {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(root);
+  } catch {
+    return;
+  }
+  chmodSync(root, stat.mode | 0o200);
+  if (!stat.isDirectory()) return;
+  for (const name of readdirSync(root)) restoreWritePermissions(join(root, name));
+}
 
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -117,7 +133,12 @@ async function run(args: string[], f: ReturnType<typeof fixture>, opts: { lang?:
 }
 
 beforeEach(() => registerAll());
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const root of roots.splice(0)) {
+    restoreWritePermissions(root);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 async function initWorkspace(f: ReturnType<typeof fixture>): Promise<void> {
   const result = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
@@ -175,6 +196,77 @@ describe("US-WS-008 roll workspace issue init", () => {
     expect(recheckView.report.manifest.state).toBe("compatible");
     expect(recheckView.report.targets["sot"]).toMatchObject({ decision: "reused" });
     expect(recheckView.report.targets["docs"]).toMatchObject({ decision: "reused" });
+  });
+
+  it("denies filesystem writes to the read-only target's product files as a normal process, while the write target stays writable", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    writeBacklogStorySpec(f);
+
+    const apply = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(apply.status, apply.stderr).toBe(0);
+    const issueRoot = join(f.workspace, "issues", "US-XX1");
+    const readCheckoutPath = join(issueRoot, "docs");
+    const writeCheckoutPath = join(issueRoot, "sot");
+
+    // Real product file already checked out by `git worktree add` — attempting
+    // to modify it as a NORMAL process (no git plumbing involved) must be
+    // denied at the filesystem level, not merely blocked from being committed.
+    const existingProductFile = join(readCheckoutPath, "README.md");
+    expect(existsSync(existingProductFile)).toBe(true);
+    expect(() => writeFileSync(existingProductFile, "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+
+    // Creating a NEW product file inside the read-only checkout must also be denied.
+    const newProductFile = join(readCheckoutPath, "new-file.txt");
+    expect(() => writeFileSync(newProductFile, "new\n")).toThrow(/EACCES|EPERM/);
+    expect(existsSync(newProductFile)).toBe(false);
+
+    // The WRITE target's checkout is unaffected — both an existing-file edit
+    // and a new-file creation succeed normally.
+    const writeProductFile = join(writeCheckoutPath, "README.md");
+    writeFileSync(writeProductFile, "mutated\n", { flag: "r+" });
+    expect(readFileSync(writeProductFile, "utf8")).toBe("mutated\n");
+    const newWriteFile = join(writeCheckoutPath, "new-file.txt");
+    writeFileSync(newWriteFile, "new\n");
+    expect(existsSync(newWriteFile)).toBe(true);
+
+    // Restore permissions before the fixture's own teardown so a re-run or a
+    // Roll cleanup pass can still remove the read-only checkout cleanly.
+    restoreWritePermissions(readCheckoutPath);
+    const reused = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(reused.status, reused.stderr).toBe(0);
+  });
+
+  it("re-applies write-denial to a reused read-only target whose permissions were restored/tampered with", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    writeBacklogStorySpec(f);
+
+    const apply = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(apply.status, apply.stderr).toBe(0);
+    const issueRoot = join(f.workspace, "issues", "US-XX1");
+    const readCheckoutPath = join(issueRoot, "docs");
+
+    // Tamper: restore write permissions as if an external process had done so.
+    restoreWritePermissions(readCheckoutPath);
+    const existingProductFile = join(readCheckoutPath, "README.md");
+    writeFileSync(existingProductFile, "tampered write while unprotected\n", "utf8");
+    expect(readFileSync(existingProductFile, "utf8")).toBe("tampered write while unprotected\n");
+
+    // Re-running `issue init` against the SAME Story must detect this target
+    // as "reused" (its worktree already exists compatibly) and STILL
+    // re-apply the real filesystem write-denial — protection must not depend
+    // on the target having been freshly created in the current run.
+    const reused = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(reused.status, reused.stderr).toBe(0);
+    expect(JSON.parse(reused.stdout)).toMatchObject({ outcome: "reused" });
+
+    expect(() => writeFileSync(existingProductFile, "mutated again\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+    const newProductFile = join(readCheckoutPath, "new-file-after-reprotect.txt");
+    expect(() => writeFileSync(newProductFile, "new\n")).toThrow(/EACCES|EPERM/);
+    expect(existsSync(newProductFile)).toBe(false);
+
+    restoreWritePermissions(readCheckoutPath);
   });
 
   it("resolves no target and creates nothing when the second repository's remote is unreachable at cache-resolution time", async () => {

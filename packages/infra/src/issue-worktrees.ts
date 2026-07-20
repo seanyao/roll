@@ -23,7 +23,7 @@ import {
   resolveRepositoryCacheIdentity,
   type RepositoryCacheProbeState,
 } from "./repository-cache.js";
-import { issueWorktreeAdd, issueWorktreeIdentity, issueWorktreeRemove } from "./issue-worktree-git.js";
+import { issueWorktreeAdd, issueWorktreeIdentity, issueWorktreeRemove, protectReadOnlyWorktree } from "./issue-worktree-git.js";
 import { git } from "./git.js";
 
 const ISSUE_INIT_JOURNAL_V1 = "roll.issue-init-journal/v1" as const;
@@ -196,6 +196,14 @@ export interface ApplyIssueInitDeps {
    *  (e.g. making an earlier target dirty) between one target's creation and
    *  a LATER target's failure, without faking any git operation itself. */
   readonly afterTargetCreated?: (alias: string, path: string) => void;
+  /** Test-only hook fired for a newly-created READ target's real worktree,
+   *  AFTER the journal has recorded it as created but BEFORE
+   *  {@link protectReadOnlyWorktree} runs — lets a test induce a genuine
+   *  filesystem-level protection failure (e.g. chmod a nested directory
+   *  unreadable) to prove the journal-before-protect ordering: a real target
+   *  the OS then refuses to protect must still roll back via a real `git
+   *  worktree remove`, never linger ungoverned. */
+  readonly beforeProtect?: (alias: string, path: string) => void;
 }
 
 export interface ApplyIssueInitInput {
@@ -371,17 +379,25 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
   writeJournal(input.issueRoot, journal);
   try {
     for (const [index, target] of plan.targets.entries()) {
-      if (target.action === "reused") continue;
-      // A "created" OR "repaired" target may still have no real worktree on
-      // disk yet (e.g. its repository cache alone needed repair) — create it
-      // whenever the path is genuinely absent, never otherwise.
-      if (existsSync(targets[index]!.path)) continue;
+      const isReadTarget = target.access === "read";
+      if (target.action === "reused" || existsSync(targets[index]!.path)) {
+        // Already on disk (reused, or repaired-but-present) — no worktree add
+        // to perform, but a READ target's write-protection must still be
+        // (re-)applied here: permissions may have been restored/tampered with
+        // since the last run, and this is the only pass that ever touches it.
+        if (isReadTarget) protectReadOnlyWorktree(targets[index]!.path);
+        continue;
+      }
       const cache = cacheByAlias.get(target.alias);
       if (cache === undefined) throw new IssueInitializationError("apply_failed", `Missing resolved repository cache for ${target.alias}`);
       await issueWorktreeAdd(cache.cachePath, targets[index]!.path, cache.baseSha, target.workBranch);
+      // Journal the creation BEFORE protecting: if protection throws, rollback
+      // must still know this worktree was created THIS run so it gets cleaned
+      // up rather than left behind ungoverned.
       targets[index] = { ...targets[index]!, created: true };
       journal = { ...journal, targets: [...targets] };
       writeJournal(input.issueRoot, journal);
+      if (isReadTarget) protectReadOnlyWorktree(targets[index]!.path);
       deps.afterTargetCreated?.(target.alias, targets[index]!.path);
     }
     if (!manifestExists) {

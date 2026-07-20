@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, realpathSync } from "node:fs";
-import { dirname } from "node:path";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statSync, type Stats } from "node:fs";
+import { dirname, join } from "node:path";
 import { git } from "./git.js";
 
 export type IssueWorktreeIdentityState = "absent" | "compatible" | "conflict";
@@ -14,10 +14,83 @@ export interface IssueWorktreeIdentity {
 const ABSENT_IDENTITY: IssueWorktreeIdentity = { state: "absent", dirty: false, branch: null, baseSha: null };
 const CONFLICT_IDENTITY: IssueWorktreeIdentity = { state: "conflict", dirty: false, branch: null, baseSha: null };
 
+/** Walk every entry under `root` (excluding `.git`, never descending into it),
+ *  applying `apply` depth-first (children before their parent directory) so a
+ *  read-only parent never blocks removing write bits from its own children.
+ *  A SYMLINK is passed to `apply` but never recursed into — its target may
+ *  point anywhere on disk, including outside the worktree entirely. */
+function walkProductEntries(root: string, apply: (entryPath: string, stat: Stats) => void): void {
+  for (const name of readdirSync(root)) {
+    if (name === ".git") continue;
+    const entryPath = join(root, name);
+    const stat = lstatSync(entryPath);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) walkProductEntries(entryPath, apply);
+    apply(entryPath, stat);
+  }
+}
+
+/** Deny filesystem writes to every product file/directory in a read-only Issue
+ *  worktree checkout — NOT merely a detached HEAD, which only blocks branch
+ *  commits and leaves the working tree writable to any normal process. The
+ *  worktree ROOT is included (otherwise a new top-level file could still be
+ *  created directly under it) — `.git` is never touched. Chmod'ing the root
+ *  is only safe because {@link unprotectReadOnlyWorktree} ALWAYS restores
+ *  write permission (root first, then every descendant) before
+ *  {@link issueWorktreeRemove} calls `git worktree remove`: git needs write
+ *  access throughout the tree to unlink it, and a still-protected root left
+ *  git unable to complete the removal in testing (worse, it could leave the
+ *  worktree half-unregistered) — so protect and unprotect are a matched pair,
+ *  never called independently of that ordering.
+ *
+ *  SYMLINK BOUNDARY: a symlinked entry is NEVER chmod'd. `chmodSync` follows
+ *  a symlink to its target (verified: it changes the TARGET's mode, not the
+ *  link's), and Node exposes no portable `lchmod` to change the link itself —
+ *  so touching a symlink here could silently mutate a file outside the
+ *  worktree entirely (anywhere the link points, including outside the repo).
+ *  A tracked symlink is therefore left exactly as git checked it out; the
+ *  read-only guarantee covers real files/directories the checkout owns. */
+export function protectReadOnlyWorktree(path: string): void {
+  walkProductEntries(path, (entryPath, stat) => {
+    if (stat.isSymbolicLink()) return;
+    chmodSync(entryPath, stat.mode & ~0o222);
+  });
+  const rootStat = statSync(path);
+  chmodSync(path, rootStat.mode & ~0o222);
+}
+
+/** Restore normal owner write permission across a previously-protected
+ *  checkout (parents before children, mirroring how they must be reopened
+ *  before their contents can be touched) — required before `git worktree
+ *  remove` can unlink the tree, and before any repair/reuse can write into it
+ *  again. Idempotent and safe to call on an unprotected worktree. Same
+ *  symlink boundary as {@link protectReadOnlyWorktree}: a symlinked entry is
+ *  never chmod'd, since doing so would follow it to its target. */
+export function unprotectReadOnlyWorktree(path: string): void {
+  if (!existsSync(path)) return;
+  const rootStat = statSync(path);
+  chmodSync(path, rootStat.mode | 0o200);
+  function restore(root: string): void {
+    for (const name of readdirSync(root)) {
+      if (name === ".git") continue;
+      const entryPath = join(root, name);
+      const stat = lstatSync(entryPath);
+      if (stat.isSymbolicLink()) continue;
+      chmodSync(entryPath, stat.mode | 0o200);
+      if (stat.isDirectory()) restore(entryPath);
+    }
+  }
+  restore(path);
+}
+
 /** Create a REAL git worktree for one Issue repository target. Never touches a
  *  pre-existing path — the caller must have already probed it as absent.
- *  `branch === null` creates a detached read-only worktree (no local branch);
- *  otherwise `-b branch` creates a NEW named branch for a write target. */
+ *  `branch === null` creates a detached worktree (no local branch); `-b
+ *  branch` creates a NEW named branch for a write target. Deliberately does
+ *  NOT apply read-only filesystem protection itself — the CALLER must record
+ *  the target as created (journal) BEFORE calling
+ *  {@link protectReadOnlyWorktree} separately, so a protection failure can
+ *  never leave a real, ungoverned worktree the journal doesn't know to roll
+ *  back (see applyIssueInit). */
 export async function issueWorktreeAdd(
   cachePath: string,
   path: string,
@@ -87,8 +160,13 @@ export async function issueWorktreeIdentity(path: string, expectedCachePath: str
 
 /** Remove a worktree via `git worktree remove` — refuses (git's own guard) if
  *  the worktree has uncommitted changes. Never a blind `rm -rf`: the caller's
- *  clean/dirty decision is enforced by git itself, not re-derived here. */
+ *  clean/dirty decision is enforced by git itself, not re-derived here.
+ *  Restores any read-only write-protection FIRST — `git worktree remove` must
+ *  unlink every entry itself, which requires write permission throughout the
+ *  tree; a still-protected checkout would make git fail (or, worse, abort
+ *  with the worktree left half-registered), never a clean removal. */
 export async function issueWorktreeRemove(cachePath: string, path: string): Promise<void> {
+  unprotectReadOnlyWorktree(path);
   const result = await git(["worktree", "remove", path], cachePath);
   if (result.code !== 0) {
     throw new Error(`git worktree remove refused for ${path}: ${result.stderr || result.stdout}`);

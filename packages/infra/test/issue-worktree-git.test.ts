@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,11 +7,16 @@ import {
   issueWorktreeAdd,
   issueWorktreeIdentity,
   issueWorktreeRemove,
+  protectReadOnlyWorktree,
+  unprotectReadOnlyWorktree,
 } from "../src/issue-worktree-git.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
-  for (const root of sandboxes.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of sandboxes.splice(0)) {
+    unprotectReadOnlyWorktree(root);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function sandbox(): string {
@@ -155,5 +160,59 @@ describe("issueWorktreeRemove", () => {
     writeFileSync(join(path, "scratch.txt"), "uncommitted work");
     await expect(issueWorktreeRemove(cachePath, path)).rejects.toThrow();
     expect(existsSync(join(path, "scratch.txt"))).toBe(true);
+  });
+});
+
+describe("protectReadOnlyWorktree / unprotectReadOnlyWorktree", () => {
+  it("denies writes to real product files and blocks new-file creation, without touching a tracked symlink's EXTERNAL target", async () => {
+    const root = sandbox();
+    const outsidePath = join(root, "outside-the-worktree.txt");
+    writeFileSync(outsidePath, "external content, never owned by any worktree\n", "utf8");
+    const outsideModeBefore = statSync(outsidePath).mode & 0o777;
+
+    const source = join(root, "source");
+    mkdirSync(source, { recursive: true });
+    git(source, ["init", "-q", "-b", "main"]);
+    git(source, ["config", "user.email", "roll@example.test"]);
+    git(source, ["config", "user.name", "Roll Test"]);
+    writeFileSync(join(source, "README.md"), "fixture\n", "utf8");
+    // A real git-tracked symlink whose target lives OUTSIDE this worktree
+    // entirely (an absolute path escaping the repo) — exactly the boundary
+    // case protect/unprotect must never cross.
+    symlinkSync(outsidePath, join(source, "escape-link.txt"));
+    git(source, ["add", "README.md", "escape-link.txt"]);
+    git(source, ["commit", "-q", "-m", "fixture with an escaping symlink"]);
+    const cachePath = join(root, "cache.git");
+    git(root, ["clone", "-q", "--bare", source, cachePath]);
+    const baseSha = git(source, ["rev-parse", "HEAD"]);
+
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    protectReadOnlyWorktree(path);
+
+    // The real checked-out product file is denied for writes.
+    expect(() => writeFileSync(join(path, "README.md"), "mutated\n", { flag: "r+" })).toThrow(/EACCES|EPERM/);
+    // A new top-level file cannot be created either.
+    expect(() => writeFileSync(join(path, "new-file.txt"), "new\n")).toThrow(/EACCES|EPERM/);
+
+    // The symlink itself is left exactly as git checked it out (still a link
+    // to the same external target) — its EXTERNAL target's permissions and
+    // content are completely untouched by protection.
+    const linkPath = join(path, "escape-link.txt");
+    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+    expect(statSync(outsidePath).mode & 0o777).toBe(outsideModeBefore);
+    expect(readFileSync(outsidePath, "utf8")).toBe("external content, never owned by any worktree\n");
+    // Writing through the external path directly (not via the symlink) still
+    // works normally — protection never reached it.
+    writeFileSync(outsidePath, "still writable externally\n", "utf8");
+    expect(readFileSync(outsidePath, "utf8")).toBe("still writable externally\n");
+
+    unprotectReadOnlyWorktree(path);
+    // Unprotection restores the real product file's write access...
+    writeFileSync(join(path, "README.md"), "restored\n", { flag: "r+" });
+    expect(readFileSync(join(path, "README.md"), "utf8")).toBe("restored\n");
+    // ...and never touched the external target either (still untouched by
+    // the restore pass, same as it was left after protect).
+    expect(readFileSync(outsidePath, "utf8")).toBe("still writable externally\n");
   });
 });

@@ -10,10 +10,17 @@ import {
   applyIssueInit,
   inspectIssueInit,
 } from "../src/issue-worktrees.js";
+import { unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
-  for (const root of sandboxes.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of sandboxes.splice(0)) {
+    // A read-only Issue worktree (real filesystem write-denial, not just a
+    // detached HEAD) would otherwise make `rmSync(recursive)` fail with
+    // EACCES on its protected files/directories.
+    unprotectReadOnlyWorktree(root);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function sandbox(): string {

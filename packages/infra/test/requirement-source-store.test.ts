@@ -129,6 +129,35 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readdirSync(join(updated.requirementPath, "revisions"))).toHaveLength(2);
   });
 
+  it("strictly parses the full source.yaml on disk after create/link/update and matches it field-for-field against the returned manifest contract", () => {
+    const f = fixture();
+    const created = captureRequirementSource(request(f));
+    const createdOnDisk = JSON.parse(readFileSync(join(created.requirementPath, "source.yaml"), "utf8"));
+    expect(createdOnDisk).toEqual(created.manifest);
+
+    const linked = captureRequirementSource(request(f, { storyIds: ["US-WS-009"] }));
+    const linkedOnDisk = JSON.parse(readFileSync(join(linked.requirementPath, "source.yaml"), "utf8"));
+    expect(linkedOnDisk).toEqual(linked.manifest);
+
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    const updated = captureRequirementSource(request(f, {
+      revision: "43",
+      capturedAt: "2026-07-20T17:00:00.000Z",
+      storyIds: ["US-WS-009"],
+      contextPaths: [],
+    }));
+    const updatedOnDisk = JSON.parse(readFileSync(join(updated.requirementPath, "source.yaml"), "utf8"));
+    expect(updatedOnDisk).toEqual(updated.manifest);
+    expect(updatedOnDisk.schema).toBe("roll.requirement-source/v1");
+    expect(updatedOnDisk.requirementId).toBe(created.manifest.requirementId);
+    expect(updatedOnDisk.previousRevisions).toEqual([{ revision: "42", capturedAt: "2026-07-20T16:00:00.000Z" }]);
+    expect(updatedOnDisk.attest).toEqual({
+      schema: "roll.requirement-attest-projection/v1",
+      mode: "generated_aggregate",
+      evidenceAuthority: "issue",
+    });
+  });
+
   it("rejects undeclared sources, dangling Stories, traversal, symlinks, non-regular files and context limits", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f, { ref: "SOT-99999" }))).toThrowError(
@@ -452,6 +481,66 @@ describe("US-WS-007 RequirementSourceStore", () => {
 
     rmSync(revision, { recursive: true });
     expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("fails loudly when an archived context file's content is tampered independently of the body", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revision = join(first.requirementPath, "revisions", "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049");
+    writeFileSync(join(revision, "context", "domain.md"), "tampered context content\n", "utf8");
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("fails loudly when capture.yaml's requirementId is tampered away from the manifest identity", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revision = join(first.requirementPath, "revisions", "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049");
+    const capture = JSON.parse(readFileSync(join(revision, "capture.yaml"), "utf8"));
+    capture.requirementId = "req-000000000000";
+    writeFileSync(join(revision, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("fails loudly when capture.yaml's recorded requirement digest is tampered away from the actual body", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revision = join(first.requirementPath, "revisions", "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049");
+    const capture = JSON.parse(readFileSync(join(revision, "capture.yaml"), "utf8"));
+    capture.requirement.sha256 = "f".repeat(64);
+    writeFileSync(join(revision, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("fails loudly when capture.yaml's recorded context descriptor is tampered away from the actual archived context", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const revision = join(first.requirementPath, "revisions", "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049");
+    const capture = JSON.parse(readFileSync(join(revision, "capture.yaml"), "utf8"));
+    capture.context[0].sha256 = "e".repeat(64);
+    writeFileSync(join(revision, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+    expect(() => captureRequirementSource(request(f))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+  });
+
+  it("fails loudly when capture.yaml's capturedAt is tampered on a previousRevisions-linked archive", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const firstRevisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const capture = JSON.parse(readFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), "utf8"));
+    capture.capturedAt = "2099-01-01T00:00:00.000Z";
+    writeFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
       expect.objectContaining({ code: "revision_conflict" }),
     );
   });

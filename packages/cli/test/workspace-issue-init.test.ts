@@ -132,8 +132,10 @@ describe("US-WS-008 roll workspace issue init", () => {
 
     const check = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], f);
     expect(check.status, check.stderr).toBe(0);
-    const checkView = JSON.parse(check.stdout) as { probe: { manifest: { state: string }; worktrees: Record<string, string> } };
-    expect(checkView.probe).toMatchObject({ manifest: { state: "absent" }, worktrees: { sot: "absent", docs: "absent" } });
+    const checkView = JSON.parse(check.stdout) as { report: { manifest: { state: string }; targets: Record<string, { decision: string; access: string; workBranch: string | null }> } };
+    expect(checkView.report.manifest.state).toBe("absent");
+    expect(checkView.report.targets["sot"]).toMatchObject({ decision: "created", access: "write" });
+    expect(checkView.report.targets["docs"]).toMatchObject({ decision: "created", access: "read", workBranch: null });
     expect(existsSync(join(f.workspace, "issues", "US-XX1"))).toBe(false);
 
     const apply = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
@@ -156,39 +158,72 @@ describe("US-WS-008 roll workspace issue init", () => {
 
     const recheck = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], f);
     expect(recheck.status, recheck.stderr).toBe(0);
-    expect(JSON.parse(recheck.stdout)).toMatchObject({
-      probe: { manifest: { state: "compatible" }, worktrees: { sot: "compatible", docs: "compatible" } },
-    });
+    const recheckView = JSON.parse(recheck.stdout) as { report: { manifest: { state: string }; targets: Record<string, { decision: string }> } };
+    expect(recheckView.report.manifest.state).toBe("compatible");
+    expect(recheckView.report.targets["sot"]).toMatchObject({ decision: "reused" });
+    expect(recheckView.report.targets["docs"]).toMatchObject({ decision: "reused" });
   });
 
-  it("rolls back the clean first target's real worktree when the second repository's remote is unreachable, and writes a repair journal", async () => {
+  it("resolves no target and creates nothing when the second repository's remote is unreachable at cache-resolution time", async () => {
     const f = fixture();
     await initWorkspace(f);
     writeBacklogStorySpec(f);
 
     // Fault injection: destroy the SECOND repository's source remote entirely
-    // (a real, unmocked failure) so its cache clone genuinely fails once the
-    // first target's real git worktree has already been created.
+    // (a real, unmocked failure). ALL targets' caches must resolve before the
+    // Issue root is created or mutated, so this must leave zero trace.
     rmSync(join(f.home, "read.git"), { recursive: true, force: true });
+
+    const failed = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(failed.status).toBe(1);
+    expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
+    expect(existsSync(join(f.workspace, "issues", "US-XX1"))).toBe(false);
+
+    // Repair: restore the remote and re-run — the same CLI contract converges.
+    // The Issue root itself was never created, but the READ target's
+    // repository cache was left interrupted mid-resolution, so the overall
+    // outcome is honestly "repaired" (a cache-level repair), not "created".
+    execFileSync("git", ["clone", "-q", "--bare", join(f.home, "read-source"), join(f.home, "read.git")], { stdio: "ignore" });
+    const repaired = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(repaired.status, repaired.stderr).toBe(0);
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired" });
+    const issueRoot = join(f.workspace, "issues", "US-XX1");
+    expect(existsSync(join(issueRoot, "sot", ".git"))).toBe(true);
+    expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
+  });
+
+  it("rolls back the clean first target's real git worktree via git worktree remove when the SECOND target's worktree add genuinely fails", async () => {
+    const f = fixture();
+    await initWorkspace(f);
+    writeBacklogStorySpec(f);
+
+    // A real, unmocked git-level failure at the worktree-ADD phase: apply
+    // once to create sot's real branch/worktree, then simulate an operator
+    // manually deleting the worktree DIRECTORY by hand (leaving the branch —
+    // and the Issue root's manifest/events — behind, an inconsistent-but-real
+    // state). Re-running must genuinely fail `worktree add -b` on the
+    // survived branch and roll back cleanly rather than duplicate anything.
+    const first = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
+    expect(first.status, first.stderr).toBe(0);
+    const issueRootPre = join(f.workspace, "issues", "US-XX1");
+    const sotCachePath = join(f.rollHome, "repos", `${f.sotRepoId}.git`);
+    execFileSync("git", ["worktree", "remove", "--force", join(issueRootPre, "sot")], { cwd: sotCachePath, stdio: "ignore" });
+    rmSync(join(issueRootPre, "docs"), { recursive: true, force: true });
 
     const failed = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
     expect(failed.status).toBe(1);
     expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
 
     const issueRoot = join(f.workspace, "issues", "US-XX1");
-    // sot (target 1, clean/newly-created) was rolled back — no leftover worktree.
-    expect(existsSync(join(issueRoot, "sot"))).toBe(false);
-    // docs (target 2) never got far enough to create anything.
     expect(existsSync(join(issueRoot, "docs"))).toBe(false);
-    // A repair journal records the failed attempt for a future re-run.
     const journal = JSON.parse(readFileSync(join(issueRoot, "issue-init.pending.json"), "utf8"));
     expect(journal).toMatchObject({ schema: "roll.issue-init-journal/v1", status: "repair_required" });
 
-    // Repair: restore the remote and re-run — the same CLI contract converges.
-    execFileSync("git", ["clone", "-q", "--bare", join(f.home, "read-source"), join(f.home, "read.git")], { stdio: "ignore" });
+    // Repair: remove the colliding branch, then re-run — the same CLI contract converges.
+    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot"], { cwd: sotCachePath, stdio: "ignore" });
     const repaired = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], f);
     expect(repaired.status, repaired.stderr).toBe(0);
-    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired" });
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "created" });
     expect(existsSync(join(issueRoot, "sot", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "issue-init.pending.json"))).toBe(false);

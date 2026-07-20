@@ -28,6 +28,11 @@ export async function issueWorktreeAdd(
     throw new Error(`refusing to create an Issue worktree over a pre-existing path: ${path}`);
   }
   mkdirSync(dirname(path), { recursive: true });
+  // Clear STALE worktree admin metadata a prior run left behind (e.g. the
+  // worktree directory was deleted by hand rather than via `worktree
+  // remove`) — prune only ever drops registrations already missing on disk,
+  // never a live worktree, so this is always safe before `worktree add`.
+  await git(["worktree", "prune"], cachePath);
   const args = branch === null
     ? ["worktree", "add", "--detach", path, baseSha]
     : ["worktree", "add", "-b", branch, path, baseSha];

@@ -73,6 +73,18 @@ describe("issueWorktreeAdd", () => {
     await expect(issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot")).rejects.toThrow();
     expect(existsSync(join(path, "keep-me.txt"))).toBe(true);
   });
+
+  it("re-adds at the same path after its directory was deleted by hand (stale worktree admin metadata), by pruning first", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "docs");
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    // Simulate an operator deleting the worktree directory directly, NOT via
+    // `git worktree remove` — git's own admin metadata still references it.
+    rmSync(path, { recursive: true, force: true });
+    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    expect(existsSync(join(path, ".git"))).toBe(true);
+  });
 });
 
 describe("issueWorktreeIdentity", () => {

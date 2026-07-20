@@ -3,7 +3,6 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   resolveWorkspaceTarget,
   validateStoryId,
-  type IssueInitProbe,
   type IssueStoryContract,
   type WorkspaceContextCandidate,
 } from "@roll/core";
@@ -16,6 +15,7 @@ import {
   resolveRequirementSourcesForStoryOnDisk,
   resolveWorkspaceBacklogStoryContract,
   type InspectedWorkspace,
+  type IssueCheckReport,
 } from "@roll/infra";
 import { parseWorkspaceManifest, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
@@ -138,11 +138,21 @@ function loadContract(workspaceRoot: string, storyId: string): { readonly ok: tr
   return { ok: true, value: resolved.value };
 }
 
-function renderCheck(probe: IssueInitProbe, storyId: string): string {
+function renderCheck(report: IssueCheckReport, storyId: string): string {
   const lines = [
-    msg("workspace.issue.check.title", storyId, probe.manifest.state),
+    msg("workspace.issue.check.title", storyId, report.manifest.state),
     msg("workspace.issue.check.header"),
-    ...Object.entries(probe.worktrees).map(([alias, state]) => `${alias}\t${state}`),
+    ...Object.values(report.targets).map((target) => [
+      target.alias,
+      target.access,
+      target.repoId,
+      target.cachePath,
+      target.cacheState,
+      target.baseSha ?? "-",
+      target.worktreePath,
+      target.workBranch ?? "-",
+      target.decision,
+    ].join("\t")),
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -193,13 +203,14 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
   }
   const requirementManifests = resolveRequirementSourcesForStoryOnDisk(workspaceRoot, parsed.storyId);
   const issueRoot = join(workspaceRoot, "issues", parsed.storyId);
+  const rollHome = workspaceRollHome();
 
   if (parsed.check) {
-    const probe = await inspectIssueInit({ issueRoot, contract: contract.value });
+    const report = await inspectIssueInit({ workspaceId, rollHome, issueRoot, contract: contract.value, bindings });
     if (parsed.json) {
-      process.stdout.write(`${JSON.stringify({ schema: CHECK_RESULT_V1, storyId: parsed.storyId, workspaceId, probe }, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify({ schema: CHECK_RESULT_V1, storyId: parsed.storyId, workspaceId, report }, null, 2)}\n`);
     } else {
-      process.stdout.write(renderCheck(probe, parsed.storyId));
+      process.stdout.write(renderCheck(report, parsed.storyId));
     }
     return 0;
   }
@@ -207,6 +218,7 @@ export async function workspaceIssueCommand(args: string[], deps: IssueCommandDe
   try {
     const result = await applyIssueInit({
       workspaceId,
+      rollHome,
       issueRoot,
       contract: contract.value,
       bindings,

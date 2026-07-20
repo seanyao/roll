@@ -18,7 +18,7 @@ export const v3Catalog: Catalog = {
     zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]\n  --check 只读解析 Story Contract、工作区绑定与每个仓库目标的状态，零写入。\n  Apply 创建/复用/修复一个 Issue root：不可变的 roll.issue/v1 manifest 与每个声明仓库目标各一个 worktree。\n",
   },
   "workspace.issue.check.title": { en: "Issue %s check: manifest %s", zh: "Issue %s 检查：manifest %s" },
-  "workspace.issue.check.header": { en: "Alias\tState", zh: "别名\t状态" },
+  "workspace.issue.check.header": { en: "Alias\tAccess\tRepoId\tCachePath\tCacheState\tBaseSha\tWorktreePath\tWorkBranch\tDecision", zh: "别名\t访问\t仓库ID\t缓存路径\t缓存状态\t基线SHA\t工作区路径\t工作分支\t决策" },
   "workspace.issue.apply.title": { en: "Issue %s apply: %s", zh: "Issue %s 应用：%s" },
   "workspace.issue.error.line": { en: "workspace issue: %s — %s", zh: "工作区 Issue：%s — %s" },
   "workspace.issue.error.invalid_arguments": { en: "Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]", zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]" },

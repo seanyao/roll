@@ -1046,6 +1046,63 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(resolved.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
   });
 
+  it("fails loudly when a declared provider's canonical path exists but is a symlink instead of a real directory", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const providerPath = join(f.workspace, "requirements", "jira");
+    const outside = join(f.root, "outside-provider-dir");
+    mkdirSync(outside, { recursive: true });
+    rmSync(providerPath, { recursive: true, force: true });
+    symlinkSync(outside, providerPath);
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("fails loudly when a declared provider's canonical path exists but is a regular file instead of a real directory", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const providerPath = join(f.workspace, "requirements", "jira");
+    rmSync(providerPath, { recursive: true, force: true });
+    writeFileSync(providerPath, "not a directory\n", "utf8");
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("fails loudly when a declared requirement's canonical path exists but is a symlink instead of a real directory", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
+    const outside = join(f.root, "outside-requirement-dir");
+    mkdirSync(outside, { recursive: true });
+    rmSync(requirementPath, { recursive: true, force: true });
+    symlinkSync(outside, requirementPath);
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("fails loudly when a declared requirement's canonical path exists but is a regular file instead of a real directory", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
+    rmSync(requirementPath, { recursive: true, force: true });
+    writeFileSync(requirementPath, "not a directory\n", "utf8");
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("treats a declared requirement that was never captured (canonical path absent) as a normal empty result, not an error", () => {
+    const f = fixture();
+    expect(resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toEqual([]);
+  });
+
   it("deduplicates when the same requirementId is legitimately reachable more than once", () => {
     const f = fixture();
     captureRequirementSource(request(f));

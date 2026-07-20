@@ -713,11 +713,44 @@ function declaredCanonicalDirs(
   return dirs;
 }
 
+function probeCanonicalPath(requirementsRoot: string, relativeDir: string): void {
+  const path = join(requirementsRoot, relativeDir);
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return;
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    fail("io_failure", "A declared Requirement's canonical path exists but is not a real directory");
+  }
+  let canonical: string;
+  try {
+    canonical = realpathSync(path);
+  } catch (error) {
+    return fail("io_failure", "A declared Requirement's canonical path could not be resolved", error);
+  }
+  if (!contained(requirementsRoot, canonical)) {
+    fail("io_failure", "A declared Requirement's canonical path escapes the Workspace requirements root");
+  }
+}
+
+function probeDeclaredCanonicalPaths(requirementsRoot: string, canonicalDirs: ReadonlySet<string>): void {
+  const providers = new Set<string>();
+  for (const dir of canonicalDirs) {
+    const provider = dir.split("/")[0];
+    if (provider !== undefined) providers.add(provider);
+  }
+  for (const provider of providers) probeCanonicalPath(requirementsRoot, provider);
+  for (const dir of canonicalDirs) probeCanonicalPath(requirementsRoot, dir);
+}
+
 function readAllRequirementManifests(
   workspaceRoot: string,
   requirements: readonly { readonly provider: string; readonly ref: string }[],
 ): readonly RequirementSourceManifest[] {
   const requirementsRoot = join(resolve(workspaceRoot), "requirements");
+  const canonicalDirs = declaredCanonicalDirs(requirements);
   if (!existsSync(requirementsRoot)) return [];
   let providerStat;
   try {
@@ -726,7 +759,7 @@ function readAllRequirementManifests(
     return [];
   }
   if (providerStat.isSymbolicLink() || !providerStat.isDirectory()) return [];
-  const canonicalDirs = declaredCanonicalDirs(requirements);
+  probeDeclaredCanonicalPaths(realpathSync(requirementsRoot), canonicalDirs);
   const seenRequirementIds = new Set<string>();
   const manifests: RequirementSourceManifest[] = [];
   for (const providerEntry of readdirSync(requirementsRoot, { withFileTypes: true })) {

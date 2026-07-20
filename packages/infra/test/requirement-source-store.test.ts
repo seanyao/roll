@@ -564,4 +564,42 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(resolved).toHaveLength(1);
     expect(resolved[0]?.revision).toBe("43");
   });
+
+  it("never moves, overwrites or duplicates Issue-owned evidence across capture, link, update and repair", () => {
+    const f = fixture();
+    const evidencePath = join(f.workspace, "issues", "US-WS-007", "evidence", "vitest.txt");
+    write(evidencePath, "US-WS-007 issue evidence: 12 passed\n");
+    const evidenceBefore = { stat: lstatSync(evidencePath), digest: createHash("sha256").update(readFileSync(evidencePath)).digest("hex") };
+
+    const first = captureRequirementSource(request(f));
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Issue-owned evidence remains authoritative");
+
+    captureRequirementSource(request(f, { storyIds: ["US-WS-009"] }));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    writeFileSync(join(first.requirementPath, "requirement.md"), "corrupted\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2030-01-01T00:00:00.000Z" }));
+
+    const evidenceAfter = { stat: lstatSync(evidencePath), digest: createHash("sha256").update(readFileSync(evidencePath)).digest("hex") };
+    expect(evidenceAfter.stat.ino).toBe(evidenceBefore.stat.ino);
+    expect(evidenceAfter.stat.mtimeMs).toBe(evidenceBefore.stat.mtimeMs);
+    expect(evidenceAfter.digest).toBe(evidenceBefore.digest);
+    expect(readFileSync(evidencePath, "utf8")).toBe("US-WS-007 issue evidence: 12 passed\n");
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).not.toContain("12 passed");
+  });
+
+  it("reconstructs requirement.md, context/ and attest.md together from the immutable revision when all three are corrupted or missing at once", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(join(first.requirementPath, "requirement.md"), "corrupted body\n", "utf8");
+    rmSync(join(first.requirementPath, "context"), { recursive: true, force: true });
+    rmSync(join(first.requirementPath, "attest.md"), { force: true });
+
+    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repaired.outcome).toBe("reused");
+    expect(readFileSync(join(first.requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
+    expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe("domain context\n");
+    expect(readFileSync(join(first.requirementPath, "context", "brief", "acceptance.md"), "utf8")).toBe("acceptance context\n");
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated aggregate projection");
+  });
 });

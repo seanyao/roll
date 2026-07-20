@@ -544,6 +544,30 @@ export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
   ];
 }
 
+/**
+ * FIX-1474 — the clean-teardown command sequence when the builder child was
+ * detected DEAD/MISSING out-of-band (liveness probe; external SIGKILL / PTY
+ * leader death / lost exit delivery). Same durable shape as the timeout
+ * teardown (I8: kill → measure → terminal cycle:end → runs row → alert →
+ * release lock LAST, worktree PRESERVED), but the terminal is the explicit
+ * `aborted` status — this is NOT a timeout (`blocked`) and NOT a code failure
+ * (`failed` after retries). The `cycle:agent_lost` event was already appended
+ * by the probe at the detection moment.
+ */
+export function abortedTeardownCommands(ctx: TerminalContext): CycleCommand[] {
+  return [
+    { kind: "kill_agent", graceSec: WATCHDOG_KILL_GRACE_SEC },
+    { kind: "measure_worktree" },
+    { kind: "emit_event", event: cycleEndEvent(ctx, "aborted") },
+    { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId: ctx.cycleId },
+    {
+      kind: "append_alert",
+      message: `cycle ${ctx.cycleId}: builder child process lost (killed out-of-band) — cycle aborted; worktree preserved`,
+    },
+    { kind: "release_lock" },
+  ];
+}
+
 // ── FIX-907: per-cycle HARD timeout (wall-clock + no-progress) ───────────────
 //
 // The watchdog above ({@link watchdogVerdict}) is checked only BETWEEN steps of
@@ -974,7 +998,7 @@ export type CycleEvent =
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
-  | { type: "agent_exited"; exit: number; timedOut: boolean }
+  | { type: "agent_exited"; exit: number; timedOut: boolean; lost?: boolean }
   // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
   // exited. `newHole`/`attackTest` are meaningful only for attacker rounds;
   // `elapsedSec` lets the pure termination check enforce the total timeout.
@@ -1245,6 +1269,17 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       ]);
 
     case "agent_exited": {
+      // FIX-1474 — a LOST builder child (killed out-of-band; detected by the
+      // runner's liveness probe, surfaced via cycle:agent_lost) converges to
+      // the explicit `aborted` terminal: no retry (the death is environmental,
+      // not a code failure) and NOT the timeout's `blocked`. Takes precedence
+      // over the retry plan.
+      if (event.lost === true) {
+        return {
+          state: { ...state, phase: "execute", terminal: "aborted", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
+          commands: abortedTeardownCommands(terminalCtx(state)),
+        };
+      }
       const plan = retryPlan({ attempt: state.attempt, exit: event.exit, timedOut: event.timedOut });
       if (plan.action === "abort_timeout") {
         // Watchdog breach → clean teardown (worktree PRESERVED, bin/roll:9122).

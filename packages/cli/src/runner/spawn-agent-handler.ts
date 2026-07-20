@@ -10,7 +10,7 @@ import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agen
 import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
-import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
+import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startBuilderLivenessProbe, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
 import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -193,6 +193,33 @@ export async function executeSpawnAgentCommand(
       let timeoutFired: "wall" | "no-progress" | "no-state-change" | null = null;
       let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
       let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
+      // FIX-1474 — the LOST-CHILD probe. The watchdogs above cover a child that
+      // is ALIVE (hung / silent / thrashing); they cannot see a child that DIED
+      // out-of-band while this spawn await never settles (external SIGKILL of a
+      // process-tree member, PTY leader death, lost exit delivery) — the shape
+      // that hung supervised cycles forever with no terminal state. The probe
+      // polls the child's pid (reported via the onSpawn seam) and, on two
+      // consecutive dead observations, records cycle:agent_lost, reaps the
+      // tree, and resolves the race below so the cycle converges to the
+      // explicit `aborted` terminal (no retry, no silent hang).
+      let spawnedPid: number | undefined;
+      let spawnSettled = false;
+      let agentLost = false;
+      let resolveLostRace: (() => void) | undefined;
+      const lostRace = new Promise<Awaited<ReturnType<typeof ports.agentSpawn>>>((resolve) => {
+        resolveLostRace = () => resolve({ stdout: "", stderr: "", exitCode: 137, timedOut: false });
+      });
+      const livenessProbe = startBuilderLivenessProbe({
+        cycleId: ctx.cycleId ?? "",
+        agent: cmd.agent,
+        pid: () => spawnedPid,
+        spawnPending: () => !spawnSettled,
+        appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
+        onLost: () => {
+          agentLost = true;
+          resolveLostRace?.();
+        },
+      });
       try {
         appendWriteProtectionEvent(
           ports,
@@ -204,7 +231,8 @@ export async function executeSpawnAgentCommand(
           }),
         );
         mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
-        res = await ports.agentSpawn(cmd.agent, {
+        res = await Promise.race([
+          ports.agentSpawn(cmd.agent, {
           purpose: "builder",
           // E4: the builder runs in the submodule cycle worktree for a submodule
           // story (execCwd); its git env + writable roots target the submodule's
@@ -240,8 +268,19 @@ export async function executeSpawnAgentCommand(
             }
             signalRecorder.accept(d);
           },
-        });
+          // FIX-1474: hand the live child to the liveness probe so an
+          // out-of-band death is detected within a bounded window.
+          onSpawn: (child) => {
+            spawnedPid = child.pid;
+          },
+          }),
+          lostRace,
+        ]);
       } finally {
+        // FIX-1474: the spawn await settled (either side of the race) — the
+        // liveness probe stands down BEFORE the other observers stop.
+        spawnSettled = true;
+        livenessProbe.stop();
         if (mainLeakWatchdog !== undefined) {
           activeMainLeak = await mainLeakWatchdog.stop();
         }
@@ -401,7 +440,7 @@ export async function executeSpawnAgentCommand(
           // FIX-343 (step ①): the builder session id is part of the auditable
           // header — the attest gate's scorer≠builder-session invariant is then
           // traceable to a recorded build-session id, not asserted.
-          `# exit=${res.exitCode} timedOut=${res.timedOut} build-session=${builderSessionId}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
+          `# exit=${res.exitCode} timedOut=${res.timedOut} lost=${agentLost} build-session=${builderSessionId}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
         );
       } catch {
         /* logging must never fail the cycle */
@@ -494,7 +533,10 @@ export async function executeSpawnAgentCommand(
             }) ?? undefined
           : undefined;
       return {
-        event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
+        // FIX-1474: a lost child converges the cycle to the explicit `aborted`
+        // terminal in the orchestrator (no retry, no blocked) — the death was
+        // environmental, recorded fail-loud via cycle:agent_lost.
+        event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut, ...(agentLost ? { lost: true } : {}) },
         // FIX-343 (step ①): persist the builder session id on the cycle context so
         // it survives to the attest gate (the scorer≠builder-session invariant is then
         // traceable to a recorded build-session id, not asserted).

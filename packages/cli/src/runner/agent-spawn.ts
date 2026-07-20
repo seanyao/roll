@@ -555,6 +555,11 @@ export interface AgentSpawnOptions {
   /** Optional cleanup callback invoked once after the child exits. Used to
    *  remove per-spawn artifacts (e.g. reasonix sandbox config in the worktree). */
   cleanup?: () => void;
+  /** FIX-1474: observer seam — invoked once, synchronously, right after the
+   *  child process is spawned, so the runner's liveness probe can watch the
+   *  real pid. Best-effort: a throwing callback never fails the spawn. Fake
+   *  spawns in tests may simply not call it (the probe stays inert). */
+  onSpawn?: (child: ChildProcess) => void;
 }
 
 /** Result of an agent spawn — the orchestrator feeds `exitCode` back as
@@ -802,6 +807,13 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
       stderr += d.toString("utf8");
     });
     liveAgents.add(child); // FIX-204D
+    // FIX-1474: hand the live child to the liveness probe BEFORE any await can
+    // interleave, so a death that predates the first probe tick is still seen.
+    try {
+      opts.onSpawn?.(child);
+    } catch {
+      /* the observer seam must never fail the spawn */
+    }
     let settled = false;
     let exitDrainFallback: NodeJS.Timeout | undefined;
     const settle = (result: AgentSpawnResult): void => {

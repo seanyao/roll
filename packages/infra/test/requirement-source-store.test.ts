@@ -621,6 +621,99 @@ describe("US-WS-007 RequirementSourceStore", () => {
     );
   });
 
+  function snapshotRequirementsTree(root: string): ReadonlyMap<string, string> {
+    const entries = new Map<string, string>();
+    const walk = (dir: string, relativeDir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
+        const path = join(dir, entry.name);
+        const relativePath = relativeDir === "" ? entry.name : `${relativeDir}/${entry.name}`;
+        const stat = lstatSync(path);
+        const digest = stat.isFile() ? createHash("sha256").update(readFileSync(path)).digest("hex") : "";
+        entries.set(relativePath, JSON.stringify({
+          type: stat.isSymbolicLink() ? "symlink" : stat.isDirectory() ? "dir" : "file",
+          ino: stat.ino,
+          dev: stat.dev,
+          mtimeMs: stat.mtimeMs,
+          size: stat.size,
+          digest,
+        }));
+        if (stat.isDirectory() && !stat.isSymbolicLink()) walk(path, relativePath);
+      }
+    };
+    if (existsSync(root)) walk(root, "");
+    return entries;
+  }
+
+  function expectNoTreeChange(before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>): void {
+    expect(Array.from(after.keys()).sort()).toEqual(Array.from(before.keys()).sort());
+    for (const [path, beforeEntry] of before) {
+      expect(after.get(path), `entry changed at ${path}`).toBe(beforeEntry);
+    }
+  }
+
+  it("rejects an update when the existing revision's archived context was tampered, leaving zero orphan revision on disk", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const firstRevisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    writeFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "context", "domain.md"), "tampered\n", "utf8");
+
+    const requirementsRoot = join(f.workspace, "requirements");
+    const before = snapshotRequirementsTree(requirementsRoot);
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    expect(() => captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+    const after = snapshotRequirementsTree(requirementsRoot);
+    expectNoTreeChange(before, after);
+
+    const secondRevisionKey = "rev-" + createHash("sha256").update("43").digest("hex");
+    expect(existsSync(join(first.requirementPath, "revisions", secondRevisionKey))).toBe(false);
+  });
+
+  it("rejects an update when the existing revision's capture.yaml metadata was tampered, leaving zero orphan revision on disk", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const firstRevisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
+    const capture = JSON.parse(readFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), "utf8"));
+    capture.requirement.sha256 = "f".repeat(64);
+    writeFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
+
+    const requirementsRoot = join(f.workspace, "requirements");
+    const before = snapshotRequirementsTree(requirementsRoot);
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    expect(() => captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+    const after = snapshotRequirementsTree(requirementsRoot);
+    expectNoTreeChange(before, after);
+
+    const secondRevisionKey = "rev-" + createHash("sha256").update("43").digest("hex");
+    expect(existsSync(join(first.requirementPath, "revisions", secondRevisionKey))).toBe(false);
+  });
+
+  it("rejects an update when the existing source.yaml's previousRevisions history was tampered, leaving zero orphan revision on disk", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
+    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
+    const sourcePath = join(first.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+    source.previousRevisions = [];
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
+
+    const requirementsRoot = join(f.workspace, "requirements");
+    const before = snapshotRequirementsTree(requirementsRoot);
+    writeFileSync(f.body, "# Jira requirement\n\nRevision 44.\n", "utf8");
+    expect(() => captureRequirementSource(request(f, { revision: "44", capturedAt: "2026-07-20T18:00:00.000Z" }))).toThrowError(
+      expect.objectContaining({ code: "revision_conflict" }),
+    );
+    const after = snapshotRequirementsTree(requirementsRoot);
+    expectNoTreeChange(before, after);
+
+    const newRevisionKey = "rev-" + createHash("sha256").update("44").digest("hex");
+    expect(existsSync(join(first.requirementPath, "revisions", newRevisionKey))).toBe(false);
+  });
+
   it("rejects a source.yaml whose previousRevisions references a revision archive that was never committed", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));

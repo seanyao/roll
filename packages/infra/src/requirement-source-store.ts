@@ -788,6 +788,9 @@ export function captureRequirementSource(
         manifest: plan.manifest,
       };
     }
+    if (plan.outcome === "updated" && existing !== undefined) {
+      validateRevision(requirementPath, existing);
+    }
     if (plan.outcome === "created" || plan.outcome === "updated") {
       writeRevision(workspaceRoot, requirementPath, plan.manifest, body, context, renameFile);
     }

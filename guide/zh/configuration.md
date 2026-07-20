@@ -96,6 +96,24 @@ roll workspace requirement add \
 根级 `requirement.md`、`context/` 与 `attest.md` 都是可重建投影。`attest.md` 可以聚合
 关联 Story 的交付，但绝不替代 Issue 自己拥有的证据。
 
+### Issue 初始化
+
+`roll workspace issue init` 解析一个 Story 的 Contract（`spec.md` frontmatter 中的
+`repositories:` 块）、工作区的仓库绑定与其关联的 Requirement 来源，然后为该 Story
+创建、复用或修复其 Issue——每个声明的仓库目标各对应一份 manifest 与一个 worktree：
+
+```bash
+roll workspace issue init US-WS-008 --workspace ws-demo --check --json
+roll workspace issue init US-WS-008 --workspace ws-demo --json
+```
+
+`--check` 零写入。Apply 会创建不可变的 `roll.issue/v1` manifest、每个目标各一条
+append-only 的 `issue:repository_bound` 事件，以及以每个目标缓存的 base SHA 为根的
+`issues/<story-id>/<alias>` worktree——只读目标不获得写权限或分支；可写目标获得唯一的
+`roll/<workspace>/<story>/<alias>` 分支。若后续目标失败，已应用的干净新建目标会被回滚
+（既有或脏的 worktree 始终被保留），并写入修复 journal；失败后重跑会恢复并修复同一个
+Issue 身份，不会重复创建 worktree 或分支。
+
 ## 常见覆盖场景
 
 把 roll 状态钉到项目本地目录（适合 CI、测试、隔离实验）：

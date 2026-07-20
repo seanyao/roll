@@ -61,6 +61,7 @@ describe("RepositoryCache golden path", () => {
     const created = await ensureRepositoryCache({ rollHome, binding, integrationRefspec: refspec });
     expect(created.action).toBe("created");
     expect(created.baseSha).toBe(runGit(source, ["rev-parse", "HEAD"]));
+    const immutableFirstBase = created.baseSha;
 
     writeFileSync(join(source, "product.txt"), "v2\n", "utf8");
     runGit(source, ["add", "product.txt"]);
@@ -71,6 +72,8 @@ describe("RepositoryCache golden path", () => {
     expect(refreshed.action).toBe("reused");
     expect(refreshed.cachePath).toBe(created.cachePath);
     expect(refreshed.baseSha).toBe(runGit(source, ["rev-parse", "HEAD"]));
+    expect(refreshed.baseSha).not.toBe(immutableFirstBase);
+    expect(runGit(refreshed.cachePath, ["cat-file", "-t", `${immutableFirstBase}^{commit}`])).toBe("commit");
     expect(runGit(refreshed.cachePath, ["rev-parse", "refs/remotes/origin/integration/release"]))
       .toBe(refreshed.baseSha);
   });

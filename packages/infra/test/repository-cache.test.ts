@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   REPOSITORY_BINDING_V1,
   repositoryIdFromRemote,
@@ -77,6 +78,33 @@ function advanceRemote(remote: ReturnType<typeof localRemote>): string {
   return runGit(remote.source, ["rev-parse", "HEAD"]);
 }
 
+async function runCacheWorker(
+  rollHome: string,
+  remote: string,
+  repoId: string,
+  outputPath: string,
+): Promise<void> {
+  const worker = fileURLToPath(new URL("./fixtures/repository-cache-worker.mjs", import.meta.url));
+  await new Promise<void>((resolveWorker, rejectWorker) => {
+    const child = spawn(process.execPath, [worker, rollHome, remote, repoId, outputPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectWorker);
+    child.on("exit", (code) => {
+      if (code === 0) resolveWorker();
+      else {
+        const workerOutput = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
+        rejectWorker(new Error(`repository cache worker exited ${code}: ${stderr}${workerOutput}`));
+      }
+    });
+  });
+}
+
 describe("RepositoryCache identity and path safety", () => {
   it("maps normalized remote identity to one deterministic collision-resistant cache path", () => {
     const rollHome = sandbox();
@@ -125,6 +153,19 @@ describe("RepositoryCache identity and path safety", () => {
     }
     expect(error).toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_remote" });
     expect(String(error)).not.toContain("token-secret");
+    expect(JSON.stringify(error)).not.toContain("token-secret");
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported relative remote syntax before invoking Git", async () => {
+    const rollHome = sandbox();
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: { ...binding("https://example.test/team/product.git"), remote: "../product.git" },
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      runGit: runGitAdapter,
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_remote" });
     expect(runGitAdapter).not.toHaveBeenCalled();
   });
 
@@ -174,6 +215,24 @@ describe("RepositoryCache identity and path safety", () => {
     await expect(ensureRepositoryCache({
       rollHome,
       binding: binding("https://example.test/team/product.git"),
+      integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
+      runGit: runGitAdapter,
+    })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
+    expect(runGitAdapter).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cache leaf symlink before invoking Git", async () => {
+    const rollHome = sandbox();
+    const outside = sandbox();
+    const repository = binding("https://example.test/team/product.git");
+    const identity = resolveRepositoryCacheIdentity({ rollHome, binding: repository });
+    mkdirSync(identity.reposRoot, { recursive: true });
+    symlinkSync(outside, identity.cachePath, "dir");
+    const runGitAdapter = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+
+    await expect(ensureRepositoryCache({
+      rollHome,
+      binding: repository,
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
       runGit: runGitAdapter,
     })).rejects.toMatchObject<Partial<RepositoryCacheError>>({ code: "unsafe_path" });
@@ -268,6 +327,27 @@ describe("RepositoryCache lifecycle", () => {
     expect(runGit(identity.cachePath, ["fsck", "--connectivity-only"])).toBe("");
   });
 
+  it("serializes two independent Node processes onto one machine cache", async () => {
+    const rollHome = sandbox();
+    const outputRoot = sandbox();
+    const upstream = localRemote(sandbox(), "process-concurrent");
+    const repository = binding(upstream.remote);
+    const alphaOutput = join(outputRoot, "alpha.json");
+    const betaOutput = join(outputRoot, "beta.json");
+
+    await Promise.all([
+      runCacheWorker(rollHome, upstream.remote, repository.repoId, alphaOutput),
+      runCacheWorker(rollHome, upstream.remote, repository.repoId, betaOutput),
+    ]);
+    const alpha = JSON.parse(readFileSync(alphaOutput, "utf8")) as { result: { action: string; cachePath: string; baseSha: string } };
+    const beta = JSON.parse(readFileSync(betaOutput, "utf8")) as { result: { action: string; cachePath: string; baseSha: string } };
+
+    expect(new Set([alpha.result.action, beta.result.action])).toEqual(new Set(["created", "reused"]));
+    expect(alpha.result.cachePath).toBe(beta.result.cachePath);
+    expect(alpha.result.baseSha).toBe(beta.result.baseSha);
+    expect(runGit(alpha.result.cachePath, ["fsck", "--connectivity-only"])).toBe("");
+  });
+
   it("does not release a newer owner lock after a stale takeover", async () => {
     const rollHome = sandbox();
     const upstream = localRemote(sandbox(), "owner-token");
@@ -297,6 +377,10 @@ describe("RepositoryCache lifecycle", () => {
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
       runGit: runGitAdapter,
     });
+    const pendingResult = pending.then(
+      (value) => ({ ok: true as const, value, error: undefined }),
+      (error: unknown) => ({ ok: false as const, value: undefined, error }),
+    );
     await fetchStarted;
     expect(existsSync(identity.journalPath)).toBe(true);
     expect(readLockOwner(identity.lockPath)).toMatchObject({
@@ -310,8 +394,10 @@ describe("RepositoryCache lifecycle", () => {
     });
     expect(takeover.acquired).toBe(true);
     unblockFetch?.();
-    await pending;
+    const result = await pendingResult;
 
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatchObject<Partial<RepositoryCacheError>>({ code: "lock_lost" });
     expect(readLockOwner(identity.lockPath)).toMatchObject({ pid: 424242, cycleId: "new-owner" });
     releaseLock(identity.lockPath);
   });
@@ -347,6 +433,9 @@ describe("RepositoryCache lifecycle", () => {
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
     });
     expect(rebuilt).toMatchObject({ action: "repaired", event: { type: "repo:cache_repaired" } });
+    expect(rebuilt.baseSha).toBe(runGit(upstream.source, ["rev-parse", "HEAD"]));
+    expect(runGit(rebuilt.cachePath, ["rev-parse", "--is-bare-repository"])).toBe("true");
+    expect(runGit(rebuilt.cachePath, ["fsck", "--connectivity-only"])).toBe("");
     for (const path of truthFiles) expect(readFileSync(path, "utf8")).toBe(before.get(path));
   });
 
@@ -402,9 +491,11 @@ describe("RepositoryCache lifecycle", () => {
       integrationRefspec: "+refs/heads/main:refs/remotes/origin/main",
     });
     expect(repairedInterrupted.action).toBe("repaired");
+    expect(repairedInterrupted.baseSha).toBe(runGit(upstream.source, ["rev-parse", "HEAD"]));
     expect(existsSync(identity.temporaryPath)).toBe(false);
     expect(existsSync(identity.journalPath)).toBe(false);
-    expect(readFileSync(join(repairedInterrupted.cachePath, "HEAD"), "utf8")).toContain("refs/heads");
+    expect(runGit(repairedInterrupted.cachePath, ["remote", "get-url", "origin"])).toBe(upstream.remote);
+    expect(runGit(repairedInterrupted.cachePath, ["fsck", "--connectivity-only"])).toBe("");
   });
 
 });

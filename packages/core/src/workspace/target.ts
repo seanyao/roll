@@ -1,3 +1,6 @@
+import { isAbsolute } from "node:path";
+import type { WorkspaceIdentity } from "@roll/spec";
+
 export type WorkspaceLifecycle = "registered" | "active" | "paused" | "archived";
 export type WorkspaceTargetOperation = "read" | "mutation";
 export type WorkspaceTargetSource = "explicit" | "environment" | "cwd_manifest" | "issue_manifest" | "all";
@@ -95,7 +98,7 @@ function compareWorkspace(a: WorkspaceRegistryCandidate, b: WorkspaceRegistryCan
 }
 
 function isAbsoluteWorkspacePath(value: string): boolean {
-  return isAbsolute(value) || win32.isAbsolute(value);
+  return isAbsolute(value);
 }
 
 function summary(candidate: WorkspaceRegistryCandidate): WorkspaceTargetSummary {
@@ -107,8 +110,9 @@ function summary(candidate: WorkspaceRegistryCandidate): WorkspaceTargetSummary 
   };
 }
 
-function summaries(registry: readonly WorkspaceRegistryCandidate[]): WorkspaceTargetSummary[] {
+function summaries(registry: readonly WorkspaceRegistryCandidate[], activeOnly = false): WorkspaceTargetSummary[] {
   return registry
+    .filter((candidate) => !activeOnly || candidate.lifecycle === "active")
     .slice()
     .sort(compareWorkspace)
     .map(summary);
@@ -119,13 +123,14 @@ function failure(
   code: WorkspaceTargetFailureCode,
   message: string,
   sources?: readonly WorkspaceTargetSource[],
+  candidateEvidence?: readonly WorkspaceRegistryCandidate[],
 ): WorkspaceTargetDecision {
   return {
     ok: false,
     error: {
       code,
       message,
-      candidates: summaries(input.registry),
+      candidates: summaries(candidateEvidence ?? input.registry, candidateEvidence === undefined),
       ...(sources === undefined ? {} : { sources: sources.slice().sort() }),
     },
   };
@@ -136,16 +141,16 @@ function registryIntegrityFailure(input: WorkspaceTargetInput): WorkspaceTargetD
   const paths = new Map<string, string>();
   for (const candidate of input.registry) {
     if (!isAbsoluteWorkspacePath(candidate.root) || !isAbsoluteWorkspacePath(candidate.canonicalRoot)) {
-      return failure(input, "invalid_target", "Workspace registry paths must be absolute and canonicalized");
+      return failure(input, "invalid_target", "Workspace registry paths must be absolute and canonicalized", undefined, [candidate]);
     }
     if (ids.has(candidate.workspaceId)) {
-      return failure(input, "duplicate_candidate", "Workspace registry contains a duplicate workspace identity");
+      return failure(input, "duplicate_candidate", "Workspace registry contains a duplicate workspace identity", undefined, input.registry);
     }
     ids.add(candidate.workspaceId);
     for (const candidatePath of [candidate.root, candidate.canonicalRoot]) {
       const owner = paths.get(candidatePath);
       if (owner !== undefined && owner !== candidate.workspaceId) {
-        return failure(input, "duplicate_candidate", "Workspace registry contains a duplicate workspace path");
+        return failure(input, "duplicate_candidate", "Workspace registry contains a duplicate workspace path", undefined, input.registry);
       }
       paths.set(candidatePath, candidate.workspaceId);
     }
@@ -158,10 +163,10 @@ function candidateValidityFailure(
   candidate: WorkspaceRegistryCandidate,
 ): WorkspaceTargetDecision | null {
   if (candidate.pathState === "stale") {
-    return failure(input, "stale_registry", "Workspace registry target is stale");
+    return failure(input, "stale_registry", "Workspace registry target is stale", undefined, [candidate]);
   }
   if (candidate.manifestWorkspaceId !== candidate.workspaceId) {
-    return failure(input, "identity_mismatch", "Workspace registry and manifest identities do not match");
+    return failure(input, "identity_mismatch", "Workspace registry and manifest identities do not match", undefined, [candidate]);
   }
   return null;
 }
@@ -192,12 +197,12 @@ function findBySelector(
     }
   }
   if (identities.size > 1) {
-    return failure(input, "conflicting_candidates", "Workspace path facts resolve to conflicting identities");
+    return failure(input, "conflicting_candidates", "Workspace path facts resolve to conflicting identities", undefined, input.registry);
   }
   const candidate = canonicalMatch ?? absoluteMatch;
   if (candidate === undefined) return failure(input, "target_missing", "Workspace path is not registered");
   if (absoluteMatch !== undefined && canonicalMatch === undefined) {
-    return failure(input, "symlink_escape", "Workspace path canonicalizes outside the registered root");
+    return failure(input, "symlink_escape", "Workspace path canonicalizes outside the registered root", undefined, [candidate]);
   }
   return candidate;
 }
@@ -206,16 +211,16 @@ function findByContext(
   input: WorkspaceTargetInput,
   candidate: WorkspaceContextCandidate,
 ): WorkspaceRegistryCandidate | WorkspaceTargetDecision {
+  const registered = input.registry.find((entry) => entry.workspaceId === candidate.workspaceId);
   if (candidate.containment === "symlink_escape") {
-    return failure(input, "symlink_escape", "Workspace context escapes its canonical root");
+    return failure(input, "symlink_escape", "Workspace context escapes its canonical root", undefined, registered === undefined ? undefined : [registered]);
   }
   if (candidate.containment === "unrelated_worktree") {
-    return failure(input, "unrelated_worktree", "Current Git worktree is unrelated to the Workspace");
+    return failure(input, "unrelated_worktree", "Current Git worktree is unrelated to the Workspace", undefined, registered === undefined ? undefined : [registered]);
   }
-  const registered = input.registry.find((entry) => entry.workspaceId === candidate.workspaceId);
   if (registered === undefined) return failure(input, "target_missing", "Workspace context identity is not registered");
   if (registered.root !== candidate.root || registered.canonicalRoot !== candidate.canonicalRoot) {
-    return failure(input, "identity_mismatch", "Workspace context path does not match the registry identity");
+    return failure(input, "identity_mismatch", "Workspace context path does not match the registry identity", undefined, [registered]);
   }
   return registered;
 }
@@ -291,6 +296,7 @@ export function resolveWorkspaceTarget(input: WorkspaceTargetInput): WorkspaceTa
       "conflicting_candidates",
       "Workspace target sources resolve to conflicting identities",
       sourceCandidates.map((candidate) => candidate.source),
+      sourceCandidates.map((candidate) => candidate.workspace),
     );
   }
 
@@ -309,5 +315,3 @@ export function resolveWorkspaceTarget(input: WorkspaceTargetInput): WorkspaceTa
     },
   };
 }
-import { isAbsolute, win32 } from "node:path";
-import type { WorkspaceIdentity } from "@roll/spec";

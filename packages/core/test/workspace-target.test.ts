@@ -161,7 +161,7 @@ describe("resolveWorkspaceTarget precedence and registry identity", () => {
       ok: true,
       target: { kind: "workspace", workspaceId: "ws-beta" },
     });
-    const windowsRegistry: readonly WorkspaceRegistryCandidate[] = [{
+    const foreignPlatformRegistry: readonly WorkspaceRegistryCandidate[] = [{
       workspaceId: "ws-windows",
       root: "C:\\workspaces\\product",
       canonicalRoot: "C:\\workspaces\\product",
@@ -170,9 +170,9 @@ describe("resolveWorkspaceTarget precedence and registry identity", () => {
       lifecycle: "registered",
     }];
     expect(resolveWorkspaceTarget(input({
-      registry: windowsRegistry,
+      registry: foreignPlatformRegistry,
       explicit: path("C:\\workspaces\\product"),
-    }))).toMatchObject({ ok: true, target: { workspaceId: "ws-windows" } });
+    }))).toMatchObject({ ok: false, error: { code: "invalid_target" } });
   });
 
   it("represents --all as a stable read-only aggregate and rejects mutation", () => {
@@ -269,6 +269,12 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
       error: { code: "target_missing" },
     });
     expect(resolveWorkspaceTarget(input({ registry: [registry[0]!] }))).toMatchObject({
+      ok: false,
+      error: { code: "target_missing", candidates: [{ workspaceId: "ws-alpha" }] },
+    });
+    expect(resolveWorkspaceTarget(input({
+      registry: [registry[0]!, { ...registry[1]!, lifecycle: "paused" }],
+    }))).toMatchObject({
       ok: false,
       error: { code: "target_missing", candidates: [{ workspaceId: "ws-alpha" }] },
     });
@@ -441,6 +447,33 @@ describe("resolveWorkspaceTarget fail-loud safety matrix", () => {
     });
     expect(JSON.stringify(decision)).not.toContain("token-sentinel");
   });
+
+  it.each([
+    {
+      name: "identity",
+      entries: [registry[0]!, { ...registry[1]!, workspaceId: "ws-alpha" }],
+      message: "Workspace registry contains a duplicate workspace identity",
+    },
+    {
+      name: "path",
+      entries: [registry[0]!, { ...registry[1]!, canonicalRoot: "/real/workspaces/alpha" }],
+      message: "Workspace registry contains a duplicate workspace path",
+    },
+  ])("retains complete duplicate $name evidence", ({ entries, message }) => {
+    expect(resolveWorkspaceTarget(input({ registry: entries, explicit: id("ws-alpha") }))).toEqual({
+      ok: false,
+      error: {
+        code: "duplicate_candidate",
+        message,
+        candidates: entries.map((entry) => ({
+          workspaceId: entry.workspaceId,
+          root: entry.root,
+          canonicalRoot: entry.canonicalRoot,
+          lifecycle: entry.lifecycle,
+        })),
+      },
+    });
+  });
 });
 
 describe("resolveWorkspaceTarget purity", () => {
@@ -485,8 +518,12 @@ describe("resolveWorkspaceTarget purity", () => {
     });
   });
 
-  it("keeps the core resolver free of filesystem and process reads", () => {
+  it("keeps the core resolver behind an explicit runtime import and global-capability boundary", () => {
     const source = readFileSync(new URL("../src/workspace/target.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/node:fs|process\.|process\[|Deno\.|Bun\.|\.cwd\s*\(/);
+    expect(source.match(/^import .*$/gm)).toEqual([
+      'import { isAbsolute } from "node:path";',
+      'import type { WorkspaceIdentity } from "@roll/spec";',
+    ]);
+    expect(source).not.toMatch(/\b(?:process|globalThis|require|Deno|Bun|eval|Function)\b|import\s*\(/);
   });
 });

@@ -62,7 +62,7 @@ import {
 } from "../src/runner/index.js";
 import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
 import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
-import { writeMainDirtyBaseline } from "../src/runner/main-checkout-guard.js";
+import { captureMainHeadBaseline, writeMainDirtyBaseline } from "../src/runner/main-checkout-guard.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -3370,6 +3370,7 @@ describe("executeCommand — command → executor mapping", () => {
     writeFileSync(join(main, "escaped.txt"), "leaked\n", "utf8");
     execFileSync("git", ["add", "escaped.txt"], { cwd: main });
     execFileSync("git", ["commit", "-q", "-m", "tcr: leaked main checkout commit"], { cwd: main });
+    const leakedHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim();
 
     const base = fakePorts();
     const count = (cwd: string, range: string): number =>
@@ -3396,14 +3397,81 @@ describe("executeCommand — command → executor mapping", () => {
         commitsAhead: 0,
       },
     });
-    expect((r.event as { facts: { mainAhead?: number } }).facts.mainAhead ?? 0).toBe(0);
+    // FIX-1475: quarantine still DETECTS the leak (event below) but never
+    // resets main — so the capture-phase probe now honestly reports the leak
+    // (no pre-spawn baseline here → absolute count, the legacy fallback).
+    expect((r.event as { facts: { mainAhead?: number } }).facts.mainAhead ?? 0).toBe(1);
     const quarantined = (calls["event"] ?? [])
       .map((a) => (a as unknown[])[1] as RollEvent)
       .find((e) => e.type === "sandbox:quarantined");
     expect(quarantined).toMatchObject({ phase: "capture", reason: "ahead", files: ["<commit>:tcr: leaked main checkout commit"] });
+    // FIX-1475: the shared main ref was NOT moved — the leaked commit is still
+    // HEAD (byte-identical), bookmarked on the quarantine ref for audit.
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim()).toBe(leakedHead);
+    if (quarantined?.type === "sandbox:quarantined") {
+      expect(execFileSync("git", ["rev-parse", quarantined.ref], { cwd: main, encoding: "utf8" }).trim()).toBe(leakedHead);
+    }
     expect(execFileSync("git", ["status", "--short", "--", "."], { cwd: main, encoding: "utf8" }).trim()).toBe("?? .roll/");
     expect(execFileSync("git", ["status", "--porcelain", "--", "escaped.txt", "README.md"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
     expect(execFileSync("git", ["rev-list", "--count", "origin/main..HEAD"], { cwd: wt, encoding: "utf8" }).trim()).toBe("0");
+  });
+
+  it("FIX-1475: capture_facts ignores PRE-EXISTING ahead commits that match the pre-spawn baseline (no false leak, main untouched)", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1475-capture-")));
+    execDirs.push(root);
+    const remote = join(root, "remote.git");
+    const main = join(root, "main");
+    const wt = join(root, "cycle-wt");
+    execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+    execFileSync("git", ["clone", "-q", remote, main]);
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: main });
+    execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: main });
+    writeFileSync(join(main, "README.md"), "base\n", "utf8");
+    execFileSync("git", ["add", "README.md"], { cwd: main });
+    execFileSync("git", ["commit", "-q", "-m", "base"], { cwd: main });
+    execFileSync("git", ["push", "-q", "-u", "origin", "main"], { cwd: main });
+
+    // Pre-existing LOCAL ahead commit on the shared checkout (owner WIP), then
+    // the cycle's pre-spawn hook freezes THIS head as the baseline.
+    writeFileSync(join(main, "owner-wip.txt"), "owner work in progress\n", "utf8");
+    execFileSync("git", ["add", "owner-wip.txt"], { cwd: main });
+    execFileSync("git", ["commit", "-q", "-m", "owner local WIP (unpushed)"], { cwd: main });
+    const aheadHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim();
+    const runtimeDir = join(main, ".roll", "loop");
+    execFileSync("git", ["worktree", "add", "-q", "-b", "cycle", wt, "origin/main"], { cwd: main });
+    captureMainHeadBaseline(main, runtimeDir, CTX.cycleId);
+
+    const base = fakePorts();
+    const count = (cwd: string, range: string): number =>
+      Number(execFileSync("git", ["rev-list", "--count", range], { cwd, encoding: "utf8" }).trim());
+    const { ports, calls } = fakePorts({
+      repoCwd: main,
+      paths: {
+        ...base.ports.paths,
+        worktreePath: wt,
+        eventsPath: join(runtimeDir, "events.ndjson"),
+        alertsPath: join(runtimeDir, "alerts.log"),
+      },
+      git: {
+        ...base.ports.git,
+        commitsAhead: vi.fn(async (cwd) => count(cwd, "origin/main..HEAD")),
+        mainAhead: vi.fn(async (cwd) => count(cwd, "origin/main..main")),
+      },
+    });
+
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+
+    // The pre-existing ahead state is NOT a leak: no mainAhead fact, no
+    // quarantine event, and the shared ref + tree are byte-identical.
+    expect((r.event as { facts: { mainAhead?: number } }).facts.mainAhead ?? 0).toBe(0);
+    const quarantined = (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as RollEvent)
+      .find((e) => e.type === "sandbox:quarantined" && e.reason === "ahead");
+    expect(quarantined).toBeUndefined();
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim()).toBe(aheadHead);
+    expect(execFileSync("git", ["rev-parse", "main"], { cwd: main, encoding: "utf8" }).trim()).toBe(aheadHead);
+    expect(readFileSync(join(main, "owner-wip.txt"), "utf8")).toBe("owner work in progress\n");
+    expect(execFileSync("git", ["branch", "--list", "rescue/*"], { cwd: main, encoding: "utf8" }).trim()).toBe("");
   });
 
   it("E4 (end-to-end): capture_facts observes a REAL tcr commit made in the submodule worktree, not the empty superproject worktree", async () => {
@@ -3465,7 +3533,7 @@ describe("executeCommand — command → executor mapping", () => {
     expect(rSuper.ctxPatch?.tcrCount).toBe(0);
   });
 
-  it("FIX-903: rescue_leaked saves leaked main commits to a rescue ref and resets main", async () => {
+  it("FIX-903: rescue_leaked saves leaked main commits to a quarantine bundle (never resets main)", async () => {
     const { ports, calls } = fakePorts({
       git: {
         ...fakePorts().ports.git,
@@ -3483,7 +3551,7 @@ describe("executeCommand — command → executor mapping", () => {
     expect(calls["event"]?.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("FIX-402: rescue_leaked preserves uncommitted tracked backlog Done while resetting leaked main commits", async () => {
+  it("FIX-402/FIX-1475: rescue_leaked bundles the leaked HEAD but NEVER resets main — uncommitted backlog edits and leaked commits survive byte-identically", async () => {
     const remote = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix402-remote-")));
     execDirs.push(remote);
     execFileSync("git", ["init", "-q", "--bare", "-b", "main"], { cwd: remote });
@@ -3513,9 +3581,14 @@ describe("executeCommand — command → executor mapping", () => {
 
     expect(res.code).toBe(0);
     expect(res.rescuedSha).toBe(leakedHead);
-    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(originHead);
-    // US-LOOP-095: leaked commits are saved to a quarantine BUNDLE (not a
-    // rescue/leaked-* branch), holding rescuedSha; no local branch is created.
+    // FIX-1475: the shared main ref did NOT move — HEAD stays on the leaked
+    // commit (byte-identical), NOT back on origin/main. The FIX-402 backlog
+    // preservation is now structural: without a reset there is nothing to
+    // clobber, so the uncommitted Done flip simply stays in the tree.
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(leakedHead);
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).not.toBe(originHead);
+    // US-LOOP-095: the leaked HEAD is saved to a quarantine BUNDLE (audit
+    // evidence); no local branch is created.
     const bundlePath = join(repo, ".roll", "loop", "quarantine", "rescue-leaked-FIX-402.bundle");
     expect(existsSync(bundlePath)).toBe(true);
     expect(execFileSync("git", ["bundle", "list-heads", bundlePath], { cwd: repo, encoding: "utf8" })).toContain(leakedHead);

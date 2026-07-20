@@ -577,6 +577,62 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(resolved[0]?.revision).toBe("43");
   });
 
+  it("excludes a source.yaml whose physical provider directory does not match the manifest's own provider field", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const misplacedDir = join(f.workspace, "requirements", "github_issue", "req-c78ccf14ea21");
+    mkdirSync(misplacedDir, { recursive: true });
+    writeFileSync(join(misplacedDir, "source.yaml"), readFileSync(join(first.requirementPath, "source.yaml")));
+
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.ref).toBe("SOT-15499");
+  });
+
+  it("excludes a source.yaml whose physical requirementId directory does not match the manifest's derived identity", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    const misplacedDir = join(f.workspace, "requirements", "jira", "req-000000000000");
+    mkdirSync(misplacedDir, { recursive: true });
+    writeFileSync(join(misplacedDir, "source.yaml"), readFileSync(join(first.requirementPath, "source.yaml")));
+
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(resolved).toHaveLength(1);
+  });
+
+  it("excludes a source.yaml whose provider/ref is not declared in workspace.yaml", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const undeclaredRequirementId = `req-${createHash("sha256").update("user_input\0undeclared-brief").digest("hex").slice(0, 12)}`;
+    const undeclaredManifest = {
+      schema: "roll.requirement-source/v1",
+      requirementId: undeclaredRequirementId,
+      provider: "user_input",
+      ref: "undeclared-brief",
+      revision: "1",
+      capturedAt: "2026-07-20T16:00:00.000Z",
+      previousRevisions: [],
+      requirement: { bytes: 1, sha256: "a".repeat(64) },
+      context: [],
+      stories: ["US-WS-007"],
+      attest: { schema: "roll.requirement-attest-projection/v1", mode: "generated_aggregate", evidenceAuthority: "issue" },
+    };
+    const undeclaredDir = join(f.workspace, "requirements", "user_input", undeclaredRequirementId);
+    mkdirSync(undeclaredDir, { recursive: true });
+    writeFileSync(join(undeclaredDir, "source.yaml"), `${JSON.stringify(undeclaredManifest, null, 2)}\n`);
+
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(resolved.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
+  });
+
+  it("deduplicates when the same requirementId is legitimately reachable more than once", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    const ids = resolved.map((manifest) => manifest.requirementId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
   it("never moves, overwrites or duplicates Issue-owned evidence across capture, link, update and repair", () => {
     const f = fixture();
     const evidencePath = join(f.workspace, "issues", "US-WS-007", "evidence", "vitest.txt");

@@ -602,7 +602,10 @@ export function requirementCaptureLockPath(workspaceRoot: string, requirementId:
   return join(resolve(workspaceRoot), "runtime", "locks", "requirements", `${requirementId}.lock`);
 }
 
-function readAllRequirementManifests(workspaceRoot: string): readonly RequirementSourceManifest[] {
+function readAllRequirementManifests(
+  workspaceRoot: string,
+  requirements: readonly { readonly provider: string; readonly ref: string }[],
+): readonly RequirementSourceManifest[] {
   const requirementsRoot = join(resolve(workspaceRoot), "requirements");
   if (!existsSync(requirementsRoot)) return [];
   let providerStat;
@@ -612,6 +615,7 @@ function readAllRequirementManifests(workspaceRoot: string): readonly Requiremen
     return [];
   }
   if (providerStat.isSymbolicLink() || !providerStat.isDirectory()) return [];
+  const seenRequirementIds = new Set<string>();
   const manifests: RequirementSourceManifest[] = [];
   for (const providerEntry of readdirSync(requirementsRoot, { withFileTypes: true })) {
     if (!providerEntry.isDirectory()) continue;
@@ -621,8 +625,19 @@ function readAllRequirementManifests(workspaceRoot: string): readonly Requiremen
       if (!requirementEntry.isDirectory()) continue;
       const requirementPath = join(providerPath, requirementEntry.name);
       if (lstatSync(requirementPath).isSymbolicLink()) continue;
-      const manifest = readExisting(join(requirementPath, "source.yaml"));
-      if (manifest !== undefined) manifests.push(manifest);
+      let manifest: RequirementSourceManifest | undefined;
+      try {
+        manifest = readExisting(join(requirementPath, "source.yaml"));
+      } catch {
+        continue;
+      }
+      if (manifest === undefined) continue;
+      if (manifest.provider !== providerEntry.name) continue;
+      if (manifest.requirementId !== requirementEntry.name) continue;
+      if (!declaredSource(requirements, manifest.provider, manifest.ref)) continue;
+      if (seenRequirementIds.has(manifest.requirementId)) continue;
+      seenRequirementIds.add(manifest.requirementId);
+      manifests.push(manifest);
     }
   }
   return manifests;
@@ -632,7 +647,9 @@ export function resolveRequirementSourcesForStoryOnDisk(
   workspaceRoot: string,
   storyId: string,
 ): readonly RequirementSourceManifest[] {
-  return resolveRequirementSourcesForStory(readAllRequirementManifests(workspaceRoot), storyId);
+  const canonicalRoot = resolve(workspaceRoot);
+  const workspace = readWorkspace(canonicalRoot);
+  return resolveRequirementSourcesForStory(readAllRequirementManifests(canonicalRoot, workspace.requirements), storyId);
 }
 
 export function captureRequirementSource(

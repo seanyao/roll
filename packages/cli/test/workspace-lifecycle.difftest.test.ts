@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -168,7 +168,9 @@ describe("US-WS-005 roll workspace lifecycle surface", () => {
 
   it("pauses one explicit path without changing another active Workspace", async () => {
     const { fixture, alpha, beta } = await twoActiveFixture();
-    const pause = scrub(await runCli(["workspace", "pause", alpha, "--json"], fixture), [alpha, beta]);
+    const alphaLink = join(fixture.home, "alpha-link");
+    symlinkSync(alpha, alphaLink);
+    const pause = scrub(await runCli(["workspace", "pause", alphaLink, "--json"], fixture), [alpha, beta, alphaLink]);
     const list = scrub(await runCli(["workspace", "list", "--json"], fixture), [alpha, beta]);
     expect(pause.status).toBe(0);
     expect(JSON.parse(list.stdout).workspaces.map((entry: { workspaceId: string; lifecycle: string }) => ({

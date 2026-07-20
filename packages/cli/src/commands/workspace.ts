@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import {
@@ -91,7 +92,13 @@ function selector(value: string): WorkspaceTargetSelector {
     return { kind: "id", workspaceId: value };
   }
   const absolutePath = resolve(value);
-  return { kind: "path", absolutePath, canonicalPath: absolutePath };
+  let canonicalPath = absolutePath;
+  try {
+    canonicalPath = realpathSync(absolutePath);
+  } catch {
+    // The target resolver will report an actionable missing/stale target.
+  }
+  return { kind: "path", absolutePath, canonicalPath };
 }
 
 function flagValue(args: readonly string[], flag: string): string | undefined {

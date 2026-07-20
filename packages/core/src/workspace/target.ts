@@ -269,6 +269,16 @@ export function resolveWorkspaceTarget(input: WorkspaceTargetInput): WorkspaceTa
     return failure(input, "target_missing", "No Workspace target could be resolved");
   }
 
+  const resolvedWorkspaceIds = new Set(sourceCandidates.map((candidate) => candidate.workspace.workspaceId));
+  if (resolvedWorkspaceIds.size > 1) {
+    return failure(
+      input,
+      "conflicting_candidates",
+      "Workspace target sources resolve to conflicting identities",
+      sourceCandidates.map((candidate) => candidate.source),
+    );
+  }
+
   const selected = sourceCandidates[0];
   if (selected === undefined) return failure(input, "target_missing", "No Workspace target could be resolved");
   const invalid = candidateValidityFailure(input, selected.workspace);

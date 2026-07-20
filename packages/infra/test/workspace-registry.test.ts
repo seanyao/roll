@@ -70,6 +70,8 @@ describe("Workspace registry v1 persistence", () => {
     });
     expect(() => parseWorkspaceRegistry(JSON.stringify({ ...snapshot, activeWorkspaceId: "ws-z" })))
       .toThrowError(WorkspaceRegistryError);
+    expect(() => parseWorkspaceRegistry(JSON.stringify({ ...snapshot, schema: "roll.workspace-registry/v2" })))
+      .toThrowError(expect.objectContaining({ code: "invalid_registry" }));
     expect(() => parseWorkspaceRegistry(JSON.stringify({
       ...snapshot,
       entries: [{ ...snapshot.entries[0], extra: true }],
@@ -162,22 +164,51 @@ describe("Workspace registry v1 persistence", () => {
   it("writes the registration event before the registry projection so retry repairs a failed commit", () => {
     const rollHome = sandbox();
     const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
-    const registryPath = workspaceRegistryPath(rollHome);
-    const blockedTempPath = `${registryPath}.tmp.${process.pid}.0`;
-    mkdirSync(blockedTempPath);
-    const store = new WorkspaceRegistry({ rollHome, now: () => 100 });
+    const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
+    let failCommit = false;
+    const store = new WorkspaceRegistry({
+      rollHome,
+      now: () => 100,
+      beforeRegistryRename: () => {
+        if (failCommit) throw new Error("planned registry commit failure");
+      },
+    });
+    store.register({ workspaceId: "ws-alpha", root: alpha });
+    const before = readFileSync(workspaceRegistryPath(rollHome), "utf8");
+    failCommit = true;
 
-    expect(() => store.register({ workspaceId: "ws-alpha", root: alpha })).toThrowError(
+    expect(() => store.register({ workspaceId: "ws-beta", root: beta })).toThrowError(
       expect.objectContaining({ code: "io_failure" }),
     );
-    expect(store.readEvents()).toEqual([
-      { schema: "roll.workspace-event/v1", type: "workspace:registered", workspaceId: "ws-alpha", ts: 100 },
-    ]);
+    expect(readFileSync(workspaceRegistryPath(rollHome), "utf8")).toBe(before);
 
-    rmSync(blockedTempPath, { recursive: true, force: true });
+    failCommit = false;
+    store.register({ workspaceId: "ws-beta", root: beta });
+    expect(store.list().map((entry) => entry.workspaceId)).toEqual(["ws-alpha", "ws-beta"]);
+    expect(store.readEvents().filter((event) => event.type === "workspace:registered" && event.workspaceId === "ws-beta"))
+      .toHaveLength(1);
+  });
+
+  it("uses an append-only event-store port for lifecycle persistence", () => {
+    const rollHome = sandbox();
+    const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
+    let text = "";
+    const appendCalls: string[] = [];
+    const eventStore = {
+      readText: () => text,
+      appendLine: (_path: string, line: string) => {
+        appendCalls.push(line);
+        text += line;
+      },
+    };
+    const store = new WorkspaceRegistry({ rollHome, now: () => 100, eventStore });
     store.register({ workspaceId: "ws-alpha", root: alpha });
+    store.activate("ws-alpha");
+    store.pause("ws-alpha");
+    expect(appendCalls).toHaveLength(3);
+    expect(appendCalls.every((line) => line.endsWith("\n"))).toBe(true);
     expect(store.list()).toEqual([
-      expect.objectContaining({ workspaceId: "ws-alpha", lifecycle: "registered" }),
+      expect.objectContaining({ workspaceId: "ws-alpha", lifecycle: "paused" }),
     ]);
   });
 });
@@ -215,6 +246,17 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
       "workspace:paused",
       "workspace:archived",
     ]);
+    const rewrittenEvents = store.readEvents().map((event) =>
+      event.type === "workspace:archived" && event.workspaceId === "ws-beta"
+        ? { ...event, type: "workspace:activated" as const }
+        : event
+    );
+    writeFileSync(workspaceEventsPath(rollHome), rewrittenEvents.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    expect(new WorkspaceRegistry({ rollHome }).list().find((entry) => entry.workspaceId === "ws-beta")?.lifecycle)
+      .toBe("active");
+    store.archive("ws-beta");
+    store.activate("ws-beta");
+    expect(store.list().find((entry) => entry.workspaceId === "ws-beta")?.lifecycle).toBe("active");
     rmSync(workspaceEventsPath(rollHome));
     expect(() => new WorkspaceRegistry({ rollHome }).list()).toThrowError(
       expect.objectContaining({ code: "invalid_registry" }),
@@ -252,6 +294,31 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
       oldRoot,
       newRoot,
     });
+  });
+
+  it("recovers an interrupted move exactly once and makes the retry idempotent", () => {
+    const rollHome = sandbox();
+    const oldRoot = workspace(join(rollHome, "roots", "old"), "ws-alpha");
+    const newRoot = workspace(join(rollHome, "roots", "new"), "ws-alpha");
+    let failCommit = false;
+    const store = new WorkspaceRegistry({
+      rollHome,
+      now: () => 100,
+      beforeRegistryRename: () => {
+        if (failCommit) throw new Error("planned move commit failure");
+      },
+    });
+    store.register({ workspaceId: "ws-alpha", root: oldRoot });
+    failCommit = true;
+    expect(() => store.move({ workspaceId: "ws-alpha", oldRoot, newRoot })).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+    expect(store.read().entries).toEqual([expect.objectContaining({ root: oldRoot })]);
+    expect(() => store.list()).toThrowError(expect.objectContaining({ code: "concurrent_write" }));
+
+    failCommit = false;
+    expect(store.move({ workspaceId: "ws-alpha", oldRoot, newRoot })).toMatchObject({ root: newRoot });
+    expect(store.readEvents().filter((event) => event.type === "workspace:path_updated")).toHaveLength(1);
   });
 
   it("keeps a missing old path visible as stale until an explicit repair", () => {
@@ -321,16 +388,20 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
     const alpha = workspace(join(rollHome, "roots", "alpha"), "ws-alpha");
     const beta = workspace(join(rollHome, "roots", "beta"), "ws-beta");
     const moduleUrl = new URL("../dist/workspace-registry.js", import.meta.url).href;
+    const start = join(rollHome, "start");
     const script = [
+      'import { existsSync, writeFileSync } from "node:fs";',
       `import { WorkspaceRegistry } from ${JSON.stringify(moduleUrl)};`,
-      "const [rollHome, workspaceId, root] = process.argv.slice(1);",
+      "const [rollHome, workspaceId, root, ready, start] = process.argv.slice(1);",
+      "writeFileSync(ready, workspaceId);",
+      "while (!existsSync(start)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);",
       "try { new WorkspaceRegistry({ rollHome }).register({ workspaceId, root });",
       "process.stdout.write(JSON.stringify({ ok: true, workspaceId })); }",
       "catch (error) { process.stdout.write(JSON.stringify({ ok: false, workspaceId, code: error.code })); }",
     ].join("\n");
-    const run = (workspaceId: string, root: string): Promise<{ ok: boolean; workspaceId: string; code?: string }> =>
+    const run = (workspaceId: string, root: string, ready: string): Promise<{ ok: boolean; workspaceId: string; code?: string }> =>
       new Promise((resolveResult, rejectResult) => {
-        const child = spawn(process.execPath, ["--input-type=module", "-e", script, rollHome, workspaceId, root], {
+        const child = spawn(process.execPath, ["--input-type=module", "-e", script, rollHome, workspaceId, root, ready, start], {
           stdio: ["ignore", "pipe", "pipe"],
         });
         let stdout = "";
@@ -344,7 +415,14 @@ describe("Workspace lifecycle, moves, and concurrent writers", () => {
         });
       });
 
-    const results = await Promise.all([run("ws-alpha", alpha), run("ws-beta", beta)]);
+    const alphaReady = join(rollHome, "alpha.ready");
+    const betaReady = join(rollHome, "beta.ready");
+    const pending = [run("ws-alpha", alpha, alphaReady), run("ws-beta", beta, betaReady)];
+    while (!existsSync(alphaReady) || !existsSync(betaReady)) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+    }
+    writeFileSync(start, "go");
+    const results = await Promise.all(pending);
     const succeeded = results.filter((result) => result.ok).map((result) => result.workspaceId).sort();
     const rejected = results.filter((result) => !result.ok);
     expect(succeeded.length).toBeGreaterThanOrEqual(1);

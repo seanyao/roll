@@ -40,6 +40,32 @@ function deadPid(): number {
 }
 
 describe("FIX-365 atomic inner-lock — concurrency", () => {
+  it("publishes owner metadata with the lock so a contender cannot steal the initialization window", () => {
+    const d = tmp();
+    const lock = join(d, "inner.lock");
+    let nested: ReturnType<typeof acquireLock> | undefined;
+
+    const first = acquireLock(lock, 1001, {
+      now: () => 1000,
+      pidAlive: () => true,
+      cycleId: "first",
+      beforePublish: () => {
+        nested = acquireLock(lock, 2002, {
+          now: () => 1000,
+          pidAlive: () => true,
+          cycleId: "second",
+        });
+      },
+    });
+
+    expect(nested).toBeDefined();
+    expect([first, nested].filter((result) => result?.acquired)).toHaveLength(1);
+    expect(readLockOwner(lock)).toMatchObject({
+      pid: nested?.acquired ? 2002 : 1001,
+      cycleId: nested?.acquired ? "second" : "first",
+    });
+  });
+
   it("two concurrent acquires on the SAME lock: exactly one acquires, the other yields to the live holder", () => {
     const d = tmp();
     const lock = join(d, "loop", "inner.lock");
@@ -147,6 +173,20 @@ describe("FIX-365 atomic inner-lock — conservative stale cleanup", () => {
     releaseLock(lock);
     expect(existsSync(lock)).toBe(false);
     releaseLock(lock); // no throw when already absent
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it("an old owner's token cannot release a successor that took over the lock", () => {
+    const d = tmp();
+    const lock = join(d, "inner.lock");
+    const first = acquireLock(lock, 1001, { now: () => 0, staleSec: 1, pidAlive: () => true });
+    const second = acquireLock(lock, 2002, { now: () => 2, staleSec: 1, pidAlive: () => true });
+    expect(first.acquired).toBe(true);
+    expect(second.acquired).toBe(true);
+
+    releaseLock(lock, first.ownerToken);
+    expect(readLockOwner(lock)?.pid).toBe(2002);
+    releaseLock(lock, second.ownerToken);
     expect(existsSync(lock)).toBe(false);
   });
 

@@ -9,7 +9,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { foldWorkspaceLifecycles, type WorkspaceLifecycleState } from "@roll/core";
+import {
+  foldWorkspaceLifecycles,
+  nodeEventStore,
+  type EventStore,
+  type WorkspaceLifecycleState,
+} from "@roll/core";
 import { WORKSPACE_EVENT_V1, type WorkspaceLifecycleEvent } from "@roll/spec";
 import { acquireLock, releaseLock } from "./process.js";
 
@@ -49,6 +54,8 @@ export interface WorkspaceRegistrySnapshot {
 export interface WorkspaceRegistryOptions {
   readonly rollHome: string;
   readonly now?: () => number;
+  readonly eventStore?: Pick<EventStore, "readText" | "appendLine">;
+  readonly beforeRegistryRename?: () => void;
 }
 
 export interface ListedWorkspace extends WorkspaceRegistryEntry, WorkspaceLifecycleState {}
@@ -165,6 +172,19 @@ export function workspaceEventsPath(rollHome: string): string {
   return join(rollHome, "workspace-events.ndjson");
 }
 
+export function workspaceRegistryTransactionPath(rollHome: string): string {
+  return join(rollHome, "workspaces.pending.json");
+}
+
+const WORKSPACE_REGISTRY_TRANSACTION_V1 = "roll.workspace-registry-transaction/v1" as const;
+
+interface WorkspaceRegistryTransaction {
+  readonly schema: typeof WORKSPACE_REGISTRY_TRANSACTION_V1;
+  readonly beforeRevision: number;
+  readonly next: WorkspaceRegistrySnapshot;
+  readonly event: WorkspaceLifecycleEvent;
+}
+
 function readManifestWorkspaceId(root: string): string {
   let text: string;
   try {
@@ -227,10 +247,12 @@ function entryIsCurrent(entry: WorkspaceRegistryEntry): boolean {
 
 export class WorkspaceRegistry {
   private readonly now: () => number;
+  private readonly eventStore: Pick<EventStore, "readText" | "appendLine">;
   private tempCounter = 0;
 
   constructor(private readonly options: WorkspaceRegistryOptions) {
     this.now = options.now ?? Date.now;
+    this.eventStore = options.eventStore ?? nodeEventStore;
   }
 
   read(): WorkspaceRegistrySnapshot {
@@ -248,9 +270,8 @@ export class WorkspaceRegistry {
   readEvents(): readonly WorkspaceLifecycleEvent[] {
     let text: string;
     try {
-      text = readFileSync(workspaceEventsPath(this.options.rollHome), "utf8");
+      text = this.eventStore.readText(workspaceEventsPath(this.options.rollHome));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       if (error instanceof WorkspaceRegistryError) throw error;
       throw new WorkspaceRegistryError("io_failure", "Workspace event stream could not be read", { cause: error });
     }
@@ -258,6 +279,9 @@ export class WorkspaceRegistry {
   }
 
   list(): readonly ListedWorkspace[] {
+    if (this.readPendingTransaction() !== undefined) {
+      throw new WorkspaceRegistryError("concurrent_write", "Workspace registry has an incomplete transaction pending recovery");
+    }
     const snapshot = this.read();
     const lifecycles = new Map(foldWorkspaceLifecycles(this.readEvents()).map((state) => [state.workspaceId, state]));
     return snapshot.entries.map((entry) => {
@@ -301,8 +325,13 @@ export class WorkspaceRegistry {
         throw new WorkspaceRegistryError("path_conflict", "Canonical Workspace path is already registered");
       }
       const entry: WorkspaceRegistryEntry = { workspaceId: input.workspaceId, root, canonicalRoot, pathState: "valid" };
-      this.appendEvent({ schema: WORKSPACE_EVENT_V1, type: "workspace:registered", workspaceId: input.workspaceId, ts: this.now() });
-      this.write({ ...snapshot, revision: snapshot.revision + 1, entries: [...snapshot.entries, entry] });
+      const next = { ...snapshot, revision: snapshot.revision + 1, entries: [...snapshot.entries, entry] };
+      this.commitTransaction(next, {
+        schema: WORKSPACE_EVENT_V1,
+        type: "workspace:registered",
+        workspaceId: input.workspaceId,
+        ts: this.now(),
+      });
       return entry;
     });
   }
@@ -340,7 +369,7 @@ export class WorkspaceRegistry {
   }
 
   private updatePath(input: WorkspaceMoveInput, mode: "move" | "repair"): WorkspaceRegistryEntry {
-    return this.withLock(() => {
+    return this.withLock((recovered) => {
       if (!isAbsolute(input.oldRoot) || !isAbsolute(input.newRoot)) {
         throw new WorkspaceRegistryError("invalid_path", "Workspace move paths must be absolute");
       }
@@ -353,6 +382,13 @@ export class WorkspaceRegistry {
         throw new WorkspaceRegistryError("not_found", `Workspace ${input.workspaceId} is not registered`);
       }
       if (existing.root !== oldRoot) {
+        if (
+          recovered?.event.type === "workspace:path_updated" &&
+          recovered.event.workspaceId === input.workspaceId &&
+          recovered.event.oldRoot === oldRoot &&
+          recovered.event.newRoot === newRoot &&
+          existing.root === newRoot
+        ) return existing;
         throw new WorkspaceRegistryError("identity_mismatch", "Explicit old path does not match the registry entry");
       }
 
@@ -397,7 +433,8 @@ export class WorkspaceRegistry {
         pathState: "valid",
       };
       const entries = snapshot.entries.map((entry, entryIndex) => entryIndex === index ? moved : entry);
-      this.appendEvent({
+      const next = { ...snapshot, revision: snapshot.revision + 1, entries };
+      this.commitTransaction(next, {
         schema: WORKSPACE_EVENT_V1,
         type: "workspace:path_updated",
         workspaceId: input.workspaceId,
@@ -405,17 +442,20 @@ export class WorkspaceRegistry {
         oldRoot,
         newRoot,
       });
-      this.write({ ...snapshot, revision: snapshot.revision + 1, entries });
       return moved;
     });
   }
 
   private write(snapshot: WorkspaceRegistrySnapshot): void {
-    const path = workspaceRegistryPath(this.options.rollHome);
+    this.writeAtomic(workspaceRegistryPath(this.options.rollHome), serializeWorkspaceRegistry(snapshot), this.options.beforeRegistryRename);
+  }
+
+  private writeAtomic(path: string, text: string, beforeRename?: () => void): void {
     mkdirSync(dirname(path), { recursive: true });
     const temp = `${path}.tmp.${process.pid}.${this.tempCounter++}`;
     try {
-      writeFileSync(temp, serializeWorkspaceRegistry(snapshot), "utf8");
+      writeFileSync(temp, text, "utf8");
+      beforeRename?.();
       renameSync(temp, path);
     } catch (error) {
       throw new WorkspaceRegistryError("io_failure", "Workspace registry atomic write failed", { cause: error });
@@ -427,11 +467,72 @@ export class WorkspaceRegistry {
   private appendEvent(event: WorkspaceLifecycleEvent): void {
     const path = workspaceEventsPath(this.options.rollHome);
     try {
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
+      this.eventStore.appendLine(path, `${JSON.stringify(event)}\n`);
     } catch (error) {
       throw new WorkspaceRegistryError("io_failure", "Workspace event append failed", { cause: error });
     }
+  }
+
+  private commitTransaction(next: WorkspaceRegistrySnapshot, event: WorkspaceLifecycleEvent): void {
+    const transaction: WorkspaceRegistryTransaction = {
+      schema: WORKSPACE_REGISTRY_TRANSACTION_V1,
+      beforeRevision: next.revision - 1,
+      next,
+      event,
+    };
+    this.writeAtomic(
+      workspaceRegistryTransactionPath(this.options.rollHome),
+      `${JSON.stringify(transaction, null, 2)}\n`,
+    );
+    this.finishTransaction(transaction);
+  }
+
+  private finishTransaction(transaction: WorkspaceRegistryTransaction): void {
+    const current = this.read();
+    if (current.revision === transaction.beforeRevision) {
+      this.write(transaction.next);
+    } else if (serializeWorkspaceRegistry(current) !== serializeWorkspaceRegistry(transaction.next)) {
+      throw new WorkspaceRegistryError("invalid_registry", "Pending Workspace transaction conflicts with registry revision");
+    }
+    const eventText = JSON.stringify(transaction.event);
+    if (!this.readEvents().some((event) => JSON.stringify(event) === eventText)) {
+      this.appendEvent(transaction.event);
+    }
+    try {
+      rmSync(workspaceRegistryTransactionPath(this.options.rollHome), { force: true });
+    } catch (error) {
+      throw new WorkspaceRegistryError("io_failure", "Workspace transaction journal could not be cleared", { cause: error });
+    }
+  }
+
+  private readPendingTransaction(): WorkspaceRegistryTransaction | undefined {
+    let raw: string;
+    try {
+      raw = readFileSync(workspaceRegistryTransactionPath(this.options.rollHome), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw new WorkspaceRegistryError("io_failure", "Workspace transaction journal could not be read", { cause: error });
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new WorkspaceRegistryError("invalid_registry", "Workspace transaction journal is invalid JSON");
+    }
+    if (!isRecord(value) || !exactKeys(value, ["schema", "beforeRevision", "next", "event"])) {
+      throw new WorkspaceRegistryError("invalid_registry", "Workspace transaction journal has an invalid shape");
+    }
+    if (value["schema"] !== WORKSPACE_REGISTRY_TRANSACTION_V1 || !Number.isSafeInteger(value["beforeRevision"])) {
+      throw new WorkspaceRegistryError("invalid_registry", "Workspace transaction journal contains invalid values");
+    }
+    const next = parseWorkspaceRegistry(`${JSON.stringify(value["next"])}\n`);
+    const event = this.parseEvent(JSON.stringify(value["event"]));
+    return {
+      schema: WORKSPACE_REGISTRY_TRANSACTION_V1,
+      beforeRevision: value["beforeRevision"] as number,
+      next,
+      event,
+    };
   }
 
   private parseEvent(line: string): WorkspaceLifecycleEvent {
@@ -485,16 +586,18 @@ export class WorkspaceRegistry {
     };
   }
 
-  private withLock<T>(run: () => T): T {
+  private withLock<T>(run: (recovered?: WorkspaceRegistryTransaction) => T): T {
     const lock = join(this.options.rollHome, "locks", "workspace-registry.lock");
     const acquired = acquireLock(lock, process.pid, { cycleId: "workspace-registry" });
     if (!acquired.acquired) {
       throw new WorkspaceRegistryError("concurrent_write", "Workspace registry is locked by another writer");
     }
     try {
-      return run();
+      const pending = this.readPendingTransaction();
+      if (pending !== undefined) this.finishTransaction(pending);
+      return run(pending);
     } finally {
-      releaseLock(lock);
+      releaseLock(lock, acquired.ownerToken);
     }
   }
 }

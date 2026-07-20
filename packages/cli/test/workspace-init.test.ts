@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { repositoryIdFromRemote } from "@roll/spec";
 import { dispatch } from "../src/bridge.js";
@@ -18,11 +18,7 @@ function git(cwd: string, args: readonly string[]): string {
   return execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-cli-"));
-  roots.push(home);
-  const source = join(home, "source");
-  const remote = join(home, "product.git");
+function materializeRemote(source: string, remote: string): void {
   mkdirSync(source);
   git(source, ["init", "-q", "-b", "main"]);
   git(source, ["config", "user.email", "roll@example.test"]);
@@ -30,7 +26,15 @@ function fixture() {
   writeFileSync(join(source, "README.md"), "fixture\n", "utf8");
   git(source, ["add", "README.md"]);
   git(source, ["commit", "-q", "-m", "fixture"]);
-  git(home, ["clone", "-q", "--bare", source, remote]);
+  git(dirname(remote), ["clone", "-q", "--bare", source, remote]);
+}
+
+function fixture(options: { readonly createRemote?: boolean } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-cli-"));
+  roots.push(home);
+  const source = join(home, "source");
+  const remote = join(home, "product.git");
+  if (options.createRemote !== false) materializeRemote(source, remote);
   const rollHome = join(home, ".roll");
   const workspace = join(home, "workspace");
   const config = join(home, "workspace-init.yaml");
@@ -47,7 +51,7 @@ repositories:
     source: ${remoteUrl}
     integration_branch: main
 `, "utf8");
-  return { home, rollHome, workspace, config, remote, remoteUrl, repoId: repoId.value };
+  return { home, rollHome, workspace, config, source, remote, remoteUrl, repoId: repoId.value };
 }
 
 function expectedSteps(f: ReturnType<typeof fixture>, action: "created" | "reused"): readonly InitStep[] {
@@ -167,6 +171,52 @@ describe("US-WS-006 roll workspace init", () => {
     expect(invalid.status).toBe(1);
     expect(JSON.parse(invalid.stderr)).toMatchObject({ error: { code: "invalid_arguments" } });
     expect(tree(f.home)).toEqual(before);
+  });
+
+  it("reports a partial cache failure, previews repair without writes, and converges through the same CLI contract", async () => {
+    const f = fixture({ createRemote: false });
+    const failed = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    expect(failed.status).toBe(1);
+    expect(JSON.parse(failed.stderr)).toMatchObject({
+      schema: "roll.workspace-init-error/v1",
+      error: { code: "apply_failed" },
+    });
+    expect(existsSync(f.workspace)).toBe(false);
+    expect(existsSync(join(f.rollHome, "workspaces.json"))).toBe(false);
+    const journalPath = join(f.rollHome, "workspace-init", "ws-demo.pending.json");
+    expect(JSON.parse(readFileSync(journalPath, "utf8"))).toMatchObject({
+      schema: "roll.workspace-init-journal/v1",
+      workspaceId: "ws-demo",
+      status: "repair_required",
+    });
+
+    const beforeCheck = tree(f.home);
+    const check = await run(["workspace", "init", "ws-demo", "--config", f.config, "--check", "--json"], f);
+    expect(check.status, check.stderr).toBe(0);
+    const repairPlan = JSON.parse(check.stdout) as InitResult;
+    expect(repairPlan).toMatchObject({ mode: "check", outcome: "repaired", workspaceId: "ws-demo" });
+    expect(repairPlan.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "journal", action: "repaired" }),
+      expect.objectContaining({ kind: "cache", target: f.repoId, action: "repaired" }),
+      expect.objectContaining({ kind: "registry", target: "ws-demo", action: "created" }),
+    ]));
+    expect(tree(f.home)).toEqual(beforeCheck);
+
+    materializeRemote(f.source, f.remote);
+    const repaired = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    expect(repaired.status, repaired.stderr).toBe(0);
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ mode: "apply", outcome: "repaired" });
+    expect(existsSync(join(f.workspace, "workspace.yaml"))).toBe(true);
+    expect(existsSync(join(f.rollHome, "workspaces.json"))).toBe(true);
+    expect(existsSync(journalPath)).toBe(false);
+    expect(JSON.parse(readFileSync(join(f.rollHome, "repos", `${f.repoId}.json`), "utf8"))).toMatchObject({
+      repoId: f.repoId,
+      cachePath: join(f.rollHome, "repos", `${f.repoId}.git`),
+    });
+
+    const reused = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    expect(reused.status, reused.stderr).toBe(0);
+    expect(JSON.parse(reused.stdout)).toMatchObject({ mode: "apply", outcome: "reused" });
   });
 
   it("exposes init in locale-specific Workspace help", async () => {

@@ -3,6 +3,7 @@ export * from "./workspace-registry.js";
 export * from "./workspace-filesystem.js";
 export * from "./requirement-source-store.js";
 export * from "./repository-cache.js";
+export * from "./issue-worktrees.js";
 export * from "./git.js";
 export * from "./github.js";
 export * from "./pr-provider.js";

@@ -94,6 +94,7 @@ import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 import { worktreeAuditCommand } from "./worktree-audit.js";
 import { worktreeCleanupCommand } from "./worktree-cleanup.js";
+import { workspaceCommand, workspaceUsage } from "./workspace.js";
 
 let registered = false;
 
@@ -157,6 +158,7 @@ export function registerAll(): void {
     if (args[0] === "pulse") return pulseCommand(args.slice(1));
     return statusCommand(args);
   }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。" });
+  registerPorted("workspace", workspaceCommand, { help: workspaceUsage });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as

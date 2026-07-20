@@ -1,0 +1,108 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific help without adjacent bilingual copy 1`] = `
+{
+  "en": "Usage: roll workspace <list|show|register|activate|pause|archive> [options]
+  \`list [--json] [--all]\`
+  \`show <id|path> [--json]\`
+  \`register <id> <path> [--json]\`
+  \`activate|pause|archive <id|path> [--json]\`
+  Lifecycle mutations require one explicit target; --all is read-only.
+",
+  "zh": "用法：roll workspace <list|show|register|activate|pause|archive> [选项]
+  \`list [--json] [--all]\`
+  \`show <ID|路径> [--json]\`
+  \`register <ID> <路径> [--json]\`
+  \`activate|pause|archive <ID|路径> [--json]\`
+  生命周期变更必须显式指定一个目标；--all 仅限只读。
+",
+}
+`;
+
+exports[`US-WS-005 roll workspace lifecycle surface > freezes stable list/show JSON contracts with honest runtime health 1`] = `
+{
+  "list": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "{
+  "schema": "roll.workspace-list/v1",
+  "workspaces": [
+    {
+      "workspaceId": "ws-alpha",
+      "path": "<WS_1>",
+      "canonicalPath": "<WS_1>",
+      "lifecycle": "active",
+      "manifest": {
+        "workspaceId": "ws-alpha",
+        "consistency": "consistent"
+      },
+      "runtimeHealth": {
+        "status": "unknown",
+        "reason": "scheduler_not_available"
+      }
+    },
+    {
+      "workspaceId": "ws-beta",
+      "path": "<WS_2>",
+      "canonicalPath": "<WS_2>",
+      "lifecycle": "active",
+      "manifest": {
+        "workspaceId": "ws-beta",
+        "consistency": "consistent"
+      },
+      "runtimeHealth": {
+        "status": "unknown",
+        "reason": "scheduler_not_available"
+      }
+    }
+  ]
+}
+",
+  },
+  "show": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "{
+  "schema": "roll.workspace-view/v1",
+  "workspace": {
+    "workspaceId": "ws-alpha",
+    "path": "<WS_1>",
+    "canonicalPath": "<WS_1>",
+    "lifecycle": "active",
+    "manifest": {
+      "workspaceId": "ws-alpha",
+      "consistency": "consistent"
+    },
+    "runtimeHealth": {
+      "status": "unknown",
+      "reason": "scheduler_not_available"
+    }
+  }
+}
+",
+  },
+}
+`;
+
+exports[`US-WS-005 roll workspace lifecycle surface > freezes two-active human list output in one locale at a time 1`] = `
+{
+  "en": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "Workspaces (2)
+ID	Lifecycle	Runtime	Consistency	Path
+ws-alpha	active	unknown	consistent	<WS_1>
+ws-beta	active	unknown	consistent	<WS_2>
+",
+  },
+  "zh": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "工作区（2）
+ID	生命周期	运行状态	一致性	路径
+ws-alpha	活跃	未知	一致	<WS_1>
+ws-beta	活跃	未知	一致	<WS_2>
+",
+  },
+}
+`;

@@ -978,6 +978,47 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(resolved.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
   });
 
+  it("fails loudly when a canonical declared requirement directory's source.yaml is missing, rather than silently omitting the Story from lookup", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    rmSync(join(f.workspace, "requirements", "jira", "req-c78ccf14ea21", "source.yaml"));
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("fails loudly when a canonical declared requirement directory's source.yaml is corrupt JSON, rather than silently omitting the Story from lookup", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    writeFileSync(join(f.workspace, "requirements", "jira", "req-c78ccf14ea21", "source.yaml"), "{ not valid json", "utf8");
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("fails loudly when a canonical declared requirement directory's source.yaml fails schema parsing, rather than silently omitting the Story from lookup", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    writeFileSync(join(f.workspace, "requirements", "jira", "req-c78ccf14ea21", "source.yaml"), `${JSON.stringify({ schema: "roll.requirement-source/v2" }, null, 2)}\n`, "utf8");
+
+    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
+      expect.objectContaining({ code: "io_failure" }),
+    );
+  });
+
+  it("still silently skips a misc, non-canonical or undeclared directory even when it has no valid source.yaml", () => {
+    const f = fixture();
+    captureRequirementSource(request(f));
+    const miscDir = join(f.workspace, "requirements", "jira", "not-a-canonical-id");
+    mkdirSync(miscDir, { recursive: true });
+    writeFileSync(join(miscDir, "notes.txt"), "scratch notes, not a requirement archive\n", "utf8");
+
+    const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
+    expect(resolved.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
+  });
+
   it("deduplicates when the same requirementId is legitimately reachable more than once", () => {
     const f = fixture();
     captureRequirementSource(request(f));

@@ -683,6 +683,17 @@ export function requirementCaptureLockPath(workspaceRoot: string, requirementId:
   return join(resolve(workspaceRoot), "runtime", "locks", "requirements", `${requirementId}.lock`);
 }
 
+function declaredCanonicalDirs(
+  requirements: readonly { readonly provider: string; readonly ref: string }[],
+): ReadonlySet<string> {
+  const dirs = new Set<string>();
+  for (const requirement of requirements) {
+    const normalized = normalizeRequirementSourceReference(requirement.provider, requirement.ref);
+    if (normalized.ok) dirs.add(`${normalized.value.provider}/${normalized.value.requirementId}`);
+  }
+  return dirs;
+}
+
 function readAllRequirementManifests(
   workspaceRoot: string,
   requirements: readonly { readonly provider: string; readonly ref: string }[],
@@ -696,6 +707,7 @@ function readAllRequirementManifests(
     return [];
   }
   if (providerStat.isSymbolicLink() || !providerStat.isDirectory()) return [];
+  const canonicalDirs = declaredCanonicalDirs(requirements);
   const seenRequirementIds = new Set<string>();
   const manifests: RequirementSourceManifest[] = [];
   for (const providerEntry of readdirSync(requirementsRoot, { withFileTypes: true })) {
@@ -706,13 +718,18 @@ function readAllRequirementManifests(
       if (!requirementEntry.isDirectory()) continue;
       const requirementPath = join(providerPath, requirementEntry.name);
       if (lstatSync(requirementPath).isSymbolicLink()) continue;
+      const isDeclaredCanonical = canonicalDirs.has(`${providerEntry.name}/${requirementEntry.name}`);
       let manifest: RequirementSourceManifest | undefined;
       try {
         manifest = readExisting(join(requirementPath, "source.yaml"));
-      } catch {
+      } catch (error) {
+        if (isDeclaredCanonical) throw error;
         continue;
       }
-      if (manifest === undefined) continue;
+      if (manifest === undefined) {
+        if (isDeclaredCanonical) fail("io_failure", "Declared Requirement source.yaml is missing from its canonical directory");
+        continue;
+      }
       if (manifest.provider !== providerEntry.name) continue;
       if (manifest.requirementId !== requirementEntry.name) continue;
       if (!declaredSource(requirements, manifest.provider, manifest.ref)) continue;

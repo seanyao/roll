@@ -186,7 +186,9 @@ function safeRelativePath(value: string): boolean {
   if (value === "" || value !== value.trim() || value.startsWith("/") || value.startsWith("~") || value.includes("\\") || /^[A-Za-z]:/u.test(value)) {
     return false;
   }
-  return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+  const segments = value.split("/");
+  if (segments.length > PROJECTION_MAX_DEPTH) return false;
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
 function contained(root: string, target: string): boolean {

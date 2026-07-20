@@ -221,6 +221,18 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
+  it("rejects a context input path deeper than the shared depth cap before writing any immutable revision, journal or projection", () => {
+    const f = fixture();
+    const segments = Array.from({ length: 40 }, (_, index) => `d${index}`);
+    const deepRelative = [...segments, "deep.md"].join("/");
+    write(join(f.contextRoot, deepRelative), "too deep\n");
+
+    expect(() => captureRequirementSource(request(f, { contextPaths: [deepRelative] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
   it("accepts exactly MAX_REQUIREMENT_CONTEXT_FILES files and exactly MAX_REQUIREMENT_CONTEXT_BYTES total bytes", () => {
     const f = fixture();
     const perFileBytes = Math.floor(MAX_REQUIREMENT_CONTEXT_BYTES / MAX_REQUIREMENT_CONTEXT_FILES);

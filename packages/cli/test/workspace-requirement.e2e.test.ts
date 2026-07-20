@@ -87,6 +87,12 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
     const second = run(args);
     expect(second.status, second.stderr).toBe(0);
     expect(JSON.parse(second.stdout)).toMatchObject({ outcome: "reused" });
+    const third = run(args);
+    expect(third.status, third.stderr).toBe(0);
+    const secondResult = JSON.parse(second.stdout) as Record<string, unknown>;
+    const thirdResult = JSON.parse(third.stdout) as Record<string, unknown>;
+    expect(thirdResult).toEqual(secondResult);
+    expect(thirdResult).toMatchObject({ outcome: "reused" });
     const requirementPath = firstResult["path"];
     expect(typeof requirementPath).toBe("string");
     if (typeof requirementPath !== "string") return;
@@ -95,7 +101,8 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
 
     process.stdout.write(`US-WS-007 built CLI transcript\n${JSON.stringify({
       first: { ...firstResult, path: "<HOME>/workspace/requirements/jira/req-c78ccf14ea21" },
-      second: { ...JSON.parse(second.stdout), path: "<HOME>/workspace/requirements/jira/req-c78ccf14ea21" },
+      second: { ...secondResult, path: "<HOME>/workspace/requirements/jira/req-c78ccf14ea21" },
+      third: { ...thirdResult, path: "<HOME>/workspace/requirements/jira/req-c78ccf14ea21" },
     }, null, 2)}\n`);
   });
 });

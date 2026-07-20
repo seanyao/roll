@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { parseRequirementSourceManifest, requirementSourceV1Schema } from "@roll/spec";
 import {
   planRequirementCapture,
+  normalizeRequirementSourceReference,
+  requirementRevisionKey,
   renderRequirementAttestProjection,
   resolveRequirementSourcesForStory,
   type RequirementCaptureFacts,
@@ -27,12 +29,27 @@ function facts(overrides: Partial<RequirementCaptureFacts> = {}): RequirementCap
 
 describe("US-WS-007 RequirementSource planning", () => {
   it.each([
-    ["jira", "jira", "req-c78ccf14ea21"],
-    ["github-issue", "github_issue", "req-3037c032c113"],
-    ["local-file", "local_file", "req-b6476e7911bb"],
-    ["user-input", "user_input", "req-db77abe09a44"],
-  ] as const)("normalizes the %s provider into the closed v1 contract", (provider, expected, requirementId) => {
-    const input = facts({ provider });
+    ["JIRA", "sot-15499", { provider: "jira", ref: "SOT-15499", requirementId: "req-c78ccf14ea21" }],
+    ["github-issue", "Owner/Repo#12", { provider: "github_issue", ref: "owner/repo#12", requirementId: "req-1aed8113153b" }],
+    ["local-file", "PRD/Brief.md", { provider: "local_file", ref: "PRD/Brief.md", requirementId: "req-bcc74925c520" }],
+    ["user-input", "owner-brief", { provider: "user_input", ref: "owner-brief", requirementId: "req-8803ac05d541" }],
+  ] as const)("shares provider/ref normalization for %s references", (provider, ref, expected) => {
+    expect(normalizeRequirementSourceReference(provider, ref)).toMatchObject({ ok: true, value: expected });
+  });
+
+  it("derives revision directories only from a normalized digest", () => {
+    expect(requirementRevisionKey("release-42")).toBe(`rev-${"717e81e2c69e106ad7cb5c8c712e0921cb04c25d5c06fc31c805d7538fe3fc52"}`);
+    expect(requirementRevisionKey("e\u0301")).toBe(requirementRevisionKey("é"));
+    expect(requirementRevisionKey("../escape")).toMatch(/^rev-[0-9a-f]{64}$/u);
+  });
+
+  it.each([
+    ["jira", "SOT-15499", "jira", "SOT-15499", "req-c78ccf14ea21"],
+    ["github-issue", "Owner/Repo#12", "github_issue", "owner/repo#12", "req-1aed8113153b"],
+    ["local-file", "PRD/Brief.md", "local_file", "PRD/Brief.md", "req-bcc74925c520"],
+    ["user-input", "owner-brief", "user_input", "owner-brief", "req-8803ac05d541"],
+  ] as const)("normalizes the %s provider into the closed v1 contract", (provider, ref, expected, normalizedRef, requirementId) => {
+    const input = facts({ provider, ref });
     const before = structuredClone(input);
     const result = planRequirementCapture(input);
     expect(result).toMatchObject({
@@ -44,7 +61,7 @@ describe("US-WS-007 RequirementSource planning", () => {
           schema: "roll.requirement-source/v1",
           requirementId,
           provider: expected,
-          ref: "SOT-15499",
+          ref: normalizedRef,
           revision: "42",
           stories: ["US-WS-007", "US-WS-008"],
           requirement: { bytes: 18, sha256: digest("a") },

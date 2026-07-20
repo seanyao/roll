@@ -50,6 +50,16 @@ export type RequirementCaptureResult =
   | { readonly ok: true; readonly value: RequirementCapturePlan }
   | { readonly ok: false; readonly errors: readonly RequirementCaptureError[] };
 
+export interface NormalizedRequirementSourceReference {
+  readonly provider: RequirementProvider;
+  readonly ref: string;
+  readonly requirementId: string;
+}
+
+export type RequirementSourceReferenceResult =
+  | { readonly ok: true; readonly value: NormalizedRequirementSourceReference }
+  | { readonly ok: false; readonly errors: readonly RequirementCaptureError[] };
+
 const PROVIDERS: Readonly<Record<string, RequirementProvider>> = {
   jira: "jira",
   github: "github_issue",
@@ -97,6 +107,40 @@ function compareText(left: string, right: string): number {
 function requirementId(provider: RequirementProvider, ref: string): string {
   const digest = createHash("sha256").update(`${provider}\0${ref}`).digest("hex").slice(0, 12);
   return `req-${digest}`;
+}
+
+function normalizedReference(provider: RequirementProvider, value: string): string {
+  const normalized = value.normalize("NFC").trim();
+  if (provider === "jira") return normalized.toUpperCase();
+  if (provider === "github_issue") return normalized.toLowerCase();
+  return normalized;
+}
+
+export function normalizeRequirementSourceReference(
+  providerInput: string,
+  refInput: string,
+): RequirementSourceReferenceResult {
+  const errors: RequirementCaptureError[] = [];
+  const provider = normalizedProvider(providerInput);
+  if (provider === undefined) {
+    errors.push({ code: "invalid_provider", path: "provider", message: "Requirement source provider is unsupported" });
+  }
+  if (!isSafeOpaqueValue(refInput) || isCredentialShaped(refInput)) {
+    errors.push({ code: "unsafe_reference", path: "ref", message: "Requirement source reference is unsafe" });
+  }
+  if (provider === undefined || errors.length > 0) return { ok: false, errors };
+  const ref = normalizedReference(provider, refInput);
+  if (provider === "jira" && !/^[A-Z][A-Z0-9]+-[0-9]+$/u.test(ref)) {
+    return { ok: false, errors: [{ code: "unsafe_reference", path: "ref", message: "Jira source reference is invalid" }] };
+  }
+  if (provider === "github_issue" && !/^[^/#\s]+\/[^/#\s]+#[0-9]+$/u.test(ref)) {
+    return { ok: false, errors: [{ code: "unsafe_reference", path: "ref", message: "GitHub Issue source reference is invalid" }] };
+  }
+  return { ok: true, value: { provider, ref, requirementId: requirementId(provider, ref) } };
+}
+
+export function requirementRevisionKey(revision: string): string {
+  return `rev-${createHash("sha256").update(revision.normalize("NFC")).digest("hex")}`;
 }
 
 function normalizeContext(
@@ -172,13 +216,8 @@ export function planRequirementCapture(
   existing?: RequirementSourceManifest,
 ): RequirementCaptureResult {
   const errors: RequirementCaptureError[] = [];
-  const provider = normalizedProvider(facts.provider);
-  if (provider === undefined) {
-    errors.push({ code: "invalid_provider", path: "provider", message: "Requirement source provider is unsupported" });
-  }
-  if (!isSafeOpaqueValue(facts.ref) || isCredentialShaped(facts.ref)) {
-    errors.push({ code: "unsafe_reference", path: "ref", message: "Requirement source reference is unsafe" });
-  }
+  const source = normalizeRequirementSourceReference(facts.provider, facts.ref);
+  if (!source.ok) errors.push(...source.errors);
   if (!isSafeOpaqueValue(facts.revision) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(facts.revision)) {
     errors.push({ code: "invalid_value", path: "revision", message: "Requirement source revision is invalid" });
   }
@@ -193,13 +232,13 @@ export function planRequirementCapture(
   }
   const context = normalizeContext(facts.context, errors);
   const stories = normalizeStories(facts.stories, errors);
-  if (provider === undefined || errors.length > 0) return { ok: false, errors };
+  if (!source.ok || errors.length > 0) return { ok: false, errors };
 
   const manifest: RequirementSourceManifest = {
     schema: REQUIREMENT_SOURCE_V1,
-    requirementId: requirementId(provider, facts.ref),
-    provider,
-    ref: facts.ref,
+    requirementId: source.value.requirementId,
+    provider: source.value.provider,
+    ref: source.value.ref,
     revision: facts.revision,
     capturedAt: facts.capturedAt,
     previousRevisions: [],

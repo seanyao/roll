@@ -62,6 +62,32 @@ export interface WorkspaceManifestExpectations {
   workspaceId?: string;
 }
 
+export type RepositoryAccess = "read" | "write";
+export type NoChangePolicy = "changes_required" | "no_change_allowed";
+
+export interface IssueRepositoryTarget {
+  repoId: string;
+  alias: string;
+  access: RepositoryAccess;
+  requiredDelivery: boolean;
+  noChangePolicy?: NoChangePolicy;
+  pathScope?: readonly string[];
+  dependsOnRepo?: string;
+}
+
+export interface IssueManifest {
+  schema: typeof ISSUE_MANIFEST_V1;
+  workspaceId: string;
+  storyId: string;
+  requirements: readonly RequirementSourceReference[];
+  repositories: readonly IssueRepositoryTarget[];
+}
+
+export interface IssueManifestExpectations {
+  workspaceId?: string;
+  storyId?: string;
+}
+
 const stringSchema: JsonSchema = { type: "string", minLength: 1 };
 const requirementSourceSchema = objectSchema(
   { provider: stringSchema, ref: stringSchema },
@@ -106,13 +132,38 @@ export const workspaceManifestV1Schema: JsonSchema = objectSchema(
   ["schema", "workspaceId", "displayName", "requirements", "repositories"],
 );
 
+const issueTargetCommonProperties = {
+  repoId: stringSchema,
+  alias: stringSchema,
+  requiredDelivery: { type: "boolean" },
+  pathScope: { type: "array", items: stringSchema },
+  dependsOnRepo: stringSchema,
+} satisfies Readonly<Record<string, JsonSchema>>;
+
+const issueRepositoryTargetSchema: JsonSchema = {
+  oneOf: [
+    objectSchema(
+      { ...issueTargetCommonProperties, access: { const: "read" }, requiredDelivery: { const: false } },
+      ["repoId", "alias", "access", "requiredDelivery"],
+    ),
+    objectSchema(
+      {
+        ...issueTargetCommonProperties,
+        access: { const: "write" },
+        noChangePolicy: { type: "string", enum: ["changes_required", "no_change_allowed"] },
+      },
+      ["repoId", "alias", "access", "requiredDelivery", "noChangePolicy"],
+    ),
+  ],
+};
+
 export const issueManifestV1Schema: JsonSchema = objectSchema(
   {
     schema: { const: ISSUE_MANIFEST_V1 },
     workspaceId: stringSchema,
     storyId: stringSchema,
-    requirements: { type: "array", items: true },
-    repositories: { type: "array", items: true },
+    requirements: { type: "array", items: requirementSourceSchema },
+    repositories: { type: "array", items: issueRepositoryTargetSchema, minItems: 1 },
   },
   ["schema", "workspaceId", "storyId", "requirements", "repositories"],
 );
@@ -470,5 +521,164 @@ export function parseWorkspaceManifest(
       requirements,
       repositories,
     },
+  };
+}
+
+function parseBoolean(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): boolean | undefined {
+  const candidate = value[key];
+  if (typeof candidate !== "boolean") {
+    errors.push({ code: "invalid_type", path: `${path}${key}`, message: "field must be a boolean" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function isSafeRelativeTargetPath(value: string): boolean {
+  if (
+    value === "" || value.startsWith("/") || value.startsWith("~") || value.includes("\\") ||
+    /^[A-Za-z]:\//u.test(value)
+  ) return false;
+  const segments = value.split("/");
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+function parseIssueTarget(value: unknown, index: number, errors: ContractError[]): IssueRepositoryTarget | undefined {
+  const path = `repositories[${index}]`;
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path, message: "repository target must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(
+    value,
+    ["repoId", "alias", "access", "requiredDelivery", "noChangePolicy", "pathScope", "dependsOnRepo"],
+    path,
+  ));
+  const repoId = requiredString(value, "repoId", `${path}.`, errors);
+  const alias = requiredString(value, "alias", `${path}.`, errors);
+  const requiredDelivery = parseBoolean(value, "requiredDelivery", `${path}.`, errors);
+  const access = value["access"];
+  if (access !== "read" && access !== "write") {
+    errors.push({ code: "invalid_value", path: `${path}.access`, message: "access must be read or write" });
+  }
+
+  const noChangePolicy = value["noChangePolicy"];
+  if (access === "write" && noChangePolicy !== "changes_required" && noChangePolicy !== "no_change_allowed") {
+    errors.push({ code: "invalid_value", path: `${path}.noChangePolicy`, message: "write target requires an explicit no-change policy" });
+  }
+  if (access === "read" && noChangePolicy !== undefined) {
+    errors.push({ code: "invalid_value", path: `${path}.noChangePolicy`, message: "read target must not declare a no-change policy" });
+  }
+  if (access === "read" && requiredDelivery === true) {
+    errors.push({ code: "invalid_value", path: `${path}.requiredDelivery`, message: "read target cannot require delivery" });
+  }
+
+  const rawPathScope = value["pathScope"];
+  let pathScope: readonly string[] | undefined;
+  if (rawPathScope !== undefined) {
+    pathScope = parseStringArray(rawPathScope, `${path}.pathScope`, errors);
+    if (pathScope !== undefined && pathScope.some((entry) => !isSafeRelativeTargetPath(entry))) {
+      errors.push({ code: "invalid_value", path: `${path}.pathScope`, message: "path scope must contain safe relative paths" });
+    }
+  }
+  const dependsOnRepo = optionalString(value, "dependsOnRepo", `${path}.`, errors);
+  if (repoId !== undefined && !/^repo-[0-9a-f]{12}$/u.test(repoId)) {
+    errors.push({ code: "invalid_value", path: `${path}.repoId`, message: "repository target has an invalid repoId" });
+  }
+  if (alias !== undefined && !isSafeAlias(alias)) {
+    errors.push({ code: "invalid_value", path: `${path}.alias`, message: "repository target has an invalid alias" });
+  }
+  if (
+    repoId === undefined || alias === undefined || requiredDelivery === undefined ||
+    (access !== "read" && access !== "write")
+  ) {
+    return undefined;
+  }
+  return {
+    repoId,
+    alias,
+    access,
+    requiredDelivery,
+    ...(access === "write" && (noChangePolicy === "changes_required" || noChangePolicy === "no_change_allowed")
+      ? { noChangePolicy }
+      : {}),
+    ...(pathScope !== undefined ? { pathScope } : {}),
+    ...(dependsOnRepo !== undefined ? { dependsOnRepo } : {}),
+  };
+}
+
+function duplicateTargetErrors(targets: readonly IssueRepositoryTarget[]): ContractError[] {
+  const errors: ContractError[] = [];
+  const aliases = new Set<string>();
+  const repoIds = new Set<string>();
+  for (const target of targets) {
+    if (aliases.has(target.alias)) {
+      errors.push({ code: "duplicate_identity", path: "repositories.alias", message: "duplicate repository target alias" });
+    }
+    if (repoIds.has(target.repoId)) {
+      errors.push({ code: "duplicate_identity", path: "repositories.repoId", message: "duplicate repository target repoId" });
+    }
+    aliases.add(target.alias);
+    repoIds.add(target.repoId);
+  }
+  return errors;
+}
+
+export function parseIssueManifest(
+  value: unknown,
+  expectations: IssueManifestExpectations = {},
+): ContractResult<IssueManifest> {
+  if (!isRecord(value)) return fail("invalid_type", "issue", "Issue manifest must be an object");
+  const errors = unknownFieldErrors(
+    value,
+    ["schema", "workspaceId", "storyId", "requirements", "repositories"],
+    "",
+  );
+  if (value["schema"] !== ISSUE_MANIFEST_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${ISSUE_MANIFEST_V1}` });
+  }
+  const workspaceId = requiredString(value, "workspaceId", "", errors);
+  const storyId = requiredString(value, "storyId", "", errors);
+  const requirements = parseRequirementSources(value["requirements"], "requirements", errors);
+  const rawTargets = value["repositories"];
+  const targets: IssueRepositoryTarget[] = [];
+  if (!Array.isArray(rawTargets) || rawTargets.length === 0) {
+    errors.push({ code: "invalid_type", path: "repositories", message: "repository targets must be a non-empty array" });
+  } else {
+    for (const [index, raw] of rawTargets.entries()) {
+      const target = parseIssueTarget(raw, index, errors);
+      if (target !== undefined) targets.push(target);
+    }
+  }
+  errors.push(...duplicateTargetErrors(targets));
+  const aliases = new Set(targets.map((target) => target.alias));
+  for (const [index, target] of targets.entries()) {
+    if (target.dependsOnRepo !== undefined && (!aliases.has(target.dependsOnRepo) || target.dependsOnRepo === target.alias)) {
+      errors.push({ code: "invalid_value", path: `repositories[${index}].dependsOnRepo`, message: "dependency must name a different declared repository alias" });
+    }
+  }
+
+  if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
+    errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });
+  }
+  if (storyId !== undefined && !isSafeIdentifier(storyId)) {
+    errors.push({ code: "invalid_value", path: "storyId", message: "Story ID contains unsafe characters" });
+  }
+  if (workspaceId !== undefined && expectations.workspaceId !== undefined && workspaceId !== expectations.workspaceId) {
+    errors.push({ code: "identity_mismatch", path: "workspaceId", message: "Workspace ID does not match the expected identity" });
+  }
+  if (storyId !== undefined && expectations.storyId !== undefined && storyId !== expectations.storyId) {
+    errors.push({ code: "identity_mismatch", path: "storyId", message: "Story ID does not match the expected identity" });
+  }
+  if (errors.length > 0 || workspaceId === undefined || storyId === undefined || requirements === undefined) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: { schema: ISSUE_MANIFEST_V1, workspaceId, storyId, requirements, repositories: targets },
   };
 }

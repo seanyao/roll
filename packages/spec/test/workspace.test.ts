@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   REPOSITORY_BINDING_V1,
+  ISSUE_MANIFEST_V1,
   WORKSPACE_MANIFEST_V1,
+  issueManifestV1Schema,
   normalizeRepositoryRemote,
+  parseIssueManifest,
   parseRepositoryBinding,
   parseWorkspaceManifest,
   repositoryBindingV1Schema,
@@ -35,6 +38,34 @@ function workspace() {
     createdAt: "2026-07-20T00:00:00Z",
     requirements: [{ provider: "jira", ref: "SOT-15499" }],
     repositories: [repository()],
+  };
+}
+
+function issue() {
+  const product = repository();
+  const docs = repository("https://github.com/Owner/Docs.git", "docs");
+  return {
+    schema: ISSUE_MANIFEST_V1,
+    workspaceId: "ws-sot-platform",
+    storyId: "US-WS-001",
+    requirements: [{ provider: "jira", ref: "SOT-15499" }],
+    repositories: [
+      {
+        repoId: product.repoId,
+        alias: product.alias,
+        access: "write",
+        requiredDelivery: true,
+        noChangePolicy: "changes_required",
+        pathScope: ["packages/spec"],
+      },
+      {
+        repoId: docs.repoId,
+        alias: docs.alias,
+        access: "read",
+        requiredDelivery: false,
+        dependsOnRepo: "product",
+      },
+    ],
   };
 }
 
@@ -149,5 +180,57 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.errors.map((error) => error.code)).toContain("duplicate_identity");
+  });
+});
+
+describe("IssueManifest repository targets", () => {
+  it("publishes a closed Issue schema", () => {
+    expect(issueManifestV1Schema).toMatchObject({ type: "object", additionalProperties: false });
+  });
+
+  it("round-trips immutable repository target declarations", () => {
+    const parsed = parseIssueManifest(issue(), {
+      workspaceId: "ws-sot-platform",
+      storyId: "US-WS-001",
+    });
+    expect(parsed).toEqual({ ok: true, value: issue() });
+  });
+
+  it.each([
+    ["read delivery", { repositories: [{ ...issue().repositories[1], requiredDelivery: true }] }],
+    ["write policy", { repositories: [{ ...issue().repositories[0], noChangePolicy: undefined }] }],
+    ["absolute path", { repositories: [{ ...issue().repositories[0], pathScope: ["/packages/spec"] }] }],
+    ["Windows absolute path", { repositories: [{ ...issue().repositories[0], pathScope: ["C:/packages/spec"] }] }],
+    ["traversal path", { repositories: [{ ...issue().repositories[0], pathScope: ["packages/../infra"] }] }],
+    ["backslash path", { repositories: [{ ...issue().repositories[0], pathScope: ["packages\\spec"] }] }],
+    ["unknown dependency", { repositories: [{ ...issue().repositories[0], dependsOnRepo: "missing" }] }],
+  ])("rejects malformed target semantics: %s", (_label, override) => {
+    const parsed = parseIssueManifest({ ...issue(), ...override }, {});
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.length).toBeGreaterThan(0);
+  });
+
+  it.each(["baseSha", "worktreePath", "branch", "status", "deliverySet"])(
+    "rejects runtime or mutable Issue field %s",
+    (field) => {
+      const parsed = parseIssueManifest({ ...issue(), [field]: "forbidden" }, {});
+      expect(parsed.ok).toBe(false);
+      if (parsed.ok) return;
+      expect(parsed.errors.map((error) => error.code)).toContain("unknown_field");
+    },
+  );
+
+  it("rejects duplicate target identity and expected ID mismatches", () => {
+    const duplicate = issue().repositories[0];
+    const parsed = parseIssueManifest(
+      { ...issue(), repositories: [duplicate, { ...duplicate }] },
+      { workspaceId: "ws-other", storyId: "US-OTHER-001" },
+    );
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.errors.map((error) => error.code)).toEqual(
+      expect.arrayContaining(["duplicate_identity", "identity_mismatch"]),
+    );
   });
 });

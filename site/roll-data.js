@@ -30,6 +30,7 @@ window.RollData = (function () {
     "roll setup",
     "roll status",
     "roll test",
+    "roll workspace",
     "roll update",
   ];
 

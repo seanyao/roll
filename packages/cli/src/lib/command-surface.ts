@@ -23,7 +23,7 @@ export type CommandAudience = "human" | "internal" | "hidden";
 export type CommandDisposition = "public" | "nested" | "internal" | "remove";
 
 /**
- * The sixteen approved public top-level commands. Every decision's `owner` is
+ * The seventeen approved public top-level commands. Every decision's `owner` is
  * one of these — a nested/internal/removed surface names the public command it
  * belongs under; a public surface owns itself.
  */
@@ -43,6 +43,7 @@ export type CommandOwner =
   | "setup"
   | "status"
   | "test"
+  | "workspace"
   | "update";
 
 export interface CommandSurfaceDecision {
@@ -80,6 +81,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   { current: "setup", owner: "setup", audience: "human", disposition: "public", rationale: "Project/tooling setup lifecycle root." },
   { current: "status", owner: "status", audience: "human", disposition: "public", rationale: "Project health snapshot." },
   { current: "test", owner: "test", audience: "human", disposition: "public", rationale: "Run the project's tests; a core workflow verb." },
+  { current: "workspace", owner: "workspace", audience: "human", disposition: "public", rationale: "Inspect and control explicitly targeted Workspace lifecycle state." },
   { current: "update", owner: "update", audience: "human", disposition: "public", rationale: "Upgrade the global roll." },
 
   // ── Nested: useful capabilities that move under their owning command ──

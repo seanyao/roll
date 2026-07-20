@@ -29,6 +29,26 @@ shared conventions.
 `ROLL_CONFIG` and `ROLL_GLOBAL` derive from `ROLL_HOME`, so usually you only
 need to override `ROLL_HOME` to relocate everything together.
 
+## Workspace Registry
+
+`roll workspace` manages the machine registry at `$ROLL_HOME/workspaces.json`
+and the append-only lifecycle stream at `$ROLL_HOME/workspace-events.ndjson`.
+There is no global current Workspace: every lifecycle mutation names one ID or
+path, while `list --all` is read-only. Multiple registered Workspaces may be
+active simultaneously.
+
+```bash
+roll workspace register ws-demo /absolute/path/to/workspace
+roll workspace activate ws-demo
+roll workspace list --json
+roll workspace show ws-demo
+roll workspace pause ws-demo
+```
+
+The view reports registry/manifest consistency separately from lifecycle.
+Until the Workspace scheduler surface is installed, runtime health is reported
+honestly as `unknown` with reason `scheduler_not_available`.
+
 ## Common Overrides
 
 Pin roll's state to a project-local directory (useful for CI, tests, or

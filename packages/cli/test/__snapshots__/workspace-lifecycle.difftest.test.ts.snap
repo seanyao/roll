@@ -1,5 +1,90 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`US-WS-005 roll workspace lifecycle surface > freezes fail-loud ambiguity, --all mutation, stale path and ID mismatch errors 1`] = `
+{
+  "all": {
+    "status": 1,
+    "stderr": "{
+  "schema": "roll.workspace-error/v1",
+  "error": {
+    "code": "all_requires_readonly",
+    "message": "--all is read-only and cannot be used for lifecycle mutations",
+    "candidates": [
+      {
+        "workspaceId": "ws-alpha",
+        "path": "<WS_1>"
+      },
+      {
+        "workspaceId": "ws-beta",
+        "path": "<WS_2>"
+      }
+    ]
+  }
+}
+",
+    "stdout": "",
+  },
+  "ambiguous": {
+    "status": 1,
+    "stderr": "{
+  "schema": "roll.workspace-error/v1",
+  "error": {
+    "code": "target_missing",
+    "message": "Provide one registered Workspace ID or path",
+    "candidates": [
+      {
+        "workspaceId": "ws-alpha",
+        "path": "<WS_1>"
+      },
+      {
+        "workspaceId": "ws-beta",
+        "path": "<WS_2>"
+      }
+    ]
+  }
+}
+",
+    "stdout": "",
+  },
+  "mismatch": {
+    "status": 1,
+    "stderr": "{
+  "schema": "roll.workspace-error/v1",
+  "error": {
+    "code": "identity_mismatch",
+    "message": "Workspace registry and manifest IDs do not match",
+    "candidates": [
+      {
+        "workspaceId": "ws-beta",
+        "path": "<WS_2>"
+      }
+    ]
+  }
+}
+",
+    "stdout": "",
+  },
+  "stale": {
+    "status": 1,
+    "stderr": "{
+  "schema": "roll.workspace-error/v1",
+  "error": {
+    "code": "stale_registry",
+    "message": "Workspace path is stale; repair the registry path first",
+    "candidates": [
+      {
+        "workspaceId": "ws-alpha",
+        "path": "<WS_1>"
+      }
+    ]
+  }
+}
+",
+    "stdout": "",
+  },
+}
+`;
+
 exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific help without adjacent bilingual copy 1`] = `
 {
   "en": "Usage: roll workspace <list|show|register|activate|pause|archive> [options]
@@ -103,6 +188,89 @@ ID	生命周期	运行状态	一致性	路径
 ws-alpha	活跃	未知	一致	<WS_1>
 ws-beta	活跃	未知	一致	<WS_2>
 ",
+  },
+}
+`;
+
+exports[`US-WS-005 roll workspace lifecycle surface > pauses one explicit path without changing another active Workspace 1`] = `
+{
+  "list": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "{
+  "schema": "roll.workspace-list/v1",
+  "workspaces": [
+    {
+      "workspaceId": "ws-alpha",
+      "path": "<WS_1>",
+      "canonicalPath": "<WS_1>",
+      "lifecycle": "paused",
+      "manifest": {
+        "workspaceId": "ws-alpha",
+        "consistency": "consistent"
+      },
+      "runtimeHealth": {
+        "status": "unknown",
+        "reason": "scheduler_not_available"
+      }
+    },
+    {
+      "workspaceId": "ws-beta",
+      "path": "<WS_2>",
+      "canonicalPath": "<WS_2>",
+      "lifecycle": "active",
+      "manifest": {
+        "workspaceId": "ws-beta",
+        "consistency": "consistent"
+      },
+      "runtimeHealth": {
+        "status": "unknown",
+        "reason": "scheduler_not_available"
+      }
+    }
+  ]
+}
+",
+  },
+  "pause": {
+    "status": 0,
+    "stderr": "",
+    "stdout": "{
+  "schema": "roll.workspace-mutation/v1",
+  "operation": "pause",
+  "workspace": {
+    "workspaceId": "ws-alpha",
+    "path": "<WS_1>",
+    "canonicalPath": "<WS_1>",
+    "lifecycle": "paused",
+    "manifest": {
+      "workspaceId": "ws-alpha",
+      "consistency": "consistent"
+    },
+    "runtimeHealth": {
+      "status": "unknown",
+      "reason": "scheduler_not_available"
+    }
+  }
+}
+",
+  },
+}
+`;
+
+exports[`US-WS-005 roll workspace lifecycle surface > rejects archived pause in both locales without changing the event stream 1`] = `
+{
+  "en": {
+    "status": 1,
+    "stderr": "workspace: archived_requires_activation — Archived Workspace must be activated before other mutations
+",
+    "stdout": "",
+  },
+  "zh": {
+    "status": 1,
+    "stderr": "工作区：archived_requires_activation — 已归档工作区必须先激活，才能执行其他变更
+",
+    "stdout": "",
   },
 }
 `;

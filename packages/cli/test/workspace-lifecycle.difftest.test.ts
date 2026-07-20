@@ -1,8 +1,9 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { REPOSITORY_BINDING_V1, WORKSPACE_MANIFEST_V1, repositoryIdFromRemote } from "@roll/spec";
+import { workspaceEventsPath } from "@roll/infra";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 import { expectNoAdjacentBilingualPairs } from "./helpers.js";
@@ -93,7 +94,13 @@ async function runCli(
 function scrub(run: Run, roots: readonly string[]): Run {
   const replace = (value: string): string => roots.reduce((text, root, index) => {
     const token = `<WS_${index + 1}>`;
-    return text.replaceAll(realpathSync(root), token).replaceAll(root, token);
+    let canonical = root;
+    try {
+      canonical = realpathSync(root);
+    } catch {
+      // A stale-path scenario deliberately removes the fixture before scrubbing.
+    }
+    return text.replaceAll(canonical, token).replaceAll(root, token);
   }, value);
   return { ...run, stdout: replace(run.stdout), stderr: replace(run.stderr) };
 }
@@ -157,5 +164,54 @@ describe("US-WS-005 roll workspace lifecycle surface", () => {
       workspace: { workspaceId: "ws-alpha", manifest: { workspaceId: "ws-alpha", consistency: "consistent" } },
     });
     expect({ list, show }).toMatchSnapshot();
+  });
+
+  it("pauses one explicit path without changing another active Workspace", async () => {
+    const { fixture, alpha, beta } = await twoActiveFixture();
+    const pause = scrub(await runCli(["workspace", "pause", alpha, "--json"], fixture), [alpha, beta]);
+    const list = scrub(await runCli(["workspace", "list", "--json"], fixture), [alpha, beta]);
+    expect(pause.status).toBe(0);
+    expect(JSON.parse(list.stdout).workspaces.map((entry: { workspaceId: string; lifecycle: string }) => ({
+      workspaceId: entry.workspaceId,
+      lifecycle: entry.lifecycle,
+    }))).toEqual([
+      { workspaceId: "ws-alpha", lifecycle: "paused" },
+      { workspaceId: "ws-beta", lifecycle: "active" },
+    ]);
+    expect({ pause, list }).toMatchSnapshot();
+  });
+
+  it("freezes fail-loud ambiguity, --all mutation, stale path and ID mismatch errors", async () => {
+    const { fixture, alpha, beta } = await twoActiveFixture();
+    const ambiguous = scrub(await runCli(["workspace", "pause", "--json"], fixture), [alpha, beta]);
+    const all = scrub(await runCli(["workspace", "archive", "--all", "--json"], fixture), [alpha, beta]);
+    rmSync(alpha, { recursive: true, force: true });
+    const stale = scrub(await runCli(["workspace", "show", "ws-alpha", "--json"], fixture), [alpha, beta]);
+    workspace(beta, "ws-other");
+    const mismatch = scrub(await runCli(["workspace", "show", "ws-beta", "--json"], fixture), [alpha, beta]);
+
+    expect([ambiguous.status, all.status, stale.status, mismatch.status]).toEqual([1, 1, 1, 1]);
+    expect(JSON.parse(ambiguous.stderr).error.code).toBe("target_missing");
+    expect(JSON.parse(ambiguous.stderr).error.candidates).toHaveLength(2);
+    expect(JSON.parse(all.stderr).error.code).toBe("all_requires_readonly");
+    expect(JSON.parse(stale.stderr).error.code).toBe("stale_registry");
+    expect(JSON.parse(mismatch.stderr).error.code).toBe("identity_mismatch");
+    expect({ ambiguous, all, stale, mismatch }).toMatchSnapshot();
+  });
+
+  it("rejects archived pause in both locales without changing the event stream", async () => {
+    const fixture = sandbox();
+    const alpha = workspace(join(fixture.home, "alpha"), "ws-alpha");
+    expect((await runCli(["workspace", "register", "ws-alpha", alpha], fixture)).status).toBe(0);
+    expect((await runCli(["workspace", "archive", "ws-alpha"], fixture)).status).toBe(0);
+    const before = readFileSync(workspaceEventsPath(fixture.rollHome), "utf8");
+    const en = scrub(await runCli(["workspace", "pause", "ws-alpha"], fixture, "en"), [alpha]);
+    const zh = scrub(await runCli(["workspace", "pause", "ws-alpha"], fixture, "zh"), [alpha]);
+    expect(en.status).toBe(1);
+    expect(zh.status).toBe(1);
+    expect(readFileSync(workspaceEventsPath(fixture.rollHome), "utf8")).toBe(before);
+    expectNoAdjacentBilingualPairs(en.stderr);
+    expectNoAdjacentBilingualPairs(zh.stderr);
+    expect({ en, zh }).toMatchSnapshot();
   });
 });

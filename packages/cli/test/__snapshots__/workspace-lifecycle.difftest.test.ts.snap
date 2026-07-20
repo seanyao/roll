@@ -87,16 +87,18 @@ exports[`US-WS-005 roll workspace lifecycle surface > freezes fail-loud ambiguit
 
 exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific help without adjacent bilingual copy 1`] = `
 {
-  "en": "Usage: roll workspace <init|list|show|register|activate|pause|archive> [options]
+  "en": "Usage: roll workspace <init|requirement|list|show|register|activate|pause|archive> [options]
   \`init <id> --config <file> [--check] [--json]\`
+  \`requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]\`
   \`list [--json] [--all]\`
   \`show <id|path> [--json]\`
   \`register <id> <path> [--json]\`
   \`activate|pause|archive <id|path> [--json]\`
   Init --check is read-only; lifecycle mutations require one explicit target; --all is read-only.
 ",
-  "zh": "用法：roll workspace <init|list|show|register|activate|pause|archive> [选项]
+  "zh": "用法：roll workspace <init|requirement|list|show|register|activate|pause|archive> [选项]
   \`init <ID> --config <文件> [--check] [--json]\`
+  \`requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]\`
   \`list [--json] [--all]\`
   \`show <ID|路径> [--json]\`
   \`register <ID> <路径> [--json]\`

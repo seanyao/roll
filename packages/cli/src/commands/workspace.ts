@@ -1,11 +1,7 @@
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   resolveWorkspaceTarget,
-  type WorkspaceRegistryCandidate,
   type WorkspaceTargetFailureCode,
-  type WorkspaceTargetSelector,
 } from "@roll/core";
 import {
   WorkspaceRegistry,
@@ -16,6 +12,8 @@ import {
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
 import { workspaceInitCommand } from "./workspace-init.js";
+import { workspaceRequirementCommand } from "./workspace-requirement.js";
+import { workspaceRegistryCandidates, workspaceRollHome, workspaceTargetSelector } from "./workspace-target.js";
 
 const WORKSPACE_LIST_V1 = "roll.workspace-list/v1" as const;
 const WORKSPACE_VIEW_V1 = "roll.workspace-view/v1" as const;
@@ -56,10 +54,6 @@ export function workspaceUsage(): string {
   return msg("workspace.usage");
 }
 
-function rollHome(): string {
-  return process.env["ROLL_HOME"] ?? resolve(homedir(), ".roll");
-}
-
 function view(entry: InspectedWorkspace): WorkspaceView {
   return {
     workspaceId: entry.workspaceId,
@@ -75,31 +69,6 @@ function view(entry: InspectedWorkspace): WorkspaceView {
       reason: "scheduler_not_available",
     },
   };
-}
-
-function candidates(entries: readonly InspectedWorkspace[]): readonly WorkspaceRegistryCandidate[] {
-  return entries.map((entry) => ({
-    workspaceId: entry.workspaceId,
-    root: entry.root,
-    canonicalRoot: entry.canonicalRoot,
-    manifestWorkspaceId: entry.manifestWorkspaceId ?? "<invalid-manifest>",
-    pathState: entry.consistency === "stale_path" ? "stale" : "valid",
-    lifecycle: entry.lifecycle,
-  }));
-}
-
-function selector(value: string): WorkspaceTargetSelector {
-  if (!isAbsolute(value) && !value.startsWith(".") && !value.includes("/")) {
-    return { kind: "id", workspaceId: value };
-  }
-  const absolutePath = resolve(value);
-  let canonicalPath = absolutePath;
-  try {
-    canonicalPath = realpathSync(absolutePath);
-  } catch {
-    // The target resolver will report an actionable missing/stale target.
-  }
-  return { kind: "path", absolutePath, canonicalPath };
 }
 
 function flagValue(args: readonly string[], flag: string): string | undefined {
@@ -203,9 +172,9 @@ function resolveOne(
 ) {
   return resolveWorkspaceTarget({
     operation,
-    registry: candidates(entries),
+    registry: workspaceRegistryCandidates(entries),
     all,
-    ...(target === undefined ? {} : { explicit: selector(target) }),
+    ...(target === undefined ? {} : { explicit: workspaceTargetSelector(target) }),
   });
 }
 
@@ -322,7 +291,8 @@ export function workspaceCommand(args: string[]): number | Promise<number> {
   }
   const rest = args.slice(1);
   if (subcommand === "init") return workspaceInitCommand(rest);
-  const store = new WorkspaceRegistry({ rollHome: rollHome() });
+  if (subcommand === "requirement") return workspaceRequirementCommand(rest);
+  const store = new WorkspaceRegistry({ rollHome: workspaceRollHome() });
   if (subcommand === "list") return listCommand(rest, store);
   if (subcommand === "show") return showCommand(rest, store);
   if (subcommand === "register") return registerCommand(rest, store);

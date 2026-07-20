@@ -150,6 +150,19 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(reads).not.toContain(join(f.contextRoot, "huge.bin"));
   });
 
+  it("rejects a context root that is itself a symlink to an external location", () => {
+    const f = fixture();
+    const outsideContext = join(f.root, "outside-context");
+    mkdirSync(outsideContext);
+    write(join(outsideContext, "domain.md"), "external context\n");
+    const linkedRoot = join(f.root, "linked-context-root");
+    symlinkSync(outsideContext, linkedRoot);
+
+    expect(() => captureRequirementSource(request(f, { contextRoot: linkedRoot, contextPaths: ["domain.md"] }))).toThrowError(
+      expect.objectContaining({ code: "unsafe_context" }),
+    );
+  });
+
   it("copies context as independent evidence so later source edits never reach the archived revision", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
@@ -230,6 +243,17 @@ describe("US-WS-007 RequirementSourceStore", () => {
     })).toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
     const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
     expect(existsSync(join(requirementPath, "source.yaml"))).toBe(false);
+  });
+
+  it("regenerates a corrupted attest.md from source authority without treating it as evidence", () => {
+    const f = fixture();
+    const first = captureRequirementSource(request(f));
+    writeFileSync(join(first.requirementPath, "attest.md"), "corrupted projection\n", "utf8");
+
+    const repeated = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
+    expect(repeated.outcome).toBe("reused");
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).not.toContain("corrupted projection");
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated aggregate projection");
   });
 
   it("fails loudly when an immutable revision is missing or tampered before reuse", () => {

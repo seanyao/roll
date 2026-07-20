@@ -349,6 +349,27 @@ function copyContextProjection(
   }
 }
 
+function isProjectionCurrent(
+  requirementPath: string,
+  manifest: RequirementSourceManifest,
+  evidence: RevisionEvidence,
+): boolean {
+  try {
+    if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
+    if (!readFileSync(join(requirementPath, "requirement.md")).equals(evidence.body.content)) return false;
+    if (readFileSync(join(requirementPath, "attest.md"), "utf8") !== renderRequirementAttestProjection(manifest)) return false;
+    const contextRoot = join(requirementPath, "context");
+    const actualPaths = existsSync(contextRoot) ? archiveContextPaths(contextRoot).slice().sort() : [];
+    const expectedPaths = evidence.context.map((file) => file.relativePath).slice().sort();
+    if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) return false;
+    return evidence.context.every((file) => (
+      readFileSync(join(contextRoot, file.relativePath)).equals(file.content)
+    ));
+  } catch {
+    return false;
+  }
+}
+
 function projectCurrent(
   requirementPath: string,
   manifest: RequirementSourceManifest,
@@ -559,7 +580,10 @@ export function captureRequirementSource(
     }
     const plan = planned.value;
     if (plan.outcome === "reused") {
-      validateRevision(requirementPath, plan.manifest);
+      const evidence = validateRevision(requirementPath, plan.manifest);
+      if (!isProjectionCurrent(requirementPath, plan.manifest, evidence)) {
+        projectCurrent(requirementPath, plan.manifest, evidence, deps);
+      }
       return {
         outcome: plan.outcome,
         workspaceId: workspace.workspaceId,

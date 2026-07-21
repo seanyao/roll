@@ -48,7 +48,7 @@ import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
-import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs } from "./backlog-target.js";
+import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs, type ResolvedBacklogTarget } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
@@ -878,29 +878,38 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // any identity-dependent code runs. Also stores the healing detail so an ALERT
   // can be written once `alertsPath` is available.
   const workspaceRequested = args.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "").trim() !== "";
-  let coreWorktreeHeal: ReturnType<typeof checkCoreWorktreeContamination>;
-  let id: { path: string; slug: string };
-  let workspaceBinding: { workspaceId: string; runtimeRoot: string; backlogPath: string } | undefined;
-  if (workspaceRequested) {
+  const legacyRunnerBound = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() !== "" ||
+    (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() !== "";
+  let workspaceTarget: ResolvedBacklogTarget | undefined;
+  if (workspaceRequested || !legacyRunnerBound) {
     const scoped = stripBacklogScopeArgs(args);
     if (!scoped.ok) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
     const selectorArgs: string[] = [];
     const workspaceIndex = args.indexOf("--workspace");
     if (workspaceIndex >= 0) selectorArgs.push("--workspace", args[workspaceIndex + 1] ?? "");
     const decision = resolveBacklogCommandTarget(selectorArgs, "mutation");
-    if (!decision.ok) return emitBacklogTargetError(decision);
-    if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
-    workspaceBinding = {
-      workspaceId: decision.workspaceId,
-      runtimeRoot: decision.runtimeRoot,
-      backlogPath: decision.backlogPath,
-    };
-    coreWorktreeHeal = { healed: false, detail: "" };
-    id = { path: decision.workspaceRoot, slug: decision.workspaceId };
-  } else {
+    if (!decision.ok) {
+      if (workspaceRequested || decision.code === "migration_required") return emitBacklogTargetError(decision);
+    } else {
+      if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+      workspaceTarget = decision;
+    }
+  }
+  let coreWorktreeHeal: ReturnType<typeof checkCoreWorktreeContamination>;
+  let id: { path: string; slug: string };
+  let workspaceBinding: { workspaceId: string; runtimeRoot: string; backlogPath: string } | undefined;
+  if (workspaceTarget === undefined) {
     const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
     coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
     id = await projectIdentity(identityRoot);
+  } else {
+    workspaceBinding = {
+      workspaceId: workspaceTarget.workspaceId,
+      runtimeRoot: workspaceTarget.runtimeRoot,
+      backlogPath: workspaceTarget.backlogPath,
+    };
+    coreWorktreeHeal = { healed: false, detail: "" };
+    id = { path: workspaceTarget.workspaceRoot, slug: workspaceTarget.workspaceId };
   }
   const cycleId = makeCycleId();
 

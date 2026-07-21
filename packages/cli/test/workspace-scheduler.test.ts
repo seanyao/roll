@@ -279,10 +279,14 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     registry.activate("ws-alpha");
     const savedRollHome = process.env["ROLL_HOME"];
     const savedWorkspace = process.env["ROLL_WORKSPACE"];
+    const savedMainProject = process.env["ROLL_MAIN_PROJECT"];
+    const savedRuntime = process.env["ROLL_PROJECT_RUNTIME_DIR"];
     let stdout = "";
     const original = process.stdout.write.bind(process.stdout);
     process.env["ROLL_HOME"] = rollHome;
     delete process.env["ROLL_WORKSPACE"];
+    delete process.env["ROLL_MAIN_PROJECT"];
+    delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
     // @ts-expect-error capture-only
     process.stdout.write = (chunk: string | Uint8Array): boolean => (stdout += String(chunk), true);
     try {
@@ -293,6 +297,10 @@ describe("US-WS-016 Workspace scheduler contract", () => {
       else process.env["ROLL_HOME"] = savedRollHome;
       if (savedWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
       else process.env["ROLL_WORKSPACE"] = savedWorkspace;
+      if (savedMainProject === undefined) delete process.env["ROLL_MAIN_PROJECT"];
+      else process.env["ROLL_MAIN_PROJECT"] = savedMainProject;
+      if (savedRuntime === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      else process.env["ROLL_PROJECT_RUNTIME_DIR"] = savedRuntime;
       delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
       delete process.env["ROLL_WORKSPACE_BACKLOG_PATH"];
     }
@@ -301,10 +309,10 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     expect(existsSync(join(root, "runtime"))).toBe(false);
   });
 
-  it("rejects repository-local run-once state with migration_required", async () => {
+  it("rejects an implicit repository-local run-once cwd with migration_required", async () => {
     const legacy = workspaceRoot("legacy-run-once");
     const rollHome = workspaceRoot("legacy-home");
-    mkdirSync(join(legacy, ".git"));
+    execFileSync("git", ["init", "--quiet"], { cwd: legacy });
     mkdirSync(join(legacy, ".roll"));
     writeFileSync(join(legacy, ".roll", "backlog.md"), "legacy\n");
     const savedCwd = process.cwd();
@@ -318,7 +326,7 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     // @ts-expect-error capture-only
     process.stderr.write = (chunk: string | Uint8Array): boolean => (stderr += String(chunk), true);
     try {
-      expect(await loopRunOnceCommand(["--dry-run", "--workspace", "ws-missing"])).toBe(1);
+      expect(await loopRunOnceCommand(["--dry-run"])).toBe(1);
     } finally {
       process.stderr.write = original;
       process.chdir(savedCwd);

@@ -13,12 +13,19 @@ import { relative, resolve, sep, join } from "node:path";
 import {
   renderBranchPattern,
   resolveIssueInitPlan,
+  resolveRequirementSourcesForStory,
   type IssueInitOutcome,
   type IssueInitTargetPlan,
   type IssueStoryContract,
   type IssueTargetProbeState,
 } from "@roll/core";
-import type { IssueManifest, RepositoryBinding, RequirementSourceManifest } from "@roll/spec";
+import {
+  ISSUE_MANIFEST_V1,
+  type IssueManifest,
+  type IssueRepositoryTarget,
+  type RepositoryBinding,
+  type RequirementSourceManifest,
+} from "@roll/spec";
 import {
   ensureRepositoryCache,
   inspectRepositoryCache,
@@ -510,9 +517,54 @@ export interface InspectIssueInitInput {
   readonly issueRoot: string;
   readonly contract: IssueStoryContract;
   readonly bindings: readonly RepositoryBinding[];
+  /** REQUIRED — `--check` cross-validates the on-disk manifest against the
+   *  FULL immutable contract (workspaceId/storyId/requirements/repositories)
+   *  via {@link manifestsMatch}, never just identity: a Story Contract or
+   *  Requirement-link drift under the same workspaceId/storyId must be
+   *  reported as a real manifest conflict, the same parity apply already
+   *  enforces. There is no identity-only fallback — every caller must
+   *  resolve its Requirement sources before calling check. */
+  readonly requirementManifests: readonly RequirementSourceManifest[];
 }
 
-function probeManifestState(issueRoot: string, expected: { workspaceId: string; storyId: string }): IssueTargetProbeState {
+/** Build the SAME immutable manifest shape apply would produce for this
+ *  contract/bindings/requirements — bound targets only, in declared order —
+ *  so `--check` can compare the on-disk manifest against the full contract,
+ *  not just its identity. An alias with no matching binding is excluded here
+ *  exactly as apply's own plan builder excludes it (never invented into a
+ *  fake repository entry) — that target's real conflict is reported
+ *  separately, per-target, in {@link inspectIssueInit}'s target loop; this
+ *  expected manifest is ONLY ever used for the manifest-identity probe, never
+ *  returned or treated as an apply-safe plan. */
+function expectedManifestForContract(
+  workspaceId: string,
+  contract: IssueStoryContract,
+  bindingsByAlias: ReadonlyMap<string, RepositoryBinding>,
+  requirementManifests: readonly RequirementSourceManifest[],
+): IssueManifest {
+  const repositories: IssueRepositoryTarget[] = [];
+  for (const declared of contract.repositories) {
+    const binding = bindingsByAlias.get(declared.alias);
+    if (binding === undefined) continue;
+    repositories.push(
+      declared.access === "read"
+        ? { repoId: binding.repoId, alias: declared.alias, access: "read", requiredDelivery: false, ...(declared.dependsOnRepo === undefined ? {} : { dependsOnRepo: declared.dependsOnRepo }) }
+        : {
+          repoId: binding.repoId,
+          alias: declared.alias,
+          access: "write",
+          requiredDelivery: declared.requiredDelivery,
+          noChangePolicy: declared.requiredDelivery ? "changes_required" : "no_change_allowed",
+          ...(declared.dependsOnRepo === undefined ? {} : { dependsOnRepo: declared.dependsOnRepo }),
+        },
+    );
+  }
+  const requirements = resolveRequirementSourcesForStory(requirementManifests, contract.storyId)
+    .map((manifest) => ({ provider: manifest.provider, ref: manifest.ref }));
+  return { schema: ISSUE_MANIFEST_V1, workspaceId, storyId: contract.storyId, requirements, repositories };
+}
+
+function probeManifestState(issueRoot: string, expected: IssueManifest): IssueTargetProbeState {
   const interrupted = existsSync(journalPath(issueRoot));
   const path = manifestPath(issueRoot);
   if (!existsSync(path)) return interrupted ? "repairable" : "absent";
@@ -522,10 +574,7 @@ function probeManifestState(issueRoot: string, expected: { workspaceId: string; 
   } catch {
     return "conflict";
   }
-  if (typeof value !== "object" || value === null) return "conflict";
-  const record = value as Record<string, unknown>;
-  if (record["workspaceId"] !== expected.workspaceId || record["storyId"] !== expected.storyId) return "conflict";
-  return "compatible";
+  return manifestsMatch(value, expected) ? "compatible" : "conflict";
 }
 
 /** Combine a target's cache state and its real git worktree identity into ONE
@@ -578,14 +627,29 @@ export async function inspectIssueInit(input: InspectIssueInitInput): Promise<Is
     return { manifest: { state: "conflict" }, targets: {} };
   }
   const bindingsByAlias = new Map(input.bindings.map((binding) => [binding.alias, binding]));
-  const manifestState = probeManifestState(input.issueRoot, {
-    workspaceId: input.workspaceId,
-    storyId: input.contract.storyId,
-  });
+  const expectedManifest = expectedManifestForContract(input.workspaceId, input.contract, bindingsByAlias, input.requirementManifests);
+  const manifestState = probeManifestState(input.issueRoot, expectedManifest);
   const targets: Record<string, IssueCheckTargetReport> = {};
   for (const declared of input.contract.repositories) {
     const binding = bindingsByAlias.get(declared.alias);
-    if (binding === undefined) continue;
+    if (binding === undefined) {
+      // Apply (resolveIssueInitPlan) rejects an alias with no matching
+      // Workspace binding as unknown_field — check must report the same
+      // real conflict for this target, never silently drop it from the
+      // report as if it were fine to continue past.
+      targets[declared.alias] = {
+        alias: declared.alias,
+        access: declared.access,
+        repoId: "",
+        cachePath: "",
+        cacheState: "conflict",
+        baseSha: null,
+        worktreePath: join(input.issueRoot, declared.alias),
+        workBranch: null,
+        decision: "conflict",
+      };
+      continue;
+    }
     const identity = resolveRepositoryCacheIdentity({ rollHome: input.rollHome, binding });
     const cacheState = await inspectRepositoryCache({ rollHome: input.rollHome, binding });
     const workBranch = declared.access === "write"

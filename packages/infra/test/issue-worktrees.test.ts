@@ -100,6 +100,7 @@ describe("inspectIssueInit", () => {
       issueRoot: f.issueRoot,
       contract: f.contract,
       bindings: f.bindings,
+      requirementManifests: f.requirementManifests,
     });
     expect(report.manifest.state).toBe("absent");
     expect(report.targets["sot1"]).toMatchObject({
@@ -118,7 +119,7 @@ describe("inspectIssueInit", () => {
     await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
     const beforeDigest = statSync(f.rollHome).mtimeMs;
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(statSync(f.rollHome).mtimeMs).toBe(beforeDigest); // zero writes on re-check
 
     expect(report.manifest.state).toBe("compatible");
@@ -129,6 +130,56 @@ describe("inspectIssueInit", () => {
     }
     expect(report.targets["sot1"]?.workBranch).toBe("roll/ws-demo/US-XX1/sot1");
     expect(report.targets["sot3"]?.workBranch).toBeNull();
+  });
+
+  it("reports conflict (never silently omits) a target whose alias has no matching Workspace repository binding", async () => {
+    const f = fixture();
+    // The Story Contract declares "sot4", but no binding for it exists —
+    // apply would reject this as unknown_field; check must say so too,
+    // never silently drop the target from the report.
+    const contractWithUnboundAlias: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [...f.contract.repositories, { alias: "sot4", access: "read", requiredDelivery: false }],
+    };
+    const report = await inspectIssueInit({
+      workspaceId: "ws-demo",
+      rollHome: f.rollHome,
+      workspaceRoot: f.workspaceRoot,
+      issueRoot: f.issueRoot,
+      contract: contractWithUnboundAlias,
+      bindings: f.bindings,
+      requirementManifests: f.requirementManifests,
+    });
+    expect(report.targets["sot4"]).toBeDefined();
+    expect(report.targets["sot4"]?.decision).toBe("conflict");
+  });
+
+  it("reports manifest conflict when requirements/repositories drift under the same identity, on a zero-write check", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // Same workspaceId/storyId, but the Story Contract now declares a
+    // DIFFERENT repository set than what the on-disk manifest was created
+    // with — the full immutable contract no longer matches.
+    const changedContract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot3", access: "read", requiredDelivery: false },
+      ],
+    };
+    const beforeDigest = statSync(f.rollHome).mtimeMs;
+    const report = await inspectIssueInit({
+      workspaceId: "ws-demo",
+      rollHome: f.rollHome,
+      workspaceRoot: f.workspaceRoot,
+      issueRoot: f.issueRoot,
+      contract: changedContract,
+      bindings: f.bindings,
+      requirementManifests: f.requirementManifests,
+    });
+    expect(statSync(f.rollHome).mtimeMs).toBe(beforeDigest); // still zero writes
+    expect(report.manifest.state).toBe("conflict");
   });
 });
 
@@ -261,7 +312,7 @@ describe("applyIssueInit", () => {
     expect(existsSync(join(outsideTarget, "manifest.json"))).toBe(false);
     expect(existsSync(join(outsideTarget, "sot1"))).toBe(false);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.manifest.state).toBe("conflict");
   });
 
@@ -462,7 +513,7 @@ describe("applyIssueInit", () => {
     const sot1Path = join(f.issueRoot, "sot1");
     git(sot1Path, ["switch", "-c", "wrong-branch"]);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
 
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
@@ -482,7 +533,7 @@ describe("applyIssueInit", () => {
     git(sot1Path, ["add", "story-work.txt"]);
     git(sot1Path, ["commit", "-q", "-m", "real story commit"]);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("reused");
 
     const applied = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
@@ -506,7 +557,7 @@ describe("applyIssueInit", () => {
     git(sot1Path, ["branch", "-f", "roll/ws-demo/US-XX1/sot1", "unrelated-history"]);
     git(sot1Path, ["checkout", "roll/ws-demo/US-XX1/sot1"]);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
 
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
@@ -530,7 +581,7 @@ describe("applyIssueInit", () => {
     git(sot3Path, ["checkout", "--detach", "HEAD"]);
     protectReadOnlyWorktree(sot3Path);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot3"]?.decision).toBe("conflict");
 
     // apply must ALSO reject — never silently repair/reuse an incompatible
@@ -562,7 +613,7 @@ describe("applyIssueInit", () => {
 
     // The existing Issue's check/reuse/repair must remain pinned at the
     // ORIGINAL base — never silently reflect the advanced shared ref.
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.baseSha).toBe(pinnedBase);
     expect(report.targets["sot1"]?.decision).toBe("reused");
 
@@ -629,7 +680,7 @@ describe("applyIssueInit", () => {
     expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
     expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true); // untouched real worktree
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
 
     rmSync(join(f.issueRoot, "issue-init.pending.json"), { force: true });
@@ -680,7 +731,7 @@ describe("applyIssueInit", () => {
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
     expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true); // the real worktree is untouched
   });
@@ -758,7 +809,7 @@ describe("applyIssueInit", () => {
       .rejects.toThrow(/baseSha/i);
 
     // The check-side preflight must also refuse it, never report success/repair.
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
 
     // Zero mutation: the journal itself, events, and manifest are untouched.
@@ -804,7 +855,7 @@ describe("applyIssueInit", () => {
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(/baseSha/i);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
 
     expect(readFileSync(journalPath, "utf8")).toBe(journalBefore);
@@ -830,7 +881,7 @@ describe("applyIssueInit", () => {
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(/baseSha/i);
 
-    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(report.targets["sot1"]?.decision).toBe("conflict");
     expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true);
   });

@@ -51,6 +51,9 @@ function isSymlink(path: string): boolean {
  *  being quietly treated as absent. */
 function backlogStorySpecMatches(workspaceRoot: string, storyId: string): string[] {
   const backlogRoot = join(workspaceRoot, "backlog");
+  if (isSymlink(backlogRoot)) {
+    throw new BacklogSymlinkEscapeError(`Workspace backlog root is a symlink: ${backlogRoot}`);
+  }
   const matches: string[] = [];
   const walk = (dir: string, depth: number): void => {
     if (depth > MAX_BACKLOG_DEPTH) return;

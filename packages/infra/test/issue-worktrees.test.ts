@@ -771,6 +771,87 @@ describe("applyIssueInit", () => {
     rmSync(journalPath, { force: true });
   });
 
+  it.each([
+    ["HEAD", "HEAD"],
+    ["a branch ref", "refs/heads/main"],
+    ["a short SHA", "abc1234"],
+    ["non-hex garbage", "not-a-real-sha-value-zzz"],
+  ])("rejects a journal whose target baseSha is %s instead of a full lowercase hex object id, with zero mutation", async (_name, badBaseSha) => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const manifestBefore = readFileSync(join(f.issueRoot, "manifest.json"), "utf8");
+    const sot1RepoId = f.bindings.find((b) => b.alias === "sot1")?.repoId;
+    if (sot1RepoId === undefined) throw new Error("fixture must resolve sot1's repoId");
+
+    // A journal that is otherwise well-formed but pins a non-immutable
+    // baseSha — HEAD/a ref/a short SHA/non-hex garbage all pass a bare
+    // "non-empty string" check yet must never be trusted as an immutable pin.
+    const invalidJournal = {
+      schema: "roll.issue-init-journal/v1",
+      transactionId: "invalid-hex-basesha-transaction",
+      workspaceId: "ws-demo",
+      storyId: "US-XX1",
+      status: "repair_required",
+      targets: [
+        { alias: "sot1", repoId: sot1RepoId, path: join(f.issueRoot, "sot1"), created: false, workBranch: "roll/ws-demo/US-XX1/sot1", access: "write", baseSha: badBaseSha },
+      ],
+    };
+    const journalPath = join(f.issueRoot, "issue-init.pending.json");
+    const journalBefore = `${JSON.stringify(invalidJournal, null, 2)}\n`;
+    writeFileSync(journalPath, journalBefore, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(/baseSha/i);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+
+    expect(readFileSync(journalPath, "utf8")).toBe(journalBefore);
+    expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
+    expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true);
+
+    rmSync(journalPath, { force: true });
+  });
+
+  it("fails loud when a completed issue:repository_bound event has a non-hex baseSha, instead of silently trusting it", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const events = eventsBefore.trim().split("\n").map((line) => JSON.parse(line));
+
+    // Hand-corrupt the completed event's baseSha to a ref-like string — a
+    // real scenario where an old/buggy writer once persisted `HEAD` or a
+    // branch name instead of resolving to an immutable object id.
+    const corrupted = events.map((event) => (event.alias === "sot1" ? { ...event, baseSha: "refs/heads/main" } : event));
+    writeFileSync(join(f.issueRoot, "events.jsonl"), `${corrupted.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(/baseSha/i);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true);
+  });
+
+  it("fails loud on a recognized issue:repository_bound event with a missing alias, instead of silently dropping the fact", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const events = eventsBefore.trim().split("\n").map((line) => JSON.parse(line));
+
+    // A recognized issue:repository_bound event (type matches) but its alias
+    // field is empty — must fail loud, never be silently swallowed as if it
+    // never existed (which would let a retry re-create/re-bind the target
+    // and lose the fact it was ever pinned).
+    const corrupted = events.map((event) => (event.alias === "sot1" ? { ...event, alias: "" } : event));
+    writeFileSync(join(f.issueRoot, "events.jsonl"), `${corrupted.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+  });
+
   it("proves the FIRST persisted multi-target journal has a non-empty baseSha for every target before any worktree mutation", async () => {
     const f = fixture();
     const journalSnapshots: unknown[] = [];

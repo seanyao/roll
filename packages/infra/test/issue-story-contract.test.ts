@@ -90,6 +90,17 @@ repositories:
     expect(result).toMatchObject({ ok: false, code: "symlink_escape" });
   });
 
+  it("refuses a symlinked backlog ROOT itself escaping the Workspace, fail-loud rather than reporting story_not_found", () => {
+    const workspaceRoot = sandbox();
+    const outside = sandbox();
+    writeSpec(join(outside, "workspace-orchestration", "US-XX1"), "US-XX1");
+    // `backlog` itself (not just something inside it) is a symlink.
+    symlinkSync(outside, join(workspaceRoot, "backlog"));
+
+    const result = resolveWorkspaceBacklogStoryContract(workspaceRoot, "US-XX1");
+    expect(result).toMatchObject({ ok: false, code: "symlink_escape" });
+  });
+
   it("refuses a spec.md reached through a symlinked ANCESTOR directory escaping the Workspace", () => {
     const workspaceRoot = sandbox();
     const outside = sandbox();

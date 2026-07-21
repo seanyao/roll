@@ -33,7 +33,7 @@ import {
   protectReadOnlyWorktree,
   type ExpectedWorktreeFacts,
 } from "./issue-worktree-git.js";
-import { git } from "./git.js";
+import { git, isImmutableGitObjectId } from "./git.js";
 
 const ISSUE_INIT_JOURNAL_V1 = "roll.issue-init-journal/v1" as const;
 
@@ -181,7 +181,9 @@ function parseRepositoryBoundEvent(raw: unknown, issueRoot: string): { readonly 
   const access = event["access"];
   const worktreePath = event["worktreePath"];
   const workBranch = event["workBranch"];
-  if (typeof alias !== "string" || alias === "") return undefined;
+  if (typeof alias !== "string" || alias === "") {
+    throw new PinnedFactsConflictError(`issue:repository_bound event in ${issueRoot} is missing a valid alias`);
+  }
   if (typeof workspaceId !== "string" || workspaceId === "") {
     throw new PinnedFactsConflictError(`issue:repository_bound event for "${alias}" in ${issueRoot} is missing a valid workspaceId`);
   }
@@ -191,8 +193,8 @@ function parseRepositoryBoundEvent(raw: unknown, issueRoot: string): { readonly 
   if (typeof repoId !== "string" || repoId === "") {
     throw new PinnedFactsConflictError(`issue:repository_bound event for "${alias}" in ${issueRoot} is missing a valid repoId`);
   }
-  if (typeof baseSha !== "string" || baseSha === "") {
-    throw new PinnedFactsConflictError(`issue:repository_bound event for "${alias}" in ${issueRoot} is missing a valid baseSha`);
+  if (typeof baseSha !== "string" || !isImmutableGitObjectId(baseSha)) {
+    throw new PinnedFactsConflictError(`issue:repository_bound event for "${alias}" in ${issueRoot} has an invalid baseSha (must be a full lowercase hex object id)`);
   }
   if (access !== "read" && access !== "write") {
     throw new PinnedFactsConflictError(`issue:repository_bound event for "${alias}" in ${issueRoot} has an invalid access value`);
@@ -335,8 +337,8 @@ function readJournalPinnedFacts(issueRoot: string): ReadonlyMap<string, PinnedTa
     // Missing/null/empty/non-string baseSha here means the journal itself
     // is corrupted or predates the pinning contract; it is never silently
     // treated as "nothing pinned yet".
-    if (typeof baseSha !== "string" || baseSha === "") {
-      throw new PinnedFactsConflictError(`Issue init journal entry for "${alias}" in ${issueRoot} is missing a valid baseSha`);
+    if (typeof baseSha !== "string" || !isImmutableGitObjectId(baseSha)) {
+      throw new PinnedFactsConflictError(`Issue init journal entry for "${alias}" in ${issueRoot} has an invalid baseSha (must be a full lowercase hex object id)`);
     }
     facts.set(alias, {
       workspaceId: journalWorkspaceId,

@@ -14,7 +14,7 @@ import {
   parseRepositoryBinding,
   type RepositoryBinding,
 } from "@roll/spec";
-import { git, type GitExecutionOptions, type GitResult } from "./git.js";
+import { git, isImmutableGitObjectId, type GitExecutionOptions, type GitResult } from "./git.js";
 import { acquireLock, readLockOwner, releaseLock } from "./process.js";
 
 export type RepositoryCacheErrorCode =
@@ -436,7 +436,7 @@ async function fetchAndResolveBaseSha(
   await checkedGit(runGit, ["fetch", "--prune", identity.transportRemote, refspec.value], cwd, "fetch", guard);
   const resolved = await checkedGit(runGit, ["rev-parse", refspec.destination], cwd, "base resolve", guard);
   const baseSha = resolved.stdout.trim();
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(baseSha)) {
+  if (!isImmutableGitObjectId(baseSha)) {
     throw new RepositoryCacheError("git_failure", "Git base resolve did not return an immutable object ID");
   }
   return baseSha;

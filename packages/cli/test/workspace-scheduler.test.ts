@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildLoopRunnerScript,
+  LOOP_ON_USAGE,
   loopOnCommand,
   loopPauseCommand,
   loopResumeCommand,
@@ -93,6 +94,23 @@ afterEach(() => {
 });
 
 describe("US-WS-016 Workspace scheduler contract", () => {
+  it("renders loop on help before target resolution or scheduler mutation", async () => {
+    const fixture = schedulerDeps({}, () => {
+      throw new Error("help must not resolve a target");
+    });
+    let stdout = "";
+    const original = process.stdout.write.bind(process.stdout);
+    // @ts-expect-error capture-only
+    process.stdout.write = (chunk: string | Uint8Array): boolean => (stdout += String(chunk), true);
+    try {
+      expect(await loopOnCommand(["--help"], fixture.deps)).toBe(0);
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(stdout).toBe(`${LOOP_ON_USAGE}\n`);
+    expect(stdout).toContain("--workspace <id|path>");
+  });
+
   it("derives disjoint runtime, event, lock and pause paths from immutable Workspace identity", () => {
     const alpha = workspaceSchedulerPaths({ workspaceId: "ws-alpha", workspaceRoot: workspaceRoot("alpha") });
     const beta = workspaceSchedulerPaths({ workspaceId: "ws-beta", workspaceRoot: workspaceRoot("beta") });

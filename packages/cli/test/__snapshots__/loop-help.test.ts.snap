@@ -4,8 +4,8 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 "Usage: roll loop <subcommand>
 The autonomous delivery loop — grouped control / observe / alerts / maintain.
 
-control   on · off [--all] · now · pause · resume · reset · go · goal · recover · fallback
-observe   watch · status · runs · log · events · signals · eval
+control   on --workspace <id|path> · off [--all] · now · pause --workspace <id|path> · resume --workspace <id|path> · reset · go --workspace <id|path> · goal · recover · fallback
+observe   watch · status [--workspace <id|path>|--all] · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
 maintain  gc · fmt · mute · unmute · reconcile-pending
 internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes
@@ -19,8 +19,8 @@ exports[`roll loop --help groups — US-DOSSIER-035 > AC6: EN/中 snapshots (sin
 "用法：roll loop <子命令>
 自治交付循环——按作动/传感/告警/维护分组。
 
-作动      on · off [--all] · now · pause · resume · reset · go · goal · recover · fallback
-传感      watch · status · runs · log · events · signals · eval
+作动      on --workspace <id|path> · off [--all] · now · pause --workspace <id|path> · resume --workspace <id|path> · reset · go --workspace <id|path> · goal · recover · fallback
+传感      watch · status [--workspace <id|path>|--all] · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
 维护      gc · fmt · mute · unmute · reconcile-pending
 内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes

@@ -865,8 +865,18 @@ async function workspaceLoopOnCommand(target: ResolvedBacklogTarget, deps: LoopS
   return 0;
 }
 
+export const LOOP_ON_USAGE =
+  "Usage: roll loop on --workspace <id|path>\n" +
+  "  Enable or re-arm the scheduler for exactly one Workspace.\n" +
+  "用法：roll loop on --workspace <ID|路径>\n" +
+  "  为且仅为一个 Workspace 启用或重新唤醒 scheduler。";
+
 /** `roll loop on` — generate v3 runners + plists, (re)load loop & pr. */
 export async function loopOnCommand(args: string[], deps: LoopSchedDeps = realDeps()): Promise<number> {
+  if (args.includes("--help") || args.includes("-h")) {
+    process.stdout.write(`${LOOP_ON_USAGE}\n`);
+    return 0;
+  }
   const workspaceDecision = resolveWorkspaceSchedulerTarget(args, "mutation", deps);
   if (workspaceDecision !== null) {
     if (!workspaceDecision.ok) return emitBacklogTargetError(workspaceDecision);

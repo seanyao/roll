@@ -308,6 +308,54 @@ describe("US-WS-007a Requirement archive audit", () => {
   });
 
   it.each([
+    ["regular entry", false, "corrupt", "revision_metadata_mismatch"],
+    ["symlink entry", true, "untrusted", "unsafe_archive_path"],
+  ])("classifies an undeclared revision-root %s without hiding it behind a scan-limit result", (_name, symlink, status, code) => {
+    const f = fixture();
+    const revisionRoot = join(f.requirementPath, "revisions", requirementRevisionKey("6"));
+    const extra = join(revisionRoot, "extra.bin");
+    if (symlink) {
+      const outside = join(f.root, "outside-extra.bin");
+      write(outside, "outside\n");
+      symlinkSync(outside, extra);
+    } else {
+      write(extra, "unexpected\n");
+    }
+
+    const result = auditRequirementArchive(f.auditInput);
+
+    expect(result.status).toBe(status);
+    expect(result.findings).toContainEqual({
+      code,
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}/extra.bin`,
+    });
+  });
+
+  it("detects a sibling archive entry added after its parent directory was enumerated", () => {
+    const f = fixture();
+    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md");
+    const added = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "late.bin");
+    let changed = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== trigger || changed) return;
+        changed = true;
+        write(added, "late mutation\n");
+      },
+    });
+
+    expect(changed).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}`,
+    });
+  });
+
+  it.each([
     ["unsupported schema", (source: Record<string, unknown>) => { source["schema"] = "roll.requirement-source/v2"; }],
     ["identity mismatch", (source: Record<string, unknown>) => { source["requirementId"] = "req-000000000000"; }],
   ])("treats %s as an untrusted manifest", (_name, mutate) => {

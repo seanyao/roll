@@ -184,6 +184,15 @@ function stableReadDirectory(path: string, maximumEntries: number): DirectoryRea
   return { ok: true, entries: entries.sort(), identity: afterIdentity };
 }
 
+function directoryIdentityChanged(path: string, initial: FileIdentity): boolean {
+  try {
+    const current = lstatSync(path);
+    return current.isSymbolicLink() || !current.isDirectory() || !sameIdentity(initial, identity(current));
+  } catch {
+    return true;
+  }
+}
+
 function contained(root: string, target: string): boolean {
   const path = relative(root, target);
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
@@ -307,10 +316,25 @@ function scanRevision(
   const revisionKey = requirementRevisionKey(revision);
   const revisionRelative = `revisions/${revisionKey}`;
   const revisionRoot = join(requirementRoot, "revisions", revisionKey);
-  const revisionDirectory = stableReadDirectory(revisionRoot, 3);
+  const revisionDirectory = stableReadDirectory(revisionRoot, limits.maxRevisionEntries);
   if (!revisionDirectory.ok) {
     findings.push(findingForReadFailure(revisionDirectory.kind, revisionRelative, revision));
     return;
+  }
+  const expectedRootEntries = new Set(["capture.yaml", "requirement.md", "context"]);
+  for (const name of revisionDirectory.entries) {
+    if (expectedRootEntries.has(name)) continue;
+    const evidencePath = `${revisionRelative}/${name}`;
+    try {
+      const stat = lstatSync(join(revisionRoot, name));
+      findings.push({
+        code: stat.isSymbolicLink() ? "unsafe_archive_path" : "revision_metadata_mismatch",
+        revision,
+        evidencePath,
+      });
+    } catch {
+      findings.push({ code: "archive_changed_during_read", revision, evidencePath });
+    }
   }
   const captureRelative = `${revisionRelative}/capture.yaml`;
   const captureRead = stableReadFile(join(revisionRoot, "capture.yaml"), limits.maxCaptureBytes, deps);
@@ -371,6 +395,9 @@ function scanRevision(
     if (read.content.byteLength !== descriptor.bytes || sha256(read.content) !== descriptor.sha256) {
       findings.push({ code: "context_digest_mismatch", revision, evidencePath: relativePath });
     }
+  }
+  if (directoryIdentityChanged(revisionRoot, revisionDirectory.identity)) {
+    findings.push({ code: "archive_changed_during_read", revision, evidencePath: revisionRelative });
   }
 }
 

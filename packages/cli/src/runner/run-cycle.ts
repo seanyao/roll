@@ -282,6 +282,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     rootCauseKey: next.rootCauseKey ?? live.rootCauseKey,
     agentTimedOut: next.agentTimedOut ?? live.agentTimedOut,
     publishConfirmed: next.publishConfirmed ?? live.publishConfirmed,
+    repositoryExecution: next.repositoryExecution ?? live.repositoryExecution,
   };
 }
 

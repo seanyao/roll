@@ -212,21 +212,28 @@ export async function startRepositoryCycleObserver(
     if (running) return;
     running = true;
     try {
+      const nowMs = Date.now();
       for (const repoId of repoIds) {
         const state = states.get(repoId);
         if (state === undefined) throw new Error(`missing repository observer state: ${repoId}`);
         try {
           const commits = await observeRepositoryRecentCommits(repoId, repositories);
-          for (const event of observeCommits(commits, state, Date.now())) {
+          for (const event of observeCommits(commits, state, nowMs)) {
             if (event.type !== "cycle:tcr" && event.type !== "cycle:first_edit") continue;
             repositories.events.append(repoId, event);
-            if (event.type === "cycle:tcr") storyState.seen.add(`${repoId}:${event.commitHash}`);
+            if (event.type === "cycle:tcr") {
+              void observeCommits([{
+                hash: `${repoId}:${event.commitHash}`,
+                message: event.message,
+                tsSec: event.commitTs === undefined ? 0 : event.commitTs / 1_000,
+              }], storyState, nowMs);
+            }
           }
         } catch (error) {
           reportFailure(error);
         }
       }
-      for (const event of maybeBuildHeartbeat(storyState, Date.now())) {
+      for (const event of maybeBuildHeartbeat(storyState, nowMs)) {
         ports.events.appendEvent(ports.paths.eventsPath, event);
       }
     } finally {

@@ -136,6 +136,7 @@ export async function executeSetupCommand(
 ): Promise<ExecuteResult> {
   switch (cmd.kind) {
     case "preflight": {
+      if (ports.repositories !== undefined) return { event: { type: "preflight_done" } };
       // FIX-198/FIX-112/FIX-211 — PR-aware claim reconcile. The inner lock
       // guarantees a single live cycle per project, so a 🔨 In Progress row is
       // from a PRIOR cycle. It is NOT always a dead claim (FIX-211): a cycle
@@ -231,6 +232,7 @@ export async function executeSetupCommand(
     // infra/git _worktree_create (STRICT). worktree_created on success, else
     // worktree_failed (→ failed terminal, bin/roll:9000).
     case "create_worktree": {
+      if (ports.repositories !== undefined) return { event: { type: "worktree_created" } };
       // RESUME-PRIOR-WORK does NOT happen here: the story id is UNDEFINED at
       // create_worktree (the picker reads the backlog INSIDE the worktree,
       // FIX-198/FIX-204C), so resume/submodule decisions are deferred to the

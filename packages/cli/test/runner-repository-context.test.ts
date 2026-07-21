@@ -8,7 +8,7 @@ import {
   type CycleRepositoryExecutionContext,
   type RepositoryExecutionContext,
 } from "@roll/spec";
-import { cycleStep, initialCycleState, type CycleContext, type RouteDeps } from "@roll/core";
+import { BUILD_HEARTBEAT_GAP_MS, cycleStep, initialCycleState, type RouteDeps } from "@roll/core";
 import {
   REPOSITORY_CONTEXT_MAX_CHARS,
   buildRepositoryContextMap,
@@ -28,9 +28,7 @@ import {
   observeWritableRepositoryCommitCount,
 } from "../src/runner/repository-observation.js";
 import { startRepositoryCycleObserver } from "../src/runner/spawn-observers.js";
-import { executeSetupCommand } from "../src/runner/setup-handlers.js";
-import { executeSpawnAgentCommand } from "../src/runner/spawn-agent-handler.js";
-import { executeCommand } from "../src/runner/executor.js";
+import { runCycleOnce } from "../src/runner/run-cycle.js";
 
 function repository(
   repoId: string,
@@ -423,6 +421,7 @@ describe("US-WS-010 repository Builder context", () => {
   });
 
   it("observes writable repository commits without treating the Issue root as a Git repository", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
     const root = mkdtempSync(join(tmpdir(), "roll-us-ws-010-observer-"));
     const issueRoot = join(root, "issues", "US-WS-010");
     const runtimeRoot = join(root, "runtime");
@@ -477,27 +476,45 @@ describe("US-WS-010 repository Builder context", () => {
       agentSpawn: fakeSpawn(),
     });
     const bound = createRepositoryPorts(ctx, adapters);
-    const observer = await startRepositoryCycleObserver({
-      ...basePorts,
-      repositories: { resolve: async () => ctx.repositoryExecution, bind: () => bound },
-    }, ctx);
+    try {
+      const observer = await startRepositoryCycleObserver({
+        ...basePorts,
+        repositories: { resolve: async () => ctx.repositoryExecution, bind: () => bound },
+      }, ctx);
 
-    changed = true;
-    expect(await observeWritableRepositoryCommitCount(ctx, bound)).toBe(2);
-    await observer.stop();
+      changed = true;
+      expect(await observeWritableRepositoryCommitCount(ctx, bound)).toBe(2);
+      now.mockReturnValue(1_000 + BUILD_HEARTBEAT_GAP_MS);
+      await observer.stop();
+    } finally {
+      now.mockRestore();
+    }
 
     expect(recentCommits).toHaveBeenCalledTimes(4);
     expect(recentCommits).not.toHaveBeenCalledWith(readonly);
     const issueEvents = readFileSync(join(issueRoot, "events.jsonl"), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(issueEvents.filter((event) => event["type"] === "cycle:tcr")).toEqual([
-      expect.objectContaining({ repoId: writable.repoId, cycleId: ctx.cycleId }),
-      expect.objectContaining({ repoId: secondary.repoId, cycleId: ctx.cycleId }),
+      expect.objectContaining({
+        workspaceId: execution.workspaceId,
+        storyId: ctx.storyId,
+        cycleId: ctx.cycleId,
+        repoId: writable.repoId,
+        commitHash: `${writable.repoId}-commit`,
+      }),
+      expect.objectContaining({
+        workspaceId: execution.workspaceId,
+        storyId: ctx.storyId,
+        cycleId: ctx.cycleId,
+        repoId: secondary.repoId,
+        commitHash: `${secondary.repoId}-commit`,
+      }),
     ]);
     const storyEvents = readFileSync(fixturePaths.eventsPath, "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(storyEvents.filter((event) => event["type"] === "cycle:phase")).toHaveLength(1);
     expect(storyEvents.filter((event) => event["type"] === "cycle:tcr")).toHaveLength(0);
+    expect(storyEvents.filter((event) => event["type"] === "cycle:stdout")).toHaveLength(0);
     expect(existsSync(join(issueRoot, ".git"))).toBe(false);
   });
 
@@ -598,6 +615,8 @@ describe("US-WS-010 repository Builder context", () => {
     const spawn = fakeSpawn();
     vi.mocked(spawn).mockImplementation(async (_agent, options) => {
       expect(options.cwd).toBe(realpathSync(fixture.issueRoot));
+      expect(options.skillBody).toContain(fixture.repositories[0]?.repoId ?? "missing-repo");
+      expect(options.skillBody).toContain(fixture.repositories[1]?.repoId ?? "missing-repo");
       for (const repo of fixture.repositories) {
         writeFileSync(join(repo.path, "delivery.txt"), `${repo.alias} delivered\n`);
         execFileSync("git", ["add", "delivery.txt"], { cwd: repo.path });
@@ -614,12 +633,23 @@ describe("US-WS-010 repository Builder context", () => {
       clock: () => 100,
     });
     const globalGit = {
+      fetchOrigin: vi.spyOn(basePorts.git, "fetchOrigin"),
+      worktreeAdd: vi.spyOn(basePorts.git, "worktreeAdd"),
+      worktreeAddInSubmodule: vi.spyOn(basePorts.git, "worktreeAddInSubmodule"),
+      worktreeRemoveInSubmodule: vi.spyOn(basePorts.git, "worktreeRemoveInSubmodule"),
+      worktreeSubmoduleInit: vi.spyOn(basePorts.git, "worktreeSubmoduleInit"),
       commitsAhead: vi.spyOn(basePorts.git, "commitsAhead"),
       tcrCount: vi.spyOn(basePorts.git, "tcrCount"),
       recentCommits: vi.spyOn(basePorts.git, "recentCommits"),
       mainAhead: vi.spyOn(basePorts.git, "mainAhead"),
+      rescueLeaked: vi.spyOn(basePorts.git, "rescueLeaked"),
       push: vi.spyOn(basePorts.git, "push"),
       worktreeRemove: vi.spyOn(basePorts.git, "worktreeRemove"),
+      fetchRemoteBranch: vi.spyOn(basePorts.git, "fetchRemoteBranch"),
+      branchMergedIntoMain: vi.spyOn(basePorts.git, "branchMergedIntoMain"),
+      branchCleanlyRebasesOntoMain: vi.spyOn(basePorts.git, "branchCleanlyRebasesOntoMain"),
+      resetWorktreeHard: vi.spyOn(basePorts.git, "resetWorktreeHard"),
+      landLocalDelivery: vi.spyOn(basePorts.git, "landLocalDelivery"),
     };
     const globalProvider = {
       openPrTitles: vi.spyOn(basePorts.github, "openPrTitles").mockResolvedValue([]),
@@ -638,48 +668,19 @@ describe("US-WS-010 repository Builder context", () => {
       pendingPublish: () => false,
       pendingMergeDelivery: () => undefined,
     };
-    const baseCtx: CycleContext = {
+    const baseCtx = {
       cycleId: "cycle-production-chain",
       branch: "cycle-production-chain",
       loop: "ci",
     };
-    expect(ports.process.acquireLock(fixturePaths.lockPath, { cycleId: baseCtx.cycleId }).acquired).toBe(true);
     const rootModeBefore = statSync(fixture.root).mode & 0o777;
+    const result = await runCycleOnce({ ports, ctx: baseCtx });
 
-    const picked = await executeSetupCommand({ kind: "pick_story" }, ports, baseCtx);
-    expect(picked.event?.type).toBe("story_picked");
-    let liveCtx: CycleContext = { ...baseCtx, ...picked.ctxPatch };
-    let state = { ...initialCycleState(baseCtx), phase: "pick" as const, worktreeReady: true };
-    const pickedStep = cycleStep(state, picked.event!);
-    state = pickedStep.state;
-    liveCtx = { ...liveCtx, ...state.ctx };
-    const routed = cycleStep(state, { type: "route_resolved", agent: "claude", model: "test" });
-    state = routed.state;
-    liveCtx = { ...liveCtx, ...state.ctx };
-    const spawnCommand = routed.commands.find((command) => command.kind === "spawn_agent");
-    if (spawnCommand === undefined || spawnCommand.kind !== "spawn_agent") throw new Error("spawn command missing");
-    const spawned = await executeSpawnAgentCommand(spawnCommand, ports, liveCtx);
-    if (spawned.event === undefined) throw new Error("spawn event missing");
-    liveCtx = { ...liveCtx, ...spawned.ctxPatch };
-    const spawnedStep = cycleStep(state, spawned.event);
-    state = spawnedStep.state;
-    liveCtx = { ...liveCtx, ...state.ctx };
-    const captureCommand = spawnedStep.commands.find((command) => command.kind === "capture_facts");
-    if (captureCommand === undefined || captureCommand.kind !== "capture_facts") throw new Error("capture command missing");
-    const captured = await executeCaptureFactsCommand(captureCommand, ports, liveCtx);
-    if (captured.event === undefined) throw new Error("capture event missing");
-    liveCtx = { ...liveCtx, ...captured.ctxPatch };
-    const terminal = cycleStep(state, captured.event);
-    expect(terminal.state.terminal).toBe("blocked");
-    expect(terminal.commands.map((command) => command.kind)).toEqual([
-      "emit_event",
-      "emit_event",
-      "append_run",
-      "release_lock",
-    ]);
-    for (const command of terminal.commands) {
-      await executeCommand(command, ports, liveCtx);
-    }
+    expect(result.terminal).toBe("blocked");
+    expect(result.state?.ctx.repositoryExecution).toMatchObject({
+      workspaceId: "ws-production-chain",
+      issueRoot: realpathSync(fixture.issueRoot),
+    });
 
     const storyEvents = readFileSync(fixturePaths.eventsPath, "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
@@ -699,6 +700,9 @@ describe("US-WS-010 repository Builder context", () => {
     for (const spy of [...Object.values(globalGit), ...Object.values(globalProvider)]) {
       expect(spy).not.toHaveBeenCalled();
     }
+    const issueEvents = readFileSync(join(fixture.issueRoot, "events.jsonl"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(issueEvents.filter((event) => event["type"] === "repository:capture_observed")).toHaveLength(2);
     expect(existsSync(join(fixture.issueRoot, ".git"))).toBe(false);
   });
 

@@ -713,4 +713,85 @@ describe("applyIssueInit", () => {
 
     rmSync(join(f.issueRoot, "issue-init.pending.json"), { force: true });
   });
+
+  it.each([
+    ["null baseSha", null],
+    ["absent baseSha", undefined],
+  ])("rejects a structurally-valid journal (matching current workspace/story/repo/access/path/branch) whose target has %s, naming baseSha in the error, with zero mutation", async (_name, baseShaValue) => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const manifestBefore = readFileSync(join(f.issueRoot, "manifest.json"), "utf8");
+    const sot1RepoId = f.bindings.find((b) => b.alias === "sot1")?.repoId;
+    if (sot1RepoId === undefined) throw new Error("fixture must resolve sot1's repoId");
+
+    // A journal that is CORRECT in every other required field — workspaceId,
+    // storyId, alias, repoId, access, path, workBranch all match the
+    // currently-resolving identity exactly — but genuinely never pins a
+    // baseSha for this target. This must never be treated as "not reached
+    // yet, resolve one fresh": a journal is only ever WRITTEN once every
+    // declared target's base is fully resolved, so an entry missing one is
+    // corrupted, not benign.
+    const target: Record<string, unknown> = {
+      alias: "sot1",
+      repoId: sot1RepoId,
+      path: join(f.issueRoot, "sot1"),
+      created: false,
+      workBranch: "roll/ws-demo/US-XX1/sot1",
+      access: "write",
+    };
+    if (baseShaValue !== undefined) target["baseSha"] = baseShaValue;
+    const invalidJournal = {
+      schema: "roll.issue-init-journal/v1",
+      transactionId: "invalid-basesha-transaction",
+      workspaceId: "ws-demo",
+      storyId: "US-XX1",
+      status: "repair_required",
+      targets: [target],
+    };
+    const journalPath = join(f.issueRoot, "issue-init.pending.json");
+    const journalBefore = `${JSON.stringify(invalidJournal, null, 2)}\n`;
+    writeFileSync(journalPath, journalBefore, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(/baseSha/i);
+
+    // The check-side preflight must also refuse it, never report success/repair.
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+
+    // Zero mutation: the journal itself, events, and manifest are untouched.
+    expect(readFileSync(journalPath, "utf8")).toBe(journalBefore);
+    expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
+    expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
+    // No new Issue mutation: sot1's real worktree is completely untouched.
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true);
+
+    rmSync(journalPath, { force: true });
+  });
+
+  it("proves the FIRST persisted multi-target journal has a non-empty baseSha for every target before any worktree mutation", async () => {
+    const f = fixture();
+    const journalSnapshots: unknown[] = [];
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      // Fires the instant EACH target's real worktree is created — by then
+      // the journal has already been (re)written at least once. Capture the
+      // journal bytes on disk at the very first opportunity, before any
+      // target-specific mutation completes, to prove baseSha was pinned for
+      // every declared target from the FIRST write, not filled in
+      // incrementally per target.
+      afterTargetCreated: () => {
+        if (journalSnapshots.length === 0) {
+          journalSnapshots.push(JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8")));
+        }
+      },
+    });
+    expect(journalSnapshots).toHaveLength(1);
+    const firstJournal = journalSnapshots[0] as { targets: Array<{ alias: string; baseSha: unknown }> };
+    expect(firstJournal.targets).toHaveLength(3); // sot1, sot2, sot3
+    for (const target of firstJournal.targets) {
+      expect(typeof target.baseSha).toBe("string");
+      expect(target.baseSha).not.toBe("");
+    }
+  });
 });

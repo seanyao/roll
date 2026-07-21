@@ -329,12 +329,14 @@ function readJournalPinnedFacts(issueRoot: string): ReadonlyMap<string, PinnedTa
     if (workBranch !== null && workBranch !== undefined && typeof workBranch !== "string") {
       throw new PinnedFactsConflictError(`Issue init journal entry for "${alias}" in ${issueRoot} has an invalid workBranch`);
     }
-    // A journal entry with no baseSha yet (this target's cache was never
-    // reached before an earlier target failed) simply has nothing pinned —
-    // not an error; the caller falls back to resolving one fresh for it.
-    if (baseSha === undefined || baseSha === null) continue;
+    // A journal is only ever WRITTEN once every declared target's cache and
+    // base SHA are fully resolved (see applyIssueInit) — there is no valid
+    // "not pinned yet" state for a persisted journal entry to represent.
+    // Missing/null/empty/non-string baseSha here means the journal itself
+    // is corrupted or predates the pinning contract; it is never silently
+    // treated as "nothing pinned yet".
     if (typeof baseSha !== "string" || baseSha === "") {
-      throw new PinnedFactsConflictError(`Issue init journal entry for "${alias}" in ${issueRoot} has an invalid baseSha`);
+      throw new PinnedFactsConflictError(`Issue init journal entry for "${alias}" in ${issueRoot} is missing a valid baseSha`);
     }
     facts.set(alias, {
       workspaceId: journalWorkspaceId,
@@ -680,12 +682,15 @@ interface JournalTarget {
   readonly created: boolean;
   readonly workBranch: string | null;
   readonly access: "read" | "write";
-  /** The pinned immutable base for this target, once resolved — persisted
-   *  to the journal BEFORE any worktree mutation so an interrupted retry
-   *  reads the SAME base back rather than re-deriving from the shared
-   *  cache's (possibly since-advanced) current ref. Null only transiently,
-   *  before this target's cache has been resolved for the first time. */
-  readonly baseSha: string | null;
+  /** The pinned immutable base for this target — REQUIRED, never null/absent.
+   *  Every target's repository cache and base SHA (`cacheByAlias`) is fully
+   *  resolved BEFORE the journal is ever constructed or written (see
+   *  applyIssueInit), so there is no valid "not yet resolved" state for the
+   *  journal to represent: a journal is only ever written once every target
+   *  in it is genuinely pinned. Persisted BEFORE any worktree mutation so an
+   *  interrupted retry reads the SAME base back rather than re-deriving one
+   *  from the shared cache's (possibly since-advanced) current ref. */
+  readonly baseSha: string;
 }
 
 interface IssueInitJournal {
@@ -858,16 +863,26 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
   // point — persisting it into the journal HERE, before any worktree
   // mutation, is what lets an interrupted retry read the SAME pinned base
   // back (readJournalPinnedFacts) instead of re-deriving one from the
-  // shared cache's ref, which may have advanced by then.
-  const targets: JournalTarget[] = plan.targets.map((target) => ({
-    alias: target.alias,
-    repoId: target.repoId,
-    path: join(input.issueRoot, target.alias),
-    created: false,
-    workBranch: target.workBranch,
-    access: target.access,
-    baseSha: cacheByAlias.get(target.alias)?.baseSha ?? null,
-  }));
+  // shared cache's ref, which may have advanced by then. A REQUIRED lookup
+  // (never an optional-chain-with-null-fallback): the cache-resolution loop
+  // above either populated `cacheByAlias` for every declared target or
+  // already threw — so a missing entry here would mean the journal is
+  // about to be written with an unpinned target, which must never happen.
+  const targets: JournalTarget[] = plan.targets.map((target) => {
+    const cache = cacheByAlias.get(target.alias);
+    if (cache === undefined) {
+      throw new IssueInitializationError("apply_failed", `Refusing to write the Issue init journal: ${target.alias} has no resolved repository cache/base SHA to pin`);
+    }
+    return {
+      alias: target.alias,
+      repoId: target.repoId,
+      path: join(input.issueRoot, target.alias),
+      created: false,
+      workBranch: target.workBranch,
+      access: target.access,
+      baseSha: cache.baseSha,
+    };
+  });
   let journal: IssueInitJournal = {
     schema: ISSUE_INIT_JOURNAL_V1,
     transactionId: randomUUID(),

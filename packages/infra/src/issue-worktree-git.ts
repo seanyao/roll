@@ -139,6 +139,27 @@ async function branchExists(cachePath: string, branch: string): Promise<boolean>
   return result.code === 0;
 }
 
+export interface IssueWorktreeAddOptions {
+  /** Only a target with a valid Issue-local pin (an existing journal/event
+   *  fact for this alias — see {@link resolveExpectedTargetFacts} in
+   *  issue-worktrees.ts) may recover an orphan governed branch of the same
+   *  name. Defaults to `false`: a brand-new, never-pinned target must never
+   *  silently adopt a pre-existing branch just because the name happens to
+   *  collide (another Workspace/Story rendering the same pattern, or manual
+   *  git use) — it fails loud instead. */
+  readonly allowOrphanRecovery?: boolean;
+}
+
+export interface IssueWorktreeAddResult {
+  /** True when this call itself created `branch` as a brand-new ref (or the
+   *  target is a read target / detached, where there is no branch at all).
+   *  False when an existing branch was RECOVERED (orphan reuse) — the
+   *  caller (applyIssueInit) persists this into the journal so rollback
+   *  only ever deletes a branch THIS run actually created, never one it
+   *  merely reused from a prior run's orphan. */
+  readonly branchCreatedThisRun: boolean;
+}
+
 /** Create a REAL git worktree for one Issue repository target. Never touches a
  *  pre-existing path — the caller must have already probed it as absent.
  *  `branch === null` creates a detached worktree (no local branch).
@@ -147,11 +168,15 @@ async function branchExists(cachePath: string, branch: string): Promise<boolean>
  *  that exact branch name already exists as a real ref (ORPHAN GOVERNED
  *  BRANCH RECOVERY — e.g. an earlier interrupted run created the branch and
  *  a worktree, then the worktree path was deleted by hand without the
- *  branch itself ever being cleaned up). In that case the branch is REUSED
- *  — but ONLY when `baseSha` is confirmed an ancestor of the branch's real
- *  current tip (so a diverged/unrelated branch of the same name is refused,
- *  never silently adopted) — checking out its ACTUAL tip, which may already
- *  hold later real story commits made before the interruption. Git's own
+ *  branch itself ever being cleaned up). Orphan recovery is REFUSED outright
+ *  (fail loud, branch left untouched) unless the caller passes
+ *  `options.allowOrphanRecovery: true` — reserved for a target that already
+ *  has a valid Issue-local pin; see {@link IssueWorktreeAddOptions}. When
+ *  recovery IS allowed, the branch is reused ONLY when `baseSha` is
+ *  confirmed an ancestor of the branch's real current tip (so a
+ *  diverged/unrelated branch of the same name is refused, never silently
+ *  adopted) — checking out its ACTUAL tip, which may already hold later real
+ *  story commits made before the interruption. Git's own
  *  one-worktree-per-branch guard naturally refuses the reuse if that branch
  *  is already checked out somewhere else; this function does not re-derive
  *  that check itself.
@@ -166,7 +191,8 @@ export async function issueWorktreeAdd(
   path: string,
   baseSha: string,
   branch: string | null,
-): Promise<void> {
+  options: IssueWorktreeAddOptions = {},
+): Promise<IssueWorktreeAddResult> {
   if (existsSync(path)) {
     throw new Error(`refusing to create an Issue worktree over a pre-existing path: ${path}`);
   }
@@ -178,6 +204,11 @@ export async function issueWorktreeAdd(
   await git(["worktree", "prune"], cachePath);
 
   if (branch !== null && await branchExists(cachePath, branch)) {
+    if (options.allowOrphanRecovery !== true) {
+      throw new Error(
+        `refusing to reuse pre-existing branch "${branch}" for ${path}: this target has no valid Issue-local pin, so orphan recovery is not permitted — a brand-new target must never silently adopt a pre-existing branch`,
+      );
+    }
     const ancestor = await git(["merge-base", "--is-ancestor", baseSha, branch], cachePath);
     if (ancestor.code !== 0) {
       throw new Error(
@@ -191,7 +222,7 @@ export async function issueWorktreeAdd(
     if (reuse.code !== 0) {
       throw new Error(`git worktree add (orphan branch recovery) failed for ${path}: ${reuse.stderr || reuse.stdout}`);
     }
-    return;
+    return { branchCreatedThisRun: false };
   }
 
   const args = branch === null
@@ -201,6 +232,7 @@ export async function issueWorktreeAdd(
   if (result.code !== 0) {
     throw new Error(`git worktree add failed for ${path}: ${result.stderr || result.stdout}`);
   }
+  return { branchCreatedThisRun: branch !== null };
 }
 
 /** Parse `git worktree list --porcelain` into path → absolute worktree path set. */

@@ -649,6 +649,14 @@ export interface ApplyIssueInitDeps {
    *  the OS then refuses to protect must still roll back via a real `git
    *  worktree remove`, never linger ungoverned. */
   readonly beforeProtect?: (alias: string, path: string) => void;
+  /** Test-only hook fired for EVERY declared target, immediately before the
+   *  re-probe that decides create-vs-reuse for it (see applyIssueInit) — the
+   *  ONLY seam a test needs to inject a genuine TOCTOU: an ordinary directory
+   *  or an unrelated real git worktree materializing at this exact path in
+   *  the gap between the earlier preflight probe and this mutation-time
+   *  decision. Fires whether the preflight decided this target absent,
+   *  reused, or repaired. */
+  readonly beforeMutateTarget?: (alias: string, path: string) => void;
 }
 
 export interface ApplyIssueInitInput {
@@ -673,6 +681,14 @@ interface ResolvedTargetCache {
   readonly repoId: string;
   readonly cachePath: string;
   readonly baseSha: string;
+  /** True whenever ANY journal/event fact already exists for this alias
+   *  (see {@link resolveExpectedTargetFacts}'s own `isPinned`) — the ONLY
+   *  targets ever allowed to recover an orphan governed branch (see
+   *  {@link issueWorktreeAdd}'s `allowOrphanRecovery`). A brand-new,
+   *  never-pinned target must never silently adopt a pre-existing branch of
+   *  the same name. */
+  readonly isPinned: boolean;
+  readonly expected: ExpectedWorktreeFacts;
 }
 
 interface JournalTarget {
@@ -691,6 +707,14 @@ interface JournalTarget {
    *  interrupted retry reads the SAME base back rather than re-deriving one
    *  from the shared cache's (possibly since-advanced) current ref. */
   readonly baseSha: string;
+  /** Whether THIS run created `workBranch` as a brand-new ref, versus
+   *  reusing (recovering) an already-existing orphan branch. `false` for a
+   *  read target (no branch at all) and for any target not yet created this
+   *  run. Rollback ({@link rollbackCreatedTargets}) deletes the branch ONLY
+   *  when this is `true` — a recovered orphan branch (and whatever later
+   *  real Story commits it already carries) must survive a later target's
+   *  failure untouched. */
+  readonly branchCreatedThisRun: boolean;
 }
 
 interface IssueInitJournal {
@@ -740,10 +764,14 @@ async function rollbackCreatedTargets(
       // checkout stays non-writable rather than silently ending up exposed.
       continue;
     }
-    // The worktree is gone; also delete the governed branch THIS run created,
-    // so a repair retry can `worktree add -b` the same branch name again
-    // without "a branch named ... already exists".
-    if (target.workBranch !== null) {
+    // The worktree is gone; also delete the governed branch, but ONLY when
+    // THIS run actually created it — so a repair retry can `worktree add -b`
+    // the same branch name again without "a branch named ... already
+    // exists". A branch this run merely RECOVERED (orphan reuse) is left
+    // completely alone: it may already carry later real Story commits made
+    // before whatever earlier interruption orphaned it, and this run never
+    // owned its lifecycle.
+    if (target.workBranch !== null && target.branchCreatedThisRun) {
       await git(["branch", "-D", target.workBranch], cache.cachePath);
     }
   }
@@ -851,7 +879,18 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
           throw new IssueInitializationError("apply_failed", `Pinned base ${pinned.baseSha} for ${declared.alias} is no longer present in its repository cache`);
         }
       }
-      cacheByAlias.set(declared.alias, { alias: declared.alias, repoId: binding.repoId, cachePath: cache.cachePath, baseSha: pinned?.baseSha ?? cache.baseSha });
+      const workBranch = declared.access === "write"
+        ? renderBranchPattern(binding.workflow.branchPattern, { workspaceId: input.workspaceId, storyId: input.contract.storyId, repoAlias: declared.alias })
+        : null;
+      const baseSha = pinned?.baseSha ?? cache.baseSha;
+      cacheByAlias.set(declared.alias, {
+        alias: declared.alias,
+        repoId: binding.repoId,
+        cachePath: cache.cachePath,
+        baseSha,
+        isPinned: pinned !== undefined,
+        expected: { access: declared.access, workBranch, baseSha },
+      });
     } catch (error) {
       if (error instanceof IssueInitializationError) throw error;
       throw new IssueInitializationError("apply_failed", `Failed to resolve the repository cache for ${declared.alias}: ${(error as Error).message}`, { cause: error });
@@ -881,6 +920,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       workBranch: target.workBranch,
       access: target.access,
       baseSha: cache.baseSha,
+      branchCreatedThisRun: false,
     };
   });
   let journal: IssueInitJournal = {
@@ -895,21 +935,59 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
   try {
     for (const [index, target] of plan.targets.entries()) {
       const isReadTarget = target.access === "read";
-      if (target.action === "reused" || existsSync(targets[index]!.path)) {
-        // Already on disk (reused, or repaired-but-present) — no worktree add
-        // to perform, but a READ target's write-protection must still be
-        // (re-)applied here: permissions may have been restored/tampered with
-        // since the last run, and this is the only pass that ever touches it.
-        if (isReadTarget) protectReadOnlyWorktree(targets[index]!.path);
-        continue;
-      }
+      const targetPath = targets[index]!.path;
       const cache = cacheByAlias.get(target.alias);
       if (cache === undefined) throw new IssueInitializationError("apply_failed", `Missing resolved repository cache for ${target.alias}`);
-      await issueWorktreeAdd(cache.cachePath, targets[index]!.path, cache.baseSha, target.workBranch);
+
+      // TOCTOU re-probe: the preflight decision (`target.action`) was made
+      // against a snapshot that may now be stale — a directory or an
+      // unrelated real worktree can appear at `targetPath` in the window
+      // between that snapshot and this exact moment. Re-probe the REAL,
+      // CURRENT state immediately before deciding create-vs-reuse; never
+      // trust the earlier snapshot alone for the mutation decision itself.
+      deps.beforeMutateTarget?.(target.alias, targetPath);
+      const freshIdentity = await issueWorktreeIdentity(targetPath, cache.cachePath);
+
+      if (target.action === "reused") {
+        // Preflight expected this target ALREADY present and compatible. It
+        // may only continue if the REAL, current facts still match — cache,
+        // branch, HEAD/base and access compatibility — never on the
+        // strength of the earlier snapshot alone.
+        const stillCompatible = await checkWorktreeCompatibility(freshIdentity, cache.cachePath, cache.expected);
+        if (!stillCompatible) {
+          throw new IssueInitializationError(
+            "apply_failed",
+            `${target.alias} was expected reused/compatible but its real worktree no longer matches at mutation time (TOCTOU) — refusing to protect or bind it`,
+          );
+        }
+        if (isReadTarget) protectReadOnlyWorktree(targetPath);
+        continue;
+      }
+
+      if (freshIdentity.state !== "absent") {
+        // Preflight expected "created" (nothing here) or a repair where the
+        // path was absent — but something now occupies `targetPath`: an
+        // ordinary directory, an unrelated real git worktree, or a wrong
+        // worktree entirely. This is a genuine TOCTOU: fail loud, leave the
+        // foreign path completely untouched, never protect it and never
+        // emit issue:repository_bound for it.
+        throw new IssueInitializationError(
+          "apply_failed",
+          `${target.alias} was expected absent but a real path now exists at ${targetPath} (TOCTOU) — refusing to create a worktree over it`,
+        );
+      }
+
+      const added = await issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
+        // Orphan governed-branch recovery is only ever permitted for a
+        // target that already carries a valid Issue-local pin — a
+        // brand-new, never-pinned target must never silently adopt a
+        // pre-existing branch of the same name.
+        allowOrphanRecovery: cache.isPinned,
+      });
       // Journal the creation BEFORE protecting: if protection throws, rollback
       // must still know this worktree was created THIS run so it gets cleaned
       // up rather than left behind ungoverned.
-      targets[index] = { ...targets[index]!, created: true };
+      targets[index] = { ...targets[index]!, created: true, branchCreatedThisRun: added.branchCreatedThisRun };
       journal = { ...journal, targets: [...targets] };
       writeJournal(input.issueRoot, journal);
       if (isReadTarget) {

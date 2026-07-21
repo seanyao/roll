@@ -11,6 +11,7 @@ import {
   inspectIssueInit,
 } from "../src/issue-worktrees.js";
 import { protectReadOnlyWorktree, unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
+import { ensureRepositoryCache } from "../src/repository-cache.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -793,5 +794,247 @@ describe("applyIssueInit", () => {
       expect(typeof target.baseSha).toBe("string");
       expect(target.baseSha).not.toBe("");
     }
+  });
+
+  it("fails loud with zero mutation when an ORDINARY DIRECTORY materializes at a target's path AFTER preflight said absent, right before the worktree add — TOCTOU re-probe", async () => {
+    const f = fixture();
+    let sot2Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      // Real fault injection: preflight already decided sot2 is "absent" ->
+      // "created". Immediately before the mutation loop actually creates
+      // sot2's real worktree, a genuinely unrelated ordinary directory
+      // appears at that exact path (e.g. another process, a stray mkdir).
+      // The re-probe immediately before create/reuse MUST catch this and
+      // fail loud rather than let `issueWorktreeAdd` blow up uninformatively
+      // or, worse, silently treat the foreign directory as "reused".
+      beforeMutateTarget: (alias, path) => {
+        if (alias === "sot2" && !existsSync(path)) {
+          sot2Path = path;
+          mkdirSync(path, { recursive: true });
+          writeFileSync(join(path, "foreign.txt"), "not a git worktree — a stray directory\n", "utf8");
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    // The foreign directory is preserved exactly as it appeared — never
+    // deleted, never adopted, never protected as if it were a real checkout.
+    expect(existsSync(join(sot2Path, "foreign.txt"))).toBe(true);
+    expect(existsSync(join(sot2Path, ".git"))).toBe(false);
+    // sot1 (created earlier in the same run, still clean) is rolled back.
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+    // No success event/manifest for this failed attempt.
+    expect(existsSync(join(f.issueRoot, "manifest.json"))).toBe(false);
+    expect(existsSync(join(f.issueRoot, "events.jsonl"))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
+  });
+
+  it("fails loud with zero mutation when a WRONG WORKTREE (different repository/branch) materializes at a target's path AFTER preflight said absent — TOCTOU re-probe", async () => {
+    const f = fixture();
+    // A completely unrelated real git worktree, cloned from a THIRD repository
+    // entirely — genuinely registered git worktree admin metadata, just not
+    // for the cache this target expects.
+    const otherRoot = join(f.root, "other-repo");
+    mkdirSync(otherRoot, { recursive: true });
+    git(otherRoot, ["init", "-q", "-b", "main"]);
+    git(otherRoot, ["config", "user.email", "roll@example.test"]);
+    git(otherRoot, ["config", "user.name", "Roll Test"]);
+    writeFileSync(join(otherRoot, "unrelated.txt"), "unrelated repo\n", "utf8");
+    git(otherRoot, ["add", "unrelated.txt"]);
+    git(otherRoot, ["commit", "-q", "-m", "unrelated"]);
+
+    let sot2Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias, path) => {
+        if (alias === "sot2" && !existsSync(path)) {
+          sot2Path = path;
+          // Real git worktree, but registered against `otherRoot`, never
+          // against sot2's own expected repository cache — detached, since
+          // `main` is already checked out in `otherRoot` itself.
+          git(otherRoot, ["worktree", "add", "--detach", path, "main"]);
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    // The foreign worktree is preserved exactly as it appeared.
+    expect(existsSync(join(sot2Path, "unrelated.txt"))).toBe(true);
+    const commonDir = git(sot2Path, ["rev-parse", "--git-common-dir"]);
+    expect(commonDir).toContain("other-repo");
+    // sot1 (created earlier in the same run, still clean) is rolled back.
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+    expect(existsSync(join(f.issueRoot, "manifest.json"))).toBe(false);
+    expect(existsSync(join(f.issueRoot, "events.jsonl"))).toBe(false);
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
+
+    git(otherRoot, ["worktree", "remove", "--force", sot2Path]);
+  });
+
+  it("fails loud (never protects a foreign path) when a target preflighted absent suddenly appears — the re-probe never emits issue:repository_bound for it", async () => {
+    const f = fixture();
+    let sot3Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias, path) => {
+        if (alias === "sot3" && !existsSync(path)) {
+          sot3Path = path;
+          mkdirSync(path, { recursive: true });
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    expect(existsSync(join(f.issueRoot, "events.jsonl"))).toBe(false);
+    expect(existsSync(sot3Path)).toBe(true); // foreign path preserved, never removed
+  });
+
+  it("issueWorktreeAdd itself still fails loud if a path appears exactly at call time, independent of the applyIssueInit re-probe seam", async () => {
+    const f = fixture();
+    // Single-target contract so there's no earlier target to roll back —
+    // isolates issueWorktreeAdd's OWN pre-existing-path guard.
+    const singleContract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    let sot1Path = "";
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: singleContract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias, path) => {
+        if (alias === "sot1" && !existsSync(path)) {
+          sot1Path = path;
+          mkdirSync(path, { recursive: true });
+          writeFileSync(join(path, "foreign.txt"), "surprise directory\n", "utf8");
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    expect(existsSync(join(sot1Path, "foreign.txt"))).toBe(true);
+    expect(existsSync(join(f.issueRoot, "manifest.json"))).toBe(false);
+  });
+
+  it("a target preflighted REUSED/REPAIRED-present may continue only when its real facts still match at mutation time", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    // sot1 is now a real, compatible, reusable write target. Corrupt it
+    // (real, unmocked drift) in the tiny window the re-probe hook fires,
+    // simulating a wrong-worktree swap between preflight and mutation.
+    const sot1Path = join(f.issueRoot, "sot1");
+    let fired = false;
+    const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot1") fired = true;
+      },
+    });
+    // Still healthy and unchanged -> the re-probe is a no-op when nothing drifted.
+    expect(fired).toBe(true);
+    expect(repaired.outcome).toBe("reused");
+    expect(existsSync(join(sot1Path, ".git"))).toBe(true);
+  });
+
+  it("fails loud when a REUSED target's real worktree is swapped for an incompatible one between preflight and mutation", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    const sot1Path = join(f.issueRoot, "sot1");
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot1") {
+          // Real, unmocked drift: switch sot1 onto an incompatible branch
+          // right in the window between preflight (which said "reused") and
+          // the mutation loop's decision to skip mutation for it.
+          git(sot1Path, ["switch", "-c", "toctou-wrong-branch"]);
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    const journal = JSON.parse(readFileSync(join(f.issueRoot, "issue-init.pending.json"), "utf8"));
+    expect(journal.status).toBe("repair_required");
+  });
+
+  it("persists whether each write target's governed branch was CREATED this run or REUSED from an orphan, and rollback only deletes a branch this run created", async () => {
+    const f = fixture();
+    const twoWriteTargetsContract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true },
+      ],
+    };
+
+    // First real apply: both sot1 and sot2's branches are genuinely CREATED this run.
+    const firstResult = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: twoWriteTargetsContract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(firstResult.outcome).toBe("created");
+
+    // Real orphan: delete only sot1's worktree directory, leaving its
+    // governed branch behind — exactly the recoverable-orphan scenario.
+    const sot1Path = join(f.issueRoot, "sot1");
+    rmSync(sot1Path, { recursive: true, force: true });
+    const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot1")?.repoId}.git`);
+    git(cachePath, ["worktree", "prune"]);
+
+    // Add a LATER real Story commit directly onto the orphaned branch (no
+    // worktree needed for this — a plain `git commit-tree`-free approach:
+    // check it out in a scratch location, commit, remove that scratch
+    // worktree, keep the branch).
+    const scratchPath = join(f.root, "scratch-sot1");
+    git(cachePath, ["worktree", "add", scratchPath, "roll/ws-demo/US-XX1/sot1"]);
+    writeFileSync(join(scratchPath, "later-story-work.txt"), "later real story commit\n", "utf8");
+    git(scratchPath, ["add", "later-story-work.txt"]);
+    git(scratchPath, ["commit", "-q", "-m", "later story commit on orphaned branch"]);
+    const laterTip = git(scratchPath, ["rev-parse", "HEAD"]);
+    git(cachePath, ["worktree", "remove", "--force", scratchPath]);
+
+    // Second apply repairs sot1 by RECOVERING the orphan branch (isPinned,
+    // since sot1 was already pinned by the first successful apply above),
+    // then a real fault forces a rollback via sot2 (already reused/healthy —
+    // inject the failure straight into sot2's real worktree instead, by
+    // making it dirty right after sot1's repair would have completed).
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: twoWriteTargetsContract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias, path) => {
+        // sot2 is already present/compatible (reused) — inject a real
+        // failure by throwing once sot1's repair mutation has been
+        // evaluated, i.e. when we reach sot2's own re-probe.
+        if (alias === "sot2") {
+          void path;
+          throw new Error("real injected failure at sot2's re-probe, to force rollback after sot1's orphan recovery");
+        }
+      },
+    })).rejects.toThrow(IssueInitializationError);
+
+    // sot1's recovered orphan branch and its LATER commit must be preserved —
+    // this run only REUSED the branch, never created it, so rollback must
+    // never delete the BRANCH even though sot1's freshly re-created worktree
+    // checkout (this run's own repair mutation) is itself rolled back like
+    // any other clean target created this run.
+    expect(git(cachePath, ["rev-parse", "roll/ws-demo/US-XX1/sot1"])).toBe(laterTip);
+    const branches = git(cachePath, ["branch", "--list", "roll/ws-demo/US-XX1/sot1"]);
+    expect(branches).not.toBe("");
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+
+    // A further repair retry recovers the SAME branch tip again — proving
+    // the later Story commit truly survived across the rollback.
+    const retryResult = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: twoWriteTargetsContract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    expect(retryResult.outcome).toBe("repaired");
+    expect(existsSync(join(f.issueRoot, "sot1", "later-story-work.txt"))).toBe(true);
+    expect(git(join(f.issueRoot, "sot1"), ["rev-parse", "HEAD"])).toBe(laterTip);
+  });
+
+  it("never adopts a pre-existing branch of the SAME name for a BRAND-NEW (never-pinned) target — fails loud instead of reusing", async () => {
+    const f = fixture();
+    const sot1Binding = f.bindings.find((b) => b.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const renderedBranch = "roll/ws-demo/US-XX1/sot1"; // matches binding().workflow.branchPattern for this workspaceId/storyId
+
+    // Prime the machine cache for real (fetch, no Issue involved), then plant
+    // a branch with the EXACT name THIS brand-new target's contract would
+    // render — entirely by hand, never via applyIssueInit, so there is no
+    // Issue-local pin for it anywhere. Simulates a name collision (manual git
+    // use, or some other unrelated process) that this Issue never created.
+    await ensureRepositoryCache({ binding: sot1Binding, rollHome: f.rollHome, integrationRefspec: `+refs/heads/main:refs/remotes/origin/main` });
+    git(cachePath, ["branch", renderedBranch, "refs/remotes/origin/main"]);
+    expect(git(cachePath, ["branch", "--list", renderedBranch])).not.toBe("");
+
+    // This Issue's sot1 target has NEVER been pinned (brand-new) yet the
+    // branch its OWN contract would render to already exists — must fail
+    // loud, never silently adopt someone else's branch.
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(false);
   });
 });

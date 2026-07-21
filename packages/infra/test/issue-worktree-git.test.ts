@@ -52,23 +52,26 @@ describe("issueWorktreeAdd", () => {
     const root = sandbox();
     const { cachePath, baseSha } = bareCache(root);
     const path = join(root, "issues", "US-XX1", "docs");
-    await issueWorktreeAdd(cachePath, path, baseSha, null);
+    const result = await issueWorktreeAdd(cachePath, path, baseSha, null);
     expect(existsSync(join(path, ".git"))).toBe(true);
     const head = git(path, ["rev-parse", "HEAD"]);
     expect(head).toBe(baseSha);
     // detached HEAD: `git symbolic-ref` exits non-zero (no branch ref to report)
     expect(() => git(path, ["symbolic-ref", "-q", "HEAD"])).toThrow();
+    // No branch at all for a read target — never "created" or "reused".
+    expect(result.branchCreatedThisRun).toBe(false);
   });
 
-  it("creates a real git worktree on a NEW named branch for a write target", async () => {
+  it("creates a real git worktree on a NEW named branch for a write target, reporting the branch as created THIS run", async () => {
     const root = sandbox();
     const { cachePath, baseSha } = bareCache(root);
     const path = join(root, "issues", "US-XX1", "sot");
-    await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
+    const result = await issueWorktreeAdd(cachePath, path, baseSha, "roll/ws-demo/US-XX1/sot");
     const branch = git(path, ["rev-parse", "--abbrev-ref", "HEAD"]);
     expect(branch).toBe("roll/ws-demo/US-XX1/sot");
     const head = git(path, ["rev-parse", "HEAD"]);
     expect(head).toBe(baseSha);
+    expect(result.branchCreatedThisRun).toBe(true);
   });
 
   it("never force-removes a pre-existing path — it fails loud instead", async () => {
@@ -105,10 +108,14 @@ describe("issueWorktreeAdd", () => {
     await issueWorktreeAdd(cachePath, path, baseSha, branch);
     rmSync(path, { recursive: true, force: true });
 
-    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    // This target is a REPAIR of an existing pin (isPinned=true) — orphan
+    // recovery is allowed.
+    const result = await issueWorktreeAdd(cachePath, path, baseSha, branch, { allowOrphanRecovery: true });
     expect(existsSync(join(path, ".git"))).toBe(true);
     expect(git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(branch);
     expect(git(path, ["rev-parse", "HEAD"])).toBe(baseSha);
+    // The branch was REUSED (recovered), not created this run.
+    expect(result.branchCreatedThisRun).toBe(false);
   });
 
   it("recovers an ORPHAN governed branch that has LATER real story commits (pinned base is an ancestor, not equal)", async () => {
@@ -123,12 +130,13 @@ describe("issueWorktreeAdd", () => {
     const advancedHead = git(path, ["rev-parse", "HEAD"]);
     rmSync(path, { recursive: true, force: true });
 
-    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    const result = await issueWorktreeAdd(cachePath, path, baseSha, branch, { allowOrphanRecovery: true });
     expect(git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(branch);
     // Recovery checks out the branch's REAL current tip — the real story
     // commit is preserved, never reset back to the base.
     expect(git(path, ["rev-parse", "HEAD"])).toBe(advancedHead);
     expect(existsSync(join(path, "story-work.txt"))).toBe(true);
+    expect(result.branchCreatedThisRun).toBe(false);
   });
 
   it("REFUSES to recover an orphan branch whose history DIVERGED from the pinned base (base is not an ancestor)", async () => {
@@ -146,7 +154,7 @@ describe("issueWorktreeAdd", () => {
     git(path, ["branch", "-f", branch, "unrelated-history"]);
     rmSync(path, { recursive: true, force: true });
 
-    await expect(issueWorktreeAdd(cachePath, path, baseSha, branch)).rejects.toThrow();
+    await expect(issueWorktreeAdd(cachePath, path, baseSha, branch, { allowOrphanRecovery: true })).rejects.toThrow();
     expect(existsSync(path)).toBe(false);
   });
 
@@ -161,10 +169,27 @@ describe("issueWorktreeAdd", () => {
     // SECOND real worktree independently tries to claim the SAME branch,
     // which git itself must refuse since one branch = one live worktree.
     const otherPath = join(root, "issues", "US-XX1", "sot-elsewhere");
-    await expect(issueWorktreeAdd(cachePath, otherPath, baseSha, branch)).rejects.toThrow();
+    await expect(issueWorktreeAdd(cachePath, otherPath, baseSha, branch, { allowOrphanRecovery: true })).rejects.toThrow();
     expect(existsSync(otherPath)).toBe(false);
     // The original worktree is completely unaffected.
     expect(existsSync(join(path, ".git"))).toBe(true);
+  });
+
+  it("REFUSES to silently adopt a pre-existing branch for a BRAND-NEW unpinned target — fails loud instead of reusing it", async () => {
+    const root = sandbox();
+    const { cachePath, baseSha } = bareCache(root);
+    const path = join(root, "issues", "US-XX1", "sot");
+    const branch = "roll/ws-demo/US-XX1/sot";
+    // A branch of this exact name already exists in the cache for some
+    // unrelated reason (e.g. name collision with another Issue/Workspace,
+    // or leftover from manual git use) — but THIS target has never been
+    // pinned (no journal/event fact), so it must never silently adopt it.
+    await issueWorktreeAdd(cachePath, path, baseSha, branch);
+    rmSync(path, { recursive: true, force: true });
+
+    await expect(issueWorktreeAdd(cachePath, path, baseSha, branch, { allowOrphanRecovery: false }))
+      .rejects.toThrow(/orphan|already exists|pinned/i);
+    expect(existsSync(path)).toBe(false);
   });
 });
 

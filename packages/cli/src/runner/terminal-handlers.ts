@@ -42,11 +42,25 @@ type TerminalCommand = Extract<CycleCommand, { kind:
   | "release_lock"
 }>;
 
+const LEGACY_REPOSITORY_TERMINAL_COMMANDS = new Set<TerminalCommand["kind"]>([
+  "publish_pr",
+  "merge_back",
+  "push_orphan",
+  "rescue_leaked",
+  "wait_merge",
+  "cleanup_environment",
+  "cleanup_worktree",
+  "append_run",
+]);
+
 export async function executeTerminalCommand(
   cmd: TerminalCommand,
   ports: Ports,
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
+  if (ctx.repositoryExecution !== undefined && LEGACY_REPOSITORY_TERMINAL_COMMANDS.has(cmd.kind)) {
+    throw new Error(`workspace_repository_scope_required: ${cmd.kind}`);
+  }
   switch (cmd.kind) {
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {

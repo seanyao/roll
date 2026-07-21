@@ -21,6 +21,7 @@ import { createRepositoryPorts } from "../src/runner/node-ports.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import type { RepositoryPortAdapters } from "../src/runner/ports.js";
 import { applyRepositoryBuilderContext } from "../src/runner/spawn-agent-handler.js";
+import { executeTerminalCommand } from "../src/runner/terminal-handlers.js";
 
 function repository(
   repoId: string,
@@ -382,5 +383,47 @@ describe("US-WS-010 repository Builder context", () => {
       cwd: "/ranking-cwd",
       skillBody: "RANK",
     });
+  });
+
+  it("fails closed before any legacy terminal Git/provider path can bypass repository identity", async () => {
+    const ports = nodePorts({
+      repoCwd: "/project",
+      paths,
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+    const gitPush = vi.spyOn(ports.git, "push");
+    const worktreeRemove = vi.spyOn(ports.git, "worktreeRemove");
+    const repoSlug = vi.spyOn(ports.github, "repoSlug");
+    const prMergeInfo = vi.spyOn(ports.github, "prMergeInfo");
+    const ctx = {
+      cycleId: "cycle-terminal",
+      branch: "cycle-terminal",
+      loop: "ci" as const,
+      storyId: "US-WS-010",
+      repositoryExecution: execution,
+    };
+
+    await expect(executeTerminalCommand({
+      kind: "publish_pr",
+      branch: "cycle-terminal",
+      docOnly: false,
+    }, ports, ctx)).rejects.toThrow("workspace_repository_scope_required");
+    await expect(executeTerminalCommand({
+      kind: "cleanup_worktree",
+      branch: "cycle-terminal",
+    }, ports, ctx)).rejects.toThrow("workspace_repository_scope_required");
+    await expect(executeTerminalCommand({
+      kind: "append_run",
+      status: "published",
+      outcome: "awaiting_merge",
+      cycleId: "cycle-terminal",
+    }, ports, ctx)).rejects.toThrow("workspace_repository_scope_required");
+
+    expect(gitPush).not.toHaveBeenCalled();
+    expect(worktreeRemove).not.toHaveBeenCalled();
+    expect(repoSlug).not.toHaveBeenCalled();
+    expect(prMergeInfo).not.toHaveBeenCalled();
   });
 });

@@ -29,7 +29,7 @@ import {
 } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { writeEvaluatorArtifact } from "./execution-profile.js";
-import { checkMainDirty, readMainDirtyBaseline, readMainHeadBaseline } from "./main-checkout-guard.js";
+import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js";
 import {
   buildPairScorePrompt,
   diagnosePairScoreOutput,
@@ -87,24 +87,6 @@ export async function executeCaptureFactsCommand(
         mainAhead = await ports.git.mainAhead(ports.repoCwd);
       } catch {
         /* drift probe is best-effort */
-      }
-      // FIX-1475: scope the ahead probe to THIS cycle, exactly like E10 scopes
-      // the dirt probe below. Pre-existing ahead commits on the shared main
-      // checkout are legitimate state (they are never reset now), so only a
-      // HEAD that MOVED since the pre-spawn baseline counts as a leak. A
-      // missing baseline (old cycle / first run) keeps the absolute count —
-      // the prior behavior.
-      if (mainAhead > 0) {
-        const baselineHead = readMainHeadBaseline(guardRuntimeDir(ports), ctx.cycleId ?? "");
-        if (baselineHead !== "") {
-          let head = "";
-          try {
-            head = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: ports.repoCwd, encoding: "utf8" })).stdout.trim();
-          } catch {
-            head = "";
-          }
-          if (head !== "" && head === baselineHead) mainAhead = 0;
-        }
       }
       // E10: symmetric completion of E7. The LIVE watchdog already diffs the
       // main checkout against a pre-spawn baseline so only dirt the BUILDER

@@ -84,19 +84,13 @@ them before continuing:
 
 - dirty files become a `rescue/leaked-*` ref that can be restored with the
   manifest's `git stash apply <ref>` command;
-- ahead commits that appear WHILE a cycle is running are bookmarked on a
-  `rescue/leaked-*` branch and reported — but the shared `main` ref is NEVER
-  moved. Recovery (`git reset --hard origin/main`) is an explicit human
-  decision, never something the loop does for you. Pre-existing local ahead
-  commits (owner WIP, a concurrent dispatch) are left byte-identically alone:
-  the cycle worktree branches off `origin/main`, so they cannot leak into the
-  cycle;
+- ahead commits become a `rescue/leaked-*` branch that can be restored with the
+  manifest's `git cherry-pick <ref>` command;
 - the manifest is written under `.roll/loop/quarantine/` and records the cycle,
   story, phase, files, ref, and exact restore command.
 
-Claim rescued dirty work from the manifest. Bookmarked ahead commits stay on
-`main` (and on their `rescue/leaked-*` ref) — inspect them and reset main
-yourself only if you want them gone.
+Claim the rescued work from the manifest, then reset or resume the loop from a
+clean main checkout.
 
 ## Scheduling
 
@@ -1235,15 +1229,10 @@ are left untouched.
 
 During the Builder process, Roll makes the shared main checkout read-only at the
 filesystem boundary while leaving the cycle worktree writable. If a previous
-cycle left product files dirty, Roll stashes that pollution to a
-`rescue/leaked-*` ref plus a `.roll/loop/quarantine/*.json` manifest and
-continues the cycle. Local commits ahead of `origin/main` are treated
-differently: the shared `main` ref is NEVER reset. Pre-existing ahead commits
-(owner WIP, a concurrent dispatch) are preserved byte-identically — the cycle
-worktree branches off `origin/main`, so they cannot leak into the cycle. Only a
-head that moves WHILE a cycle is running is a leak: it is bookmarked on a
-`rescue/leaked-*` branch, recorded in the manifest, and surfaced as an alert;
-resetting main is an explicit human decision.
+cycle left product files dirty or local commits ahead of `origin/main`, Roll
+moves that pollution to a `rescue/leaked-*` ref plus a
+`.roll/loop/quarantine/*.json` manifest, restores main to the trusted state, and
+continues the cycle.
 
 The event stream records `sandbox:write_protected` and `sandbox:quarantined`.
 `roll loop watch --events`, `roll loop cycle <id> --activity`, and supervisor output

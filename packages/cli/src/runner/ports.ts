@@ -67,10 +67,8 @@ export interface GitPort {
   worktreeStatusSignature?(worktreeCwd: string): Promise<string>;
   /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
   mainAhead(repoCwd: string): Promise<number>;
-  /** FIX-903: save the current main HEAD to a quarantine bundle
-   *  (`rescue/leaked-<cycleId>.bundle`) for audit. FIX-1475: NEVER resets the
-   *  shared main ref — the commits stay in place and recovery is manual.
-   *  Returns the rescued SHA and exit code. */
+  /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),
+   *  then reset main to origin/main. Returns the rescued SHA and exit code. */
   rescueLeaked(repoCwd: string, refName: string): Promise<{ code: number; rescuedSha: string }>;
   /** FIX-208: count `tcr:` commits ahead of the integration branch (v2口径:
    *  `git log --oneline <baseRef>..HEAD | grep -c ' tcr:'`) in the worktree.

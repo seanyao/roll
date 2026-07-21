@@ -269,14 +269,13 @@ export async function executeTerminalCommand(
       return {};
     }
 
-    // FIX-903: save leaked main commits to a quarantine bundle for audit.
-    // FIX-1475: the shared main ref is NEVER reset — recovery is manual.
+    // FIX-903: save leaked main commits to a rescue ref, then reset main.
     case "rescue_leaked": {
       const refName = `rescue/leaked-${cmd.cycleId}`;
       const r = await ports.git.rescueLeaked(ports.repoCwd, refName);
       ports.events.appendAlert(
         ports.paths.alertsPath,
-        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; shared main NOT reset (FIX-1475) — recover manually: git reset --hard origin/main`,
+        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; main reset ${r.code === 0 ? "ok" : "failed"}`,
       );
       // FIX-903 AC3: emit an audit event so the rescue is observable.
       ports.events.appendEvent(ports.paths.eventsPath, {

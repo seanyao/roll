@@ -1568,7 +1568,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
                   { kind: "rescue_leaked", cycleId: state.ctx.cycleId },
                   {
                     kind: "append_alert",
-                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s) — leaked commits saved to quarantine bundle rescue-leaked-${state.ctx.cycleId}.bundle; shared main NOT reset (FIX-1475) — recover manually: git reset --hard origin/main`,
+                    message: `cycle ${state.ctx.cycleId}: local main is ahead of origin/main by ${event.facts.mainAhead} commit(s) while cycle branch has ${event.facts.commitsAhead} commit(s) — leaked commits saved to quarantine bundle rescue-leaked-${state.ctx.cycleId}.bundle; main reset to origin/main (FIX-903/US-LOOP-095)`,
                   },
                 ]
             : status === "failed" && event.facts.commitsAhead > 0

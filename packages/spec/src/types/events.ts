@@ -101,9 +101,7 @@ export type RollEvent =
   // restored before applying protection for the new cycle.
   | { type: "sandbox:write_protected"; cycleId: string; status: "applied" | "released" | "recovered"; repoCwd: string; markerPath: string; paths: number; ts: number }
   // US-LOOP-089: main checkout pollution was moved to an auditable rescue ref
-  // and quarantine manifest. FIX-1475: for reason "ahead" the shared main ref
-  // is NEVER moved — the commits are bookmarked on `ref` and left in place;
-  // restoreCommand is then a manual-recovery note, not an applied action.
+  // and quarantine manifest, then the checkout was restored before continuing.
   | {
       type: "sandbox:quarantined";
       cycleId: string;

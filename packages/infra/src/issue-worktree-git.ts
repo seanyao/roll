@@ -244,20 +244,18 @@ function worktreeListPaths(porcelain: string): Set<string> {
   return paths;
 }
 
-/** Branches checked out by live worktrees. Missing/prunable registrations are
- *  deliberately ignored: apply prunes those records before recovering the
- *  governed branch, and a zero-write check must report the same decision. */
+/** Branches reserved by registrations that `git worktree prune` will retain.
+ *  Only an explicit `prunable` marker is recoverable; a missing but locked
+ *  registration still owns its branch and must remain a conflict. */
 function worktreeListActiveBranches(porcelain: string): Set<string> {
   const branches = new Set<string>();
   const prefix = "refs/heads/";
-  for (const block of porcelain.split("\n\n")) {
-    const lines = block.split("\n");
+  for (const block of porcelain.split("\0\0")) {
+    const lines = block.split("\0");
     const worktreeLine = lines.find((line) => line.startsWith("worktree "));
     const branchLine = lines.find((line) => line.startsWith("branch "));
     if (worktreeLine === undefined || branchLine === undefined) continue;
     if (lines.some((line) => line.startsWith("prunable"))) continue;
-    const worktreePath = worktreeLine.slice("worktree ".length).trim();
-    if (!existsSync(worktreePath)) continue;
     const ref = branchLine.slice("branch ".length).trim();
     if (ref.startsWith(prefix)) branches.add(ref.slice(prefix.length));
   }
@@ -269,7 +267,7 @@ export type GovernedBranchState = "absent" | "recoverable" | "conflict";
 /** Inspect a write target's governed branch without mutating the shared cache. */
 export async function inspectGovernedBranchState(cachePath: string, branch: string, baseSha: string): Promise<GovernedBranchState> {
   if (!await branchExists(cachePath, branch)) return "absent";
-  const list = await git(["worktree", "list", "--porcelain"], cachePath);
+  const list = await git(["worktree", "list", "--porcelain", "-z"], cachePath);
   if (list.code !== 0) return "conflict";
   if (worktreeListActiveBranches(list.stdout).has(branch)) return "conflict";
   const ancestor = await git(["merge-base", "--is-ancestor", baseSha, branch], cachePath);

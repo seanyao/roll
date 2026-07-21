@@ -113,6 +113,16 @@ function fixture() {
   return { root, rollHome, bindings, contract, requirementManifests, workspaceRoot, issueRoot, remotes: { sot1: sot1Remote, sot2: sot2Remote, sot3: sot3Remote } };
 }
 
+function createGovernedBranchCollision(f: ReturnType<typeof fixture>, alias: string): { cachePath: string; worktreePath: string } {
+  const repoId = f.bindings.find((candidate) => candidate.alias === alias)?.repoId;
+  if (repoId === undefined) throw new Error(`missing fixture binding for ${alias}`);
+  const cachePath = join(f.rollHome, "repos", `${repoId}.git`);
+  const worktreePath = join(f.root, "throwaway-issue", alias);
+  mkdirSync(join(f.root, "throwaway-issue"), { recursive: true });
+  git(cachePath, ["worktree", "add", "-b", `roll/ws-demo/US-XX1/${alias}`, worktreePath, "refs/remotes/origin/main"]);
+  return { cachePath, worktreePath };
+}
+
 describe("inspectIssueInit", () => {
   it("is side-effect free and reports every target's full check facts for a brand-new Issue", async () => {
     const f = fixture();
@@ -285,10 +295,14 @@ describe("inspectIssueInit", () => {
     git(unrelated, ["add", "unrelated.txt"]);
     git(unrelated, ["commit", "-q", "-m", "unrelated history"]);
     git(cachePath, ["fetch", unrelated, "unrelated:roll/ws-demo/US-XX1/sot1"]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
 
     const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
 
     expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
   });
 
   it("reports conflict when a pinned target's governed branch is checked out in another real worktree", async () => {
@@ -302,6 +316,29 @@ describe("inspectIssueInit", () => {
     git(cachePath, ["worktree", "remove", "--force", sot1Path]);
     const elsewhere = join(f.root, "elsewhere-检出");
     git(cachePath, ["worktree", "add", elsewhere, "roll/ws-demo/US-XX1/sot1"]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+  });
+
+  it("reports conflict for a pinned target whose missing worktree registration is locked rather than prunable", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(cachePath, ["worktree", "lock", sot1Path]);
+    rmSync(sot1Path, { recursive: true, force: true });
+    const registration = git(cachePath, ["worktree", "list", "--porcelain"]);
+    expect(registration).toContain("locked");
+    expect(registration).not.toContain("prunable");
     const rollHomeBefore = treeDigest(f.rollHome);
     const workspaceBefore = treeDigest(f.workspaceRoot);
 
@@ -474,13 +511,19 @@ describe("applyIssueInit", () => {
 
   it("rolls back a newly-created CLEAN target via real git worktree removal when a LATER target's worktree add genuinely fails", async () => {
     const f = fixture();
-    // A real, unmocked git-level failure at the worktree-ADD phase (after
-    // every target's cache already resolved): sot2's governed branch name
-    // already exists in its OWN cache (e.g. left by some other process) —
-    // git's own `worktree add -b` refuses to recreate an existing branch.
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
-
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    // A real git-level failure materializes only AFTER preflight: another
+    // process checks out sot2's governed branch between target mutations.
+    // This preserves AC6 rollback coverage without contradicting AC1's
+    // requirement to reject conflicts already visible during preflight.
+    let collisionCreated = false;
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot2" && !collisionCreated) {
+          createGovernedBranchCollision(f, alias);
+          collisionCreated = true;
+        }
+      },
+    }))
       .rejects.toThrow(IssueInitializationError);
 
     // sot1 was newly-created and clean -> rolled back via git worktree remove.
@@ -491,11 +534,7 @@ describe("applyIssueInit", () => {
 
   it("preserves a target that becomes dirty after creation when a LATER target fails — real fault injection", async () => {
     const f = fixture();
-    // A real, unmocked git-level failure at the worktree-ADD phase: sot2's
-    // governed branch already exists in its own cache (left by some other
-    // process), so git's own `worktree add -b` refuses to recreate it.
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
-
+    let collision: ReturnType<typeof createGovernedBranchCollision> | undefined;
     let firstAttemptError: unknown;
     try {
       await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
@@ -503,6 +542,9 @@ describe("applyIssueInit", () => {
         // make it genuinely dirty — BEFORE sot2's real git failure triggers rollback.
         afterTargetCreated: (alias, path) => {
           if (alias === "sot1") writeFileSync(join(path, "dirty.txt"), "keep me — real uncommitted work");
+        },
+        beforeMutateTarget: (alias) => {
+          if (alias === "sot2" && collision === undefined) collision = createGovernedBranchCollision(f, alias);
         },
       });
     } catch (error) {
@@ -513,9 +555,9 @@ describe("applyIssueInit", () => {
     expect(existsSync(join(f.issueRoot, "sot1", "dirty.txt"))).toBe(true);
 
     // Repair: remove the colliding branch from the OTHER worktree, then re-run.
-    const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
-    execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: cachePath, stdio: "ignore" });
-    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: cachePath, stdio: "ignore" });
+    if (collision === undefined) throw new Error("expected sot2 branch collision");
+    execFileSync("git", ["worktree", "remove", "--force", collision.worktreePath], { cwd: collision.cachePath, stdio: "ignore" });
+    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: collision.cachePath, stdio: "ignore" });
     const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(repaired.outcome).toBe("repaired");
     expect(existsSync(join(f.issueRoot, "sot1", "dirty.txt"))).toBe(true);
@@ -524,15 +566,19 @@ describe("applyIssueInit", () => {
 
   it("resumes and repairs the same Issue identity after interruption without duplicating worktrees or branches", async () => {
     const f = fixture();
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    let collision: ReturnType<typeof createGovernedBranchCollision> | undefined;
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot2" && collision === undefined) collision = createGovernedBranchCollision(f, alias);
+      },
+    }))
       .rejects.toThrow(IssueInitializationError);
     // sot1 was newly-created and clean -> rolled back on the failed attempt.
     expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
 
-    const cachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
-    execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: cachePath, stdio: "ignore" });
-    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: cachePath, stdio: "ignore" });
+    if (collision === undefined) throw new Error("expected sot2 branch collision");
+    execFileSync("git", ["worktree", "remove", "--force", collision.worktreePath], { cwd: collision.cachePath, stdio: "ignore" });
+    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: collision.cachePath, stdio: "ignore" });
     const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(result.outcome).toBe("repaired");
     expect(existsSync(join(f.issueRoot, "sot2", ".git"))).toBe(true);
@@ -818,12 +864,12 @@ describe("applyIssueInit", () => {
 
   it("never leaves a stale success fact (issue:repository_bound event) for a target that was rolled back on a failed apply", async () => {
     const f = fixture();
-    // A real, unmocked git-level failure at the worktree-ADD phase: sot2's
-    // governed branch already exists in its own cache (left by some other
-    // process), so git's own `worktree add -b` refuses to recreate it.
-    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.root, issueRoot: join(f.root, "throwaway-issue"), contract: { storyId: "US-XX1", repositories: [{ alias: "sot2", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests });
-
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    let collision: ReturnType<typeof createGovernedBranchCollision> | undefined;
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }, {
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot2" && collision === undefined) collision = createGovernedBranchCollision(f, alias);
+      },
+    }))
       .rejects.toThrow(IssueInitializationError);
 
     // sot1 was rolled back — no events.jsonl was ever created for THIS
@@ -834,9 +880,9 @@ describe("applyIssueInit", () => {
     expect(journal.status).toBe("repair_required");
 
     // Repair: remove the colliding branch, then re-run — the same contract converges.
-    const sot2CachePath = join(f.rollHome, "repos", `${f.bindings.find((b) => b.alias === "sot2")?.repoId}.git`);
-    execFileSync("git", ["worktree", "remove", "--force", join(f.root, "throwaway-issue", "sot2")], { cwd: sot2CachePath, stdio: "ignore" });
-    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: sot2CachePath, stdio: "ignore" });
+    if (collision === undefined) throw new Error("expected sot2 branch collision");
+    execFileSync("git", ["worktree", "remove", "--force", collision.worktreePath], { cwd: collision.cachePath, stdio: "ignore" });
+    execFileSync("git", ["branch", "-D", "roll/ws-demo/US-XX1/sot2"], { cwd: collision.cachePath, stdio: "ignore" });
     const repaired = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
     expect(repaired.outcome).toBe("repaired");
     const events = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
@@ -1291,12 +1337,120 @@ describe("applyIssueInit", () => {
     await ensureRepositoryCache({ binding: sot1Binding, rollHome: f.rollHome, integrationRefspec: `+refs/heads/main:refs/remotes/origin/main` });
     git(cachePath, ["branch", renderedBranch, "refs/remotes/origin/main"]);
     expect(git(cachePath, ["branch", "--list", renderedBranch])).not.toBe("");
+    const rollHomeBefore = treeDigest(f.rollHome);
 
     // This Issue's sot1 target has NEVER been pinned (brand-new) yet the
     // branch its OWN contract would render to already exists — must fail
     // loud, never silently adopt someone else's branch.
     await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
-    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(false);
+    expect(existsSync(f.issueRoot)).toBe(false);
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+  });
+
+  it("rejects a pinned diverged governed branch before mutating the existing Issue", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const branch = "roll/ws-demo/US-XX1/sot1";
+    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot1")]);
+    git(cachePath, ["update-ref", "-d", `refs/heads/${branch}`]);
+    const unrelated = join(f.root, "apply-unrelated");
+    mkdirSync(unrelated, { recursive: true });
+    git(unrelated, ["init", "-q", "-b", "unrelated"]);
+    git(unrelated, ["config", "user.email", "roll@example.test"]);
+    git(unrelated, ["config", "user.name", "Roll Test"]);
+    writeFileSync(join(unrelated, "unrelated.txt"), "unrelated\n", "utf8");
+    git(unrelated, ["add", "unrelated.txt"]);
+    git(unrelated, ["commit", "-q", "-m", "unrelated history"]);
+    git(cachePath, ["fetch", unrelated, `unrelated:${branch}`]);
+    const branchBefore = git(cachePath, ["rev-parse", branch]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+    expect(git(cachePath, ["rev-parse", branch])).toBe(branchBefore);
+    expect(existsSync(join(f.issueRoot, "issue-init.pending.json"))).toBe(false);
+  });
+
+  it("rejects a pinned governed branch checked out elsewhere before mutating the existing Issue", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const branch = "roll/ws-demo/US-XX1/sot1";
+    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot1")]);
+    const elsewhere = join(f.root, "apply-elsewhere");
+    git(cachePath, ["worktree", "add", elsewhere, branch]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+    const elsewhereBefore = treeDigest(elsewhere);
+    const registrationsBefore = git(cachePath, ["worktree", "list", "--porcelain"]);
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+    expect(treeDigest(elsewhere)).toBe(elsewhereBefore);
+    expect(git(cachePath, ["worktree", "list", "--porcelain"])).toBe(registrationsBefore);
+    expect(existsSync(join(f.issueRoot, "issue-init.pending.json"))).toBe(false);
+  });
+
+  it("rejects a missing locked governed branch before mutating the existing Issue", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(cachePath, ["worktree", "lock", sot1Path]);
+    rmSync(sot1Path, { recursive: true, force: true });
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+    const registrationsBefore = git(cachePath, ["worktree", "list", "--porcelain"]);
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+    expect(git(cachePath, ["worktree", "list", "--porcelain"])).toBe(registrationsBefore);
+    expect(existsSync(join(f.issueRoot, "issue-init.pending.json"))).toBe(false);
+  });
+
+  it("repairs a pinned stale prunable worktree without changing its branch tip or duplicating Issue evidence", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const branch = "roll/ws-demo/US-XX1/sot1";
+    const sot1Path = join(f.issueRoot, "sot1");
+    const branchBefore = git(cachePath, ["rev-parse", branch]);
+    const manifestBefore = readFileSync(join(f.issueRoot, "manifest.json"), "utf8");
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    rmSync(sot1Path, { recursive: true, force: true });
+    expect(git(cachePath, ["worktree", "list", "--porcelain"])).toContain("prunable");
+
+    const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(result.outcome).toBe("repaired");
+    expect(git(sot1Path, ["rev-parse", "HEAD"])).toBe(branchBefore);
+    expect(git(sot1Path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(branch);
+    expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
+    expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
+    expect(existsSync(join(f.issueRoot, "issue-init.pending.json"))).toBe(false);
   });
 });

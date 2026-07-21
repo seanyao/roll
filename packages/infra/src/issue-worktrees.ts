@@ -920,7 +920,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       throw new IssueInitializationError("rejected", `Issue-local pinned facts for ${declared.alias} are malformed or conflicting: ${(error as Error).message}`, { cause: error });
     }
     const worktreePath = join(input.issueRoot, declared.alias);
-    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned, false);
+    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned, true);
     worktreeStates[declared.alias] = combineTargetState(cacheState, worktreeState);
   }
 

@@ -574,7 +574,7 @@ export async function executeSetupCommand(
       // E2: post-pick submodule worktree (fail-loud) — see submodule-worktree.ts.
       const sub = await createSubmoduleWorktreeIfDeclared(ports, ctx, story);
       if (sub.failed) return { event: { type: "worktree_failed" } };
-      const repositoryExecution = await ports.repositoryContext?.resolve(story.id);
+      const repositoryExecution = await ports.repositories?.resolve(story.id);
       return {
         event: {
           type: "story_picked",

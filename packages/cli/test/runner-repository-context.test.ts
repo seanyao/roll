@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +17,7 @@ import {
   nodePorts,
   type RunnerPaths,
 } from "../src/runner/index.js";
+import { createRepositoryPorts } from "../src/runner/node-ports.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import type { RepositoryPortAdapters } from "../src/runner/ports.js";
 import { applyRepositoryBuilderContext } from "../src/runner/spawn-agent-handler.js";
@@ -155,7 +156,7 @@ describe("US-WS-010 repository Builder context", () => {
       agentSpawn: fakeSpawn(),
     });
 
-    const resolved = await ports.repositoryContext?.resolve(fixture.storyId);
+    const resolved = await ports.repositories?.resolve(fixture.storyId);
 
     expect(resolved).toMatchObject({
       workspaceId: "ws-20260717001",
@@ -250,24 +251,69 @@ describe("US-WS-010 repository Builder context", () => {
         prMergeInfo: vi.fn(async () => undefined),
       },
     };
-    const ports = nodePorts({
-      repoCwd: "/project",
-      paths,
-      skillBody: "BUILD STORY",
-      routeDeps,
-      agentSpawn: fakeSpawn(),
+    const repositories = createRepositoryPorts({
+      cycleId: "cycle-adapters",
+      branch: "cycle-adapters",
+      loop: "ci",
+      storyId: "US-WS-010",
       repositoryExecution: execution,
-      repositoryAdapters: adapters,
-    });
+    }, adapters);
 
-    expect(await ports.repositories?.git.commitsAhead(writable.repoId)).toBe(2);
+    expect(await repositories.git.commitsAhead(writable.repoId)).toBe(2);
     expect(commitsAhead).toHaveBeenCalledWith(writable, undefined);
-    expect(await ports.repositories?.provider.repoSlug(writable.repoId)).toBe("owner/sot1");
+    expect(await repositories.provider.repoSlug(writable.repoId)).toBe("owner/sot1");
     expect(repoSlug).toHaveBeenCalledWith(writable);
-    await expect(ports.repositories?.git.push(readonly.repoId, "story-branch")).rejects.toThrow(
+    await expect(repositories.git.push(readonly.repoId, "story-branch")).rejects.toThrow(
       "read_only_repository",
     );
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("writes repository events through one identity-enforcing Issue writer", async () => {
+    const fixture = productionWorkspaceFixture();
+    const fixturePaths: RunnerPaths = {
+      eventsPath: join(fixture.root, "runtime", "events.ndjson"),
+      runsPath: join(fixture.root, "runtime", "runs.jsonl"),
+      alertsPath: join(fixture.root, "runtime", "alerts.log"),
+      lockPath: join(fixture.root, "runtime", "lock"),
+      heartbeatPath: join(fixture.root, "runtime", "heartbeat"),
+      worktreePath: join(fixture.root, "legacy-worktree"),
+    };
+    const ports = nodePorts({
+      repoCwd: fixture.root,
+      paths: fixturePaths,
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+    const resolved = await ports.repositories?.resolve(fixture.storyId);
+    if (resolved === undefined) throw new Error("fixture repository context must resolve");
+    const bound = ports.repositories?.bind({
+      cycleId: "cycle-event",
+      branch: "cycle-event",
+      loop: "ci",
+      storyId: fixture.storyId,
+      repositoryExecution: resolved,
+    });
+
+    bound?.events.append(fixture.repoId, {
+      type: "repository:test_observed",
+      status: "green",
+      ts: 2,
+    });
+
+    const events = readFileSync(join(resolved.issueRoot, "events.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.at(-1)).toMatchObject({
+      type: "repository:test_observed",
+      workspaceId: resolved.workspaceId,
+      storyId: fixture.storyId,
+      cycleId: "cycle-event",
+      repoId: fixture.repoId,
+      status: "green",
+    });
   });
 
   it("preserves the current one-repository spawn contract when no Workspace context is supplied", async () => {
@@ -300,7 +346,6 @@ describe("US-WS-010 repository Builder context", () => {
       skillBody: "BUILD STORY",
       routeDeps,
       agentSpawn: spawn,
-      repositoryExecution: execution,
     });
 
     await ports.agentSpawn("claude", {
@@ -324,7 +369,6 @@ describe("US-WS-010 repository Builder context", () => {
       skillBody: "REVIEW",
       routeDeps,
       agentSpawn: spawn,
-      repositoryExecution: execution,
     });
 
     await ports.agentSpawn("claude", {

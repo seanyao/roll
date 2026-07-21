@@ -269,6 +269,13 @@ function appendRepositoryBoundEventsAtomically(issueRoot: string, newLines: stri
   atomicWrite(path, existing + newLines);
 }
 
+/** Append one already-validated Issue event using the same strict, atomic stream
+ * extension as repository binding. Callers own the event schema and identity;
+ * malformed existing streams still fail loud before any write. */
+export function appendIssueEventAtomically(issueRoot: string, event: Readonly<Record<string, unknown>>): void {
+  appendRepositoryBoundEventsAtomically(issueRoot, `${JSON.stringify(event)}\n`);
+}
+
 /** One target's pinned facts as recorded in the CURRENT interrupted journal
  *  — the Issue-local source of truth while a prior apply is mid-flight
  *  (`applying`/`repair_required`), before any event has been durably

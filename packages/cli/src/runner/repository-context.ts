@@ -3,13 +3,17 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import {
+  appendIssueEventAtomically,
   readRepositoryBoundFacts,
   readWorkspace,
 } from "@roll/infra";
+import { repositoryEventIdentity, type CycleContext } from "@roll/core";
 import {
   parseIssueManifest,
   type CycleRepositoryExecutionContext,
   type RepositoryExecutionContext,
+  type RepositoryExecutionEvent,
+  type RepositoryExecutionEventPayload,
 } from "@roll/spec";
 
 const execFileAsync = promisify(execFile);
@@ -97,4 +101,23 @@ export async function resolveRepositoryExecutionContext(
     throw new Error(`invalid_repository_map: ${storyId}`);
   }
   return { workspaceId: workspace.workspaceId, issueRoot: canonicalIssue, repositories };
+}
+
+/** The only Issue event writer for repository-scoped runtime facts. Callers
+ * provide payload only; Workspace/Story/Cycle/repo identity is derived from the
+ * bound CycleContext and written last so it cannot be forged or omitted. */
+export function appendRepositoryExecutionEvent(
+  ctx: CycleContext,
+  repoId: string,
+  payload: RepositoryExecutionEventPayload,
+): RepositoryExecutionEvent {
+  const identified = repositoryEventIdentity(ctx, repoId);
+  if (!identified.ok) {
+    throw new Error(`${identified.code}: ${identified.repoId ?? repoId}`);
+  }
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) throw new Error("missing_repository_context");
+  const event: RepositoryExecutionEvent = { ...payload, ...identified.identity };
+  appendIssueEventAtomically(execution.issueRoot, event);
+  return event;
 }

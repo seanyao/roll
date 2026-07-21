@@ -54,3 +54,13 @@ export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
 export interface RepositoryCycleIdentity extends RepositoryIssueIdentity {
   readonly cycleId: string;
 }
+
+/** Issue-local repository event body. Identity is never accepted from callers;
+ * the repository writer injects the Cycle envelope after repoId validation. */
+export interface RepositoryExecutionEventPayload {
+  readonly type: string;
+  readonly ts: number;
+  readonly [key: string]: unknown;
+}
+
+export type RepositoryExecutionEvent = RepositoryCycleIdentity & RepositoryExecutionEventPayload;

@@ -15,6 +15,7 @@ import {
   queryStoryDelivery,
   resolveRoute,
   resolveRouteExcluding,
+  type CycleContext,
   type FreshnessPort,
   type ObservedCommit,
   type RouteDeps,
@@ -63,14 +64,17 @@ import { readPendingPublish } from "./pending-publish.js";
 import { resolveScopedStoryExecute } from "./scoped-route.js";
 import { readSelfHeal } from "./selfheal-budget.js";
 import type {
+  BoundRepositoryPorts,
   Ports,
   ProcessClock,
-  RepositoryContextPort,
   RepositoryPortAdapters,
   RepositoryPorts,
   RunnerPaths,
 } from "./ports.js";
-import { resolveRepositoryExecutionContext } from "./repository-context.js";
+import {
+  appendRepositoryExecutionEvent,
+  resolveRepositoryExecutionContext,
+} from "./repository-context.js";
 import {
   bootstrapWorktreeSkills,
   commitRollMetadataRepo,
@@ -144,9 +148,11 @@ function defaultRepositoryAdapters(): RepositoryPortAdapters {
 }
 
 export function createRepositoryPorts(
-  execution: CycleRepositoryExecutionContext,
+  ctx: CycleContext,
   adapters: RepositoryPortAdapters = defaultRepositoryAdapters(),
-): RepositoryPorts {
+): BoundRepositoryPorts {
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) throw new Error("missing_repository_context");
   const entries = Object.entries(execution.repositories);
   const aliases = new Set<string>();
   for (const [key, repository] of entries) {
@@ -181,6 +187,19 @@ export function createRepositoryPorts(
       prState: async (repoId, branch) => adapters.provider.prState(context(repoId), branch),
       prMergeInfo: async (repoId, branch) => adapters.provider.prMergeInfo(context(repoId), branch),
     },
+    events: {
+      append: (repoId, payload) => appendRepositoryExecutionEvent(ctx, repoId, payload),
+    },
+  };
+}
+
+function createWorkspaceRepositoryPorts(
+  workspaceRoot: string,
+  adapters: RepositoryPortAdapters = defaultRepositoryAdapters(),
+): RepositoryPorts {
+  return {
+    resolve: (storyId) => resolveRepositoryExecutionContext(workspaceRoot, storyId),
+    bind: (ctx) => createRepositoryPorts(ctx, adapters),
   };
 }
 
@@ -250,17 +269,13 @@ export function nodePorts(opts: {
   routeDeps: RouteDeps;
   agentSpawn?: AgentSpawn;
   clock?: ProcessClock;
-  repositoryExecution?: CycleRepositoryExecutionContext;
   repositoryAdapters?: RepositoryPortAdapters;
 }): Ports {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
   const spawn = opts.agentSpawn ?? realAgentSpawn;
-  const repositories = opts.repositoryExecution === undefined
-    ? undefined
-    : createRepositoryPorts(opts.repositoryExecution, opts.repositoryAdapters);
-  const repositoryContext: RepositoryContextPort | undefined = existsSync(join(opts.repoCwd, "workspace.yaml"))
-    ? { resolve: (storyId) => resolveRepositoryExecutionContext(opts.repoCwd, storyId) }
+  const repositories = existsSync(join(opts.repoCwd, "workspace.yaml"))
+    ? createWorkspaceRepositoryPorts(opts.repoCwd, opts.repositoryAdapters)
     : undefined;
 
   // FIX-906: the unified delivery-truth predicate. The structured projection
@@ -321,7 +336,6 @@ export function nodePorts(opts: {
     paths: opts.paths,
     skillBody: opts.skillBody,
     ...(repositories === undefined ? {} : { repositories }),
-    ...(repositoryContext === undefined ? {} : { repositoryContext }),
     clock,
     agentSpawn: spawn,
     // FIX-906: unified delivery-truth predicate (structured projection over

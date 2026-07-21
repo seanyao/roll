@@ -320,30 +320,23 @@ export async function executeSetupCommand(
       // delivering the rest. Runtime overlay (.roll/loop/skip-cards.json); backlog
       // truth is untouched.
       const skipCards = readSkipCards(dirname(ports.paths.eventsPath));
-      // FIX-1205: de-dup from both GitHub PR references and durable delivery
-      // truth. Loop PR titles may be only `loop cycle cycle-<id>`, so body
-      // trailers and published-pending delivery records must also block a pick.
-      // FIX-1215: fail-OPEN on gh query failure — a network blip must not
-      // silently block every card (fail-closed = starvation). Log the blip and
-      // proceed with an empty PR list so the picker stays honest.
-      let openPrTitles: OpenPrReferenceInput[];
+      // Legacy projects de-dup picks against open PRs; Workspace delivery is repository-scoped downstream.
+      let openPrTitles: OpenPrReferenceInput[] = [];
       let ghError = false;
-      try {
-        openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
-      } catch (err) {
-        ghError = true;
-        openPrTitles = [];
-        const msg = err instanceof Error ? err.message : String(err);
-        ports.events.appendAlert(
-          ports.paths.alertsPath,
-          `[WARN] cycle ${ctx.cycleId}: gh pr list failed (${msg.slice(0, 120)}); proceeding with empty PR list — cards with pending-publish markers remain pickable`,
-        );
-        ports.events.appendEvent(ports.paths.eventsPath, {
-          type: "pick:gh_error",
-          cycleId: ctx.cycleId,
-          reason: msg.slice(0, 200),
-          ts: eventTs(ports),
-        });
+      if (ports.repositories === undefined) {
+        try {
+          openPrTitles = await ports.github.openPrTitles(ports.repoCwd);
+        } catch (err) {
+          ghError = true;
+          const msg = err instanceof Error ? err.message : String(err);
+          ports.events.appendAlert(ports.paths.alertsPath, `[WARN] cycle ${ctx.cycleId}: gh pr list failed (${msg.slice(0, 120)}); proceeding with empty PR list — cards with pending-publish markers remain pickable`);
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "pick:gh_error",
+            cycleId: ctx.cycleId,
+            reason: msg.slice(0, 200),
+            ts: eventTs(ports),
+          });
+        }
       }
       const githubHasOpenPr = buildHasOpenPr(openPrTitles);
       const pendingMergeReason = (id: string): string | undefined => {
@@ -572,7 +565,9 @@ export async function executeSetupCommand(
         ts: eventTs(ports),
       });
       // E2: post-pick submodule worktree (fail-loud) — see submodule-worktree.ts.
-      const sub = await createSubmoduleWorktreeIfDeclared(ports, ctx, story);
+      const sub = ports.repositories === undefined
+        ? await createSubmoduleWorktreeIfDeclared(ports, ctx, story)
+        : { failed: false };
       if (sub.failed) return { event: { type: "worktree_failed" } };
       const repositoryExecution = await ports.repositories?.resolve(story.id);
       return {

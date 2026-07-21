@@ -73,7 +73,9 @@ export async function executeSpawnAgentCommand(
       // (execRepoCwd ⇒ ports.repoCwd), byte-identical to today.
       const legacyExecCwd = resolveExecutionCwd(ports, ctx);
       const execCwd = ctx.repositoryExecution?.issueRoot ?? legacyExecCwd;
-      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      const execRepoCwd = ctx.repositoryExecution === undefined
+        ? resolveExecutionRepoCwd(ports, ctx)
+        : undefined;
       // E8: the cycle observer and the timeout watchdog's commit probe count the
       // builder's commits against the EXECUTION repo's integration branch (the
       // submodule's own working branch), NOT the hardwired origin/main. A submodule
@@ -82,9 +84,7 @@ export async function executeSpawnAgentCommand(
       // commits (no cycle:tcr events) and the watchdog's commitCount read 0. The
       // baseline is resolved from execRepoCwd, never the detached worktree. No
       // targetSubmodule ⇒ resolveIntegrationBranch(repoCwd) → origin/main default.
-      const observeBase = ctx.repositoryExecution === undefined
-        ? resolveIntegrationBranch(execRepoCwd)
-        : undefined;
+      const observeBase = execRepoCwd === undefined ? undefined : resolveIntegrationBranch(execRepoCwd);
       if (ctx.repositoryExecution === undefined) {
         await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
       }
@@ -262,7 +262,9 @@ export async function executeSpawnAgentCommand(
           cwd: execCwd,
           skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-          writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
+          ...(execRepoCwd === undefined
+            ? {}
+            : { writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath) }),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
           env: {
             ...process.env,

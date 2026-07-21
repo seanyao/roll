@@ -22,24 +22,11 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
 import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
-import {
-  acMapPath,
-  runAcMapSelfHeal,
-  type DraftEvidence,
-} from "./attest-remediation.js";
+import { acMapPath, runAcMapSelfHeal, type DraftEvidence } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { writeEvaluatorArtifact } from "./execution-profile.js";
 import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js";
-import {
-  buildPairScorePrompt,
-  diagnosePairScoreOutput,
-  enabledPairingStages,
-  retryPeerConsult,
-  runPairing,
-  runScorePairing,
-  type PairEvent,
-  type PairScore,
-} from "./pairing-gate.js";
+import { buildPairScorePrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairScore } from "./pairing-gate.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
@@ -54,10 +41,7 @@ const execFileAsync = promisify(execFile);
 
 type CaptureFactsCommand = Extract<CycleCommand, { kind: "capture_facts" }>;
 
-async function executeRepositoryCaptureFactsCommand(
-  ports: Ports,
-  ctx: CycleContext,
-): Promise<ExecuteResult> {
+async function executeRepositoryCaptureFactsCommand(ports: Ports, ctx: CycleContext): Promise<ExecuteResult> {
   const repositories = ports.repositories?.bind(ctx);
   if (repositories === undefined) throw new Error("missing_repository_ports");
   const observed = await observeWritableRepositories(ctx, repositories);
@@ -92,10 +76,7 @@ async function executeRepositoryCaptureFactsCommand(
     ctxPatch: {
       tcrCount: observed.tcrCount,
       ...(repositoryVerificationPending
-        ? {
-            failureClass: "harness" as const,
-            rootCauseKey: "harness:repository_verification_pending",
-          }
+        ? { failureClass: "harness" as const, rootCauseKey: "harness:repository_verification_pending" }
         : {}),
     },
   };

@@ -76,6 +76,7 @@ import {
   loopPauseCommand,
   loopResumeCommand,
   loopFallbackCommand,
+  loopWorkspaceStatusCommand,
 } from "./loop-sched.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
@@ -458,6 +459,9 @@ export function registerAll(): void {
     // default `loop status` dashboard output is unchanged.
     if ((args[0] === undefined || args[0] === "status") && args.includes("--capture")) {
       return captureCommand(["status", ...args.slice(1).filter((a) => a !== "--capture")]);
+    }
+    if (args[0] === "status" && (args.includes("--workspace") || args.includes("--all"))) {
+      return loopWorkspaceStatusCommand(args.slice(1));
     }
     if (args[0] === undefined || args[0] === "status") return dashboardCommand(args.slice(1));
     // `loop eval` / `loop story`: read-face commands (US-PORT-007) — thin TS

@@ -373,6 +373,33 @@ describe("US-WS-007a Requirement archive audit", () => {
     });
   });
 
+  it("does not follow a directory swapped to an outside symlink between lstat and enumeration", () => {
+    const f = fixture();
+    const relative = `revisions/${requirementRevisionKey("6")}/context/brief/nested`;
+    const target = join(f.requirementPath, relative);
+    const parked = `${target}.parked`;
+    const outside = join(f.root, "outside-directory-race");
+    write(join(outside, "secret.md"), "outside secret must not be enumerated\n");
+    let swapped = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      beforeOpenDirectory: (path) => {
+        if (path !== target || swapped) return;
+        swapped = true;
+        renameSync(target, parked);
+        symlinkSync(outside, target);
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision: "6",
+      evidencePath: relative,
+    });
+  });
+
   it("rejects source.yaml changing after the revision scan starts", () => {
     const f = fixture();
     const sourcePath = join(f.requirementPath, "source.yaml");

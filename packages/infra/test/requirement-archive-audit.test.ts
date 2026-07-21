@@ -258,6 +258,31 @@ describe("US-WS-007a Requirement archive audit", () => {
     });
   });
 
+  it("stops a file that grows beyond its byte budget after fstat without completing the read", () => {
+    const f = fixture();
+    const target = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md");
+    const completedReads: string[] = [];
+    let grew = false;
+
+    const result = auditRequirementArchive({ ...f.auditInput, limits: { maxBodyBytes: 32 } }, {
+      afterStatFile: (path) => {
+        if (path !== target || grew) return;
+        grew = true;
+        writeFileSync(path, "x".repeat(33));
+      },
+      afterReadFile: (path) => completedReads.push(path),
+    });
+
+    expect(grew).toBe(true);
+    expect(completedReads).not.toContain(target);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "unsafe_archive_path",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}/requirement.md`,
+    });
+  });
+
   it("rejects a stale fd when its pathname is swapped for an outside symlink", () => {
     const f = fixture();
     const target = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md");

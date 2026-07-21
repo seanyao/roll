@@ -6,7 +6,7 @@ import {
   lstatSync,
   openSync,
   opendirSync,
-  readFileSync,
+  readSync,
   realpathSync,
   type Stats,
 } from "node:fs";
@@ -22,7 +22,6 @@ import {
   parseRequirementSourceManifest,
   type RequirementArchiveAudit,
   type RequirementArchiveFinding,
-  type RequirementContextDescriptor,
   type RequirementPreviousRevision,
   type RequirementSourceManifest,
 } from "@roll/spec";
@@ -47,6 +46,7 @@ export interface RequirementArchiveAuditLimits {
 }
 
 export interface RequirementArchiveAuditDependencies {
+  readonly afterStatFile?: (path: string) => void;
   readonly afterReadFile?: (path: string) => void;
 }
 
@@ -61,6 +61,8 @@ const DEFAULT_LIMITS: RequirementArchiveAuditLimits = {
   maxBodyBytes: MAX_REQUIREMENT_BODY_BYTES,
   maxDepth: 32,
 };
+
+const READ_CHUNK_BYTES = 64 * 1024;
 
 type ReadFailureKind = "missing" | "unsafe" | "limit" | "changed";
 
@@ -120,8 +122,19 @@ function stableReadFile(
       return { ok: false, kind: "changed" };
     }
     if (before.size > maximumBytes) return { ok: false, kind: "limit" };
-    const content = readFileSync(descriptor);
-    if (content.byteLength > maximumBytes) return { ok: false, kind: "limit" };
+    deps.afterStatFile?.(path);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const remaining = maximumBytes - total;
+      const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, remaining + 1));
+      const bytesRead = readSync(descriptor, chunk, 0, chunk.byteLength, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > maximumBytes) return { ok: false, kind: "limit" };
+      chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+    }
+    const content = Buffer.concat(chunks, total);
     deps.afterReadFile?.(path);
     const after = fstatSync(descriptor);
     let pathAfter: Stats;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -386,9 +386,20 @@ describe("US-WS-010 repository Builder context", () => {
   });
 
   it("fails closed before any legacy terminal Git/provider path can bypass repository identity", async () => {
+    const runtimeRoot = mkdtempSync(join(tmpdir(), "roll-us-ws-010-terminal-"));
+    const scopedPaths: RunnerPaths = {
+      ...paths,
+      eventsPath: join(runtimeRoot, "events.ndjson"),
+      runsPath: join(runtimeRoot, "runs.jsonl"),
+      alertsPath: join(runtimeRoot, "alerts.log"),
+    };
+    const leasePath = join(runtimeRoot, "story-leases.json");
+    writeFileSync(leasePath, `${JSON.stringify({
+      "US-WS-010": { pid: 4242, claimedAt: 1, source: "cycle" },
+    })}\n`);
     const ports = nodePorts({
       repoCwd: "/project",
-      paths,
+      paths: scopedPaths,
       skillBody: "BUILD STORY",
       routeDeps,
       agentSpawn: fakeSpawn(),
@@ -397,7 +408,7 @@ describe("US-WS-010 repository Builder context", () => {
     const worktreeRemove = vi.spyOn(ports.git, "worktreeRemove");
     const repoSlug = vi.spyOn(ports.github, "repoSlug");
     const prMergeInfo = vi.spyOn(ports.github, "prMergeInfo");
-    const upsertRun = vi.spyOn(ports.events, "upsertRun").mockImplementation(() => undefined);
+    const upsertRun = vi.spyOn(ports.events, "upsertRun");
     const appendAlert = vi.spyOn(ports.events, "appendAlert").mockImplementation(() => undefined);
     const ctx = {
       cycleId: "cycle-terminal",
@@ -428,8 +439,12 @@ describe("US-WS-010 repository Builder context", () => {
     expect(repoSlug).not.toHaveBeenCalled();
     expect(prMergeInfo).not.toHaveBeenCalled();
     expect(upsertRun).toHaveBeenCalledOnce();
+    expect(readFileSync(scopedPaths.runsPath, "utf8")).toContain(
+      '"story_id":"US-WS-010","cycle_id":"cycle-terminal"',
+    );
+    expect(existsSync(leasePath)).toBe(false);
     expect(appendAlert).toHaveBeenCalledWith(
-      paths.alertsPath,
+      scopedPaths.alertsPath,
       expect.stringContaining("workspace_repository_scope_required: cleanup_worktree"),
     );
   });

@@ -599,9 +599,9 @@ function writeManifest(path: string, manifest: Record<string, unknown>): void {
   renameSync(tmp, path);
 }
 
-function aheadCount(repoCwd: string): number {
+function aheadCount(repoCwd: string, integrationBranch: string): number {
   try {
-    const raw = git(repoCwd, ["rev-list", "--count", "origin/main..HEAD"]);
+    const raw = git(repoCwd, ["rev-list", "--count", `${integrationBranch}..HEAD`]);
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   } catch {
@@ -609,9 +609,9 @@ function aheadCount(repoCwd: string): number {
   }
 }
 
-function aheadFiles(repoCwd: string): string[] {
+function aheadFiles(repoCwd: string, integrationBranch: string): string[] {
   try {
-    return git(repoCwd, ["log", "--reverse", "--format=%s", "origin/main..HEAD"])
+    return git(repoCwd, ["log", "--reverse", "--format=%s", `${integrationBranch}..HEAD`])
       .split("\n")
       .filter((line) => line.trim() !== "")
       .map((line) => `<commit>:${line.trim()}`);
@@ -698,14 +698,15 @@ async function quarantineDirty(opts: QuarantineOptions, files: string[]): Promis
 }
 
 async function quarantineAhead(opts: QuarantineOptions): Promise<QuarantineResult | null> {
-  if (aheadCount(opts.repoCwd) === 0) return null;
+  const integrationBranch = resolveIntegrationBranch(opts.repoCwd);
+  if (aheadCount(opts.repoCwd, integrationBranch) === 0) return null;
   const id = quarantineId(opts, "ahead");
   const ref = refName(id);
-  const files = aheadFiles(opts.repoCwd);
+  const files = aheadFiles(opts.repoCwd, integrationBranch);
   if (!gitQuiet(opts.repoCwd, ["branch", ref, "HEAD"])) return null;
   // E1: reset the main checkout back onto the configured integration branch
   // (default origin/main). The leaked commits are preserved on `ref` above.
-  if (!gitQuiet(opts.repoCwd, ["reset", "--hard", resolveIntegrationBranch(opts.repoCwd)])) return null;
+  if (!gitQuiet(opts.repoCwd, ["reset", "--hard", integrationBranch])) return null;
   const restoreCommand = `git cherry-pick ${ref}`;
   const path = manifestPath(opts.runtimeDir, id);
   const ev = toEvent(opts, "ahead", ref, files, path, restoreCommand);

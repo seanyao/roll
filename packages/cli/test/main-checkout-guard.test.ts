@@ -267,6 +267,61 @@ describe("main checkout guard — US-LOOP-089", () => {
     expect(manifest.restoreCommand).toContain(`git cherry-pick ${results[0]!.ref}`);
   });
 
+  it("FIX-1473: does not quarantine the configured integration branch baseline", async () => {
+    const repo = cleanRepo("roll-main-configured-baseline-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    writeFileSync(join(repo, ".roll", "local.yaml"), "integration_branch: origin/dev\n", "utf8");
+    writeFileSync(join(repo, "tracked.txt"), "workspace baseline\n", "utf8");
+    git(repo, ["add", "tracked.txt"]);
+    git(repo, ["commit", "-q", "-m", "workspace integration baseline"]);
+    git(repo, ["update-ref", "refs/remotes/origin/dev", "HEAD"]);
+    const baselineHead = sh(repo, ["rev-parse", "HEAD"]);
+
+    const results = await quarantineMainCheckout({
+      repoCwd: repo,
+      runtimeDir,
+      cycleId: "C-configured-baseline",
+      storyId: "FIX-1473",
+      phase: "pre-spawn",
+      nowMs: () => 2_100,
+    });
+
+    expect(results).toEqual([]);
+    expect(sh(repo, ["rev-parse", "HEAD"])).toBe(baselineHead);
+  });
+
+  it("FIX-1473: quarantines only commits added after the configured integration branch", async () => {
+    const repo = cleanRepo("roll-main-configured-ahead-");
+    const runtimeDir = join(repo, ".roll", "loop");
+    writeFileSync(join(repo, ".roll", "local.yaml"), "integration_branch: origin/dev\n", "utf8");
+    writeFileSync(join(repo, "tracked.txt"), "workspace baseline\n", "utf8");
+    git(repo, ["add", "tracked.txt"]);
+    git(repo, ["commit", "-q", "-m", "workspace integration baseline"]);
+    git(repo, ["update-ref", "refs/remotes/origin/dev", "HEAD"]);
+    const baselineHead = sh(repo, ["rev-parse", "origin/dev"]);
+    writeFileSync(join(repo, "tracked.txt"), "leaked after baseline\n", "utf8");
+    git(repo, ["add", "tracked.txt"]);
+    git(repo, ["commit", "-q", "-m", "leaked configured checkout commit"]);
+    const leakedHead = sh(repo, ["rev-parse", "HEAD"]);
+
+    const results = await quarantineMainCheckout({
+      repoCwd: repo,
+      runtimeDir,
+      cycleId: "C-configured-ahead",
+      storyId: "FIX-1473",
+      phase: "post-cycle",
+      nowMs: () => 2_200,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      reason: "ahead",
+      files: ["<commit>:leaked configured checkout commit"],
+    });
+    expect(sh(repo, ["rev-parse", "HEAD"])).toBe(baselineHead);
+    expect(sh(repo, ["rev-parse", results[0]!.ref])).toBe(leakedHead);
+  });
+
   it("checkMainDirty ignores .roll runtime and skills submodule dirt", async () => {
     const repo = cleanRepo("roll-main-dirty-scope-");
     writeFileSync(join(repo, ".roll", "loop", "events.ndjson"), "runtime\n", "utf8");

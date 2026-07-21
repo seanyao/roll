@@ -9,6 +9,11 @@
 判断下一步，并显式启动任何长时间 Story 工作。`roll loop resume` 会切回
 autonomous，不改变 agent binding。
 
+Workspace 模式按不可变 Workspace ID 标识 scheduler。`roll loop on`、`go`、
+`pause`、`resume` 会接收或推导唯一一个 Workspace 目标，并把 runtime、事件、锁与
+失败状态保存在该 Workspace 下。多个 active Workspace 可以独立运行；
+`roll loop status --all` 仅提供只读聚合视图，不会修改任何 Workspace。
+
 ## 工作原理
 
 1. 读取 `BACKLOG.md`，摘取优先级最高的 `📋 Todo` 条目。

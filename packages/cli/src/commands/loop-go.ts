@@ -613,11 +613,12 @@ function isGuidedRun(opts: GoOptions): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
+    "Usage: roll loop go [--workspace <id|path>] [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
     "  Chain goal-mode cycles until the scoped backlog is complete, paused, or capped.",
     "  按 goal 范围连续执行 cycle，直到完成、暂停或达到上限。",
     "",
     "Options:",
+    "  --workspace <id|path> Bind this goal session to one Workspace runtime and backlog.",
     "  --epic <name>       Limit the goal to one epic.",
     "  --cards <ids>       Limit the goal to comma/space separated card IDs.",
     "  --all               Reset the goal scope to the full Todo backlog (undo a prior --epic/--cards goal).",

@@ -161,7 +161,8 @@ describe("loop run-once CLI wiring", () => {
   });
 
   it("US-DELIV-005: usage documents --race (same-card parallel opt-in)", () => {
-    expect(RUN_ONCE_USAGE).toContain("[--dry-run] [--race]");
+    expect(RUN_ONCE_USAGE).toContain("[--workspace <id|path>] [--dry-run] [--race]");
+    expect(RUN_ONCE_USAGE).toContain("cycle runtime, backlog, locks, and events to one Workspace");
     expect(RUN_ONCE_USAGE).toContain("--race");
   });
 

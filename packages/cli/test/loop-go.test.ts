@@ -157,6 +157,8 @@ describe("US-GOAL-002 — roll loop go", () => {
     const r = await capture(() => loopGoCommand(["--help"], completeGoalDeps(p)));
     expect(r.code).toBe(0);
     expect(r.out).toContain("Usage: roll loop go");
+    expect(r.out).toContain("--workspace <id|path>");
+    expect(r.out).toContain("one Workspace runtime and backlog");
     expect(r.out).toContain("--for <duration>");
     expect(r.out).toContain("--max-cycles <n>");
     // The cost/usage CONTROL flags are gone — the loop stops on NO PROGRESS.

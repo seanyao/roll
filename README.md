@@ -221,7 +221,7 @@ with `roll loop resume` when ready.
 | `roll help [--lang en\|zh] [name]` | View built-in Charter / guide docs; `roll --help` prints CLI usage |
 | `roll idea "<one-sentence description>"` | Capture and classify a new backlog card |
 | `roll init` | Diagnose this directory and route setup/onboarding |
-| `roll loop <on\|off [--all]\|go\|watch\|runs\|cycles\|cycle\|alert\|…>` | Run, observe, stop, and maintain the autonomous executor |
+| `roll loop <on\|go\|pause\|resume> --workspace <id\|path>` / `roll loop status --all` | Run or mutate one Workspace scheduler; aggregate status is read-only |
 | `roll next` | Continue init/onboard with one best next command |
 | `roll north [--json] [--no-color]` | North-star terminal panel for autonomy, delivery rate, fix tax, and attribution errors |
 | `roll release [--dry-run\|--showcase]` | Release planning/flow plus golden-path showcase support |

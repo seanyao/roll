@@ -127,3 +127,15 @@ exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON co
 }
 "
 `;
+
+exports[`US-WS-008 roll workspace issue init > rolls back the clean first target's real git worktree via git worktree remove when the SECOND target's worktree add genuinely fails > second-target-apply-failed-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-error/v1",
+  "error": {
+    "code": "apply_failed",
+    "message": "Issue init failed; clean new targets were rolled back and a repair journal was written",
+    "candidates": []
+  }
+}
+"
+`;

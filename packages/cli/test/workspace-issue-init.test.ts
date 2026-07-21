@@ -374,6 +374,11 @@ repositories:
     const failed = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(failed.status).toBe(1);
     expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
+    // Freeze the COMPLETE apply_failed JSON payload for a genuine
+    // second-target failure — not just a MatchObject subset — so any
+    // unintended shape drift (a dropped field, an added one, a changed
+    // message) is caught even where the subset check above would stay green.
+    expect(scrub(failed.stderr, f)).toMatchSnapshot("second-target-apply-failed-json");
 
     const issueRoot = join(f.workspace, "issues", storyId);
     // sot was newly-created and clean during THIS run -> rolled back via a

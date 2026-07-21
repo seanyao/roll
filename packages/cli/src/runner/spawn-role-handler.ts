@@ -35,7 +35,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { CycleCommand, CycleContext } from "@roll/core";
 import { adversarialRolePrompt, agentSpawnEnvironment } from "./agent-spawn.js";
-import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, worktreeGitEnv } from "./main-checkout-guard.js";
+import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection } from "./main-checkout-guard.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { readCycleTimeoutThresholds } from "./spawn-observers.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -130,7 +130,6 @@ export async function executeSpawnRoleCommand(
         ...process.env,
         ROLL_LOOP_ALERT: ports.paths.alertsPath,
         ROLL_ADVERSARIAL_MARKER: markerPath,
-        ...worktreeGitEnv(execCwd, ports.repoCwd),
         ...agentSpawnEnvironment(cmd.agent),
       },
     });

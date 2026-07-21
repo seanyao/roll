@@ -5280,8 +5280,8 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
     expect(coreWorktree).toBe("");
   });
 
-  it("FIX-1073: git env pins commits to the cycle worktree even when the agent runs git -C main", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1073-")));
+  it("FIX-1473: cycle and nested repositories keep independent config, index, hooks, refs and commits", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1473-")));
     execDirs.push(root);
     const main = join(root, "main");
     const wt = join(root, "wt");
@@ -5292,7 +5292,6 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
     writeFileSync(join(main, "README.md"), "base\n");
     execFileSync("git", ["add", "README.md"], { cwd: main });
     execFileSync("git", ["commit", "-m", "base"], { cwd: main });
-    const mainBase = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim();
     execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
 
     const shim = join(root, "pi");
@@ -5301,13 +5300,24 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
       [
         "#!/bin/sh",
         "set -eu",
-        'test -n "${GIT_DIR:-}"',
-        'test -n "${GIT_WORK_TREE:-}"',
-        "printf 'probe\\n' > \"$GIT_WORK_TREE/probe.txt\"",
-        "git -C \"$MAIN_CHECKOUT\" add probe.txt",
-        "git -C \"$MAIN_CHECKOUT\" commit -m 'tcr: FIX-1073 git env probe'",
-        "printf 'top=%s\\n' \"$(git -C \"$MAIN_CHECKOUT\" rev-parse --show-toplevel)\"",
-        "printf 'worktree=%s\\n' \"$GIT_WORK_TREE\"",
+        'test -z "${GIT_DIR:-}"',
+        'test -z "${GIT_WORK_TREE:-}"',
+        'test -z "${GIT_COMMON_DIR:-}"',
+        'test -z "${GIT_INDEX_FILE:-}"',
+        "printf 'cycle\\n' > cycle.txt",
+        "git add cycle.txt",
+        "git commit -m 'tcr: FIX-1473 cycle commit'",
+        "mkdir nested",
+        "git -C nested init -q -b nested-main",
+        "git -C nested config user.email nested@example.test",
+        "git -C nested config user.name 'Nested Test'",
+        "printf '#!/bin/sh\\nprintf hook-ran > hook-ran.txt\\n' > nested/.git/hooks/pre-commit",
+        "chmod +x nested/.git/hooks/pre-commit",
+        "printf 'nested\\n' > nested/nested.txt",
+        "git -C nested add nested.txt",
+        "git -C nested commit -q -m 'nested commit'",
+        "printf 'cycle_top=%s\\n' \"$(git rev-parse --show-toplevel)\"",
+        "printf 'nested_top=%s\\n' \"$(git -C nested rev-parse --show-toplevel)\"",
         "",
       ].join("\n"),
     );
@@ -5317,16 +5327,29 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
       cwd: wt,
       skillBody: "X",
       bin: shim,
-      env: { ...process.env, MAIN_CHECKOUT: main },
+      env: {
+        ...process.env,
+        GIT_DIR: "/poison/git-dir",
+        GIT_WORK_TREE: "/poison/work-tree",
+        GIT_COMMON_DIR: "/poison/common-dir",
+        GIT_INDEX_FILE: "/poison/index",
+      },
       timeoutMs: 15000,
     });
 
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain(`top=${wt}`);
-    expect(r.stdout).toContain(`worktree=${wt}`);
+    expect(r.stdout).toContain(`cycle_top=${wt}`);
+    expect(r.stdout).toContain(`nested_top=${join(wt, "nested")}`);
     expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
+    expect(execFileSync("git", ["log", "-1", "--format=%s"], { cwd: join(wt, "nested"), encoding: "utf8" }).trim()).toBe(
+      "nested commit",
+    );
+    expect(readFileSync(join(wt, "nested", "hook-ran.txt"), "utf8")).toBe("hook-ran");
+    expect(execFileSync("git", ["symbolic-ref", "--short", "HEAD"], { cwd: join(wt, "nested"), encoding: "utf8" }).trim()).toBe(
+      "nested-main",
+    );
     expect(execFileSync("git", ["status", "--short"], { cwd: main }).toString().trim()).toBe("");
-    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim()).toBe(mainBase);
+    expect(spawnSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: main }).status).not.toBe(0);
   });
 });
 

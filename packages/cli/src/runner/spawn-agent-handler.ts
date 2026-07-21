@@ -4,7 +4,7 @@ import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, typ
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
-import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination, worktreeGitEnv } from "./main-checkout-guard.js";
+import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } from "./main-checkout-guard.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
 import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
@@ -209,7 +209,6 @@ export async function executeSpawnAgentCommand(
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
-            ...worktreeGitEnv(execCwd, ports.repoCwd),
             ...agentSpawnEnvironment(cmd.agent),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the

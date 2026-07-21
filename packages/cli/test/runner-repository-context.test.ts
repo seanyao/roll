@@ -22,6 +22,7 @@ import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import type { RepositoryPortAdapters } from "../src/runner/ports.js";
 import { applyRepositoryBuilderContext } from "../src/runner/spawn-agent-handler.js";
 import { executeTerminalCommand } from "../src/runner/terminal-handlers.js";
+import { executeCaptureFactsCommand } from "../src/runner/capture-facts-handler.js";
 import {
   observeWritableRepositories,
   observeWritableRepositoryCommitCount,
@@ -426,6 +427,88 @@ describe("US-WS-010 repository Builder context", () => {
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(storyEvents.filter((event) => event["type"] === "cycle:phase")).toHaveLength(1);
     expect(storyEvents.filter((event) => event["type"] === "cycle:tcr")).toHaveLength(0);
+    expect(existsSync(join(issueRoot, ".git"))).toBe(false);
+  });
+
+  it("captures strict aggregate facts without probing the Issue root as Git", async () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-us-ws-010-capture-"));
+    const issueRoot = join(root, "issues", "US-WS-010");
+    const runtimeRoot = join(root, "runtime");
+    mkdirSync(issueRoot, { recursive: true });
+    mkdirSync(runtimeRoot, { recursive: true });
+    const ctx = {
+      cycleId: "cycle-capture",
+      branch: "cycle-capture",
+      loop: "ci" as const,
+      storyId: "US-WS-010",
+      agent: "claude",
+      repositoryExecution: {
+        workspaceId: execution.workspaceId,
+        issueRoot,
+        repositories: {
+          [secondary.repoId]: secondary,
+          [readonly.repoId]: readonly,
+          [writable.repoId]: writable,
+        },
+      },
+    };
+    const adapters: RepositoryPortAdapters = {
+      git: {
+        commitsAhead: vi.fn(async (repo) => repo.repoId === writable.repoId ? 1 : 2),
+        tcrCount: vi.fn(async () => 1),
+        recentCommits: vi.fn(async () => []),
+        dirty: vi.fn(async (repo) => repo.repoId === secondary.repoId),
+        push: vi.fn(async () => ({ code: 0 })),
+      },
+      provider: {
+        repoSlug: vi.fn(async () => undefined),
+        prState: vi.fn(async () => "UNKNOWN"),
+        prMergeInfo: vi.fn(async () => undefined),
+      },
+    };
+    const fixturePaths: RunnerPaths = {
+      eventsPath: join(runtimeRoot, "events.ndjson"),
+      runsPath: join(runtimeRoot, "runs.jsonl"),
+      alertsPath: join(runtimeRoot, "alerts.log"),
+      lockPath: join(runtimeRoot, "lock"),
+      heartbeatPath: join(runtimeRoot, "heartbeat"),
+      worktreePath: join(root, "legacy-worktree"),
+    };
+    const basePorts = nodePorts({
+      repoCwd: root,
+      paths: fixturePaths,
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+    const bound = createRepositoryPorts(ctx, adapters);
+    const ports = {
+      ...basePorts,
+      repositories: { resolve: async () => ctx.repositoryExecution, bind: () => bound },
+    };
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, ports, ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({
+        commitsAhead: 3,
+        worktreeDirty: true,
+        repositoryVerificationPending: true,
+      }),
+    });
+    expect(result.ctxPatch).toMatchObject({
+      tcrCount: 2,
+      failureClass: "harness",
+      rootCauseKey: "harness:repository_verification_pending",
+    });
+    expect(adapters.git.commitsAhead).not.toHaveBeenCalledWith(readonly);
+    const issueEvents = readFileSync(join(issueRoot, "events.jsonl"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(issueEvents.filter((event) => event["type"] === "repository:capture_observed")).toEqual([
+      expect.objectContaining({ repoId: writable.repoId, commitsAhead: 1, tcrCount: 1, worktreeDirty: false }),
+      expect.objectContaining({ repoId: secondary.repoId, commitsAhead: 2, tcrCount: 1, worktreeDirty: true }),
+    ]);
     expect(existsSync(join(issueRoot, ".git"))).toBe(false);
   });
 

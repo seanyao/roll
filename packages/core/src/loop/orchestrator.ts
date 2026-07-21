@@ -278,6 +278,10 @@ export interface CapturedFacts {
   timedOut: boolean;
   /** Commits ahead of origin/main in the worktree (bin/roll:9139). */
   commitsAhead: number;
+  /** Workspace repository observations are real, but repository-scoped
+   * verification/publish is intentionally deferred to US-WS-012. This explicit
+   * seam blocks before legacy single-repository gates can consume the aggregate. */
+  repositoryVerificationPending?: boolean;
   /** FIX-252: commits on local main that are not on origin/main. */
   mainAhead?: number;
   /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
@@ -332,6 +336,7 @@ export interface CapturedFacts {
 export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   if (facts.timedOut) return "blocked";
   if (!facts.usedWorktree) return "failed";
+  if (facts.repositoryVerificationPending === true) return "blocked";
   // FIX-1037: main checkout pollution is a sandbox/runner boundary breach. It
   // must fail before any "agent did real work" or "existing PR" branch can
   // publish, otherwise an escaped builder can both dirty main and still ship.

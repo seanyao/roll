@@ -263,6 +263,32 @@ describe("US-WS-010 — one Story Cycle carries a repository execution map", () 
       code: "invalid_repository_map",
     });
   });
+
+  it("blocks committed Workspace work while repository verification is pending", () => {
+    expect(classifyCaptured({
+      usedWorktree: true,
+      agentExecuted: true,
+      agentExit: 0,
+      timedOut: false,
+      commitsAhead: 2,
+      repositoryVerificationPending: true,
+    })).toBe("blocked");
+  });
+
+  it.each([
+    { label: "dirty with commits", commitsAhead: 2 },
+    { label: "dirty only", commitsAhead: 0 },
+  ])("blocks $label before legacy handoff classification", ({ commitsAhead }) => {
+    expect(classifyCaptured({
+      usedWorktree: true,
+      agentExecuted: true,
+      agentExit: 0,
+      timedOut: false,
+      commitsAhead,
+      worktreeDirty: true,
+      repositoryVerificationPending: true,
+    })).toBe("blocked");
+  });
 });
 
 describe("Hook 1 — productivity floor: gave_up vs idle", () => {

@@ -48,10 +48,58 @@ import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
 import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
+import { observeWritableRepositories } from "./repository-observation.js";
 
 const execFileAsync = promisify(execFile);
 
 type CaptureFactsCommand = Extract<CycleCommand, { kind: "capture_facts" }>;
+
+async function executeRepositoryCaptureFactsCommand(
+  ports: Ports,
+  ctx: CycleContext,
+): Promise<ExecuteResult> {
+  const repositories = ports.repositories?.bind(ctx);
+  if (repositories === undefined) throw new Error("missing_repository_ports");
+  const observed = await observeWritableRepositories(ctx, repositories);
+  for (const leg of observed.legs) {
+    repositories.events.append(leg.repoId, {
+      type: "repository:capture_observed",
+      commitsAhead: leg.commitsAhead,
+      tcrCount: leg.tcrCount,
+      worktreeDirty: leg.worktreeDirty,
+      ts: eventTs(ports),
+    });
+  }
+  const repositoryVerificationPending = observed.commitsAhead > 0 || observed.worktreeDirty;
+  if (repositoryVerificationPending) {
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `repository_verification_pending: Workspace cycle ${ctx.cycleId ?? "?"} captured ${observed.commitsAhead} commit(s) across ${observed.legs.length} writable repositories; US-WS-012 must verify and publish them`,
+    );
+  }
+  const facts: CapturedFacts = {
+    usedWorktree: true,
+    agentExecuted: (ctx.agent ?? "").trim() !== "",
+    agentExit: ctx.agentExitCode ?? 0,
+    timedOut: false,
+    commitsAhead: observed.commitsAhead,
+    ...(observed.worktreeDirty ? { worktreeDirty: true } : {}),
+    ...(repositoryVerificationPending ? { repositoryVerificationPending: true } : {}),
+    ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
+  };
+  return {
+    event: { type: "facts_captured", facts },
+    ctxPatch: {
+      tcrCount: observed.tcrCount,
+      ...(repositoryVerificationPending
+        ? {
+            failureClass: "harness" as const,
+            rootCauseKey: "harness:repository_verification_pending",
+          }
+        : {}),
+    },
+  };
+}
 
 export async function executeCaptureFactsCommand(
   cmd: CaptureFactsCommand,
@@ -59,6 +107,9 @@ export async function executeCaptureFactsCommand(
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
   void cmd;
+      if (ctx.repositoryExecution !== undefined) {
+        return executeRepositoryCaptureFactsCommand(ports, ctx);
+      }
       // E4: the agent built/committed inside the EXECUTION worktree (the submodule
       // cycle worktree when the story declared a target_submodule, else the
       // superproject worktree). Every git OBSERVATION of the agent's delivery

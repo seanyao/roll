@@ -85,7 +85,9 @@ export async function executeSpawnAgentCommand(
       const observeBase = ctx.repositoryExecution === undefined
         ? resolveIntegrationBranch(execRepoCwd)
         : undefined;
-      await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
+      if (ctx.repositoryExecution === undefined) {
+        await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
+      }
       const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
       if (credentialBlock !== null) {
         const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, "auth", credentialBlock, eventTs(ports));
@@ -240,16 +242,18 @@ export async function executeSpawnAgentCommand(
       let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
       let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
       try {
-        appendWriteProtectionEvent(
-          ports,
-          applyMainCheckoutWriteProtection({
-            repoCwd: ports.repoCwd,
-            runtimeDir: guardRuntimeDir(ports),
-            cycleId: ctx.cycleId ?? "",
-            nowMs: () => eventTs(ports),
-          }),
-        );
-        mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+        if (ctx.repositoryExecution === undefined) {
+          appendWriteProtectionEvent(
+            ports,
+            applyMainCheckoutWriteProtection({
+              repoCwd: ports.repoCwd,
+              runtimeDir: guardRuntimeDir(ports),
+              cycleId: ctx.cycleId ?? "",
+              nowMs: () => eventTs(ports),
+            }),
+          );
+          mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+        }
         res = await ports.agentSpawn(cmd.agent, applyRepositoryBuilderContext(ctx, {
           purpose: "builder",
           // E4: the builder runs in the submodule cycle worktree for a submodule
@@ -288,15 +292,17 @@ export async function executeSpawnAgentCommand(
         if (mainLeakWatchdog !== undefined) {
           activeMainLeak = await mainLeakWatchdog.stop();
         }
-        appendWriteProtectionEvent(
-          ports,
-          releaseMainCheckoutWriteProtection({
-            repoCwd: ports.repoCwd,
-            runtimeDir: guardRuntimeDir(ports),
-            cycleId: ctx.cycleId ?? "",
-            nowMs: () => eventTs(ports),
-          }),
-        );
+        if (ctx.repositoryExecution === undefined) {
+          appendWriteProtectionEvent(
+            ports,
+            releaseMainCheckoutWriteProtection({
+              repoCwd: ports.repoCwd,
+              runtimeDir: guardRuntimeDir(ports),
+              cycleId: ctx.cycleId ?? "",
+              nowMs: () => eventTs(ports),
+            }),
+          );
+        }
         signalRecorder.flush();
         // Stop the timer AND take one final synchronous-await snapshot so the LAST
         // TCR commits (landed between the last tick and agent exit) are not lost.
@@ -314,18 +320,20 @@ export async function executeSpawnAgentCommand(
       // E4: scoop ALERT*.md the builder dropped in its OWN cwd (the submodule
       // cycle worktree for a submodule story).
       persistWorktreeAlerts(execCwd, ports.paths.alertsPath, ports.events);
-      if (activeMainLeak.detected) {
-        await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
-        res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
-      } else {
-        await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+      if (ctx.repositoryExecution === undefined) {
+        if (activeMainLeak.detected) {
+          await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
+          res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
+        } else {
+          await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+        }
       }
 
       // FIX-1237: heal-at-every-boundary — repair core.worktree contamination
       // immediately after EVERY agent spawn completes, not just at pre-init
       // and terminal.  Catches any poisoning the agent did during its run so
       // sibling worktrees never see a poisoned config before the next step.
-      {
+      if (ctx.repositoryExecution === undefined) {
         const repair = repairCoreWorktreeContamination(ports.repoCwd);
         if (repair.healed) {
           ports.events.appendEvent(ports.paths.eventsPath, {

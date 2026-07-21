@@ -6,6 +6,7 @@ export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
 export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
 export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
+export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" as const;
 
 export type ContractErrorCode =
   | "invalid_type"
@@ -66,6 +67,33 @@ export interface RequirementSourceManifest {
   readonly context: readonly RequirementContextDescriptor[];
   readonly stories: readonly string[];
   readonly attest: RequirementAttestProjectionContract;
+}
+
+export type RequirementArchiveFindingCode =
+  | "manifest_invalid"
+  | "revision_missing"
+  | "revision_metadata_mismatch"
+  | "content_digest_mismatch"
+  | "context_digest_mismatch"
+  | "unsafe_archive_path"
+  | "archive_changed_during_read";
+
+export interface RequirementArchiveFinding {
+  readonly code: RequirementArchiveFindingCode;
+  readonly revision?: string;
+  readonly evidencePath: string;
+}
+
+/**
+ * V1 consistency result for the source revision graph and its declared evidence digests.
+ * It is not cryptographic proof against a coordinated rewrite of both authority and evidence.
+ */
+export interface RequirementArchiveAudit {
+  readonly schema: typeof REQUIREMENT_ARCHIVE_AUDIT_V1;
+  readonly requirementId: string;
+  readonly status: "healthy" | "corrupt" | "untrusted";
+  readonly checkedRevisions: readonly string[];
+  readonly findings: readonly RequirementArchiveFinding[];
 }
 
 export interface RepositoryWorkflowMetadata {

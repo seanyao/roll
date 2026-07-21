@@ -16,7 +16,9 @@ import {
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 import { loopGoCommand, planGoTmuxCommands, type LoopGoDeps, type StartTmuxInput } from "../src/commands/loop-go.js";
 import { loopRunOnceCommand } from "../src/commands/loop-run-once.js";
+import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import { WorkspaceRegistry } from "@roll/infra";
+import type { RouteDeps } from "@roll/core";
 import { REPOSITORY_BINDING_V1, WORKSPACE_MANIFEST_V1, repositoryIdFromRemote } from "@roll/spec";
 import { workspaceSchedulerPaths } from "../src/lib/operating-mode.js";
 
@@ -94,6 +96,45 @@ afterEach(() => {
 });
 
 describe("US-WS-016 Workspace scheduler contract", () => {
+  it("binds the production backlog port to the Workspace backlog and leaves legacy repo-local state untouched", () => {
+    const root = workspaceRoot("backlog-port");
+    workspaceManifest(root, "ws-alpha");
+    const backlogPath = join(root, "backlog", "index.md");
+    const legacyBacklogPath = join(root, ".roll", "backlog.md");
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    mkdirSync(join(root, ".roll"), { recursive: true });
+    writeFileSync(
+      backlogPath,
+      "| Story | Description | Status |\n|---|---|---|\n| US-WS-016 | Workspace story | 📋 Todo |\n",
+    );
+    writeFileSync(
+      legacyBacklogPath,
+      "| Story | Description | Status |\n|---|---|---|\n| LEGACY-1 | Legacy decoy | 📋 Todo |\n",
+    );
+    const runtimeRoot = join(root, "runtime");
+    const paths: RunnerPaths = {
+      eventsPath: join(runtimeRoot, "events.ndjson"),
+      runsPath: join(runtimeRoot, "runs.jsonl"),
+      alertsPath: join(runtimeRoot, "alerts.log"),
+      lockPath: join(runtimeRoot, "inner.lock"),
+      heartbeatPath: join(runtimeRoot, "heartbeat"),
+      worktreePath: join(runtimeRoot, "worktrees", "cycle-test"),
+    };
+    const routeDeps: RouteDeps = {
+      readSlot: () => ({ agent: "claude" }),
+      firstInstalled: () => "claude",
+    };
+    const ports = nodePorts({ repoCwd: root, paths, skillBody: "BUILD STORY", routeDeps });
+
+    expect(ports.backlog.read(root)).toEqual([
+      expect.objectContaining({ id: "US-WS-016", status: "📋 Todo" }),
+    ]);
+    ports.backlog.markStatus?.(root, "US-WS-016", "🔨 In Progress");
+
+    expect(readFileSync(backlogPath, "utf8")).toContain("US-WS-016 | Workspace story | 🔨 In Progress");
+    expect(readFileSync(legacyBacklogPath, "utf8")).toContain("LEGACY-1 | Legacy decoy | 📋 Todo");
+  });
+
   it("renders loop on help before target resolution or scheduler mutation", async () => {
     const fixture = schedulerDeps({}, () => {
       throw new Error("help must not resolve a target");

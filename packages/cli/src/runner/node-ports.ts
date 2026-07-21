@@ -311,6 +311,7 @@ export function nodePorts(opts: {
   paths: RunnerPaths;
   skillBody: string;
   routeDeps: RouteDeps;
+  backlogPath?: string;
   agentSpawn?: AgentSpawn;
   clock?: ProcessClock;
   repositoryAdapters?: RepositoryPortAdapters;
@@ -321,6 +322,11 @@ export function nodePorts(opts: {
   const repositories = existsSync(join(opts.repoCwd, "workspace.yaml"))
     ? createWorkspaceRepositoryPorts(opts.repoCwd, opts.repositoryAdapters)
     : undefined;
+  const backlogPath = opts.backlogPath ?? (
+    repositories === undefined
+      ? join(opts.repoCwd, ".roll", "backlog.md")
+      : join(opts.repoCwd, "backlog", "index.md")
+  );
 
   // FIX-906: the unified delivery-truth predicate. The structured projection
   // (`ensureDeliveriesFresh`, FIX-904/905) rebuilds deliveries.jsonl from BOTH
@@ -532,22 +538,20 @@ export function nodePorts(opts: {
       },
     },
     backlog: {
-      read(projectCwd) {
-        const p = join(projectCwd, ".roll", "backlog.md");
-        if (!existsSync(p)) return [];
-        return parseBacklog(readFileSync(p, "utf8"));
+      read(_projectCwd) {
+        if (!existsSync(backlogPath)) return [];
+        return parseBacklog(readFileSync(backlogPath, "utf8"));
       },
       // FIX-198: the production binding was MISSING entirely (the optional
       // chain made every In-Progress claim a silent no-op). ID-anchored mark
       // under optimistic concurrency; best-effort — a conflict/IO failure must
       // never kill the cycle, the reconcile pass is the safety net.
-      markStatus(projectCwd, id, status) {
+      markStatus(_projectCwd, id, status) {
         try {
-          const p = join(projectCwd, ".roll", "backlog.md");
-          if (!existsSync(p)) return;
+          if (!existsSync(backlogPath)) return;
           const store = new BacklogStore();
-          const snap = store.readBacklog(p);
-          store.mark(p, snap.hash, id, status);
+          const snap = store.readBacklog(backlogPath);
+          store.mark(backlogPath, snap.hash, id, status);
         } catch {
           /* best-effort: reconcile owns the fallback */
         }

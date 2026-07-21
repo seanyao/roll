@@ -297,13 +297,12 @@ describe("US-WS-008 roll workspace issue init", () => {
     expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
   });
 
-  it("rolls back the clean first target's real git worktree via git worktree remove when the SECOND target's worktree add genuinely fails", async () => {
+  it("rejects a SECOND target's pre-existing governed branch before creating the first target", async () => {
     const f = fixture();
     await initWorkspace(f);
     // This fault needs the SECOND target to be a WRITE target too, so its
-    // real `worktree add -b <branch>` can genuinely collide on an
-    // already-existing branch — the same real git-level failure mode the
-    // infra-level suite already proves (see issue-worktrees.test.ts). `docs`
+    // governed branch can genuinely collide with an already-existing branch
+    // during the complete preflight. `docs`
     // is declared write-access ONLY for this one story id; every other test
     // in this file keeps it read-access.
     const storyId = "US-FAULT1";
@@ -353,8 +352,7 @@ repositories:
     // legitimately reuse: orphan governed branch recovery (US-WS-008) only
     // ever reuses a same-named branch when the pinned base is confirmed an
     // ANCESTOR of its tip, so this branch's diverged history must make the
-    // recovery attempt itself fail loud, exactly like any other real
-    // second-target apply failure.
+    // preflight itself fail loud before any target is mutated.
     const docsCachePath = join(f.rollHome, "repos", `${f.readRepoId}.git`);
     const targetBranch = `roll/ws-demo/${storyId}/docs`;
     const scratchDir = join(f.home, "docs-branch-scratch");
@@ -367,31 +365,23 @@ repositories:
     execFileSync("git", ["-c", "user.email=roll@example.test", "-c", "user.name=Roll Test", "commit", "-q", "-m", "unrelated root commit"], { cwd: scratchDir, stdio: "ignore" });
     execFileSync("git", ["push", docsCachePath, `${targetBranch}:${targetBranch}`], { cwd: scratchDir, stdio: "ignore" });
 
-    // Run the target Story once for real: `sot` (target 1) is created fresh
-    // and clean; `docs` (target 2) genuinely fails to recover its orphan
-    // governed branch because that branch's diverged history does not have
-    // the pinned base as an ancestor.
+    // The complete multi-target preflight sees docs's conflict before any
+    // Issue mutation. In particular, the earlier sot target must never be
+    // created merely because it appears first in the Story contract.
     const failed = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(failed.status).toBe(1);
-    expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "apply_failed" } });
-    // Freeze the COMPLETE apply_failed JSON payload for a genuine
-    // second-target failure — not just a MatchObject subset — so any
+    expect(JSON.parse(failed.stderr)).toMatchObject({ error: { code: "rejected" } });
+    // Freeze the COMPLETE rejection payload for a later-target preflight
+    // conflict — not just a MatchObject subset — so any
     // unintended shape drift (a dropped field, an added one, a changed
     // message) is caught even where the subset check above would stay green.
-    expect(scrub(failed.stderr, f)).toMatchSnapshot("second-target-apply-failed-json");
+    expect(scrub(failed.stderr, f)).toMatchSnapshot("later-target-preflight-rejected-json");
 
     const issueRoot = join(f.workspace, "issues", storyId);
-    // sot was newly-created and clean during THIS run -> rolled back via a
-    // real `git worktree remove`, never left behind.
-    expect(existsSync(join(issueRoot, "sot"))).toBe(false);
-    // docs never got a worktree created — the branch collision struck before
-    // any worktree-add for it could succeed.
-    expect(existsSync(join(issueRoot, "docs"))).toBe(false);
-    const journal = JSON.parse(readFileSync(join(issueRoot, "issue-init.pending.json"), "utf8"));
-    expect(journal).toMatchObject({ schema: "roll.issue-init-journal/v1", status: "repair_required" });
+    expect(existsSync(issueRoot)).toBe(false);
 
     // The throwaway warmup Issue and its real worktree are completely
-    // unaffected by the failed target Story's rollback.
+    // unaffected by the rejected target Story's preflight.
     expect(existsSync(join(throwawayIssueRoot, "docs", ".git"))).toBe(true);
 
     // Repair: delete only the deliberately-injected colliding branch, then
@@ -399,9 +389,9 @@ repositories:
     execFileSync("git", ["branch", "-D", targetBranch], { cwd: docsCachePath, stdio: "ignore" });
     const repaired = await run(["workspace", "issue", "init", storyId, "--workspace", "ws-demo", "--json"], f);
     expect(repaired.status, repaired.stderr).toBe(0);
-    // A journal survived the failed attempt (interrupted mid-apply), so the
-    // converged retry is honestly "repaired", not a fresh "created".
-    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired" });
+    // The rejected preflight left no Issue state to repair, so this remains
+    // a fresh creation after the external conflict is removed.
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "created" });
     expect(existsSync(join(issueRoot, "sot", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "docs", ".git"))).toBe(true);
     expect(existsSync(join(issueRoot, "issue-init.pending.json"))).toBe(false);

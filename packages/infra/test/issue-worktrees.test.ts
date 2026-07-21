@@ -1324,10 +1324,18 @@ describe("applyIssueInit", () => {
 
   it("never adopts a pre-existing branch of the SAME name for a BRAND-NEW (never-pinned) target — fails loud instead of reusing", async () => {
     const f = fixture();
-    const sot1Binding = f.bindings.find((b) => b.alias === "sot1");
-    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
-    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
-    const renderedBranch = "roll/ws-demo/US-XX1/sot1"; // matches binding().workflow.branchPattern for this workspaceId/storyId
+    const contract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true, dependsOnRepo: "sot1" },
+      ],
+    };
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    const sot2Binding = f.bindings.find((candidate) => candidate.alias === "sot2");
+    if (sot1Binding === undefined || sot2Binding === undefined) throw new Error("fixture must resolve both write bindings");
+    const cachePath = join(f.rollHome, "repos", `${sot2Binding.repoId}.git`);
+    const renderedBranch = "roll/ws-demo/US-XX1/sot2"; // conflict belongs to the later target
 
     // Prime the machine cache for real (fetch, no Issue involved), then plant
     // a branch with the EXACT name THIS brand-new target's contract would
@@ -1335,14 +1343,15 @@ describe("applyIssueInit", () => {
     // Issue-local pin for it anywhere. Simulates a name collision (manual git
     // use, or some other unrelated process) that this Issue never created.
     await ensureRepositoryCache({ binding: sot1Binding, rollHome: f.rollHome, integrationRefspec: `+refs/heads/main:refs/remotes/origin/main` });
+    await ensureRepositoryCache({ binding: sot2Binding, rollHome: f.rollHome, integrationRefspec: `+refs/heads/main:refs/remotes/origin/main` });
     git(cachePath, ["branch", renderedBranch, "refs/remotes/origin/main"]);
     expect(git(cachePath, ["branch", "--list", renderedBranch])).not.toBe("");
     const rollHomeBefore = treeDigest(f.rollHome);
 
-    // This Issue's sot1 target has NEVER been pinned (brand-new) yet the
+    // This Issue's later sot2 target has NEVER been pinned (brand-new) yet the
     // branch its OWN contract would render to already exists — must fail
-    // loud, never silently adopt someone else's branch.
-    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] }, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+    // loud before the earlier sot1 target can be created or journaled.
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
       .rejects.toThrow(IssueInitializationError);
     expect(existsSync(f.issueRoot)).toBe(false);
     expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
@@ -1350,13 +1359,19 @@ describe("applyIssueInit", () => {
 
   it("rejects a pinned diverged governed branch before mutating the existing Issue", async () => {
     const f = fixture();
-    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    const contract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true, dependsOnRepo: "sot1" },
+      ],
+    };
     await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
-    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
-    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
-    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
-    const branch = "roll/ws-demo/US-XX1/sot1";
-    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot1")]);
+    const sot2Binding = f.bindings.find((candidate) => candidate.alias === "sot2");
+    if (sot2Binding === undefined) throw new Error("fixture must resolve sot2's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot2Binding.repoId}.git`);
+    const branch = "roll/ws-demo/US-XX1/sot2";
+    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot2")]);
     git(cachePath, ["update-ref", "-d", `refs/heads/${branch}`]);
     const unrelated = join(f.root, "apply-unrelated");
     mkdirSync(unrelated, { recursive: true });
@@ -1382,13 +1397,19 @@ describe("applyIssueInit", () => {
 
   it("rejects a pinned governed branch checked out elsewhere before mutating the existing Issue", async () => {
     const f = fixture();
-    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    const contract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true, dependsOnRepo: "sot1" },
+      ],
+    };
     await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
-    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
-    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
-    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
-    const branch = "roll/ws-demo/US-XX1/sot1";
-    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot1")]);
+    const sot2Binding = f.bindings.find((candidate) => candidate.alias === "sot2");
+    if (sot2Binding === undefined) throw new Error("fixture must resolve sot2's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot2Binding.repoId}.git`);
+    const branch = "roll/ws-demo/US-XX1/sot2";
+    git(cachePath, ["worktree", "remove", "--force", join(f.issueRoot, "sot2")]);
     const elsewhere = join(f.root, "apply-elsewhere");
     git(cachePath, ["worktree", "add", elsewhere, branch]);
     const rollHomeBefore = treeDigest(f.rollHome);
@@ -1408,14 +1429,20 @@ describe("applyIssueInit", () => {
 
   it("rejects a missing locked governed branch before mutating the existing Issue", async () => {
     const f = fixture();
-    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    const contract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true, dependsOnRepo: "sot1" },
+      ],
+    };
     await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
-    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
-    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
-    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
-    const sot1Path = join(f.issueRoot, "sot1");
-    git(cachePath, ["worktree", "lock", sot1Path]);
-    rmSync(sot1Path, { recursive: true, force: true });
+    const sot2Binding = f.bindings.find((candidate) => candidate.alias === "sot2");
+    if (sot2Binding === undefined) throw new Error("fixture must resolve sot2's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot2Binding.repoId}.git`);
+    const sot2Path = join(f.issueRoot, "sot2");
+    git(cachePath, ["worktree", "lock", sot2Path]);
+    rmSync(sot2Path, { recursive: true, force: true });
     const rollHomeBefore = treeDigest(f.rollHome);
     const workspaceBefore = treeDigest(f.workspaceRoot);
     const registrationsBefore = git(cachePath, ["worktree", "list", "--porcelain"]);

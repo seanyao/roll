@@ -14,6 +14,13 @@ export interface IssueWorktreeIdentity {
 const ABSENT_IDENTITY: IssueWorktreeIdentity = { state: "absent", dirty: false, branch: null, baseSha: null };
 const CONFLICT_IDENTITY: IssueWorktreeIdentity = { state: "conflict", dirty: false, branch: null, baseSha: null };
 
+/** Git introspection for check/preflight paths must not refresh index or
+ *  worktree metadata. `--no-optional-locks` is Git's command-line equivalent
+ *  of `GIT_OPTIONAL_LOCKS=0`, keeping a read-only probe truly zero-write. */
+function inspectGit(args: readonly string[], cwd: string) {
+  return git(["--no-optional-locks", ...args], cwd);
+}
+
 /** Walk every entry under `root` (excluding `.git`, never descending into it),
  *  applying `apply` depth-first (children before their parent directory) so a
  *  read-only parent never blocks removing write bits from its own children.
@@ -135,7 +142,7 @@ export function unprotectReadOnlyWorktree(path: string): void {
 
 /** True when `branch` already exists as a real ref in this cache. */
 export async function branchExists(cachePath: string, branch: string): Promise<boolean> {
-  const result = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], cachePath);
+  const result = await inspectGit(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], cachePath);
   return result.code === 0;
 }
 
@@ -267,10 +274,10 @@ export type GovernedBranchState = "absent" | "recoverable" | "conflict";
 /** Inspect a write target's governed branch without mutating the shared cache. */
 export async function inspectGovernedBranchState(cachePath: string, branch: string, baseSha: string): Promise<GovernedBranchState> {
   if (!await branchExists(cachePath, branch)) return "absent";
-  const list = await git(["worktree", "list", "--porcelain", "-z"], cachePath);
+  const list = await inspectGit(["worktree", "list", "--porcelain", "-z"], cachePath);
   if (list.code !== 0) return "conflict";
   if (worktreeListActiveBranches(list.stdout).has(branch)) return "conflict";
-  const ancestor = await git(["merge-base", "--is-ancestor", baseSha, branch], cachePath);
+  const ancestor = await inspectGit(["merge-base", "--is-ancestor", baseSha, branch], cachePath);
   return ancestor.code === 0 ? "recoverable" : "conflict";
 }
 
@@ -287,22 +294,22 @@ export async function issueWorktreeIdentity(path: string, expectedCachePath: str
   }
   if (stat.isSymbolicLink() || !stat.isDirectory()) return CONFLICT_IDENTITY;
 
-  const commonDir = await git(["rev-parse", "--git-common-dir"], path);
+  const commonDir = await inspectGit(["rev-parse", "--git-common-dir"], path);
   if (commonDir.code !== 0) return CONFLICT_IDENTITY;
 
-  const list = await git(["worktree", "list", "--porcelain"], expectedCachePath);
+  const list = await inspectGit(["worktree", "list", "--porcelain"], expectedCachePath);
   if (list.code !== 0) return CONFLICT_IDENTITY;
   const registered = worktreeListPaths(list.stdout);
   const canonicalPath = realpathSync(path);
   const isRegisteredHere = [...registered].some((registeredPath) => registeredPath === canonicalPath);
   if (!isRegisteredHere) return CONFLICT_IDENTITY;
 
-  const head = await git(["rev-parse", "HEAD"], path);
+  const head = await inspectGit(["rev-parse", "HEAD"], path);
   if (head.code !== 0) return CONFLICT_IDENTITY;
-  const branchResult = await git(["symbolic-ref", "-q", "--short", "HEAD"], path);
+  const branchResult = await inspectGit(["symbolic-ref", "-q", "--short", "HEAD"], path);
   const branch = branchResult.code === 0 ? branchResult.stdout.trim() : null;
 
-  const status = await git(["status", "--porcelain"], path);
+  const status = await inspectGit(["status", "--porcelain"], path);
   const dirty = status.code !== 0 || status.stdout.trim() !== "";
 
   return { state: "compatible", dirty, branch: branch === "" ? null : branch, baseSha: head.stdout.trim() };
@@ -347,7 +354,7 @@ export async function checkWorktreeCompatibility(
   }
   if (identity.branch !== expected.workBranch) return false;
   if (identity.baseSha === expected.baseSha) return true;
-  const ancestor = await git(["merge-base", "--is-ancestor", expected.baseSha, identity.baseSha ?? ""], expectedCachePath);
+  const ancestor = await inspectGit(["merge-base", "--is-ancestor", expected.baseSha, identity.baseSha ?? ""], expectedCachePath);
   return ancestor.code === 0;
 }
 

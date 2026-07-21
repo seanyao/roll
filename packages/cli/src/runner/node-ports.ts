@@ -65,11 +65,13 @@ import { readSelfHeal } from "./selfheal-budget.js";
 import type {
   Ports,
   ProcessClock,
+  RepositoryContextPort,
   RepositoryPortAdapters,
   RepositoryPorts,
   RunnerPaths,
 } from "./ports.js";
 import { injectRepositoryContext } from "./project-map.js";
+import { resolveRepositoryExecutionContext } from "./repository-context.js";
 import {
   bootstrapWorktreeSkills,
   commitRollMetadataRepo,
@@ -279,6 +281,9 @@ export function nodePorts(opts: {
   const repositories = opts.repositoryExecution === undefined
     ? undefined
     : createRepositoryPorts(opts.repositoryExecution, opts.repositoryAdapters);
+  const repositoryContext: RepositoryContextPort | undefined = existsSync(join(opts.repoCwd, "workspace.yaml"))
+    ? { resolve: (storyId) => resolveRepositoryExecutionContext(opts.repoCwd, storyId) }
+    : undefined;
 
   // FIX-906: the unified delivery-truth predicate. The structured projection
   // (`ensureDeliveriesFresh`, FIX-904/905) rebuilds deliveries.jsonl from BOTH
@@ -338,6 +343,7 @@ export function nodePorts(opts: {
     paths: opts.paths,
     skillBody: opts.skillBody,
     ...(repositories === undefined ? {} : { repositories }),
+    ...(repositoryContext === undefined ? {} : { repositoryContext }),
     clock,
     agentSpawn: spawn,
     // FIX-906: unified delivery-truth predicate (structured projection over

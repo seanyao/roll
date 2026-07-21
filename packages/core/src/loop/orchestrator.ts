@@ -1062,7 +1062,11 @@ export type CycleEvent =
   | { type: "preflight_done" }
   | { type: "worktree_created" }
   | { type: "worktree_failed" } // isolation failed → failed terminal (bin/roll:9000).
-  | { type: "story_picked"; storyId: string }
+  | {
+      type: "story_picked";
+      storyId: string;
+      repositoryExecution?: CycleRepositoryExecutionContext;
+    }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
@@ -1271,7 +1275,17 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // the worktree carries the resume tree by the time the agent spawns. When no
       // resume branch exists it is a clean no-op (worktree stays on origin/main).
       return {
-        state: { ...state, phase: "route", ctx: { ...state.ctx, storyId: event.storyId } },
+        state: {
+          ...state,
+          phase: "route",
+          ctx: {
+            ...state.ctx,
+            storyId: event.storyId,
+            ...(event.repositoryExecution === undefined
+              ? {}
+              : { repositoryExecution: event.repositoryExecution }),
+          },
+        },
         commands: [
           { kind: "resume_worktree", storyId: event.storyId },
           { kind: "resolve_route", storyId: event.storyId },

@@ -1,5 +1,6 @@
 import type { CycleContext, CycleEvent, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
 import type { RepositoryExecutionContext, RollEvent } from "@roll/spec";
+import type { CycleRepositoryExecutionContext } from "@roll/spec";
 import type { CaptureMarker, Clock, ScreenshotResult } from "@roll/infra";
 import type { AgentSpawn } from "./agent-spawn.js";
 import type { ReachResult } from "./agent-liveness.js";
@@ -163,6 +164,10 @@ export interface RepositoryPorts {
   };
 }
 
+export interface RepositoryContextPort {
+  resolve(storyId: string): Promise<CycleRepositoryExecutionContext | undefined>;
+}
+
 /** Process facet — lock + heartbeat (infra/process.ts). */
 export interface ProcessPort {
   acquireLock(
@@ -281,6 +286,9 @@ export interface Ports {
   /** Workspace repository operations, keyed only by stable repoId. Absent for
    * pre-Workspace runner construction; never synthesized from repoCwd. */
   repositories?: RepositoryPorts;
+  /** Resolves the picked Story's Issue-local repository facts. It is absent for
+   * legacy repository-local runners and never guesses a Story before pick. */
+  repositoryContext?: RepositoryContextPort;
   process: ProcessPort;
   events: EventsPort;
   backlog: BacklogPort;

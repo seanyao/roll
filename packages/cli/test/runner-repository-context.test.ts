@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CycleRepositoryExecutionContext, RepositoryExecutionContext } from "@roll/spec";
-import type { RouteDeps } from "@roll/core";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  repositoryIdFromRemote,
+  type CycleRepositoryExecutionContext,
+  type RepositoryExecutionContext,
+} from "@roll/spec";
+import { cycleStep, initialCycleState, type RouteDeps } from "@roll/core";
 import {
   REPOSITORY_CONTEXT_MAX_CHARS,
   buildRepositoryContextMap,
@@ -67,7 +75,111 @@ function fakeSpawn(): AgentSpawn {
   return spawn;
 }
 
+function productionWorkspaceFixture(): { root: string; storyId: string; repoId: string; headSha: string } {
+  const root = mkdtempSync(join(tmpdir(), "roll-us-ws-010-context-"));
+  const storyId = "US-WS-010";
+  const remote = "https://github.com/example/sot1.git";
+  const parsedRepoId = repositoryIdFromRemote(remote);
+  if (!parsedRepoId.ok) throw new Error("fixture remote must be canonicalizable");
+  const repoId = parsedRepoId.value;
+  const issueRoot = join(root, "issues", storyId);
+  const worktreePath = join(issueRoot, "sot1");
+  mkdirSync(worktreePath, { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.email", "roll-test@example.invalid"], { cwd: worktreePath });
+  writeFileSync(join(worktreePath, "README.md"), "fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: worktreePath });
+  execFileSync("git", ["commit", "-qm", "fixture"], { cwd: worktreePath });
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktreePath, encoding: "utf8" }).trim();
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({
+    schema: "roll.workspace/v1",
+    workspaceId: "ws-20260717001",
+    displayName: "US-WS-010 fixture",
+    requirements: [],
+    repositories: [{
+      schema: "roll.repository-binding/v1",
+      repoId,
+      alias: "sot1",
+      remote,
+      integrationBranch: "main",
+      provider: "github",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    }],
+  }, null, 2)}\n`);
+  writeFileSync(join(issueRoot, "manifest.json"), `${JSON.stringify({
+    schema: "roll.issue/v1",
+    workspaceId: "ws-20260717001",
+    storyId,
+    requirements: [],
+    repositories: [{
+      repoId,
+      alias: "sot1",
+      access: "write",
+      requiredDelivery: true,
+      noChangePolicy: "changes_required",
+    }],
+  }, null, 2)}\n`);
+  writeFileSync(join(issueRoot, "events.jsonl"), `${JSON.stringify({
+    type: "issue:repository_bound",
+    workspaceId: "ws-20260717001",
+    storyId,
+    alias: "sot1",
+    repoId,
+    access: "write",
+    baseSha: headSha,
+    worktreePath,
+    workBranch: "story/US-WS-010",
+    ts: 1,
+  })}\n`);
+  return { root, storyId, repoId, headSha };
+}
+
 describe("US-WS-010 repository Builder context", () => {
+  it("resolves the production Workspace Issue only after the Story identity is known", async () => {
+    const fixture = productionWorkspaceFixture();
+    const fixturePaths: RunnerPaths = {
+      eventsPath: join(fixture.root, "runtime", "events.ndjson"),
+      runsPath: join(fixture.root, "runtime", "runs.jsonl"),
+      alertsPath: join(fixture.root, "runtime", "alerts.log"),
+      lockPath: join(fixture.root, "runtime", "lock"),
+      heartbeatPath: join(fixture.root, "runtime", "heartbeat"),
+      worktreePath: join(fixture.root, "legacy-worktree"),
+    };
+    const ports = nodePorts({
+      repoCwd: fixture.root,
+      paths: fixturePaths,
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+
+    const resolved = await ports.repositoryContext?.resolve(fixture.storyId);
+
+    expect(resolved).toMatchObject({
+      workspaceId: "ws-20260717001",
+      issueRoot: realpathSync(join(fixture.root, "issues", fixture.storyId)),
+      repositories: {
+        [fixture.repoId]: {
+          repoId: fixture.repoId,
+          alias: "sot1",
+          access: "write",
+          baseSha: fixture.headSha,
+          headSha: fixture.headSha,
+          commands: { test: [], integration: [] },
+        },
+      },
+    });
+    const start = initialCycleState({ cycleId: "cycle-fixture", branch: "cycle-fixture", loop: "ci" });
+    const ready = { ...start, phase: "pick" as const, worktreeReady: true };
+    const stepped = cycleStep(ready, {
+      type: "story_picked",
+      storyId: fixture.storyId,
+      repositoryExecution: resolved,
+    });
+    expect(stepped.state.ctx.repositoryExecution).toEqual(resolved);
+  });
+
   it("renders one bounded prompt map with access, worktree and verification commands", () => {
     const rendered = buildRepositoryContextMap(execution);
 

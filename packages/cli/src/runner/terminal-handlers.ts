@@ -48,9 +48,6 @@ const LEGACY_REPOSITORY_TERMINAL_COMMANDS = new Set<TerminalCommand["kind"]>([
   "push_orphan",
   "rescue_leaked",
   "wait_merge",
-  "cleanup_environment",
-  "cleanup_worktree",
-  "append_run",
 ]);
 
 export async function executeTerminalCommand(
@@ -58,8 +55,29 @@ export async function executeTerminalCommand(
   ports: Ports,
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
-  if (ctx.repositoryExecution !== undefined && LEGACY_REPOSITORY_TERMINAL_COMMANDS.has(cmd.kind)) {
-    throw new Error(`workspace_repository_scope_required: ${cmd.kind}`);
+  if (ctx.repositoryExecution !== undefined) {
+    if (cmd.kind === "append_run") {
+      const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
+      ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
+      if ((ctx.storyId ?? "") !== "") {
+        try {
+          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), ctx.storyId ?? "", "cycle");
+        } catch {
+          /* lease cleanup must never block terminal bookkeeping */
+        }
+      }
+      return {};
+    }
+    if (cmd.kind === "cleanup_environment" || cmd.kind === "cleanup_worktree") {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `workspace_repository_scope_required: ${cmd.kind} skipped legacy repo-global cleanup for cycle ${ctx.cycleId}`,
+      );
+      return {};
+    }
+    if (LEGACY_REPOSITORY_TERMINAL_COMMANDS.has(cmd.kind)) {
+      throw new Error(`workspace_repository_scope_required: ${cmd.kind}`);
+    }
   }
   switch (cmd.kind) {
     // delivery/pr planPublishPr → github.runPublishPlan → published result.

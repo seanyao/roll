@@ -397,6 +397,8 @@ describe("US-WS-010 repository Builder context", () => {
     const worktreeRemove = vi.spyOn(ports.git, "worktreeRemove");
     const repoSlug = vi.spyOn(ports.github, "repoSlug");
     const prMergeInfo = vi.spyOn(ports.github, "prMergeInfo");
+    const upsertRun = vi.spyOn(ports.events, "upsertRun").mockImplementation(() => undefined);
+    const appendAlert = vi.spyOn(ports.events, "appendAlert").mockImplementation(() => undefined);
     const ctx = {
       cycleId: "cycle-terminal",
       branch: "cycle-terminal",
@@ -413,17 +415,22 @@ describe("US-WS-010 repository Builder context", () => {
     await expect(executeTerminalCommand({
       kind: "cleanup_worktree",
       branch: "cycle-terminal",
-    }, ports, ctx)).rejects.toThrow("workspace_repository_scope_required");
+    }, ports, ctx)).resolves.toEqual({});
     await expect(executeTerminalCommand({
       kind: "append_run",
       status: "published",
       outcome: "awaiting_merge",
       cycleId: "cycle-terminal",
-    }, ports, ctx)).rejects.toThrow("workspace_repository_scope_required");
+    }, ports, ctx)).resolves.toEqual({});
 
     expect(gitPush).not.toHaveBeenCalled();
     expect(worktreeRemove).not.toHaveBeenCalled();
     expect(repoSlug).not.toHaveBeenCalled();
     expect(prMergeInfo).not.toHaveBeenCalled();
+    expect(upsertRun).toHaveBeenCalledOnce();
+    expect(appendAlert).toHaveBeenCalledWith(
+      paths.alertsPath,
+      expect.stringContaining("workspace_repository_scope_required: cleanup_worktree"),
+    );
   });
 });

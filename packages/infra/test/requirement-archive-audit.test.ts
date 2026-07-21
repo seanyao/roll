@@ -5,7 +5,9 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,6 +49,7 @@ function fixture() {
   const contextRoot = join(root, "context-source");
   write(body, "revision 6 body\n");
   write(join(contextRoot, "api.md"), "revision 6 context\n");
+  write(join(contextRoot, "brief", "nested", "rules.md"), "revision 6 rules\n");
   const first = captureRequirementSource({
     workspaceRoot: workspace,
     provider: "jira",
@@ -55,11 +58,12 @@ function fixture() {
     capturedAt: "2026-07-20T16:00:00.000Z",
     bodyFile: body,
     contextRoot,
-    contextPaths: ["api.md"],
+    contextPaths: ["api.md", "brief/nested/rules.md"],
     storyIds: ["US-WS-007a"],
   });
   write(body, "revision 7 body\n");
   write(join(contextRoot, "api.md"), "revision 7 context\n");
+  write(join(contextRoot, "brief", "nested", "rules.md"), "revision 7 rules\n");
   const current = captureRequirementSource({
     workspaceRoot: workspace,
     provider: "jira",
@@ -68,7 +72,7 @@ function fixture() {
     capturedAt: "2026-07-20T17:00:00.000Z",
     bodyFile: body,
     contextRoot,
-    contextPaths: ["api.md"],
+    contextPaths: ["api.md", "brief/nested/rules.md"],
     storyIds: ["US-WS-007a"],
   });
   return {
@@ -165,6 +169,177 @@ describe("US-WS-007a Requirement archive audit", () => {
       code: expected.code,
       revision: expected.revision,
       evidencePath: expected.suffix,
+    });
+  });
+
+  it.each([
+    {
+      name: "Requirement root",
+      plant: (f: ReturnType<typeof fixture>, outside: string) => {
+        const parked = `${f.requirementPath}.parked`;
+        renameSync(f.requirementPath, parked);
+        symlinkSync(outside, f.requirementPath);
+      },
+      evidencePath: ".",
+    },
+    {
+      name: "revision directory",
+      plant: (f: ReturnType<typeof fixture>, outside: string) => {
+        const revision = join(f.requirementPath, "revisions", requirementRevisionKey("6"));
+        rmSync(revision, { recursive: true });
+        symlinkSync(outside, revision);
+      },
+      evidencePath: `revisions/${requirementRevisionKey("6")}`,
+    },
+    {
+      name: "nested context entry",
+      plant: (f: ReturnType<typeof fixture>, outside: string) => {
+        const target = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "api.md");
+        rmSync(target);
+        symlinkSync(join(outside, "secret.md"), target);
+      },
+      evidencePath: `revisions/${requirementRevisionKey("6")}/context/api.md`,
+    },
+  ])("never follows a symlink planted at the $name", ({ plant, evidencePath }) => {
+    const f = fixture();
+    const outside = join(f.root, "outside");
+    write(join(outside, "secret.md"), "outside secret\n");
+    plant(f, outside);
+
+    const result = auditRequirementArchive(f.auditInput);
+
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "unsafe_archive_path",
+      evidencePath,
+    }));
+  });
+
+  it.each([
+    ["revision count", { maxRevisions: 1 }, "source.yaml"],
+    ["revision directory entries", { maxRevisionEntries: 1 }, "revisions"],
+    ["context file count", { maxContextFiles: 1 }, expect.stringContaining("/context")],
+    ["context directory entries", { maxContextEntries: 1 }, expect.stringContaining("/context")],
+    ["context bytes", { maxContextBytes: 5 }, expect.stringContaining("/context/")],
+    ["body bytes", { maxBodyBytes: 5 }, expect.stringContaining("/requirement.md")],
+    ["context depth", { maxDepth: 1 }, expect.stringContaining("/context/brief/nested")],
+  ])("stops at the declared %s bound", (_name, limits, evidencePath) => {
+    const f = fixture();
+
+    const result = auditRequirementArchive({ ...f.auditInput, limits });
+
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual(expect.objectContaining({
+      code: "unsafe_archive_path",
+      evidencePath,
+    }));
+  });
+
+  it("rejects an in-place same-size archive overwrite during a no-follow read", () => {
+    const f = fixture();
+    const target = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "api.md");
+    const size = readFileSync(target).byteLength;
+    let raced = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== target || raced) return;
+        raced = true;
+        writeFileSync(path, `${"x".repeat(size - 1)}\n`);
+      },
+    });
+
+    expect(raced).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}/context/api.md`,
+    });
+  });
+
+  it("rejects a stale fd when its pathname is swapped for an outside symlink", () => {
+    const f = fixture();
+    const target = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md");
+    const outside = join(f.root, "outside-body.md");
+    write(outside, "outside secret\n");
+    let swapped = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== target || swapped) return;
+        swapped = true;
+        renameSync(target, `${target}.parked`);
+        symlinkSync(outside, target);
+      },
+    });
+
+    expect(swapped).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}/requirement.md`,
+    });
+  });
+
+  it("rejects source.yaml changing after the revision scan starts", () => {
+    const f = fixture();
+    const sourcePath = join(f.requirementPath, "source.yaml");
+    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("7"), "requirement.md");
+    let changed = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== trigger || changed) return;
+        changed = true;
+        const source = JSON.parse(readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+        source["stories"] = ["US-WS-007a", "US-WS-RACE"];
+        writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`);
+      },
+    });
+
+    expect(changed).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      evidencePath: "source.yaml",
+    });
+  });
+
+  it.each([
+    ["unsupported schema", (source: Record<string, unknown>) => { source["schema"] = "roll.requirement-source/v2"; }],
+    ["identity mismatch", (source: Record<string, unknown>) => { source["requirementId"] = "req-000000000000"; }],
+  ])("treats %s as an untrusted manifest", (_name, mutate) => {
+    const f = fixture();
+    const sourcePath = join(f.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+    mutate(source);
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`);
+
+    expect(auditRequirementArchive(f.auditInput)).toMatchObject({
+      status: "untrusted",
+      checkedRevisions: [],
+      findings: [{ code: "manifest_invalid", evidencePath: "source.yaml" }],
+    });
+  });
+
+  it("fails closed on invalid bounds instead of silently replacing caller policy with defaults", () => {
+    const f = fixture();
+
+    expect(auditRequirementArchive({ ...f.auditInput, limits: { maxDepth: 0 } })).toMatchObject({
+      status: "untrusted",
+      findings: [{ code: "unsafe_archive_path", evidencePath: "." }],
+    });
+  });
+
+  it("returns a typed untrusted audit when the Workspace root cannot be anchored", () => {
+    const f = fixture();
+    const missingWorkspace = join(f.root, "missing-workspace");
+
+    expect(auditRequirementArchive({ ...f.auditInput, workspaceRoot: missingWorkspace })).toMatchObject({
+      status: "untrusted",
+      findings: [{ code: "unsafe_archive_path", evidencePath: "." }],
     });
   });
 });

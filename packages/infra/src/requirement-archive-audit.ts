@@ -374,10 +374,10 @@ function scanRevision(
   }
 }
 
-function validLimits(input: Partial<RequirementArchiveAuditLimits> | undefined): RequirementArchiveAuditLimits {
+function validLimits(input: Partial<RequirementArchiveAuditLimits> | undefined): RequirementArchiveAuditLimits | undefined {
   const limits = { ...DEFAULT_LIMITS, ...input };
   for (const value of Object.values(limits)) {
-    if (!Number.isSafeInteger(value) || value < 1) return DEFAULT_LIMITS;
+    if (!Number.isSafeInteger(value) || value < 1) return undefined;
   }
   return limits;
 }
@@ -394,13 +394,21 @@ export function auditRequirementArchive(
       checkedRevisions: [],
       findings: [finding],
     });
+  if (limits === undefined) {
+    return fallback({ code: "unsafe_archive_path", evidencePath: "." });
+  }
   if (
     !safeSegment(input.provider, /^[a-z][a-z0-9_]*$/u) ||
     !safeSegment(input.requirementId, /^req-[0-9a-f]{12}$/u)
   ) {
     return fallback({ code: "manifest_invalid", evidencePath: "source.yaml" });
   }
-  const workspaceRoot = realpathSync(resolve(input.workspaceRoot));
+  let workspaceRoot: string;
+  try {
+    workspaceRoot = realpathSync(resolve(input.workspaceRoot));
+  } catch {
+    return fallback({ code: "unsafe_archive_path", evidencePath: "." });
+  }
   const requirementRoot = join(workspaceRoot, "requirements", input.provider, input.requirementId);
   try {
     const canonicalRoot = realpathSync(requirementRoot);

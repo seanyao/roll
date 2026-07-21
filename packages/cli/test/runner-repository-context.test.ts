@@ -618,6 +618,11 @@ describe("US-WS-010 repository Builder context", () => {
       heartbeatPath: join(runtimeRoot, "heartbeat"),
       worktreePath: fixture.root,
     };
+    writeFileSync(fixturePaths.runsPath, [
+      { story_id: fixture.storyId, cycle_id: "prior-built", status: "built" },
+      { story_id: fixture.storyId, cycle_id: "prior-orphan", status: "orphan" },
+      { story_id: fixture.storyId, cycle_id: "prior-failed", status: "failed" },
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n");
     const spawn = fakeSpawn();
     vi.mocked(spawn).mockImplementation(async (_agent, options) => {
       expect(options.cwd).toBe(realpathSync(fixture.issueRoot));
@@ -691,9 +696,10 @@ describe("US-WS-010 repository Builder context", () => {
     const storyEvents = readFileSync(fixturePaths.eventsPath, "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(storyEvents.filter((event) => event["type"] === "cycle:end")).toHaveLength(1);
-    const runs = readFileSync(fixturePaths.runsPath, "utf8").trim().split("\n");
-    expect(runs).toHaveLength(1);
-    expect(JSON.parse(runs[0] ?? "{}") as Record<string, unknown>).toMatchObject({
+    const runs = readFileSync(fixturePaths.runsPath, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(runs).toHaveLength(4);
+    expect(runs.find((row) => row["cycle_id"] === baseCtx.cycleId)).toMatchObject({
       story_id: fixture.storyId,
       cycle_id: baseCtx.cycleId,
       status: "blocked",

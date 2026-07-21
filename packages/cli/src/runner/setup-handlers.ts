@@ -587,7 +587,6 @@ export async function executeSetupCommand(
     }
 
     // RESUME-PRIOR-WORK re-point (post-pick) — the ONE real resume decision point.
-    //
     // The worktree was created on origin/main (the fresh-context default) BEFORE
     // the story was picked; this is the FIRST step that has the real picked story
     // id (pick_story reads the backlog INSIDE the worktree, FIX-198/FIX-204C, so
@@ -606,6 +605,7 @@ export async function executeSetupCommand(
     // worktree carries the resume tree by the time the agent spawns. Best-effort: a
     // reset failure leaves the worktree on origin/main rather than topple the cycle.
     case "resume_worktree": {
+      if (ports.repositories !== undefined) return {};
       // E1: resolveResumeBase returns the configured integration branch verbatim
       // when there is no resumable prior branch → that equality is the no-op.
       const base = await resolveResumeBase(ports, cmd.storyId);

@@ -83,6 +83,13 @@ type DirectoryAnchor =
   | { readonly ok: true; readonly identity: FileIdentity }
   | { readonly ok: false; readonly kind: ReadFailureKind };
 
+interface AnchoredDirectory {
+  readonly path: string;
+  readonly evidencePath: string;
+  readonly revision?: string;
+  readonly identity: FileIdentity;
+}
+
 function identity(stat: Stats): FileIdentity {
   return {
     dev: stat.dev,
@@ -96,6 +103,10 @@ function identity(stat: Stats): FileIdentity {
 function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+
+function sameNodeIdentity(left: FileIdentity, right: FileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 function stableReadFile(
@@ -227,6 +238,23 @@ function stableAnchorDirectory(
   }
 }
 
+function revalidateDirectoryAnchors(
+  anchors: readonly AnchoredDirectory[],
+  deps: RequirementArchiveAuditDependencies,
+  findings: RequirementArchiveFinding[],
+): void {
+  const changedRoots: string[] = [];
+  for (const anchor of anchors) {
+    if (changedRoots.some((root) => contained(root, anchor.path))) continue;
+    const current = stableAnchorDirectory(anchor.path, deps);
+    if (current.ok && sameNodeIdentity(anchor.identity, current.identity)) continue;
+    changedRoots.push(anchor.path);
+    findings.push(anchor.revision === undefined
+      ? { code: "archive_changed_during_read", evidencePath: anchor.evidencePath }
+      : { code: "archive_changed_during_read", revision: anchor.revision, evidencePath: anchor.evidencePath });
+  }
+}
+
 function contained(root: string, target: string): boolean {
   const path = relative(root, target);
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
@@ -346,6 +374,7 @@ function scanRevision(
   limits: RequirementArchiveAuditLimits,
   deps: RequirementArchiveAuditDependencies,
   findings: RequirementArchiveFinding[],
+  directoryAnchors: AnchoredDirectory[],
 ): void {
   const revisionKey = requirementRevisionKey(revision);
   const revisionRelative = `revisions/${revisionKey}`;
@@ -355,6 +384,12 @@ function scanRevision(
     findings.push(findingForReadFailure(revisionAnchor.kind, revisionRelative, revision));
     return;
   }
+  directoryAnchors.push({
+    path: revisionRoot,
+    evidencePath: revisionRelative,
+    revision,
+    identity: revisionAnchor.identity,
+  });
   const captureRelative = `${revisionRelative}/capture.yaml`;
   const captureRead = stableReadFile(join(revisionRoot, "capture.yaml"), limits.maxCaptureBytes, deps);
   if (!captureRead.ok) {
@@ -399,6 +434,12 @@ function scanRevision(
     findings.push(findingForReadFailure(contextAnchor.kind, contextRelative, revision));
     return;
   }
+  directoryAnchors.push({
+    path: contextRoot,
+    evidencePath: contextRelative,
+    revision,
+    identity: contextAnchor.identity,
+  });
   const contextPlan = declaredContextPlan(capture.context, limits);
   if (!contextPlan.ok) {
     const suffix = contextPlan.evidencePath === "" ? "" : `/${contextPlan.evidencePath}`;
@@ -412,10 +453,19 @@ function scanRevision(
     if (blockedDirectories.some((blocked) => directory === blocked || directory.startsWith(`${blocked}/`))) {
       continue;
     }
-    const anchor = stableAnchorDirectory(join(contextRoot, directory), deps);
-    if (anchor.ok) continue;
-    blockedDirectories.push(directory);
-    findings.push(findingForReadFailure(anchor.kind, `${contextRelative}/${directory}`, revision));
+    const path = join(contextRoot, directory);
+    const anchor = stableAnchorDirectory(path, deps);
+    if (!anchor.ok) {
+      blockedDirectories.push(directory);
+      findings.push(findingForReadFailure(anchor.kind, `${contextRelative}/${directory}`, revision));
+      continue;
+    }
+    directoryAnchors.push({
+      path,
+      evidencePath: `${contextRelative}/${directory}`,
+      revision,
+      identity: anchor.identity,
+    });
   }
   let remainingBytes = limits.maxContextBytes;
   for (const descriptor of capture.context.slice().sort((left, right) => compareText(left.path, right.path))) {
@@ -445,12 +495,17 @@ function validLimits(input: Partial<RequirementArchiveAuditLimits> | undefined):
   return limits;
 }
 
+/**
+ * Audits the v1 source graph, declared paths, metadata, and digest consistency without
+ * claiming external authenticity when source authority and evidence are rewritten together.
+ */
 export function auditRequirementArchive(
   input: RequirementArchiveAuditInput,
   deps: RequirementArchiveAuditDependencies = {},
 ): RequirementArchiveAudit {
   const limits = validLimits(input.limits);
   const findings: RequirementArchiveFinding[] = [];
+  const directoryAnchors: AnchoredDirectory[] = [];
   const fallback = (finding: RequirementArchiveFinding): RequirementArchiveAudit =>
     classifyRequirementArchiveIntegrity({
       requirementId: input.requirementId,
@@ -485,6 +540,11 @@ export function auditRequirementArchive(
   if (!requirementAnchor.ok) {
     return fallback(findingForReadFailure(requirementAnchor.kind, "."));
   }
+  directoryAnchors.push({
+    path: requirementRoot,
+    evidencePath: ".",
+    identity: requirementAnchor.identity,
+  });
   const sourceRead = stableReadFile(join(requirementRoot, "source.yaml"), limits.maxSourceBytes, deps);
   if (!sourceRead.ok) {
     const finding = sourceRead.kind === "missing"
@@ -523,8 +583,13 @@ export function auditRequirementArchive(
   if (!revisionsAnchor.ok) {
     findings.push(findingForReadFailure(revisionsAnchor.kind, "revisions"));
   } else {
+    directoryAnchors.push({
+      path: revisionsRoot,
+      evidencePath: "revisions",
+      identity: revisionsAnchor.identity,
+    });
     for (const revision of graph) {
-      scanRevision(requirementRoot, source, revision, limits, deps, findings);
+      scanRevision(requirementRoot, source, revision, limits, deps, findings, directoryAnchors);
     }
   }
 
@@ -535,6 +600,7 @@ export function auditRequirementArchive(
   ) {
     findings.push({ code: "archive_changed_during_read", evidencePath: "source.yaml" });
   }
+  revalidateDirectoryAnchors(directoryAnchors, deps, findings);
   return classifyRequirementArchiveIntegrity({
     requirementId: source.requirementId,
     checkedRevisions: graph,

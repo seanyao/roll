@@ -84,6 +84,10 @@ export interface RequirementArchiveFinding {
   readonly evidencePath: string;
 }
 
+/**
+ * V1 consistency result for the source revision graph and its declared evidence digests.
+ * It is not cryptographic proof against a coordinated rewrite of both authority and evidence.
+ */
 export interface RequirementArchiveAudit {
   readonly schema: typeof REQUIREMENT_ARCHIVE_AUDIT_V1;
   readonly requirementId: string;

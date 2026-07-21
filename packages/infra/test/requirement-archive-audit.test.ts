@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  cpSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -113,7 +114,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe("US-WS-007a Requirement archive audit", () => {
+describe("US-WS-007a Requirement archive v1 declared-consistency audit", () => {
   it("accepts a public create-to-linked flow without requiring immutable capture stories to be rewritten", () => {
     const f = fixture();
 
@@ -196,17 +197,17 @@ describe("US-WS-007a Requirement archive audit", () => {
       expected: { code: "revision_missing", revision: "6", suffix: `revisions/${requirementRevisionKey("6")}` },
     },
     {
-      name: "body digest tamper",
+      name: "body digest mismatch",
       mutate: (f: ReturnType<typeof fixture>) => writeFileSync(join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md"), "tampered body\n"),
       expected: { code: "content_digest_mismatch", revision: "6", suffix: `revisions/${requirementRevisionKey("6")}/requirement.md` },
     },
     {
-      name: "context digest tamper",
+      name: "context digest mismatch",
       mutate: (f: ReturnType<typeof fixture>) => writeFileSync(join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "api.md"), "tampered context\n"),
       expected: { code: "context_digest_mismatch", revision: "6", suffix: `revisions/${requirementRevisionKey("6")}/context/api.md` },
     },
     {
-      name: "capture metadata tamper",
+      name: "capture metadata mismatch",
       mutate: (f: ReturnType<typeof fixture>) => {
         const path = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "capture.yaml");
         const capture = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
@@ -452,6 +453,37 @@ describe("US-WS-007a Requirement archive audit", () => {
     expect(result.findings).toContainEqual({
       code: "archive_changed_during_read",
       evidencePath: "source.yaml",
+    });
+  });
+
+  it.each([
+    ["revision", "", `revisions/${requirementRevisionKey("7")}`],
+    ["context root", "context", `revisions/${requirementRevisionKey("7")}/context`],
+    ["context ancestor", "context/brief", `revisions/${requirementRevisionKey("7")}/context/brief`],
+  ])("rejects a declared %s atomically replaced after its files were read", (_name, suffix, evidencePath) => {
+    const f = fixture();
+    const revision = "7";
+    const target = join(f.requirementPath, "revisions", requirementRevisionKey(revision), suffix);
+    const replacement = join(f.root, "replacement-directory");
+    cpSync(target, replacement, { recursive: true });
+    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "capture.yaml");
+    let replaced = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== trigger || replaced) return;
+        replaced = true;
+        renameSync(target, `${target}.parked`);
+        renameSync(replacement, target);
+      },
+    });
+
+    expect(replaced).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision,
+      evidencePath,
     });
   });
 

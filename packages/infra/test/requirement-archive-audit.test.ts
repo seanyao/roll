@@ -45,6 +45,7 @@ function fixture() {
     }],
   }, null, 2)}\n`);
   write(join(workspace, "backlog", "epic", "US-WS-007a", "spec.md"), "# US-WS-007a\n");
+  write(join(workspace, "backlog", "epic", "US-WS-LINKED", "spec.md"), "# US-WS-LINKED\n");
   const body = join(root, "requirement.md");
   const contextRoot = join(root, "context-source");
   write(body, "revision 6 body\n");
@@ -78,6 +79,8 @@ function fixture() {
   return {
     root,
     workspace,
+    body,
+    contextRoot,
     requirementPath: current.requirementPath,
     auditInput: { workspaceRoot: workspace, provider: "jira", requirementId: current.manifest.requirementId },
   };
@@ -111,6 +114,30 @@ afterEach(() => {
 });
 
 describe("US-WS-007a Requirement archive audit", () => {
+  it("accepts a public create-to-linked flow without requiring immutable capture stories to be rewritten", () => {
+    const f = fixture();
+
+    const linked = captureRequirementSource({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      ref: "SOT-15499",
+      revision: "7",
+      capturedAt: "2030-01-01T00:00:00.000Z",
+      bodyFile: f.body,
+      contextRoot: f.contextRoot,
+      contextPaths: ["api.md", "brief/nested/rules.md"],
+      storyIds: ["US-WS-LINKED"],
+    });
+
+    expect(linked.outcome).toBe("linked");
+    expect(linked.manifest.stories).toEqual(["US-WS-007a", "US-WS-LINKED"]);
+    expect(auditRequirementArchive(f.auditInput)).toMatchObject({
+      status: "healthy",
+      checkedRevisions: ["7", "6"],
+      findings: [],
+    });
+  });
+
   it("validates the complete immutable revision graph without reading projections or Issue evidence", () => {
     const f = fixture();
     writeFileSync(join(f.requirementPath, "requirement.md"), "drifted projection\n", "utf8");

@@ -264,7 +264,10 @@ function captureMetadataMatches(
     return false;
   }
   if (revision !== source.revision) return true;
-  return JSON.stringify(capture) === JSON.stringify(source);
+  return JSON.stringify(capture.requirement) === JSON.stringify(source.requirement) &&
+    JSON.stringify(capture.context) === JSON.stringify(source.context) &&
+    JSON.stringify(capture.attest) === JSON.stringify(source.attest) &&
+    capture.stories.every((storyId) => source.stories.includes(storyId));
 }
 
 function captureIdentityMatches(

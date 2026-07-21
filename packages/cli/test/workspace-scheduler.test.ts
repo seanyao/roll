@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildLoopRunnerScript,
   LOOP_ON_USAGE,
@@ -17,6 +17,7 @@ import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 import { loopGoCommand, planGoTmuxCommands, type LoopGoDeps, type StartTmuxInput } from "../src/commands/loop-go.js";
 import { loopRunOnceCommand } from "../src/commands/loop-run-once.js";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
+import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import { WorkspaceRegistry } from "@roll/infra";
 import type { RouteDeps } from "@roll/core";
 import { REPOSITORY_BINDING_V1, WORKSPACE_MANIFEST_V1, repositoryIdFromRemote } from "@roll/spec";
@@ -49,6 +50,48 @@ function workspaceManifest(root: string, workspaceId: string): void {
       workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
     }],
   })}\n`);
+}
+
+function workspaceIssue(root: string, workspaceId: string, storyId: string): { readonly issueRoot: string } {
+  const remote = `https://example.test/workspaces/${workspaceId}.git`;
+  const repoId = repositoryIdFromRemote(remote);
+  if (!repoId.ok) throw new Error("fixture remote must be valid");
+  const issueRoot = join(root, "issues", storyId);
+  const worktreePath = join(issueRoot, "primary");
+  mkdirSync(worktreePath, { recursive: true });
+  execFileSync("git", ["init", "--quiet"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.email", "roll-test@example.invalid"], { cwd: worktreePath });
+  writeFileSync(join(worktreePath, "README.md"), "fixture\n");
+  execFileSync("git", ["add", "README.md"], { cwd: worktreePath });
+  execFileSync("git", ["commit", "--quiet", "-m", "fixture"], { cwd: worktreePath });
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktreePath, encoding: "utf8" }).trim();
+  writeFileSync(join(issueRoot, "manifest.json"), `${JSON.stringify({
+    schema: "roll.issue/v1",
+    workspaceId,
+    storyId,
+    requirements: [],
+    repositories: [{
+      repoId: repoId.value,
+      alias: "primary",
+      access: "write",
+      requiredDelivery: true,
+      noChangePolicy: "changes_required",
+    }],
+  }, null, 2)}\n`);
+  writeFileSync(join(issueRoot, "events.jsonl"), `${JSON.stringify({
+    type: "issue:repository_bound",
+    workspaceId,
+    storyId,
+    alias: "primary",
+    repoId: repoId.value,
+    access: "write",
+    baseSha: headSha,
+    worktreePath,
+    workBranch: `roll/${workspaceId}/${storyId}`,
+    ts: 1,
+  })}\n`);
+  return { issueRoot };
 }
 
 function target(workspaceId: string, workspaceRoot: string): BacklogTargetDecision {
@@ -410,6 +453,93 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     expect(stdout).toContain("# project: ws-alpha");
     expect(existsSync(join(root, ".roll"))).toBe(false);
     expect(existsSync(join(root, "runtime"))).toBe(false);
+  });
+
+  it("runs one production Workspace Story without invoking any root repository preflight", async () => {
+    const root = workspaceRoot("run-once-production");
+    const rollHome = workspaceRoot("run-once-production-home");
+    const storyId = "US-WS-016";
+    workspaceManifest(root, "ws-alpha");
+    const issue = workspaceIssue(root, "ws-alpha", storyId);
+    const backlogPath = join(root, "backlog", "index.md");
+    const legacyBacklogPath = join(root, ".roll", "backlog.md");
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    mkdirSync(join(root, ".roll"), { recursive: true });
+    writeFileSync(
+      backlogPath,
+      `| Story | Description | Status |\n|---|---|---|\n| ${storyId} | Workspace production story | 📋 Todo |\n`,
+    );
+    writeFileSync(
+      legacyBacklogPath,
+      "| Story | Description | Status |\n|---|---|---|\n| LEGACY-1 | Legacy decoy | 📋 Todo |\n",
+    );
+    writeFileSync(join(root, ".roll", "policy.yaml"), "loop_safety:\n  skip_network_check: true\n");
+    const registry = new WorkspaceRegistry({ rollHome, now: () => 1 });
+    registry.register({ workspaceId: "ws-alpha", root });
+    registry.activate("ws-alpha");
+
+    let builderSpawned = false;
+    let leaseObserved = false;
+    const agentSpawn: AgentSpawn = vi.fn(async (_agent, options) => {
+      if (options.purpose === "builder") {
+        builderSpawned = true;
+        expect(options.cwd).toBe(realpathSync(issue.issueRoot));
+        expect(readFileSync(backlogPath, "utf8")).toContain(
+          `${storyId} | Workspace production story | 🔨 In Progress`,
+        );
+        const leasePath = join(root, "runtime", "story-leases.json");
+        leaseObserved = existsSync(leasePath) && readFileSync(leasePath, "utf8").includes(storyId);
+      }
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    });
+    agentSpawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
+    const repoPushable = vi.fn(() => ({ ok: true as const, reason: "ok" as const, detail: "" }));
+    const branchCanary = vi.fn(() => false);
+    const reconcile = vi.fn(async () => undefined);
+    const backfill = vi.fn(async () => []);
+    const saved = new Map<string, string | undefined>();
+    const envKeys = [
+      "ROLL_HOME",
+      "ROLL_WORKSPACE",
+      "ROLL_MAIN_PROJECT",
+      "ROLL_PROJECT_RUNTIME_DIR",
+      "ROLL_WORKSPACE_BACKLOG_PATH",
+      "ROLL_LOOP_NO_AUTO_RECOVER",
+    ] as const;
+    for (const key of envKeys) saved.set(key, process.env[key]);
+    process.env["ROLL_HOME"] = rollHome;
+    process.env["ROLL_LOOP_NO_AUTO_RECOVER"] = "1";
+    delete process.env["ROLL_WORKSPACE"];
+    delete process.env["ROLL_MAIN_PROJECT"];
+    delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    delete process.env["ROLL_WORKSPACE_BACKLOG_PATH"];
+    try {
+      expect(await loopRunOnceCommand(["--workspace", "ws-alpha"], {
+        requireNetwork: async () => ({ ok: true, recovered: false }),
+        checkRepoPushable: repoPushable,
+        readSkillBody: () => "BUILD STORY",
+        buildRouteDeps: () => ({ readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" }),
+        agentSpawn,
+        warnIfBinaryStale: async () => undefined,
+        branchCanaryTrips: branchCanary,
+        runReconcileTick: reconcile,
+        backfillMergedRuns: backfill,
+      })).toBe(1);
+    } finally {
+      for (const key of envKeys) {
+        const value = saved.get(key);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+
+    expect(builderSpawned).toBe(true);
+    expect(leaseObserved).toBe(true);
+    expect(existsSync(join(root, ".roll", "loop", "story-leases.json"))).toBe(false);
+    expect(readFileSync(legacyBacklogPath, "utf8")).toContain("LEGACY-1 | Legacy decoy | 📋 Todo");
+    for (const rootGit of [repoPushable, branchCanary, reconcile, backfill]) {
+      expect(rootGit).not.toHaveBeenCalled();
+    }
   });
 
   it("rejects an implicit repository-local run-once cwd with migration_required", async () => {

@@ -853,10 +853,22 @@ export const RUN_ONCE_USAGE =
   "  --dry-run   只打印命令计划——不动 git / gh / agent。\n" +
   "  --race      显式开同卡并行竞速(默认一卡一租约);首个 merge 原子取消其余 sibling。";
 
+export interface LoopRunOnceDeps {
+  readonly requireNetwork?: typeof requireNetwork;
+  readonly checkRepoPushable?: typeof checkRepoPushable;
+  readonly readSkillBody?: typeof readSkillBody;
+  readonly buildRouteDeps?: typeof buildLoopRouteDeps;
+  readonly agentSpawn?: AgentSpawn;
+  readonly warnIfBinaryStale?: typeof warnIfBinaryStale;
+  readonly branchCanaryTrips?: typeof branchCanaryTrips;
+  readonly runReconcileTick?: typeof runReconcileTick;
+  readonly backfillMergedRuns?: typeof backfillMergedRuns;
+}
+
 /**
  * The `loop run-once` entry. Returns a process exit code (0 ok).
  */
-export async function loopRunOnceCommand(args: string[]): Promise<number> {
+export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps = {}): Promise<number> {
   // FIX-351: `--help`/`-h` must PRINT usage and exit — never start a cycle. This
   // guard runs BEFORE any side effect (project identity, lock, network probe,
   // agent spawn), so a help flag can never burn a cycle.
@@ -1059,7 +1071,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       lang: process.env["LANG"],
     });
     const guardLines: string[] = [];
-    const net = await requireNetwork(`loop run-once (cycle ${cycleId})`, id.path, {
+    const net = await (deps.requireNetwork ?? requireNetwork)(`loop run-once (cycle ${cycleId})`, id.path, {
       lang,
       emit: (line) => {
         guardLines.push(line);
@@ -1084,30 +1096,32 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // FIX-1019 / FIX-1020: before burning agent tokens, verify the project has a
   // pushable GitHub remote. Missing remote / unreachable repo → fast failure
   // with an actionable ALERT instead of N failed cycles.
-  const repoCheck = checkRepoPushable(id.path);
-  if (!repoCheck.ok) {
-    writeRepoAlert(alertsPath, paths.eventsPath, cycleId, repoCheck);
-    const lang = resolveLang({
-      rollLang: process.env["ROLL_LANG"],
-      lcAll: process.env["LC_ALL"],
-      lang: process.env["LANG"],
-    });
-    const key =
-      repoCheck.reason === "not_git"
-        ? "loop.not_a_git_repo"
-        : repoCheck.reason === "no_remote"
-          ? "loop.no_remote"
-          : "loop.repo_unreachable";
-    process.stderr.write(
-      `loop run-once: ${t(v3Catalog, lang, key)}\n` +
-        `loop run-once: ${repoCheck.detail !== "" ? `(${repoCheck.detail})` : ""}\n`,
-    );
-    return 1;
+  if (workspaceBinding === undefined) {
+    const repoCheck = (deps.checkRepoPushable ?? checkRepoPushable)(id.path);
+    if (!repoCheck.ok) {
+      writeRepoAlert(alertsPath, paths.eventsPath, cycleId, repoCheck);
+      const lang = resolveLang({
+        rollLang: process.env["ROLL_LANG"],
+        lcAll: process.env["LC_ALL"],
+        lang: process.env["LANG"],
+      });
+      const key =
+        repoCheck.reason === "not_git"
+          ? "loop.not_a_git_repo"
+          : repoCheck.reason === "no_remote"
+            ? "loop.no_remote"
+            : "loop.repo_unreachable";
+      process.stderr.write(
+        `loop run-once: ${t(v3Catalog, lang, key)}\n` +
+          `loop run-once: ${repoCheck.detail !== "" ? `(${repoCheck.detail})` : ""}\n`,
+      );
+      return 1;
+    }
   }
 
   // FIX-204A: an empty workflow document = a blind agent burning tokens for
   // nothing — halt loudly BEFORE any lock/worktree/agent side effect.
-  const skillBody = readSkillBody(id.path);
+  const skillBody = (deps.readSkillBody ?? readSkillBody)(id.path);
   if (skillBody === null) {
     const msg =
       `[${new Date().toISOString()}] ALERT loop run-once: roll-loop SKILL.md not found ` +
@@ -1128,14 +1142,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   // Build scoped route dependencies. Legacy local/pairing configuration is not
   // consulted by the execution path.
-  const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
+  const routeDeps: RouteDeps = (deps.buildRouteDeps ?? buildLoopRouteDeps)(id.path);
 
   // FIX-220: manual `roll loop now` (ROLL_LOOP_FORCE=1) runs in an interactive
   // terminal — strip --verbose and --output-format stream-json so the user sees
   // readable text instead of a JSON flood.
   const isInteractive = (process.env["ROLL_LOOP_FORCE"] ?? "").trim() !== "";
-  let interactiveAgentSpawn: AgentSpawn | undefined;
-  if (isInteractive) {
+  let interactiveAgentSpawn = deps.agentSpawn;
+  if (interactiveAgentSpawn === undefined && isInteractive) {
     interactiveAgentSpawn = (agent, opts) => realAgentSpawn(agent, { ...opts, interactive: true });
     interactiveAgentSpawn.supportedPurposes = realAgentSpawn.supportedPurposes;
   }
@@ -1145,6 +1159,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     paths,
     skillBody,
     routeDeps,
+    ...(workspaceBinding === undefined ? {} : { backlogPath: workspaceBinding.backlogPath }),
     ...(interactiveAgentSpawn !== undefined ? { agentSpawn: interactiveAgentSpawn } : {}),
   });
   const ports =
@@ -1171,7 +1186,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // at most one network call per machine per day, fully best-effort, NEVER blocks
   // the cycle. A miss (offline / curl absent) is a silent no-op.
   try {
-    await warnIfBinaryStale(rollHome(), rollVersion(), (msg) => {
+    await (deps.warnIfBinaryStale ?? warnIfBinaryStale)(rollHome(), rollVersion(), (msg) => {
       try {
         appendFileSync(alertsPath, `${msg}\n`, "utf8");
       } catch {
@@ -1185,17 +1200,22 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // US-LOOP-096: branch-leak canary circuit breaker — if ephemeral branches /
   // worktrees have piled up (cleanup contract broke), refuse to start a new
   // cycle (it would only add more), write a PAUSE + ALERT, and skip this tick.
-  if (branchCanaryTrips(id.path, id.slug, rt, alertsPath)) {
+  if (
+    workspaceBinding === undefined &&
+    (deps.branchCanaryTrips ?? branchCanaryTrips)(id.path, id.slug, rt, alertsPath)
+  ) {
     process.stdout.write("loop run-once: branch-leak canary tripped — loop paused (see ALERT); skipped\n");
     return 0;
   }
 
   // US-DELIV-009: pre-pick reconcile tick — merge any CI-green awaiting_merge
   // PRs before starting new work. Idempotent, crash-safe, silent.
-  try {
-    await runReconcileTick(id.path, { silent: true });
-  } catch {
-    /* reconcile tick must never block the cycle */
+  if (workspaceBinding === undefined) {
+    try {
+      await (deps.runReconcileTick ?? runReconcileTick)(id.path, { silent: true });
+    } catch {
+      /* reconcile tick must never block the cycle */
+    }
   }
 
   // FIX-204D: between here and the walk's own finally, signals get a clean
@@ -1536,25 +1556,27 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // US-DELIV-009: post-publish reconcile tick — after the cycle terminal,
   // reconcile all awaiting_merge cycles. A CI-green PR gets merge_now→merged
   // →delivered on the next tick. Idempotent, crash-safe, silent.
-  try {
-    await runReconcileTick(id.path, { silent: true });
-  } catch {
-    /* reconcile tick must never block the cycle terminal */
-  }
-
-  // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/
-  // failed) whose cycle branch's PR really MERGED flip to merged/delivered.
-  // Best-effort + bounded (≤20 gh probes); never blocks the cycle terminal.
-  try {
-    const credited = await backfillMergedRuns(id.path, paths.runsPath);
-    for (const c of credited) {
-      process.stdout.write(
-        `loop run-once: backfill credited cycle ${c.cycleId} → merged (${c.mergeCommit})\n` +
-          `loop run-once: 回填记账 cycle ${c.cycleId} → 已合并 (${c.mergeCommit})\n`,
-      );
+  if (workspaceBinding === undefined) {
+    try {
+      await (deps.runReconcileTick ?? runReconcileTick)(id.path, { silent: true });
+    } catch {
+      /* reconcile tick must never block the cycle terminal */
     }
-  } catch {
-    /* backfill must never mask the cycle terminal result */
+
+    // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/
+    // failed) whose cycle branch's PR really MERGED flip to merged/delivered.
+    // Best-effort + bounded (≤20 gh probes); never blocks the cycle terminal.
+    try {
+      const credited = await (deps.backfillMergedRuns ?? backfillMergedRuns)(id.path, paths.runsPath);
+      for (const c of credited) {
+        process.stdout.write(
+          `loop run-once: backfill credited cycle ${c.cycleId} → merged (${c.mergeCommit})\n` +
+            `loop run-once: 回填记账 cycle ${c.cycleId} → 已合并 (${c.mergeCommit})\n`,
+        );
+      }
+    } catch {
+      /* backfill must never mask the cycle terminal result */
+    }
   }
 
   const breaker = applyCorrectionCircuitBreaker(id.path, id.slug, paths.eventsPath, alertsPath);

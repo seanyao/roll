@@ -123,12 +123,55 @@ async function recentCommitsAt(worktreeCwd: string, baseRef = "origin/main"): Pr
   return out;
 }
 
+async function repositoryCommitsAhead(repository: RepositoryExecutionContext): Promise<number> {
+  const result = await execFileAsync("git", ["rev-list", "--count", `${repository.baseSha}..HEAD`], {
+    cwd: repository.worktreePath,
+    encoding: "utf8",
+  });
+  const count = Number(result.stdout.trim());
+  if (!Number.isInteger(count) || count < 0) throw new Error("invalid commits-ahead result");
+  return count;
+}
+
+async function repositoryTcrCount(repository: RepositoryExecutionContext): Promise<number> {
+  const result = await execFileAsync("git", ["log", "--oneline", `${repository.baseSha}..HEAD`], {
+    cwd: repository.worktreePath,
+    encoding: "utf8",
+  });
+  return result.stdout.split("\n").filter((line) => line.includes(" tcr:")).length;
+}
+
+async function repositoryRecentCommits(repository: RepositoryExecutionContext): Promise<ObservedCommit[]> {
+  const result = await execFileAsync(
+    "git",
+    ["log", "--reverse", "--format=%H%x09%ct%x09%s", `${repository.baseSha}..HEAD`],
+    { cwd: repository.worktreePath, encoding: "utf8" },
+  );
+  return result.stdout.split("\n").flatMap((line) => {
+    if (line.trim() === "") return [];
+    const [hash, rawTs, ...message] = line.split("\t");
+    if (hash === undefined || hash === "") throw new Error("invalid recent-commit result");
+    const tsSec = Number(rawTs ?? "0");
+    if (!Number.isFinite(tsSec)) throw new Error("invalid recent-commit timestamp");
+    return [{ hash, message: message.join("\t"), tsSec }];
+  });
+}
+
+async function repositoryDirty(repository: RepositoryExecutionContext): Promise<boolean> {
+  const result = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+    cwd: repository.worktreePath,
+    encoding: "utf8",
+  });
+  return result.stdout.trim() !== "";
+}
+
 function defaultRepositoryAdapters(): RepositoryPortAdapters {
   return {
     git: {
-      commitsAhead: (repository, baseRef) => commitsAheadAt(repository.worktreePath, baseRef),
-      tcrCount: (repository, baseRef) => tcrCountAt(repository.worktreePath, baseRef),
-      recentCommits: (repository, baseRef) => recentCommitsAt(repository.worktreePath, baseRef),
+      commitsAhead: repositoryCommitsAhead,
+      tcrCount: repositoryTcrCount,
+      recentCommits: repositoryRecentCommits,
+      dirty: repositoryDirty,
       push: (repository, branch) => gitPush(repository.worktreePath, branch),
     },
     provider: {
@@ -177,9 +220,10 @@ export function createRepositoryPorts(
   return {
     context,
     git: {
-      commitsAhead: async (repoId, baseRef) => adapters.git.commitsAhead(context(repoId), baseRef),
-      tcrCount: async (repoId, baseRef) => adapters.git.tcrCount(context(repoId), baseRef),
-      recentCommits: async (repoId, baseRef) => adapters.git.recentCommits(context(repoId), baseRef),
+      commitsAhead: async (repoId) => adapters.git.commitsAhead(context(repoId)),
+      tcrCount: async (repoId) => adapters.git.tcrCount(context(repoId)),
+      recentCommits: async (repoId) => adapters.git.recentCommits(context(repoId)),
+      dirty: async (repoId) => adapters.git.dirty(context(repoId)),
       push: async (repoId, branch) => adapters.git.push(writable(repoId, "publish"), branch),
     },
     provider: {

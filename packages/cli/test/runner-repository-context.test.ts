@@ -22,6 +22,7 @@ import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import type { RepositoryPortAdapters } from "../src/runner/ports.js";
 import { applyRepositoryBuilderContext } from "../src/runner/spawn-agent-handler.js";
 import { executeTerminalCommand } from "../src/runner/terminal-handlers.js";
+import { observeWritableRepositories } from "../src/runner/repository-observation.js";
 
 function repository(
   repoId: string,
@@ -45,6 +46,7 @@ function repository(
 
 const writable = repository("repo-111111111111", "sot1", "write");
 const readonly = repository("repo-222222222222", "reference", "read");
+const secondary = repository("repo-333333333333", "sot2", "write");
 const execution: CycleRepositoryExecutionContext = {
   workspaceId: "ws-20260717001",
   issueRoot: "/workspace/issues/US-WS-010",
@@ -244,6 +246,7 @@ describe("US-WS-010 repository Builder context", () => {
         commitsAhead,
         tcrCount: vi.fn(async () => 1),
         recentCommits: vi.fn(async () => []),
+        dirty: vi.fn(async () => false),
         push,
       },
       provider: {
@@ -261,13 +264,86 @@ describe("US-WS-010 repository Builder context", () => {
     }, adapters);
 
     expect(await repositories.git.commitsAhead(writable.repoId)).toBe(2);
-    expect(commitsAhead).toHaveBeenCalledWith(writable, undefined);
+    expect(commitsAhead).toHaveBeenCalledWith(writable);
     expect(await repositories.provider.repoSlug(writable.repoId)).toBe("owner/sot1");
     expect(repoSlug).toHaveBeenCalledWith(writable);
     await expect(repositories.git.push(readonly.repoId, "story-branch")).rejects.toThrow(
       "read_only_repository",
     );
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("aggregates strict observations from writable repoIds only", async () => {
+    const ctx = {
+      cycleId: "cycle-observe",
+      branch: "cycle-observe",
+      loop: "ci" as const,
+      storyId: "US-WS-010",
+      repositoryExecution: {
+        ...execution,
+        repositories: {
+          [secondary.repoId]: secondary,
+          [readonly.repoId]: readonly,
+          [writable.repoId]: writable,
+        },
+      },
+    };
+    const adapters: RepositoryPortAdapters = {
+      git: {
+        commitsAhead: vi.fn(async (repo) => repo.repoId === writable.repoId ? 1 : 2),
+        tcrCount: vi.fn(async () => 1),
+        recentCommits: vi.fn(async () => []),
+        dirty: vi.fn(async (repo) => repo.repoId === secondary.repoId),
+        push: vi.fn(async () => ({ code: 0 })),
+      },
+      provider: {
+        repoSlug: vi.fn(async () => undefined),
+        prState: vi.fn(async () => "UNKNOWN"),
+        prMergeInfo: vi.fn(async () => undefined),
+      },
+    };
+
+    const observed = await observeWritableRepositories(ctx, createRepositoryPorts(ctx, adapters));
+
+    expect(observed).toEqual({
+      legs: [
+        { repoId: writable.repoId, commitsAhead: 1, tcrCount: 1, worktreeDirty: false },
+        { repoId: secondary.repoId, commitsAhead: 2, tcrCount: 1, worktreeDirty: true },
+      ],
+      commitsAhead: 3,
+      tcrCount: 2,
+      worktreeDirty: true,
+    });
+    expect(adapters.git.commitsAhead).toHaveBeenCalledTimes(2);
+    expect(adapters.git.commitsAhead).not.toHaveBeenCalledWith(readonly);
+  });
+
+  it("fails loud when any writable repository observation is unknown", async () => {
+    const ctx = {
+      cycleId: "cycle-observe-fail",
+      branch: "cycle-observe-fail",
+      loop: "ci" as const,
+      storyId: "US-WS-010",
+      repositoryExecution: execution,
+    };
+    const adapters: RepositoryPortAdapters = {
+      git: {
+        commitsAhead: vi.fn(async () => 1),
+        tcrCount: vi.fn(async () => { throw new Error("missing base"); }),
+        recentCommits: vi.fn(async () => []),
+        dirty: vi.fn(async () => false),
+        push: vi.fn(async () => ({ code: 0 })),
+      },
+      provider: {
+        repoSlug: vi.fn(async () => undefined),
+        prState: vi.fn(async () => "UNKNOWN"),
+        prMergeInfo: vi.fn(async () => undefined),
+      },
+    };
+
+    await expect(
+      observeWritableRepositories(ctx, createRepositoryPorts(ctx, adapters)),
+    ).rejects.toThrow(`repository_observation_failed: ${writable.repoId}: tcr_count`);
   });
 
   it("writes repository events through one identity-enforcing Issue writer", async () => {

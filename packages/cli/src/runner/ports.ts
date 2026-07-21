@@ -136,9 +136,10 @@ export interface GithubPort {
  * competing repository identity. */
 export interface RepositoryPortAdapters {
   readonly git: {
-    commitsAhead(repository: RepositoryExecutionContext, baseRef?: string): Promise<number>;
-    tcrCount(repository: RepositoryExecutionContext, baseRef?: string): Promise<number | undefined>;
-    recentCommits(repository: RepositoryExecutionContext, baseRef?: string): Promise<ObservedCommit[]>;
+    commitsAhead(repository: RepositoryExecutionContext): Promise<number>;
+    tcrCount(repository: RepositoryExecutionContext): Promise<number>;
+    recentCommits(repository: RepositoryExecutionContext): Promise<ObservedCommit[]>;
+    dirty(repository: RepositoryExecutionContext): Promise<boolean>;
     push(repository: RepositoryExecutionContext, branch: string): Promise<{ code: number }>;
   };
   readonly provider: {
@@ -154,9 +155,10 @@ export interface RepositoryPortAdapters {
 export interface BoundRepositoryPorts {
   readonly context: (repoId: string) => RepositoryExecutionContext;
   readonly git: {
-    commitsAhead(repoId: string, baseRef?: string): Promise<number>;
-    tcrCount(repoId: string, baseRef?: string): Promise<number | undefined>;
-    recentCommits(repoId: string, baseRef?: string): Promise<ObservedCommit[]>;
+    commitsAhead(repoId: string): Promise<number>;
+    tcrCount(repoId: string): Promise<number>;
+    recentCommits(repoId: string): Promise<ObservedCommit[]>;
+    dirty(repoId: string): Promise<boolean>;
     push(repoId: string, branch: string): Promise<{ code: number }>;
   };
   readonly provider: {

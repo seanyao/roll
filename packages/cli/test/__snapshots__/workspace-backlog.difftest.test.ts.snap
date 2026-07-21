@@ -11,6 +11,14 @@ ws-alpha	US-1	📋 Todo	ws-alpha story
 ws-beta	US-1	📋 Todo	ws-beta story
 ",
     },
+    "help": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--all]
+       roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]
+  Read or manage one resolved Workspace backlog; --all is read-only and mutations are rejected.
+",
+    },
     "read": {
       "status": 0,
       "stderr": "",
@@ -41,6 +49,14 @@ Contract: <WS_1>/backlog/epic/feature/US-1/spec.md
       "stdout": "工作区	Story	状态	说明
 ws-alpha	US-1	📋 Todo	ws-alpha story
 ws-beta	US-1	📋 Todo	ws-beta story
+",
+    },
+    "help": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "用法：roll backlog [show <story-id>] [--workspace <id|path>] [--all]
+      roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]
+  读取或管理一个明确工作区的 backlog；--all 只允许只读聚合，变更命令会拒绝。
 ",
     },
     "read": {

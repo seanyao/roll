@@ -112,6 +112,16 @@ function currentHelpLang() {
   });
 }
 
+function backlogUsage(): string {
+  return currentHelpLang() === "zh"
+    ? "用法：roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+        "      roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
+        "  读取或管理一个明确工作区的 backlog；--all 只允许只读聚合，变更命令会拒绝。\n"
+    : "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+        "       roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
+        "  Read or manage one resolved Workspace backlog; --all is read-only and mutations are rejected.\n";
+}
+
 const DOCTOR_TOOLS_USAGE =
   "Usage: roll doctor tools\n" +
   "  Show registered tools, input contracts, effective policy state, and requirement readiness.\n";
@@ -285,7 +295,7 @@ export function registerAll(): void {
     if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
-  }, { help: "Usage: roll backlog\n  Render the backlog board.\n渲染任务板。" });
+  }, { help: backlogUsage });
   // FIX-356a: `roll brief` retired — US-PORT-002 was an immature owner digest.
   // The absent-command convention (standard unknown-command error from the bridge)
   // is the chosen retired-surface behaviour.

@@ -191,15 +191,19 @@ describe("US-WS-009 Workspace backlog reads", () => {
     await registerActive(f, "ws-alpha", alpha);
     await registerActive(f, "ws-beta", beta);
     const en = {
+      help: scrub(await runCli(["backlog", "--help"], f, { lang: "en" }), [alpha, beta]),
       read: scrub(await runCli(["backlog", "--workspace", "ws-alpha"], f, { lang: "en" }), [alpha, beta]),
       show: scrub(await runCli(["backlog", "show", "US-1", "--workspace", "ws-alpha"], f, { lang: "en" }), [alpha, beta]),
       all: scrub(await runCli(["backlog", "--all"], f, { lang: "en" }), [alpha, beta]),
     };
     const zh = {
+      help: scrub(await runCli(["backlog", "--help"], f, { lang: "zh" }), [alpha, beta]),
       read: scrub(await runCli(["backlog", "--workspace", "ws-alpha"], f, { lang: "zh" }), [alpha, beta]),
       show: scrub(await runCli(["backlog", "show", "US-1", "--workspace", "ws-alpha"], f, { lang: "zh" }), [alpha, beta]),
       all: scrub(await runCli(["backlog", "--all"], f, { lang: "zh" }), [alpha, beta]),
     };
+    expectNoAdjacentBilingualPairs(en.help.stdout);
+    expectNoAdjacentBilingualPairs(zh.help.stdout);
     expectNoAdjacentBilingualPairs(en.read.stdout.split("\n", 1)[0] ?? "");
     expectNoAdjacentBilingualPairs(zh.read.stdout.split("\n", 1)[0] ?? "");
     expectNoAdjacentBilingualPairs(en.show.stdout);

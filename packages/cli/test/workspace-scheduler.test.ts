@@ -9,6 +9,7 @@ import {
   loopPauseCommand,
   loopResumeCommand,
   loopWorkspaceStatusCommand,
+  writeDormantMarker,
   type LoopSchedDeps,
 } from "../src/commands/loop-sched.js";
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
@@ -177,6 +178,49 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     expect(readFileSync(join(fixture.shared, "loop", "run-ws-beta.sh"), "utf8")).toContain(
       `ROLL_PROJECT_RUNTIME_DIR='${join(beta, "runtime")}'`,
     );
+  });
+
+  it("atomically wakes a dormant Workspace without leaving an armed dormant marker", async () => {
+    const root = workspaceRoot("dormant-on");
+    const paths = workspaceSchedulerPaths({ workspaceId: "ws-alpha", workspaceRoot: root });
+    mkdirSync(paths.runtimeRoot, { recursive: true });
+    writeDormantMarker(paths.dormantMarkerPath, { since: "2026-07-21T00:00:00Z", reason: "idle" });
+    const fixture = schedulerDeps({ "ws-alpha": root }, () => target("ws-alpha", root));
+
+    expect(await loopOnCommand(["--workspace", "ws-alpha"], fixture.deps)).toBe(0);
+
+    expect(existsSync(paths.dormantMarkerPath)).toBe(false);
+    expect(existsSync(join(paths.runtimeRoot, ".waking-ws-alpha"))).toBe(false);
+    expect(readFileSync(paths.eventsPath, "utf8")).toContain('"type":"loop:woke"');
+    expect(fixture.calls).toContain("isArmed com.roll.loop.ws-alpha");
+  });
+
+  it("recovers an orphan Workspace wake claim and records the wake before cleanup", async () => {
+    const root = workspaceRoot("orphan-waking-on");
+    const paths = workspaceSchedulerPaths({ workspaceId: "ws-alpha", workspaceRoot: root });
+    mkdirSync(paths.runtimeRoot, { recursive: true });
+    writeFileSync(join(paths.runtimeRoot, ".waking-ws-alpha"), "orphan\n");
+    const fixture = schedulerDeps({ "ws-alpha": root }, () => target("ws-alpha", root));
+
+    expect(await loopOnCommand(["--workspace", "ws-alpha"], fixture.deps)).toBe(0);
+
+    expect(existsSync(join(paths.runtimeRoot, ".waking-ws-alpha"))).toBe(false);
+    expect(readFileSync(paths.eventsPath, "utf8")).toContain('"type":"loop:woke"');
+  });
+
+  it("restores Workspace dormancy when scheduler wake fails", async () => {
+    const root = workspaceRoot("dormant-on-fail");
+    const paths = workspaceSchedulerPaths({ workspaceId: "ws-alpha", workspaceRoot: root });
+    mkdirSync(paths.runtimeRoot, { recursive: true });
+    writeDormantMarker(paths.dormantMarkerPath, { since: "2026-07-21T00:00:00Z", reason: "idle" });
+    const fixture = schedulerDeps({ "ws-alpha": root }, () => target("ws-alpha", root), () => false);
+    fixture.deps.scheduler.wake = () => Promise.resolve(false);
+
+    expect(await loopOnCommand(["--workspace", "ws-alpha"], fixture.deps)).toBe(1);
+
+    expect(existsSync(paths.dormantMarkerPath)).toBe(true);
+    expect(existsSync(join(paths.runtimeRoot, ".waking-ws-alpha"))).toBe(false);
+    expect(existsSync(paths.eventsPath)).toBe(false);
   });
 
   it("pauses and resumes one Workspace without changing another Workspace runtime", async () => {

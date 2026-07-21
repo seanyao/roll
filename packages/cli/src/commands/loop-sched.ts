@@ -789,6 +789,22 @@ async function workspaceLoopOnCommand(target: ResolvedBacklogTarget, deps: LoopS
   const ld = deps.launchdDir();
   const uid = deps.uid();
   mkdirSync(ld, { recursive: true });
+  const waking = join(paths.runtimeRoot, `.waking-${target.workspaceId}`);
+  let wakeTransition = false;
+  if (existsSync(paths.dormantMarkerPath)) {
+    try {
+      renameSync(paths.dormantMarkerPath, waking);
+      wakeTransition = true;
+    } catch {
+      if (!existsSync(waking)) {
+        process.stderr.write(`Workspace loop wake claim failed: ${target.workspaceId}\n`);
+        return 1;
+      }
+      wakeTransition = true;
+    }
+  } else if (existsSync(waking)) {
+    wakeTransition = true;
+  }
 
   const runner = join(shared, "loop", `run-${target.workspaceId}.sh`);
   const rollBinOverride = (process.env["ROLL_RUNNER_ROLL_BIN"] ?? "").trim();
@@ -818,8 +834,28 @@ async function workspaceLoopOnCommand(target: ResolvedBacklogTarget, deps: LoopS
   );
   const mounted = await mountService(deps, label, plist);
   if (!mounted.ok) {
+    if (wakeTransition) {
+      const disarmed = await deps.scheduler.dormant(label);
+      if (disarmed) restoreDormantClaim(waking, paths.dormantMarkerPath);
+    }
     process.stderr.write(mountFailureMessage(uid, [{ label, plist, m: mounted }]));
     return 1;
+  }
+  if (wakeTransition) {
+    mkdirSync(paths.runtimeRoot, { recursive: true });
+    try {
+      new EventBus().appendEvent(paths.eventsPath, {
+        type: "loop:woke",
+        loop: "ci",
+        ts: Math.floor(Date.now() / 1000),
+        trigger: "manual",
+        wakeEpoch: Math.floor(Date.now() / 1000),
+      });
+    } catch {
+      process.stderr.write(`Workspace loop wake event failed: ${target.workspaceId}\n`);
+      return 1;
+    }
+    rmSync(waking, { force: true });
   }
   process.stdout.write(
     `Workspace loop enabled: ${target.workspaceId} (${target.canonicalRoot})\n` +

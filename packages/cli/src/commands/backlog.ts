@@ -9,6 +9,7 @@ import { validateStoryId } from "@roll/core";
 import { classifyStatus, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { c, pad, renderState, RESET_RAW, row, trunc } from "../render.js";
 import {
+  emitBacklogTargetError,
   resolveBacklogCommandTarget,
   type BacklogAggregateEntry,
   type BacklogOperation,
@@ -166,7 +167,7 @@ export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBa
 
   const decision = deps.resolveTarget(args, "read");
   if (!decision.ok) {
-    return emitError(decision.code, decision.candidates, "migrationCheckCommand" in decision ? decision.migrationCheckCommand : undefined);
+    return emitBacklogTargetError(decision);
   }
   if ("aggregate" in decision) return renderAggregate(decision.aggregate);
   if (storyId !== undefined) return showStory(decision, storyId);

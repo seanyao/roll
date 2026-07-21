@@ -7,6 +7,7 @@ import {
   type WorkspaceTargetFailureCode,
 } from "@roll/core";
 import { WorkspaceRegistry, type InspectedWorkspace } from "@roll/infra";
+import { resolveLang, t, v3Catalog } from "@roll/spec";
 import {
   inspectWorkspaceCwd,
   workspaceRegistryCandidates,
@@ -116,6 +117,72 @@ export interface BacklogCommandTargetDeps {
   readonly cwd: () => string;
   readonly environmentWorkspace: () => string | undefined;
   readonly inspectRegistry: () => readonly InspectedWorkspace[];
+}
+
+export type BacklogTargetResolver = (
+  args: readonly string[],
+  operation: BacklogOperation,
+) => BacklogTargetDecision;
+
+export type BacklogScopedArgs =
+  | { readonly ok: true; readonly args: readonly string[] }
+  | { readonly ok: false };
+
+export function stripBacklogScopeArgs(args: readonly string[]): BacklogScopedArgs {
+  const remaining: string[] = [];
+  let workspaceSeen = false;
+  let allSeen = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--workspace") {
+      if (workspaceSeen || args[index + 1] === undefined) return { ok: false };
+      workspaceSeen = true;
+      index += 1;
+      continue;
+    }
+    if (arg === "--all") {
+      if (allSeen) return { ok: false };
+      allSeen = true;
+      continue;
+    }
+    if (arg !== undefined) remaining.push(arg);
+  }
+  return { ok: true, args: remaining };
+}
+
+function backlogMessage(key: string, ...args: ReadonlyArray<string | number>): string {
+  const language = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  return t(v3Catalog, language, key, ...args);
+}
+
+export function emitBacklogTargetError(
+  decision: Extract<BacklogTargetDecision, { readonly ok: false }>,
+): number {
+  process.stderr.write(
+    `${backlogMessage("backlog.error.line", decision.code, backlogMessage(`workspace.error.${decision.code}`))}\n`,
+  );
+  if (decision.candidates.length > 0) {
+    const candidates = decision.candidates
+      .map((entry) => `${entry.workspaceId}=${entry.workspaceRoot}`)
+      .join(", ");
+    process.stderr.write(`${backlogMessage("backlog.error.candidates", candidates)}\n`);
+  }
+  if ("migrationCheckCommand" in decision) {
+    process.stderr.write(
+      `${backlogMessage("backlog.error.migration_command", decision.migrationCheckCommand)}\n`,
+    );
+  }
+  return 1;
+}
+
+export function emitBacklogTarget(target: ResolvedBacklogTarget): void {
+  process.stdout.write(
+    `${backlogMessage("backlog.title", target.workspaceId, target.canonicalRoot)}\n`,
+  );
 }
 
 function realCommandTargetDeps(): BacklogCommandTargetDeps {

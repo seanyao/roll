@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -107,6 +107,19 @@ function scrub(run: Run, roots: readonly string[]): Run {
   return { ...run, stdout: replace(run.stdout), stderr: replace(run.stderr) };
 }
 
+function treeState(root: string, relative = ""): readonly string[] {
+  const path = relative === "" ? root : join(root, relative);
+  if (!existsSync(path)) return [];
+  if (!statSync(path).isDirectory()) {
+    return [`F ${relative} ${readFileSync(path, "utf8")}`];
+  }
+  const rows = relative === "" ? [] : [`D ${relative}`];
+  for (const name of readdirSync(path).sort()) {
+    rows.push(...treeState(root, relative === "" ? name : join(relative, name)));
+  }
+  return rows;
+}
+
 beforeEach(() => registerAll());
 
 afterEach(() => {
@@ -211,5 +224,103 @@ describe("US-WS-009 Workspace backlog reads", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(`roll workspace migrate --from '${realpathSync(legacy)}' --check`);
     expect(readFileSync(backlogPath, "utf8")).toBe(before);
+  });
+
+  it("scopes status, claim, lint, and unstick side effects to exactly one Workspace", async () => {
+    const f = fixture();
+    const alpha = createWorkspace(join(f.home, "alpha"), "ws-alpha");
+    const beta = createWorkspace(join(f.home, "beta"), "ws-beta");
+    await registerActive(f, "ws-alpha", alpha);
+    await registerActive(f, "ws-beta", beta);
+    const alphaBefore = treeState(alpha);
+
+    const blocked = await runCli(["backlog", "block", "US-1", "waiting", "--workspace", "ws-beta"], f);
+    expect(blocked.status).toBe(0);
+    expect(blocked.stdout).toContain(`Backlog ws-beta (${realpathSync(beta)})`);
+    expect(readFileSync(join(beta, "backlog", "index.md"), "utf8")).toContain("🔒 Blocked [waiting]");
+
+    const promoted = await runCli(["backlog", "promote", "US-1", "--workspace", beta], f);
+    expect(promoted.status).toBe(0);
+    const issueCwd = join(beta, "issues", "US-1", "repo-a", "src");
+    mkdirSync(issueCwd, { recursive: true });
+    const claimed = await runCli(["backlog", "claim", "US-1"], f, { cwd: issueCwd });
+    expect(claimed.status).toBe(0);
+    expect(readFileSync(join(beta, "runtime", "locks", "story-leases.json"), "utf8")).toContain("US-1");
+    expect(existsSync(join(alpha, "runtime", "locks", "story-leases.json"))).toBe(false);
+
+    const linted = await runCli(["backlog", "lint", "--workspace", "ws-beta"], f);
+    expect(linted.status).toBe(0);
+    expect(linted.stdout).toContain(`Backlog ws-beta (${realpathSync(beta)})`);
+
+    writeFileSync(
+      join(beta, "runtime", "events.ndjson"),
+      `${JSON.stringify({ stage: "pick_todo", detail: "US-1", label: "cycle-1", ts: "2020-01-01T00:00:00Z" })}\n` +
+        `${JSON.stringify({ stage: "cycle_end", label: "cycle-1", outcome: "failed", ts: "2020-01-01T01:00:00Z" })}\n`,
+    );
+    const unstuck = await runCli(["backlog", "unstick", "--workspace", "ws-beta"], f);
+    expect(unstuck.status).toBe(0);
+    expect(readFileSync(join(beta, "backlog", "index.md"), "utf8")).toContain("📋 Todo");
+    expect(readFileSync(join(beta, "runtime", "alerts", "unstick.md"), "utf8")).toContain("unstick: reverted US-1");
+    expect(treeState(alpha)).toEqual(alphaBefore);
+  });
+
+  it("rejects aggregate management mutations and legacy path overrides without writing", async () => {
+    const f = fixture();
+    const alpha = createWorkspace(join(f.home, "alpha"), "ws-alpha");
+    const beta = createWorkspace(join(f.home, "beta"), "ws-beta");
+    await registerActive(f, "ws-alpha", alpha);
+    await registerActive(f, "ws-beta", beta);
+    const before = treeState(f.home);
+    const aggregateCommands = [
+      ["backlog", "block", "US-1", "reason", "--all"],
+      ["backlog", "defer", "US-1", "reason", "--all"],
+      ["backlog", "unblock", "US-1", "--all"],
+      ["backlog", "promote", "US-1", "--all"],
+      ["backlog", "claim", "US-1", "--all"],
+      ["backlog", "unstick", "--all"],
+    ];
+    for (const command of aggregateCommands) {
+      const result = await runCli(command, f);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("all_requires_readonly");
+      expect(treeState(f.home)).toEqual(before);
+    }
+
+    const outside = join(f.home, "outside.md");
+    writeFileSync(outside, "outside sentinel\n");
+    const overrideBefore = treeState(f.home);
+    expect((await runCli(["backlog", "unstick", "--workspace", "ws-alpha", "--backlog", outside], f)).status).toBe(1);
+    expect((await runCli(["backlog", "lint", outside, "--workspace", "ws-alpha"], f)).status).toBe(1);
+    expect(treeState(f.home)).toEqual(overrideBefore);
+  });
+
+  it("fails conflicting and legacy mutation scope before any write", async () => {
+    const f = fixture();
+    const alpha = createWorkspace(join(f.home, "alpha"), "ws-alpha");
+    const beta = createWorkspace(join(f.home, "beta"), "ws-beta");
+    await registerActive(f, "ws-alpha", alpha);
+    await registerActive(f, "ws-beta", beta);
+    const conflictBefore = treeState(f.home);
+    const conflict = await runCli(["backlog", "block", "US-1", "--workspace", "ws-alpha"], f, {
+      cwd: beta,
+      workspaceEnv: "ws-beta",
+    });
+    expect(conflict.status).toBe(1);
+    expect(conflict.stderr).toContain("conflicting_candidates");
+    expect(treeState(f.home)).toEqual(conflictBefore);
+
+    const legacy = mkdtempSync(join(tmpdir(), "roll-legacy mutation-"));
+    sandboxes.push(legacy);
+    mkdirSync(join(legacy, ".git"));
+    mkdirSync(join(legacy, ".roll"));
+    writeFileSync(join(legacy, ".roll", "backlog.md"), "legacy sentinel\n");
+    const nested = join(legacy, "src");
+    mkdirSync(nested);
+    const legacyBefore = treeState(legacy);
+    const migration = await runCli(["backlog", "block", "US-1"], fixture(), { cwd: nested });
+    expect(migration.status).toBe(1);
+    expect(migration.stderr).toContain("migration_required");
+    expect(migration.stderr).toContain(`roll workspace migrate --from '${realpathSync(legacy)}' --check`);
+    expect(treeState(legacy)).toEqual(legacyBefore);
   });
 });

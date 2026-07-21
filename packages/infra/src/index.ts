@@ -2,6 +2,7 @@ export * from "./config.js";
 export * from "./workspace-registry.js";
 export * from "./workspace-filesystem.js";
 export * from "./requirement-source-store.js";
+export * from "./requirement-archive-audit.js";
 export * from "./repository-cache.js";
 export * from "./issue-worktrees.js";
 export * from "./issue-story-contract.js";

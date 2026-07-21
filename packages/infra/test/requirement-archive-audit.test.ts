@@ -215,6 +215,23 @@ describe("US-WS-007a Requirement archive audit", () => {
     }));
   });
 
+  it("emits one revision-qualified finding for an expected revision path that becomes unsafe", () => {
+    const f = fixture();
+    const revisionPath = join(f.requirementPath, "revisions", requirementRevisionKey("6"));
+    const outside = join(f.root, "outside-revision");
+    mkdirSync(outside);
+    rmSync(revisionPath, { recursive: true });
+    symlinkSync(outside, revisionPath);
+
+    const result = auditRequirementArchive(f.auditInput);
+
+    expect(result.findings.filter((finding) => finding.evidencePath === `revisions/${requirementRevisionKey("6")}`)).toEqual([{
+      code: "unsafe_archive_path",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}`,
+    }]);
+  });
+
   it.each([
     ["revision count", { maxRevisions: 1 }, "source.yaml"],
     ["revision directory entries", { maxRevisionEntries: 1 }, "revisions"],

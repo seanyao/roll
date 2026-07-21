@@ -516,23 +516,35 @@ export function auditRequirementArchive(
   if (!revisionsDirectory.ok) {
     findings.push(findingForReadFailure(revisionsDirectory.kind, "revisions"));
   } else {
-    const expectedKeys = new Set(graph.map(requirementRevisionKey));
+    const expectedByKey = new Map(graph.map((revision) => [requirementRevisionKey(revision), revision]));
+    const blockedKeys = new Set<string>();
     for (const key of revisionsDirectory.entries) {
       const path = join(revisionsRoot, key);
+      const revision = expectedByKey.get(key);
       let stat: Stats;
       try {
         stat = lstatSync(path);
       } catch {
-        findings.push({ code: "archive_changed_during_read", evidencePath: `revisions/${key}` });
+        findings.push(revision === undefined
+          ? { code: "archive_changed_during_read", evidencePath: `revisions/${key}` }
+          : { code: "archive_changed_during_read", revision, evidencePath: `revisions/${key}` });
+        if (revision !== undefined) blockedKeys.add(key);
         continue;
       }
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        findings.push({ code: "unsafe_archive_path", evidencePath: `revisions/${key}` });
-      } else if (!expectedKeys.has(key)) {
+        findings.push(revision === undefined
+          ? { code: "unsafe_archive_path", evidencePath: `revisions/${key}` }
+          : { code: "unsafe_archive_path", revision, evidencePath: `revisions/${key}` });
+        if (revision !== undefined) blockedKeys.add(key);
+      } else if (revision === undefined) {
         findings.push({ code: "revision_metadata_mismatch", evidencePath: `revisions/${key}` });
       }
     }
-    for (const revision of graph) scanRevision(requirementRoot, source, revision, limits, deps, findings);
+    for (const revision of graph) {
+      if (!blockedKeys.has(requirementRevisionKey(revision))) {
+        scanRevision(requirementRoot, source, revision, limits, deps, findings);
+      }
+    }
     if (directorySnapshotChanged(revisionsRoot, revisionsDirectory, limits.maxRevisionEntries)) {
       findings.push({ code: "archive_changed_during_read", evidencePath: "revisions" });
     }

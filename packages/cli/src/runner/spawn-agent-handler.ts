@@ -2,12 +2,12 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
-import { agentSpawnEnvironment } from "./agent-spawn.js";
+import { agentSpawnEnvironment, type AgentSpawnOptions } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
 import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } from "./main-checkout-guard.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
-import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
+import { buildLowScoreFixForwardPrompt, injectRepositoryContext, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
@@ -25,6 +25,22 @@ function executionSkillBody(ports: Ports, storyId: string | undefined): string {
   if (!ports.skillBody.startsWith("# Roll Loop")) return ports.skillBody;
   const skillName = storyId?.startsWith("FIX-") || storyId?.startsWith("BUG-") ? "roll-fix" : "roll-build";
   return readSkillBody(ports.repoCwd, { skillName }) ?? ports.skillBody;
+}
+
+/** Apply the repository context resolved after Story pick. The spawn port itself
+ * remains context-free; only the Builder command carrying the live CycleContext
+ * can select the Issue root and authoritative repository prompt. */
+export function applyRepositoryBuilderContext(
+  ctx: CycleContext,
+  options: AgentSpawnOptions,
+): AgentSpawnOptions {
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) return options;
+  return {
+    ...options,
+    cwd: execution.issueRoot,
+    skillBody: injectRepositoryContext(options.skillBody, execution),
+  };
 }
 
 export async function executeSpawnAgentCommand(
@@ -51,7 +67,8 @@ export async function executeSpawnAgentCommand(
       // submodule cycle worktree, where its edits/build/test/commits land and E2's
       // landing reads the HEAD. No targetSubmodule ⇒ ports.paths.worktreePath
       // (execRepoCwd ⇒ ports.repoCwd), byte-identical to today.
-      const execCwd = resolveExecutionCwd(ports, ctx);
+      const legacyExecCwd = resolveExecutionCwd(ports, ctx);
+      const execCwd = ctx.repositoryExecution?.issueRoot ?? legacyExecCwd;
       const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
       // E8: the cycle observer and the timeout watchdog's commit probe count the
       // builder's commits against the EXECUTION repo's integration branch (the
@@ -196,7 +213,7 @@ export async function executeSpawnAgentCommand(
           }),
         );
         mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
-        res = await ports.agentSpawn(cmd.agent, {
+        res = await ports.agentSpawn(cmd.agent, applyRepositoryBuilderContext(ctx, {
           purpose: "builder",
           // E4: the builder runs in the submodule cycle worktree for a submodule
           // story (execCwd); its git env + writable roots target the submodule's
@@ -229,7 +246,7 @@ export async function executeSpawnAgentCommand(
             }
             signalRecorder.accept(d);
           },
-        });
+        }));
       } finally {
         if (mainLeakWatchdog !== undefined) {
           activeMainLeak = await mainLeakWatchdog.stop();

@@ -19,6 +19,7 @@ import {
 } from "../src/runner/index.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
 import type { RepositoryPortAdapters } from "../src/runner/ports.js";
+import { applyRepositoryBuilderContext } from "../src/runner/spawn-agent-handler.js";
 
 function repository(
   repoId: string,
@@ -209,20 +210,18 @@ describe("US-WS-010 repository Builder context", () => {
 
   it("runs the Builder at the Issue root and injects the repository map without spawning an external engine", async () => {
     const spawn = fakeSpawn();
-    const ports = nodePorts({
-      repoCwd: "/project",
-      paths,
-      skillBody: "BUILD STORY",
-      routeDeps,
-      agentSpawn: spawn,
+    const spawnOptions = applyRepositoryBuilderContext({
+      cycleId: "cycle-fixture",
+      branch: "cycle-fixture",
+      loop: "ci",
       repositoryExecution: execution,
-    });
-
-    await ports.agentSpawn("claude", {
+    }, {
       purpose: "builder",
       cwd: paths.worktreePath,
       skillBody: "BUILD STORY",
     });
+
+    await spawn("claude", spawnOptions);
 
     expect(spawn).toHaveBeenCalledOnce();
     expect(spawn).toHaveBeenCalledWith(
@@ -232,7 +231,6 @@ describe("US-WS-010 repository Builder context", () => {
         skillBody: expect.stringContaining("repo-111111111111"),
       }),
     );
-    expect(ports.agentSpawn.supportedPurposes).toEqual(spawn.supportedPurposes);
   });
 
   it("binds Git/provider adapters by repoId and rejects read-only publish before the adapter runs", async () => {
@@ -274,12 +272,35 @@ describe("US-WS-010 repository Builder context", () => {
 
   it("preserves the current one-repository spawn contract when no Workspace context is supplied", async () => {
     const spawn = fakeSpawn();
+    const input = {
+      purpose: "builder",
+      cwd: paths.worktreePath,
+      skillBody: "BUILD STORY",
+    } as const;
+    const spawnOptions = applyRepositoryBuilderContext({
+      cycleId: "cycle-legacy",
+      branch: "cycle-legacy",
+      loop: "ci",
+    }, input);
+
+    await spawn("claude", spawnOptions);
+
+    expect(spawn).toHaveBeenCalledWith("claude", {
+      purpose: "builder",
+      cwd: paths.worktreePath,
+      skillBody: "BUILD STORY",
+    });
+  });
+
+  it("does not let nodePorts construction statically rewrite a Builder call", async () => {
+    const spawn = fakeSpawn();
     const ports = nodePorts({
       repoCwd: "/project",
       paths,
       skillBody: "BUILD STORY",
       routeDeps,
       agentSpawn: spawn,
+      repositoryExecution: execution,
     });
 
     await ports.agentSpawn("claude", {
@@ -293,7 +314,6 @@ describe("US-WS-010 repository Builder context", () => {
       cwd: paths.worktreePath,
       skillBody: "BUILD STORY",
     });
-    expect(ports.repositories).toBeUndefined();
   });
 
   it("does not rewrite non-Builder agent calls", async () => {

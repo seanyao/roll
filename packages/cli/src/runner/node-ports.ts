@@ -70,7 +70,6 @@ import type {
   RepositoryPorts,
   RunnerPaths,
 } from "./ports.js";
-import { injectRepositoryContext } from "./project-map.js";
 import { resolveRepositoryExecutionContext } from "./repository-context.js";
 import {
   bootstrapWorktreeSkills,
@@ -185,27 +184,6 @@ export function createRepositoryPorts(
   };
 }
 
-const REPOSITORY_BUILDER_PURPOSES = new Set(["builder", "test_author", "implementer", "attacker"]);
-
-function repositoryAwareSpawn(
-  spawn: AgentSpawn,
-  execution: CycleRepositoryExecutionContext | undefined,
-): AgentSpawn {
-  if (execution === undefined) return spawn;
-  const scoped: AgentSpawn = async (agent, opts) => {
-    if (opts.purpose === undefined || !REPOSITORY_BUILDER_PURPOSES.has(opts.purpose)) {
-      return spawn(agent, opts);
-    }
-    return spawn(agent, {
-      ...opts,
-      cwd: execution.issueRoot,
-      skillBody: injectRepositoryContext(opts.skillBody, execution),
-    });
-  };
-  scoped.supportedPurposes = spawn.supportedPurposes;
-  return scoped;
-}
-
 /**
  * FIX-1249 — config-rig model backstop for POOL-PICKED agents. A `select` role
  * pool (or a nudge/fallback hop) resolves an AGENT but carries no per-route
@@ -277,7 +255,7 @@ export function nodePorts(opts: {
 }): Ports {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
-  const spawn = repositoryAwareSpawn(opts.agentSpawn ?? realAgentSpawn, opts.repositoryExecution);
+  const spawn = opts.agentSpawn ?? realAgentSpawn;
   const repositories = opts.repositoryExecution === undefined
     ? undefined
     : createRepositoryPorts(opts.repositoryExecution, opts.repositoryAdapters);

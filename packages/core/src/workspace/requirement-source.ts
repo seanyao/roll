@@ -306,7 +306,7 @@ export function renderRequirementAttestProjection(
   return [
     `# Requirement ${manifest.provider}:${manifest.ref} attestation`,
     "",
-    "> Generated aggregate projection. Issue-owned evidence remains authoritative.",
+    "> Generated pending projection. Issue-owned evidence remains authoritative.",
     "",
     `Revision: ${manifest.revision}`,
     "Linked Stories:",

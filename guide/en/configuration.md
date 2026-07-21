@@ -99,8 +99,11 @@ checks. Each raw capture is immutable under
 `requirements/<provider>/<requirement-id>/revisions/rev-<digest>/`; a repeated
 identical capture is a zero-write reuse, while a new revision preserves the old
 bytes. `source.yaml` is the atomic current index. Root-level `requirement.md`,
-`context/`, and `attest.md` are rebuildable projections; `attest.md` aggregates
-linked Story delivery but never replaces Issue-owned evidence.
+`context/`, and `attest.md` are rebuildable projections. During this capture
+stage, `attest.md` lists linked Stories as pending and declares Issue-owned
+evidence authoritative; it does not inspect or summarize `issues/` delivery
+evidence. If a current projection is missing, stale, or unsafe, capture fails
+loud without repairing it; Workspace diagnosis and repair are separate actions.
 
 ### Issue initialization
 

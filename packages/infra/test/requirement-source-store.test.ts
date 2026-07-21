@@ -99,7 +99,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     const revision = join(first.requirementPath, "revisions", revisionKey);
     expect(readFileSync(join(revision, "requirement.md"), "utf8")).toContain("Jira requirement");
     expect(readFileSync(join(revision, "context", "brief", "acceptance.md"), "utf8")).toBe("acceptance context\n");
-    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated aggregate projection");
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated pending projection");
     expect(lstatSync(revision).isDirectory()).toBe(true);
 
     const writesAfterFirst = renames.length;

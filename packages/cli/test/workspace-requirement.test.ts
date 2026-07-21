@@ -174,6 +174,25 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(readFileSync(join(requirementPath, "context", "brief.md"), "utf8")).toContain("context-secret-value");
   });
 
+  it("reports projection drift as a non-repairing capture failure", async () => {
+    const f = fixture();
+    expect((await run([...addArgs(f), "--json"], f)).status).toBe(0);
+    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
+    writeFileSync(join(requirementPath, "attest.md"), "corrupted projection\n", "utf8");
+
+    const repeated = await run([...addArgs(f), "--json"], f);
+
+    expect(repeated.status).toBe(1);
+    expect(repeated.stdout).toBe("");
+    expect(JSON.parse(repeated.stderr)).toMatchObject({
+      error: {
+        code: "projection_repair_required",
+        message: "Current Requirement projection is inconsistent; capture stopped without repair",
+      },
+    });
+    expect(readFileSync(join(requirementPath, "attest.md"), "utf8")).toBe("corrupted projection\n");
+  });
+
   it("exposes locale-specific nested help and includes requirement in Workspace help", async () => {
     const f = fixture();
     const workspace = await run(["workspace", "--help"], f, { lang: "en" });
@@ -182,7 +201,9 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(workspace.stdout).toContain("requirement add");
     expect(en).toMatchObject({ status: 0, stderr: "" });
     expect(en.stdout).toContain("Usage: roll workspace requirement add");
+    expect(en.stdout).toContain("Projection drift stops capture without repair");
     expect(zh).toMatchObject({ status: 0, stderr: "" });
     expect(zh.stdout).toContain("用法：roll workspace requirement add");
+    expect(zh.stdout).toContain("投影漂移会中止采集，不会自动修复");
   });
 });

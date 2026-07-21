@@ -128,6 +128,10 @@ describe("US-WS-007 Workspace Requirement E2E", () => {
     if (typeof requirementPath !== "string") return;
     expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("Jira-shaped requirement");
     expect(readFileSync(join(requirementPath, "context", "acceptance.md"), "utf8")).toContain("No provider network");
+    const attest = readFileSync(join(requirementPath, "attest.md"), "utf8");
+    expect(attest).toContain("Generated pending projection");
+    expect(attest).toContain("US-WS-007: no evidence captured yet");
+    expect(attest).not.toContain("issues/US-WS-007/evidence");
 
     process.stdout.write(`US-WS-007 built CLI transcript\n${JSON.stringify({
       first: { ...firstResult, path: "<HOME>/workspace/requirements/jira/req-c78ccf14ea21" },

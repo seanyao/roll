@@ -158,7 +158,7 @@ describe("US-WS-007 RequirementSource planning", () => {
     if (first === undefined || second === undefined) throw new Error("fixture must be valid");
     expect(resolveRequirementSourcesForStory([second.manifest, first.manifest], "US-WS-008"))
       .toEqual([first.manifest, second.manifest]);
-    expect(renderRequirementAttestProjection(first.manifest)).toContain("Generated aggregate projection");
+    expect(renderRequirementAttestProjection(first.manifest)).toContain("Generated pending projection");
     expect(renderRequirementAttestProjection(first.manifest)).toContain("Issue-owned evidence remains authoritative");
   });
 

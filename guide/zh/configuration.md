@@ -93,8 +93,10 @@ roll workspace requirement add \
 不可变形式保存在
 `requirements/<provider>/<requirement-id>/revisions/rev-<digest>/`；完全相同的
 重复采集零写复用，新 revision 会保留旧字节。`source.yaml` 是原子提交的当前索引；
-根级 `requirement.md`、`context/` 与 `attest.md` 都是可重建投影。`attest.md` 可以聚合
-关联 Story 的交付，但绝不替代 Issue 自己拥有的证据。
+根级 `requirement.md`、`context/` 与 `attest.md` 都是可重建投影。在采集阶段，
+`attest.md` 只把关联 Story 列为 pending，并声明 Issue 自有证据才是权威；它不会读取或
+汇总 `issues/` 下的交付证据。若当前投影缺失、陈旧或不安全，采集会直接失败且不会自动
+修复；Workspace 诊断与修复属于独立动作。
 
 ### Issue 初始化
 

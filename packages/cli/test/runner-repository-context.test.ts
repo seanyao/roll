@@ -513,6 +513,12 @@ describe("US-WS-010 repository Builder context", () => {
     const storyEvents = readFileSync(fixturePaths.eventsPath, "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(storyEvents.filter((event) => event["type"] === "cycle:phase")).toHaveLength(1);
+    expect(storyEvents.filter((event) => event["type"] === "cycle:first_edit")).toEqual([
+      expect.objectContaining({
+        cycleId: ctx.cycleId,
+        commitHash: `${writable.repoId}-commit`,
+      }),
+    ]);
     expect(storyEvents.filter((event) => event["type"] === "cycle:tcr")).toHaveLength(0);
     expect(storyEvents.filter((event) => event["type"] === "cycle:stdout")).toHaveLength(0);
     expect(existsSync(join(issueRoot, ".git"))).toBe(false);

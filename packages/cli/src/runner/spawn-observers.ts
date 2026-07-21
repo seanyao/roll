@@ -222,11 +222,18 @@ export async function startRepositoryCycleObserver(
             if (event.type !== "cycle:tcr" && event.type !== "cycle:first_edit") continue;
             repositories.events.append(repoId, event);
             if (event.type === "cycle:tcr") {
-              void observeCommits([{
+              const storyEvents = observeCommits([{
                 hash: `${repoId}:${event.commitHash}`,
                 message: event.message,
                 tsSec: event.commitTs === undefined ? 0 : event.commitTs / 1_000,
               }], storyState, nowMs);
+              for (const storyEvent of storyEvents) {
+                if (storyEvent.type !== "cycle:first_edit") continue;
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  ...storyEvent,
+                  commitHash: event.commitHash,
+                });
+              }
             }
           }
         } catch (error) {

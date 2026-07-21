@@ -171,7 +171,8 @@ describe("v3 loop runner template", () => {
 
   it("delegates the cycle to `roll loop run-once` (the v3 heart)", () => {
     expect(script).toContain("loop run-once");
-    expect(script).toContain('cd "/Users/u/proj"');
+    expect(script).toContain("PROJECT='/Users/u/proj'");
+    expect(script).toContain('cd "$PROJECT"');
   });
 
   it("is self-contained — calls NO bash-engine functions (FIX-197 family)", () => {
@@ -204,7 +205,7 @@ describe("v3 loop runner template", () => {
   });
 
   it("logs to the project-local cron.log and keeps the box awake", () => {
-    expect(script).toContain('RT="/Users/u/proj/.roll/loop"');
+    expect(script).toContain("RT='/Users/u/proj/.roll/loop'");
     expect(script).toContain('LOG="$RT/cron.log"');
     expect(script).toContain("caffeinate");
   });
@@ -1071,7 +1072,8 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
     expect(s).toContain('"$TMUX_BIN" has-session');
     expect(s).toContain('"$TMUX_BIN" new-session -d -s');
     expect(s).toContain("-x 200 -y 50"); // v2 oracle geometry
-    expect(s).toContain("'$ROLL_BIN' loop watch");
+    expect(s).toContain("printf -v _watch_cmd 'cd %q && %q loop watch --since all'");
+    expect(s).toContain('new-session -d -s "$_sess" -x 200 -y 50 -n watch "$_watch_cmd"');
     expect(s).not.toContain("tail -n +1 -F '$RT/live.log' | '$ROLL_BIN' loop fmt");
     expect(s).toContain('"$TMUX_BIN" new-window -d');
     expect(s).toContain("ROLL_TMUX_WRAPPED=1");
@@ -1080,7 +1082,7 @@ describe("FIX-204E — tmux observation window in the runner template", () => {
   it("US-LOOP-047: routes the watch window through `roll loop watch`", () => {
     // The unified watch entrypoint owns default status, event modes, and
     // live.log following; the scheduler should not hand-roll tail|fmt.
-    expect(s).toMatch(/'\$ROLL_BIN' loop watch/);
+    expect(s).toMatch(/printf -v _watch_cmd 'cd %q && %q loop watch --since all'/);
     expect(s).not.toMatch(/tail -n \+1 -F '\$RT\/live\.log' \| '\$ROLL_BIN' loop fmt/);
   });
 

@@ -26,6 +26,7 @@ import { buildRunRow, buildTerminalRecord, commitRollMetadata, stampTs, withReal
 import { eventTs } from "./runner-time.js";
 import { cleanStaleEvidence, isParkedAtHold, resetStaleSpecTruth, revertPrematureDone } from "./resume-truth.js";
 import { appendCleanupEvent, cleanupGuardResult, recordCleanupFailures } from "./sandbox-boundary.js";
+import { resolveStoryLeasePath } from "./story-lease-path.js";
 
 type TerminalCommand = Extract<CycleCommand, { kind:
   | "publish_pr"
@@ -61,7 +62,7 @@ export async function executeTerminalCommand(
       ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
       if ((ctx.storyId ?? "") !== "") {
         try {
-          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), ctx.storyId ?? "", "cycle");
+          removeLease(resolveStoryLeasePath(ports.paths), ctx.storyId ?? "", "cycle");
         } catch {
           /* lease cleanup must never block terminal bookkeeping */
         }
@@ -478,7 +479,7 @@ export async function executeTerminalCommand(
       // keep its soft-lease protection past this cycle's terminal (kimi review).
       if (terminalStoryId !== "") {
         try {
-          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
+          removeLease(resolveStoryLeasePath(ports.paths), terminalStoryId, "cycle");
         } catch {
           /* lease cleanup must never block terminal */
         }

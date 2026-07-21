@@ -368,6 +368,8 @@ export interface RunnerPaths {
   alertsPath: string;
   lockPath: string;
   heartbeatPath: string;
+  /** Story-claim ledger. Absent preserves the legacy events-adjacent path. */
+  storyLeasePath?: string;
   /** The cycle worktree path. */
   worktreePath: string;
 }

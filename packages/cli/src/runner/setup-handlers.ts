@@ -1,5 +1,6 @@
 import {
   assessBacklog,
+  buildClaimedByOther,
   buildHasOpenPr,
   cleanDeadLeases,
   decideClaimReconcile,
@@ -26,7 +27,7 @@ import {
 import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
 import { isScreenLocked, resolveIntegrationBranch } from "@roll/infra";
 import { dirname, join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
 import { physicalTerminalFromSpecText } from "../lib/physical-terminal.js";
 import { createSubmoduleWorktreeIfDeclared } from "./submodule-worktree.js";
@@ -45,6 +46,7 @@ import type { ExecuteResult, Ports } from "./ports.js";
 import { activeRigs, probeDueSuspendedRigs, readRigLifecycleState, suspendedRigs } from "./agent-liveness.js";
 import { latestScreenLockEvent } from "./screen-lock-events.js";
 import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
+import { resolveStoryLeasePath } from "./story-lease-path.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -53,11 +55,6 @@ type SetupCommand = Extract<CycleCommand, { kind:
   | "resume_worktree"
   | "resolve_route"
 }>;
-
-/** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
-function storyLeasePath(ports: Ports): string {
-  return join(dirname(ports.paths.eventsPath), "story-leases.json");
-}
 
 /**
  * US-DELIV-005: read the event ledger for the delivery-lease projection.
@@ -174,7 +171,7 @@ export async function executeSetupCommand(
         const claims = rows.filter((r) => (r.status ?? "").includes("🔨"));
         if (claims.length > 0) {
           const slug = await ports.github.repoSlug(ports.repoCwd).catch(() => undefined);
-          const leases = readLeases(storyLeasePath(ports));
+          const leases = readLeases(resolveStoryLeasePath(ports.paths));
           const nowMs = Date.now();
           for (const claim of claims) {
             const cycle = latestDeliveringCycle(runRows, claim.id);
@@ -358,9 +355,10 @@ export async function executeSetupCommand(
       const pendingPublish = readPendingPublish(dirname(ports.paths.eventsPath));
       // FIX-1232: clean dead PID leases from the lease file before the picker
       // runs. A crashed cycle leaves a stale cycle-lease that accumulates in the
-      // file — harmless to the picker (isClaimedByOther is not wired) but noise
-      // for diagnostics and the preflight reclaim step.
-      const deadLeases = cleanDeadLeases(storyLeasePath(ports));
+      // file. Clean it before the claim predicate reads the shared ledger so a
+      // dead owner cannot keep the Story blocked.
+      const storyLeasePath = resolveStoryLeasePath(ports.paths);
+      const deadLeases = cleanDeadLeases(storyLeasePath);
       if (deadLeases.length > 0) {
         ports.events.appendAlert(
           ports.paths.alertsPath,
@@ -370,7 +368,8 @@ export async function executeSetupCommand(
       // US-DELIV-005: derive delivery leases before picking; --race permits
       // parallel work, then the first merge supersedes its siblings.
       const raceMode = process.env["ROLL_LOOP_RACE"] === "1";
-      const liveClaims = readLeases(storyLeasePath(ports));
+      const liveClaims = readLeases(storyLeasePath);
+      const claimedByOther = buildClaimedByOther(liveClaims, Date.now(), process.pid);
       const cycleEvents = readLeaseEvents(ports.paths.eventsPath);
       const recoveryCandidateIds = pendingRecoveryCandidateIds(cycleEvents);
       const activeLeases = projectDeliveryLeases(cycleEvents).filter(
@@ -416,6 +415,18 @@ export async function executeSetupCommand(
         shouldSkip: (id) => skipCards.has(id),
         hasPendingPublish: (id) =>
           (ports.pendingPublish?.(id) ?? false) || pendingPublish.has(id),
+        isClaimedByOther: (id) => {
+          const lease = liveClaims[id];
+          if (lease === undefined) return false;
+          if (lease.source === "human" || lease.source === "supervisor") {
+            return isHumanSoftLeaseActive(lease, Date.now());
+          }
+          return claimedByOther(id);
+        },
+        skipClaimedReason: (id) => {
+          const lease = liveClaims[id];
+          return lease === undefined ? undefined : `claimed by ${lease.source}`;
+        },
         deliveryLeaseBlock: (id) => leaseBlockReason(id, activeLeases, { race: raceMode }),
         isScreenLocked: screenLocked,
         requiresPhysicalSurface,
@@ -550,7 +561,8 @@ export async function executeSetupCommand(
       // preflight after a crash) can tell this claim is owned by a running cycle
       // and not reclaim it until the cycle ends or the PID is proven dead.
       try {
-        setLease(storyLeasePath(ports), story.id, {
+        mkdirSync(dirname(storyLeasePath), { recursive: true });
+        setLease(storyLeasePath, story.id, {
           pid: process.pid,
           source: "cycle",
           claimedAt: Date.now(),

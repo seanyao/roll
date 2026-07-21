@@ -16,8 +16,10 @@ import {
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 import { loopGoCommand, planGoTmuxCommands, type LoopGoDeps, type StartTmuxInput } from "../src/commands/loop-go.js";
 import { loopRunOnceCommand } from "../src/commands/loop-run-once.js";
+import { backlogClaimCommand } from "../src/commands/backlog-mgmt.js";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
+import { executeSetupCommand } from "../src/runner/setup-handlers.js";
 import { WorkspaceRegistry } from "@roll/infra";
 import type { RouteDeps } from "@roll/core";
 import { REPOSITORY_BINDING_V1, WORKSPACE_MANIFEST_V1, repositoryIdFromRemote } from "@roll/spec";
@@ -176,6 +178,58 @@ describe("US-WS-016 Workspace scheduler contract", () => {
 
     expect(readFileSync(backlogPath, "utf8")).toContain("US-WS-016 | Workspace story | 🔨 In Progress");
     expect(readFileSync(legacyBacklogPath, "utf8")).toContain("LEGACY-1 | Legacy decoy | 📋 Todo");
+  });
+
+  it("keeps a human backlog claim authoritative when the visible status drifts back to Todo", async () => {
+    const root = workspaceRoot("human-lease");
+    const storyId = "US-WS-016";
+    workspaceManifest(root, "ws-alpha");
+    workspaceIssue(root, "ws-alpha", storyId);
+    const backlogPath = join(root, "backlog", "index.md");
+    const runtimeRoot = join(root, "runtime");
+    const leasePath = join(runtimeRoot, "locks", "story-leases.json");
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    writeFileSync(
+      backlogPath,
+      `| Story | Description | Status |\n|---|---|---|\n| ${storyId} | Human-owned story | 📋 Todo |\n`,
+    );
+    const claimedAt = Date.now();
+    expect(backlogClaimCommand([storyId, "--workspace", "ws-alpha"], {
+      nowMs: () => claimedAt,
+      resolveTarget: () => target("ws-alpha", root),
+    })).toBe(0);
+    writeFileSync(backlogPath, readFileSync(backlogPath, "utf8").replace("🔨 In Progress", "📋 Todo"));
+    const paths: RunnerPaths = {
+      eventsPath: join(runtimeRoot, "events.ndjson"),
+      runsPath: join(runtimeRoot, "runs.jsonl"),
+      alertsPath: join(runtimeRoot, "alerts.log"),
+      lockPath: join(runtimeRoot, "inner.lock"),
+      heartbeatPath: join(runtimeRoot, "heartbeat"),
+      storyLeasePath: leasePath,
+      worktreePath: join(runtimeRoot, "worktrees", "cycle-human-lease"),
+    };
+    const agentSpawn: AgentSpawn = async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false });
+    const ports = nodePorts({
+      repoCwd: root,
+      paths,
+      skillBody: "BUILD STORY",
+      routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      agentSpawn,
+      backlogPath,
+    });
+
+    const result = await executeSetupCommand({ kind: "pick_story" }, ports, {
+      cycleId: "cycle-human-lease",
+      branch: "cycle-human-lease",
+      loop: "ci",
+    });
+
+    expect(result.event).toEqual({ type: "no_story" });
+    expect(JSON.parse(readFileSync(leasePath, "utf8"))[storyId]).toEqual({
+      source: "human",
+      claimedAt,
+    });
+    expect(existsSync(join(runtimeRoot, "story-leases.json"))).toBe(false);
   });
 
   it("renders loop on help before target resolution or scheduler mutation", async () => {
@@ -480,6 +534,7 @@ describe("US-WS-016 Workspace scheduler contract", () => {
 
     let builderSpawned = false;
     let leaseObserved = false;
+    const humanClaimedAt = Date.now();
     const agentSpawn: AgentSpawn = vi.fn(async (_agent, options) => {
       if (options.purpose === "builder") {
         builderSpawned = true;
@@ -487,8 +542,12 @@ describe("US-WS-016 Workspace scheduler contract", () => {
         expect(readFileSync(backlogPath, "utf8")).toContain(
           `${storyId} | Workspace production story | 🔨 In Progress`,
         );
-        const leasePath = join(root, "runtime", "story-leases.json");
-        leaseObserved = existsSync(leasePath) && readFileSync(leasePath, "utf8").includes(storyId);
+        const leasePath = join(root, "runtime", "locks", "story-leases.json");
+        leaseObserved = existsSync(leasePath) && JSON.parse(readFileSync(leasePath, "utf8"))[storyId]?.source === "cycle";
+        mkdirSync(join(root, "runtime", "locks"), { recursive: true });
+        writeFileSync(leasePath, `${JSON.stringify({
+          [storyId]: { source: "human", claimedAt: humanClaimedAt },
+        }, null, 2)}\n`);
       }
       return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
     });
@@ -535,6 +594,11 @@ describe("US-WS-016 Workspace scheduler contract", () => {
 
     expect(builderSpawned).toBe(true);
     expect(leaseObserved).toBe(true);
+    expect(JSON.parse(readFileSync(join(root, "runtime", "locks", "story-leases.json"), "utf8"))[storyId]).toEqual({
+      source: "human",
+      claimedAt: humanClaimedAt,
+    });
+    expect(existsSync(join(root, "runtime", "story-leases.json"))).toBe(false);
     expect(existsSync(join(root, ".roll", "loop", "story-leases.json"))).toBe(false);
     expect(readFileSync(legacyBacklogPath, "utf8")).toContain("LEGACY-1 | Legacy decoy | 📋 Todo");
     for (const rootGit of [repoPushable, branchCanary, reconcile, backfill]) {

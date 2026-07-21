@@ -50,6 +50,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs, type ResolvedBacklogTarget } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
+import { resolveStoryLeasePath } from "../runner/story-lease-path.js";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
   "loop run-once: delivery published — PR open, awaiting reconciliation (Delivery Reconciler advances merge and credits main evidence)\n" +
@@ -127,7 +128,7 @@ const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
  * after a clean terminal (lock already released) must not double-write.
  */
 export function cycleSignalTeardown(
-  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath">,
+  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath" | "storyLeasePath">,
   cycleId: string,
   branch: string,
   sig: NodeJS.Signals,
@@ -225,7 +226,7 @@ export function cycleSignalTeardown(
     const terminalStoryId = ctx.storyId ?? "";
     if (terminalStoryId !== "") {
       try {
-        removeLease(join(dirname(paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
+        removeLease(resolveStoryLeasePath(paths), terminalStoryId, "cycle");
       } catch {
         /* lease cleanup must never block signal teardown */
       }
@@ -1010,6 +1011,9 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
     alertsPath,
     lockPath: join(rt, "inner.lock"),
     heartbeatPath: join(rt, "heartbeat"),
+    ...(workspaceBinding === undefined
+      ? {}
+      : { storyLeasePath: join(rt, "locks", "story-leases.json") }),
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 

@@ -523,6 +523,32 @@ repositories:
     expect(zh.stdout).toMatchSnapshot("help-zh");
   });
 
+  it("freezes governed-branch conflict and stale-registration repair check output", async () => {
+    const conflictFixture = fixture();
+    await initWorkspace(conflictFixture);
+    writeBacklogStorySpec(conflictFixture);
+    const conflictCache = join(conflictFixture.rollHome, "repos", `${conflictFixture.sotRepoId}.git`);
+    git(conflictCache, ["branch", "roll/ws-demo/US-XX1/sot", "refs/remotes/origin/main"]);
+
+    const conflict = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], conflictFixture);
+    expect(conflict).toMatchObject({ status: 0, stderr: "" });
+    expect(scrub(conflict.stdout, conflictFixture)).toMatchSnapshot("governed-branch-conflict-json");
+
+    const repairFixture = fixture();
+    await initWorkspace(repairFixture);
+    writeBacklogStorySpec(repairFixture);
+    const created = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--json"], repairFixture);
+    expect(created).toMatchObject({ status: 0, stderr: "" });
+    const repairCache = join(repairFixture.rollHome, "repos", `${repairFixture.sotRepoId}.git`);
+    rmSync(join(repairFixture.workspace, "issues", "US-XX1", "sot"), { recursive: true, force: true });
+    expect(git(repairCache, ["worktree", "list", "--porcelain"])).toContain("prunable");
+
+    const repaired = await run(["workspace", "issue", "init", "US-XX1", "--workspace", "ws-demo", "--check", "--json"], repairFixture);
+    expect(repaired).toMatchObject({ status: 0, stderr: "" });
+    expect(scrub(repaired.stdout, repairFixture)).toMatchSnapshot("stale-registration-repaired-json");
+    expect(git(repairCache, ["worktree", "list", "--porcelain"])).toContain("prunable");
+  });
+
   it("freezes the scrubbed full JSON contract for check/create/reuse/failure", async () => {
     const f = fixture();
     await initWorkspace(f);

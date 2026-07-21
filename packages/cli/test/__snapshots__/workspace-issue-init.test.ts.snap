@@ -16,6 +16,82 @@ exports[`US-WS-008 roll workspace issue init > freezes EN/ZH --help > help-zh 1`
 "
 `;
 
+exports[`US-WS-008 roll workspace issue init > freezes governed-branch conflict and stale-registration repair check output > governed-branch-conflict-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-check/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "report": {
+    "manifest": {
+      "state": "absent"
+    },
+    "targets": {
+      "sot": {
+        "alias": "sot",
+        "access": "write",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/sot",
+        "workBranch": "roll/ws-demo/US-XX1/sot",
+        "decision": "conflict"
+      },
+      "docs": {
+        "alias": "docs",
+        "access": "read",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/docs",
+        "workBranch": null,
+        "decision": "created"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes governed-branch conflict and stale-registration repair check output > stale-registration-repaired-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-check/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "report": {
+    "manifest": {
+      "state": "compatible"
+    },
+    "targets": {
+      "sot": {
+        "alias": "sot",
+        "access": "write",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/sot",
+        "workBranch": "roll/ws-demo/US-XX1/sot",
+        "decision": "repaired"
+      },
+      "docs": {
+        "alias": "docs",
+        "access": "read",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/docs",
+        "workBranch": null,
+        "decision": "reused"
+      }
+    }
+  }
+}
+"
+`;
+
 exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON contract for check/create/reuse/failure > check-json 1`] = `
 "{
   "schema": "roll.workspace-issue-check/v1",

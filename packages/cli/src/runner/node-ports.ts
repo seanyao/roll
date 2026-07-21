@@ -372,7 +372,15 @@ export function nodePorts(opts: {
     return deliveryTruthCache;
   };
   const mergedDelivery = (storyId: string): boolean => {
+    if (repositories !== undefined) return false;
     return deliveryTruth().get(storyId)?.delivered === true;
+  };
+  const pendingMergeDelivery = (storyId: string): { prNumber?: number } | undefined => {
+    if (repositories !== undefined) return undefined;
+    const truth = deliveryTruth().get(storyId);
+    if (truth === undefined) return undefined;
+    if (truth.lifecycleState !== "pending_merge" && truth.lifecycleState !== "ci_red") return undefined;
+    return truth.prNumber === undefined ? {} : { prNumber: truth.prNumber };
   };
 
   return {
@@ -388,12 +396,7 @@ export function nodePorts(opts: {
     // FIX-1018: skip stories that already have locally-committed-but-unpublished
     // work from a prior cycle. The executor reads the runtime file at pick time.
     pendingPublish: (storyId) => readPendingPublish(dirname(opts.paths.eventsPath)).has(storyId),
-    pendingMergeDelivery: (storyId) => {
-      const truth = deliveryTruth().get(storyId);
-      if (truth === undefined) return undefined;
-      if (truth.lifecycleState !== "pending_merge" && truth.lifecycleState !== "ci_red") return undefined;
-      return truth.prNumber === undefined ? {} : { prNumber: truth.prNumber };
-    },
+    pendingMergeDelivery,
     // FIX-363: the real connectivity probe reuses the same spawn the reviews use.
     agentReachable: (agent) => probeAgentReachable(agent, spawn, { cwd: opts.repoCwd }),
     git: {

@@ -8,7 +8,7 @@ import {
   type CycleRepositoryExecutionContext,
   type RepositoryExecutionContext,
 } from "@roll/spec";
-import { BUILD_HEARTBEAT_GAP_MS, cycleStep, initialCycleState, type RouteDeps } from "@roll/core";
+import { BUILD_HEARTBEAT_GAP_MS, cycleStep, initialCycleState, nodeExecPort, type RouteDeps } from "@roll/core";
 import {
   REPOSITORY_CONTEXT_MAX_CHARS,
   buildRepositoryContextMap,
@@ -675,9 +675,6 @@ describe("US-WS-010 repository Builder context", () => {
         read: () => [{ id: fixture.storyId, desc: "Workspace production chain", status: "📋 Todo" }],
         markStatus,
       },
-      mergedDelivery: () => false,
-      pendingPublish: () => false,
-      pendingMergeDelivery: () => undefined,
     };
     const baseCtx = {
       cycleId: "cycle-production-chain",
@@ -685,7 +682,10 @@ describe("US-WS-010 repository Builder context", () => {
       loop: "ci",
     };
     const rootModeBefore = statSync(fixture.root).mode & 0o777;
+    const nodeExec = vi.spyOn(nodeExecPort, "run");
     const result = await runCycleOnce({ ports, ctx: baseCtx });
+    const nodeExecCalls = [...nodeExec.mock.calls];
+    nodeExec.mockRestore();
 
     expect(result.terminal).toBe("blocked");
     expect(result.state?.ctx.repositoryExecution).toMatchObject({
@@ -712,6 +712,7 @@ describe("US-WS-010 repository Builder context", () => {
     for (const spy of [...Object.values(globalGit), ...Object.values(globalProvider)]) {
       expect(spy).not.toHaveBeenCalled();
     }
+    expect(nodeExecCalls).toHaveLength(0);
     const issueEvents = readFileSync(join(fixture.issueRoot, "events.jsonl"), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(issueEvents.filter((event) => event["type"] === "repository:capture_observed")).toHaveLength(2);

@@ -1,25 +1,20 @@
 import { createHash } from "node:crypto";
 import {
-  closeSync,
   existsSync,
-  ftruncateSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
-  openSync,
   readFileSync,
   readdirSync,
   renameSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_REQUIREMENT_BODY_BYTES, MAX_REQUIREMENT_CONTEXT_BYTES, MAX_REQUIREMENT_CONTEXT_FILES } from "@roll/core";
+import { MAX_REQUIREMENT_CONTEXT_BYTES, MAX_REQUIREMENT_CONTEXT_FILES } from "@roll/core";
 import { acquireLock, releaseLock } from "../src/process.js";
 import {
   captureRequirementSource,
@@ -530,7 +525,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     }
   });
 
-  it("commits source authority before projections and repairs an interrupted projection on retry", () => {
+  it("commits source authority before projections but requires an explicit repair after interruption", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f), { beforeProjection: () => { throw new Error("projection failed"); } }))
       .toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
@@ -538,10 +533,10 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(JSON.parse(readFileSync(join(requirementPath, "source.yaml"), "utf8"))).toMatchObject({ revision: "42" });
     expect(existsSync(join(requirementPath, "projection.pending.json"))).toBe(true);
 
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
-    expect(repaired.outcome).toBe("reused");
-    expect(existsSync(join(requirementPath, "projection.pending.json"))).toBe(false);
-    expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
+    expect(() => captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" })))
+      .toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
+    expect(existsSync(join(requirementPath, "projection.pending.json"))).toBe(true);
+    expect(existsSync(join(requirementPath, "requirement.md"))).toBe(false);
   });
 
   it("does not switch source authority when the projection journal cannot be prepared", () => {
@@ -556,15 +551,14 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(requirementPath, "source.yaml"))).toBe(false);
   });
 
-  it("regenerates a corrupted attest.md from source authority without treating it as evidence", () => {
+  it("fails loudly on a corrupted current projection without repairing it during capture", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
     writeFileSync(join(first.requirementPath, "attest.md"), "corrupted projection\n", "utf8");
 
-    const repeated = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
-    expect(repeated.outcome).toBe("reused");
-    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).not.toContain("corrupted projection");
-    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated aggregate projection");
+    expect(() => captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" })))
+      .toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
+    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toBe("corrupted projection\n");
   });
 
   it("fails loudly when an immutable revision is missing or tampered before reuse", () => {
@@ -823,143 +817,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
     );
   });
 
-  it("never follows a symlink planted inside the current projection's context/ during self-heal", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const outside = join(f.root, "outside-secret.txt");
-    write(outside, "secret outside projection\n");
-    rmSync(join(first.requirementPath, "context", "domain.md"), { force: true });
-    symlinkSync(outside, join(first.requirementPath, "context", "domain.md"));
-
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
-    expect(repaired.outcome).toBe("reused");
-    const healed = join(first.requirementPath, "context", "domain.md");
-    expect(lstatSync(healed).isSymbolicLink()).toBe(false);
-    expect(readFileSync(healed, "utf8")).toBe("domain context\n");
-  });
-
-  it("treats a projection context/ tree deeper than the revision depth cap as stale rather than recursing unbounded", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    let deep = join(first.requirementPath, "context");
-    for (let index = 0; index < 40; index += 1) {
-      deep = join(deep, `d${index}`);
-    }
-    mkdirSync(deep, { recursive: true });
-    write(join(deep, "extra.md"), "unexpected deep file\n");
-
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
-    expect(repaired.outcome).toBe("reused");
-    expect(existsSync(join(first.requirementPath, "context", "d0"))).toBe(false);
-    expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe("domain context\n");
-  });
-
-  it("rejects an oversized current requirement.md by its pre-read fstat size, proven by a deterministic stat-seam call count", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const oversizedPath = join(first.requirementPath, "requirement.md");
-    const fd = openSync(oversizedPath, "w");
-    ftruncateSync(fd, MAX_REQUIREMENT_BODY_BYTES + 4096);
-    closeSync(fd);
-    expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_BODY_BYTES);
-
-    const statSeenPaths: string[] = [];
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      afterProjectionStat: (path) => statSeenPaths.push(path),
-    });
-    expect(repaired.outcome).toBe("reused");
-    expect(statSeenPaths).not.toContain(oversizedPath);
-    expect(readFileSync(oversizedPath, "utf8")).toContain("Jira requirement");
-  });
-
-  it("treats a current requirement.md that grows past the cap between stat and read completion as stale rather than trusting a stale size check", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const growingPath = join(first.requirementPath, "requirement.md");
-    writeFileSync(growingPath, "small\n", "utf8");
-    let grew = false;
-
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      afterProjectionStat: (path) => {
-        if (path !== growingPath || grew) return;
-        grew = true;
-        const fd = openSync(growingPath, "a");
-        writeSync(fd, "x".repeat(1024));
-        closeSync(fd);
-      },
-    });
-    expect(repaired.outcome).toBe("reused");
-    expect(readFileSync(growingPath, "utf8")).toContain("Jira requirement");
-  });
-
-  it("does not trust a same-inode, same-size content overwrite that lands between read completion and the after-fstat check", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const targetPath = join(first.requirementPath, "requirement.md");
-    const originalContent = readFileSync(targetPath, "utf8");
-    const sameLengthReplacement = `${"x".repeat(originalContent.length - 1)}\n`;
-    expect(sameLengthReplacement).toHaveLength(originalContent.length);
-    const inoBeforeOverwrite = statSync(targetPath).ino;
-    let overwritten = false;
-    let inoAtOverwrite: number | undefined;
-
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      afterProjectionRead: (path) => {
-        if (path !== targetPath || overwritten) return;
-        overwritten = true;
-        const fd = openSync(targetPath, "r+");
-        writeSync(fd, sameLengthReplacement, 0, "utf8");
-        closeSync(fd);
-        inoAtOverwrite = statSync(targetPath).ino;
-      },
-    });
-    expect(overwritten).toBe(true);
-    expect(inoAtOverwrite).toBe(inoBeforeOverwrite);
-    expect(repaired.outcome).toBe("reused");
-    expect(readFileSync(targetPath, "utf8")).toContain("Jira requirement");
-    expect(readFileSync(targetPath, "utf8")).not.toContain("xxxxxxxxxx");
-  });
-
-  it("does not trust a stale fd once its pathname is renamed away and replaced by a symlink during the read", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const targetPath = join(first.requirementPath, "requirement.md");
-    const outsideSecret = join(f.root, "outside-secret-during-read.md");
-    writeFileSync(outsideSecret, "leaked outside content\n", "utf8");
-    let swapped = false;
-
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      afterProjectionStat: (path) => {
-        if (path !== targetPath || swapped) return;
-        swapped = true;
-        rmSync(targetPath, { force: true });
-        symlinkSync(outsideSecret, targetPath);
-      },
-    });
-    expect(swapped).toBe(true);
-    expect(repaired.outcome).toBe("reused");
-    expect(lstatSync(targetPath).isSymbolicLink()).toBe(false);
-    expect(readFileSync(targetPath, "utf8")).toContain("Jira requirement");
-  });
-
-  it("rejects an oversized current context/ file by its pre-read fstat size, proven by a deterministic stat-seam call count", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const oversizedPath = join(first.requirementPath, "context", "domain.md");
-    const fd = openSync(oversizedPath, "w");
-    ftruncateSync(fd, MAX_REQUIREMENT_CONTEXT_BYTES + 4096);
-    closeSync(fd);
-    expect(statSync(oversizedPath).size).toBeGreaterThan(MAX_REQUIREMENT_CONTEXT_BYTES);
-
-    const statSeenPaths: string[] = [];
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      afterProjectionStat: (path) => statSeenPaths.push(path),
-    });
-    expect(repaired.outcome).toBe("reused");
-    expect(statSeenPaths).not.toContain(oversizedPath);
-    expect(readFileSync(oversizedPath, "utf8")).toBe("domain context\n");
-  });
-
   it("resolves a Story back to its Requirement sources by reading source.yaml from disk in a fresh call, not an in-memory cache", () => {
     const f = fixture();
     captureRequirementSource(request(f));
@@ -1173,18 +1030,17 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(attest).toMatch(/no evidence captured yet|pending/iu);
   });
 
-  it("reconstructs requirement.md, context/ and attest.md together from the immutable revision when all three are corrupted or missing at once", () => {
+  it("reports all missing current projection files without recreating them during capture", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
     writeFileSync(join(first.requirementPath, "requirement.md"), "corrupted body\n", "utf8");
     rmSync(join(first.requirementPath, "context"), { recursive: true, force: true });
     rmSync(join(first.requirementPath, "attest.md"), { force: true });
 
-    const repaired = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }));
-    expect(repaired.outcome).toBe("reused");
-    expect(readFileSync(join(first.requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
-    expect(readFileSync(join(first.requirementPath, "context", "domain.md"), "utf8")).toBe("domain context\n");
-    expect(readFileSync(join(first.requirementPath, "context", "brief", "acceptance.md"), "utf8")).toBe("acceptance context\n");
-    expect(readFileSync(join(first.requirementPath, "attest.md"), "utf8")).toContain("Generated aggregate projection");
+    expect(() => captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" })))
+      .toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
+    expect(readFileSync(join(first.requirementPath, "requirement.md"), "utf8")).toBe("corrupted body\n");
+    expect(existsSync(join(first.requirementPath, "context"))).toBe(false);
+    expect(existsSync(join(first.requirementPath, "attest.md"))).toBe(false);
   });
 });

@@ -810,7 +810,13 @@ export function captureRequirementSource(
     const sourcePath = join(requirementPath, "source.yaml");
     const existing = existsSync(requirementPath) ? readExisting(sourcePath) : undefined;
     if (existing !== undefined && existsSync(join(requirementPath, PROJECTION_JOURNAL))) {
-      projectCurrent(workspaceRoot, requirementPath, existing, validateRevision(requirementPath, existing), deps);
+      fail("projection_repair_required", "Requirement current projection needs explicit repair before capture can continue");
+    }
+    if (existing !== undefined) {
+      const existingEvidence = validateRevision(requirementPath, existing);
+      if (!isProjectionCurrent(requirementPath, existing, existingEvidence, deps)) {
+        fail("projection_repair_required", "Requirement current projection is missing, stale, or unsafe");
+      }
     }
     const body = stableFile(
       resolve(input.bodyFile),
@@ -841,10 +847,6 @@ export function captureRequirementSource(
     }
     const plan = planned.value;
     if (plan.outcome === "reused") {
-      const evidence = validateRevision(requirementPath, plan.manifest);
-      if (!isProjectionCurrent(requirementPath, plan.manifest, evidence, deps)) {
-        projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
-      }
       return {
         outcome: plan.outcome,
         workspaceId: workspace.workspaceId,
@@ -852,9 +854,6 @@ export function captureRequirementSource(
         contextCount: plan.manifest.context.length,
         manifest: plan.manifest,
       };
-    }
-    if (plan.outcome === "updated" && existing !== undefined) {
-      validateRevision(requirementPath, existing);
     }
     if (plan.outcome === "created" || plan.outcome === "updated") {
       writeRevision(workspaceRoot, requirementPath, plan.manifest, body, context, renameFile);

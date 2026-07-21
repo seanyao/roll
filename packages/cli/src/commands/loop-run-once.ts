@@ -48,6 +48,7 @@ import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
@@ -78,7 +79,7 @@ export function announceReport(
   const label = currentLang() === "zh" ? "验收 Review Page" : "Acceptance Review Page";
   process.stdout.write(`${label}: ${report}\n`);
   const muted =
-    existsSync(join(projectPath, ".roll", "loop", `mute-${slug}`)) ||
+    existsSync(join(runtimeDir(projectPath), `mute-${slug}`)) ||
     existsSync(
       join(process.env["ROLL_SHARED_ROOT"] || join(process.env["HOME"] ?? "", ".shared", "roll"), "loop", `mute-${slug}`),
     );
@@ -292,6 +293,11 @@ function runtimeDir(projectPath: string): string {
   return env !== "" ? env : join(projectPath, ".roll", "loop");
 }
 
+function resolvedBacklogFile(projectPath: string): string {
+  const env = (process.env["ROLL_WORKSPACE_BACKLOG_PATH"] ?? "").trim();
+  return env !== "" ? env : join(projectPath, ".roll", "backlog.md");
+}
+
 // ── FIX-216b: consecutive-failure auto-PAUSE ──────────────────────────────────
 
 const PAUSE_THRESHOLD = 3;
@@ -374,7 +380,7 @@ function incrementConsecutiveFails(
   const threshold = readFailurePauseThreshold(projectPath);
   if (count < threshold) return;
 
-  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
   if (existsSync(pauseMarker)) return;
   const alertMsg =
     `# ALERT — loop auto-paused after ${count} consecutive failures\n\n` +
@@ -419,7 +425,7 @@ function writeRootCausePause(
   count: number,
   snapshotPath: string | undefined,
 ): void {
-  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
   if (existsSync(pauseMarker)) return;
   const playbook = playbookForFailure(attribution.failureClass, attribution.rootCauseKey);
   const alertMsg =
@@ -772,7 +778,7 @@ function writeReviewerBlockedAlert(
     /* best-effort */
   }
   if (block.cause === "auth") {
-    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
     if (!existsSync(pauseMarker)) {
       try {
         writeFileSync(pauseMarker, msg, "utf8");
@@ -868,10 +874,31 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // projectIdentity() resolve to the wrong checkout. Detect and unset before
   // any identity-dependent code runs. Also stores the healing detail so an ALERT
   // can be written once `alertsPath` is available.
-  const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
-  const coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
-
-  const id = await projectIdentity(identityRoot);
+  const workspaceRequested = args.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "").trim() !== "";
+  let coreWorktreeHeal: ReturnType<typeof checkCoreWorktreeContamination>;
+  let id: { path: string; slug: string };
+  let workspaceBinding: { workspaceId: string; runtimeRoot: string; backlogPath: string } | undefined;
+  if (workspaceRequested) {
+    const scoped = stripBacklogScopeArgs(args);
+    if (!scoped.ok) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+    const selectorArgs: string[] = [];
+    const workspaceIndex = args.indexOf("--workspace");
+    if (workspaceIndex >= 0) selectorArgs.push("--workspace", args[workspaceIndex + 1] ?? "");
+    const decision = resolveBacklogCommandTarget(selectorArgs, "mutation");
+    if (!decision.ok) return emitBacklogTargetError(decision);
+    if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+    workspaceBinding = {
+      workspaceId: decision.workspaceId,
+      runtimeRoot: decision.runtimeRoot,
+      backlogPath: decision.backlogPath,
+    };
+    coreWorktreeHeal = { healed: false, detail: "" };
+    id = { path: decision.workspaceRoot, slug: decision.workspaceId };
+  } else {
+    const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
+    coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
+    id = await projectIdentity(identityRoot);
+  }
   const cycleId = makeCycleId();
 
   // FIX-1209: identity assertion — if the resolved project path contains a cycle
@@ -921,6 +948,12 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       ].join("\n"),
     );
     return 0;
+  }
+
+  if (workspaceBinding !== undefined) {
+    process.env["ROLL_WORKSPACE"] = workspaceBinding.workspaceId;
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = workspaceBinding.runtimeRoot;
+    process.env["ROLL_WORKSPACE_BACKLOG_PATH"] = workspaceBinding.backlogPath;
   }
 
   const rt = runtimeDir(id.path);
@@ -1264,18 +1297,18 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     // Best-effort: dormancy must NEVER break the idle cycle.
     try {
       const bus = new EventBus();
-      const backlogFile = join(id.path, ".roll", "backlog.md");
+      const backlogFile = resolvedBacklogFile(id.path);
       const nowSec = Math.floor(Date.now() / 1000);
       const outcome = await maybeEnterDormancy({
         slug: id.slug,
         count: idleCount,
-        resolveState: () => resolveLoopRunState(id.path, id.slug),
+        resolveState: () => resolveLoopRunState(id.path, id.slug, runtimeDir(id.path)),
         readBacklog: () => (existsSync(backlogFile) ? readFileSync(backlogFile, "utf8") : ""),
         scheduler: createScheduler(process.platform, { uid: process.getuid?.() ?? 0 }),
         loopLabel: launchdLabel("loop", id.slug),
         now: () => new Date().toISOString(),
         emit: (event) => bus.appendEvent(paths.eventsPath, event as never),
-        writeDormant: (body) => writeDormantMarker(dormantMarkerPath(id.path, id.slug), body),
+        writeDormant: (body) => writeDormantMarker(dormantMarkerPath(id.path, id.slug, runtimeDir(id.path)), body),
         upsertDormantRun: () =>
           bus.upsertRun(
             paths.runsPath,
@@ -1287,7 +1320,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
             ),
           ),
         writePause: (reason) => {
-          const p = join(id.path, ".roll", "loop", `PAUSE-${id.slug}`);
+          const p = join(runtimeDir(id.path), `PAUSE-${id.slug}`);
           mkdirSync(dirname(p), { recursive: true });
           writeFileSync(p, `# loop paused — dormancy bootout failed\n\n${reason}\n`, "utf8");
         },
@@ -1374,7 +1407,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const failedAgent = (result.state?.ctx?.agent ?? "").trim();
     const zeroTcr = isZeroTcrStall(result.terminal, tcr);
     if (sid !== "" && failedAgent !== "" && zeroTcr) {
-      const backlogFile = join(id.path, ".roll", "backlog.md");
+      const backlogFile = resolvedBacklogFile(id.path);
       const bus = new EventBus();
       // FIX-932 kill-switch: only attempt the agent SWAP when auto-recovery is on.
       // ROLL_LOOP_NO_AUTO_RECOVER=1 skips switch + split entirely → the zero-TCR
@@ -1637,7 +1670,7 @@ export async function egressBlocked(
 
 /** True iff a PAUSE marker exists for this project/slug. */
 function isLoopPaused(projectPath: string, slug: string): boolean {
-  return existsSync(join(projectPath, ".roll", "loop", `PAUSE-${slug}`));
+  return existsSync(join(runtimeDir(projectPath), `PAUSE-${slug}`));
 }
 
 /**
@@ -1674,7 +1707,7 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
     alreadyPaused: isLoopPaused(projectPath, slug),
   });
   if (verdict.shouldPause) {
-    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
     // FIX-1273 AC1: enumerate the EXACT counted branches + loop worktrees with
     // their fresh audit disposition so the pause is auditable and points at the
     // safe recovery route — not a bare number. The audit runs ONLY on trip (rare)

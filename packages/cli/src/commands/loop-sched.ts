@@ -593,8 +593,8 @@ function writeExecutable(path: string, content: string): void {
   writeFileSync(path, content, { mode: 0o755 });
 }
 
-function pauseMarkerPath(projectPath: string, slug: string): string {
-  return join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+function pauseMarkerPath(projectPath: string, slug: string, runtimeRoot?: string): string {
+  return join(runtimeRoot ?? join(projectPath, ".roll", "loop"), `PAUSE-${slug}`);
 }
 
 // ─── US-LOOP-079g: DORMANT marker + loop run state resolver ───────────────
@@ -613,8 +613,8 @@ export type LoopRunState = "PAUSED" | "DORMANT" | "ACTIVE";
  * US-LOOP-079g AC1: the DORMANT marker path mirrors {@link pauseMarkerPath}.
  * `<rt>/.roll/loop/DORMANT-<slug>` (ROLL_PROJECT_RUNTIME_DIR-aware).
  */
-export function dormantMarkerPath(projectPath: string, slug: string): string {
-  return join(projectPath, ".roll", "loop", `DORMANT-${slug}`);
+export function dormantMarkerPath(projectPath: string, slug: string, runtimeRoot?: string): string {
+  return join(runtimeRoot ?? join(projectPath, ".roll", "loop"), `DORMANT-${slug}`);
 }
 
 /**
@@ -648,9 +648,9 @@ export function writeDormantMarker(markerPath: string, body: DormantMarkerBody):
  * only DORMANT marker → DORMANT; neither → ACTIVE.
  * Does NOT read lane-armed state or state.yaml files.
  */
-export function resolveLoopRunState(projectPath: string, slug: string): LoopRunState {
-  if (existsSync(pauseMarkerPath(projectPath, slug))) return "PAUSED";
-  if (existsSync(dormantMarkerPath(projectPath, slug))) return "DORMANT";
+export function resolveLoopRunState(projectPath: string, slug: string, runtimeRoot?: string): LoopRunState {
+  if (existsSync(pauseMarkerPath(projectPath, slug, runtimeRoot))) return "PAUSED";
+  if (existsSync(dormantMarkerPath(projectPath, slug, runtimeRoot))) return "DORMANT";
   return "ACTIVE";
 }
 

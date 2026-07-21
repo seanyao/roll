@@ -12,6 +12,9 @@ import {
 } from "../src/commands/loop-sched.js";
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 import { loopGoCommand, planGoTmuxCommands, type LoopGoDeps, type StartTmuxInput } from "../src/commands/loop-go.js";
+import { loopRunOnceCommand } from "../src/commands/loop-run-once.js";
+import { WorkspaceRegistry } from "@roll/infra";
+import { REPOSITORY_BINDING_V1, WORKSPACE_MANIFEST_V1, repositoryIdFromRemote } from "@roll/spec";
 import { workspaceSchedulerPaths } from "../src/lib/operating-mode.js";
 
 const dirs: string[] = [];
@@ -20,6 +23,27 @@ function workspaceRoot(id: string): string {
   const root = mkdtempSync(join(tmpdir(), `roll-${id}-`));
   dirs.push(root);
   return root;
+}
+
+function workspaceManifest(root: string, workspaceId: string): void {
+  const remote = `https://example.test/workspaces/${workspaceId}.git`;
+  const repoId = repositoryIdFromRemote(remote);
+  if (!repoId.ok) throw new Error("fixture remote must be valid");
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({
+    schema: WORKSPACE_MANIFEST_V1,
+    workspaceId,
+    displayName: workspaceId,
+    requirements: [],
+    repositories: [{
+      schema: REPOSITORY_BINDING_V1,
+      repoId: repoId.value,
+      alias: "primary",
+      remote,
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    }],
+  })}\n`);
 }
 
 function target(workspaceId: string, workspaceRoot: string): BacklogTargetDecision {
@@ -212,5 +236,68 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     expect(worker).toContain("ROLL_WORKSPACE='ws-alpha'");
     expect(worker).toContain(`ROLL_PROJECT_RUNTIME_DIR='${join(root, "runtime")}'`);
     expect(worker).toContain(`ROLL_WORKSPACE_BACKLOG_PATH='${join(root, "backlog", "index.md")}'`);
+  });
+
+  it("resolves run-once dry-run from Workspace identity without requiring a repository-local Roll root", async () => {
+    const root = workspaceRoot("run-once");
+    const rollHome = workspaceRoot("run-once-home");
+    workspaceManifest(root, "ws-alpha");
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    writeFileSync(join(root, "backlog", "index.md"), "| Story | Description | Status |\n|---|---|---|\n");
+    const registry = new WorkspaceRegistry({ rollHome, now: () => 1 });
+    registry.register({ workspaceId: "ws-alpha", root });
+    registry.activate("ws-alpha");
+    const savedRollHome = process.env["ROLL_HOME"];
+    const savedWorkspace = process.env["ROLL_WORKSPACE"];
+    let stdout = "";
+    const original = process.stdout.write.bind(process.stdout);
+    process.env["ROLL_HOME"] = rollHome;
+    delete process.env["ROLL_WORKSPACE"];
+    // @ts-expect-error capture-only
+    process.stdout.write = (chunk: string | Uint8Array): boolean => (stdout += String(chunk), true);
+    try {
+      expect(await loopRunOnceCommand(["--dry-run", "--workspace", "ws-alpha"])).toBe(0);
+    } finally {
+      process.stdout.write = original;
+      if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = savedRollHome;
+      if (savedWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+      else process.env["ROLL_WORKSPACE"] = savedWorkspace;
+      delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+      delete process.env["ROLL_WORKSPACE_BACKLOG_PATH"];
+    }
+    expect(stdout).toContain("# project: ws-alpha");
+    expect(existsSync(join(root, ".roll"))).toBe(false);
+    expect(existsSync(join(root, "runtime"))).toBe(false);
+  });
+
+  it("rejects repository-local run-once state with migration_required", async () => {
+    const legacy = workspaceRoot("legacy-run-once");
+    const rollHome = workspaceRoot("legacy-home");
+    mkdirSync(join(legacy, ".git"));
+    mkdirSync(join(legacy, ".roll"));
+    writeFileSync(join(legacy, ".roll", "backlog.md"), "legacy\n");
+    const savedCwd = process.cwd();
+    const savedRollHome = process.env["ROLL_HOME"];
+    const savedWorkspace = process.env["ROLL_WORKSPACE"];
+    let stderr = "";
+    const original = process.stderr.write.bind(process.stderr);
+    process.chdir(legacy);
+    process.env["ROLL_HOME"] = rollHome;
+    delete process.env["ROLL_WORKSPACE"];
+    // @ts-expect-error capture-only
+    process.stderr.write = (chunk: string | Uint8Array): boolean => (stderr += String(chunk), true);
+    try {
+      expect(await loopRunOnceCommand(["--dry-run", "--workspace", "ws-missing"])).toBe(1);
+    } finally {
+      process.stderr.write = original;
+      process.chdir(savedCwd);
+      if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = savedRollHome;
+      if (savedWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+      else process.env["ROLL_WORKSPACE"] = savedWorkspace;
+    }
+    expect(stderr).toContain("migration_required");
+    expect(stderr).toContain("roll workspace migrate --from");
   });
 });

@@ -97,6 +97,20 @@ function addArgs(f: ReturnType<typeof fixture>): string[] {
   ];
 }
 
+function activateDecoyWorkspace(f: ReturnType<typeof fixture>): string {
+  const decoy = join(f.home, "decoy-workspace");
+  mkdirSync(decoy);
+  const manifest = JSON.parse(readFileSync(join(f.workspace, "workspace.yaml"), "utf8")) as Record<string, unknown>;
+  write(join(decoy, "workspace.yaml"), `${JSON.stringify({ ...manifest, workspaceId: "ws-decoy", displayName: "Decoy" }, null, 2)}\n`);
+  for (const storyId of ["US-WS-007", "US-WS-008"]) {
+    write(join(decoy, "backlog", "epic", storyId, "spec.md"), `# ${storyId}\n`);
+  }
+  const registry = new WorkspaceRegistry({ rollHome: f.rollHome, now: () => 2 });
+  registry.register({ workspaceId: "ws-decoy", root: decoy });
+  registry.activate("ws-decoy");
+  return decoy;
+}
+
 function scrub(text: string, f: ReturnType<typeof fixture>): string {
   return text.replaceAll(realpathSync(f.home), "<HOME>").replaceAll(f.home, "<HOME>");
 }
@@ -124,16 +138,33 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("Revision 43");
   });
 
-  it("resolves the Workspace from environment and cwd while terminal output stays bounded", async () => {
+  it("resolves explicit, environment and cwd Workspace selectors ahead of a different active Workspace", async () => {
+    const explicitFixture = fixture();
+    const explicitDecoy = activateDecoyWorkspace(explicitFixture);
+    const explicit = await run([...addArgs(explicitFixture), "--json"], explicitFixture);
+    expect(explicit).toMatchObject({ status: 0, stderr: "" });
+    expect(JSON.parse(explicit.stdout)).toMatchObject({ workspaceId: "ws-demo", path: expect.stringContaining(explicitFixture.workspace) });
+    expect(existsSync(join(explicitDecoy, "requirements"))).toBe(false);
+
     const f = fixture();
+    const decoy = activateDecoyWorkspace(f);
     const envArgs = addArgs(f).filter((_arg, index, all) => all[index - 1] !== "--workspace" && _arg !== "--workspace");
     const fromEnv = await run(envArgs, f, { workspaceEnv: "ws-demo" });
     expect(fromEnv).toMatchObject({ status: 0, stderr: "" });
-    expect(scrub(fromEnv.stdout, f)).toMatchSnapshot("terminal-en");
+    const envOutput = scrub(fromEnv.stdout, f);
+    expect(envOutput).toMatchSnapshot("terminal-en");
+    expect(envOutput).toContain("Requirement jira:SOT-15499 revision 42");
+    expect(envOutput).toContain("Context files: 1");
+    expect(envOutput).toContain("Path: <HOME>/workspace/requirements/jira/req-c78ccf14ea21");
 
     const fromCwd = await run(envArgs, f, { cwd: join(f.workspace, "backlog", "epic") });
     expect(fromCwd).toMatchObject({ status: 0, stderr: "" });
-    expect(scrub(fromCwd.stdout, f)).toMatchSnapshot("terminal-cwd-reused");
+    const cwdOutput = scrub(fromCwd.stdout, f);
+    expect(cwdOutput).toMatchSnapshot("terminal-cwd-reused");
+    expect(cwdOutput).toContain("Requirement jira:SOT-15499 revision 42");
+    expect(cwdOutput).toContain("Context files: 1");
+    expect(cwdOutput).toContain("Path: <HOME>/workspace/requirements/jira/req-c78ccf14ea21");
+    expect(existsSync(join(decoy, "requirements"))).toBe(false);
   });
 
   it("rejects credential-shaped refs and unsafe paths without echoing input or writing evidence", async () => {
@@ -168,6 +199,14 @@ describe("US-WS-007 roll workspace requirement add", () => {
     expect(captured.stdout).not.toContain("body-secret-value");
     expect(captured.stdout).not.toContain("credential-sentinel-in-context");
     expect(captured.stdout).not.toContain("context-secret-value");
+
+    const terminal = await run(addArgs(f), f);
+    expect(terminal).toMatchObject({ status: 0, stderr: "" });
+    expect(terminal.stdout).toContain("Requirement jira:SOT-15499 revision 42");
+    expect(terminal.stdout).not.toContain("credential-sentinel-in-body");
+    expect(terminal.stdout).not.toContain("body-secret-value");
+    expect(terminal.stdout).not.toContain("credential-sentinel-in-context");
+    expect(terminal.stdout).not.toContain("context-secret-value");
 
     const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
     expect(readFileSync(join(requirementPath, "requirement.md"), "utf8")).toContain("body-secret-value");

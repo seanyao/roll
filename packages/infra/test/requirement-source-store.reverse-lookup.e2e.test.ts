@@ -39,6 +39,7 @@ describe("US-WS-007 Story reverse lookup — fresh process proof", () => {
       }],
     }, null, 2)}\n`);
     write(join(workspace, "backlog", "epic", "US-WS-007", "spec.md"), "# US-WS-007\n");
+    write(join(workspace, "backlog", "epic", "US-WS-008", "spec.md"), "# US-WS-008\n");
     const body = join(root, "requirement.md");
     write(body, "# Jira requirement\n\nFresh process reverse lookup fixture.\n");
 
@@ -53,7 +54,7 @@ describe("US-WS-007 Story reverse lookup — fresh process proof", () => {
         capturedAt: "2026-07-20T16:00:00.000Z",
         bodyFile: ${JSON.stringify(body)},
         contextPaths: [],
-        storyIds: ["US-WS-007"],
+        storyIds: ["US-WS-007", "US-WS-008"],
       });
     `;
     const captureProcess = spawnSync(process.execPath, ["--input-type=module", "-e", captureScript], { encoding: "utf8", cwd: repoRoot });
@@ -61,13 +62,15 @@ describe("US-WS-007 Story reverse lookup — fresh process proof", () => {
 
     const lookupScript = `
       import { resolveRequirementSourcesForStoryOnDisk } from ${JSON.stringify(infraDistUrl)};
-      const resolved = resolveRequirementSourcesForStoryOnDisk(${JSON.stringify(workspace)}, "US-WS-007");
-      process.stdout.write(JSON.stringify(resolved.map((m) => ({ provider: m.provider, ref: m.ref, revision: m.revision }))));
+      const project = (storyId) => resolveRequirementSourcesForStoryOnDisk(${JSON.stringify(workspace)}, storyId)
+        .map((m) => ({ provider: m.provider, ref: m.ref, revision: m.revision }));
+      process.stdout.write(JSON.stringify({ ws007: project("US-WS-007"), ws008: project("US-WS-008") }));
     `;
     const lookupProcess = spawnSync(process.execPath, ["--input-type=module", "-e", lookupScript], { encoding: "utf8", cwd: repoRoot });
     expect(lookupProcess.status, lookupProcess.stderr).toBe(0);
-    const resolved = JSON.parse(lookupProcess.stdout) as ReadonlyArray<{ provider: string; ref: string; revision: string }>;
-    expect(resolved).toEqual([{ provider: "jira", ref: "SOT-15499", revision: "42" }]);
+    const resolved = JSON.parse(lookupProcess.stdout) as Record<string, ReadonlyArray<{ provider: string; ref: string; revision: string }>>;
+    const expected = [{ provider: "jira", ref: "SOT-15499", revision: "42" }];
+    expect(resolved).toEqual({ ws007: expected, ws008: expected });
 
     const emptyLookupScript = `
       import { resolveRequirementSourcesForStoryOnDisk } from ${JSON.stringify(infraDistUrl)};

@@ -51,7 +51,7 @@ exports[`US-WS-007 roll workspace requirement add > captures, repeats and update
 "
 `;
 
-exports[`US-WS-007 roll workspace requirement add > resolves the Workspace from environment and cwd while terminal output stays bounded > terminal-cwd-reused 1`] = `
+exports[`US-WS-007 roll workspace requirement add > resolves explicit, environment and cwd Workspace selectors ahead of a different active Workspace > terminal-cwd-reused 1`] = `
 "Requirement jira:SOT-15499 revision 42 (reused)
 Context files: 1
 Linked Stories: 2
@@ -59,7 +59,7 @@ Path: <HOME>/workspace/requirements/jira/req-c78ccf14ea21
 "
 `;
 
-exports[`US-WS-007 roll workspace requirement add > resolves the Workspace from environment and cwd while terminal output stays bounded > terminal-en 1`] = `
+exports[`US-WS-007 roll workspace requirement add > resolves explicit, environment and cwd Workspace selectors ahead of a different active Workspace > terminal-en 1`] = `
 "Requirement jira:SOT-15499 revision 42 (created)
 Context files: 1
 Linked Stories: 2

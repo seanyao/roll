@@ -408,6 +408,24 @@ function projectCurrent(
   }
 }
 
+function projectLinkedStories(
+  workspaceRoot: string,
+  requirementPath: string,
+  manifest: RequirementSourceManifest,
+  deps: RequirementSourceStoreDeps,
+): void {
+  const renameFile = deps.renameFile ?? renameSync;
+  const journal = join(requirementPath, PROJECTION_JOURNAL);
+  try {
+    deps.beforeProjection?.();
+    ensureSafeDirectory(workspaceRoot, requirementPath, false);
+    atomicWrite(join(requirementPath, "attest.md"), renderRequirementAttestProjection(manifest), renameFile);
+    rmSync(journal, { force: true });
+  } catch (error) {
+    return fail("projection_repair_required", "Requirement Story links committed but the pending projection needs repair", error);
+  }
+}
+
 function archiveContextPathsWalk(
   root: string,
   relativeRoot: string,
@@ -512,7 +530,7 @@ function prepareProjectionJournal(
       renameFile,
     );
   } catch (error) {
-    return fail("projection_repair_required", "Requirement projection journal could not be prepared", error);
+    return fail("io_failure", "Requirement projection journal could not be prepared", error);
   }
 }
 
@@ -698,10 +716,11 @@ export function captureRequirementSource(
         manifest: plan.manifest,
       };
     }
+    let evidence: RevisionEvidence | undefined;
     if (plan.outcome === "created" || plan.outcome === "updated") {
       writeRevision(workspaceRoot, requirementPath, plan.manifest, body, context, renameFile);
+      evidence = validateRevision(requirementPath, plan.manifest);
     }
-    const evidence = validateRevision(requirementPath, plan.manifest);
     prepareProjectionJournal(workspaceRoot, requirementPath, plan.manifest, renameFile);
     try {
       ensureSafeDirectory(workspaceRoot, requirementPath, false);
@@ -710,7 +729,12 @@ export function captureRequirementSource(
       if (error instanceof RequirementSourceStoreError) throw error;
       return fail("io_failure", "Requirement source index could not be committed", error);
     }
-    projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
+    if (plan.outcome === "linked") {
+      projectLinkedStories(workspaceRoot, requirementPath, plan.manifest, deps);
+    } else {
+      if (evidence === undefined) fail("io_failure", "Requirement revision evidence was not prepared");
+      projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
+    }
     return {
       outcome: plan.outcome,
       workspaceId: workspace.workspaceId,

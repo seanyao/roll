@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MAX_REQUIREMENT_CONTEXT_BYTES, MAX_REQUIREMENT_CONTEXT_FILES } from "@roll/core";
 import { acquireLock, releaseLock } from "../src/process.js";
 import {
@@ -107,9 +107,13 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(reused.outcome).toBe("reused");
     expect(renames).toHaveLength(writesAfterFirst);
 
+    const projectedBodyBeforeLink = lstatSync(join(first.requirementPath, "requirement.md"));
+    const projectedContextBeforeLink = lstatSync(join(first.requirementPath, "context", "domain.md"));
     const linked = captureRequirementSource(request(f, { storyIds: ["US-WS-009"] }), deps);
     expect(linked).toMatchObject({ outcome: "linked", manifest: { stories: ["US-WS-007", "US-WS-008", "US-WS-009"] } });
     expect(readdirSync(join(first.requirementPath, "revisions"))).toEqual([revisionKey]);
+    expect(lstatSync(join(first.requirementPath, "requirement.md")).ino).toBe(projectedBodyBeforeLink.ino);
+    expect(lstatSync(join(first.requirementPath, "context", "domain.md")).ino).toBe(projectedContextBeforeLink.ino);
 
     writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
     const updated = captureRequirementSource(request(f, {
@@ -267,16 +271,19 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
-  it("rejects a context input path deeper than the shared depth cap before writing any immutable revision, journal or projection", () => {
-    const f = fixture();
-    const segments = Array.from({ length: 40 }, (_, index) => `d${index}`);
-    const deepRelative = [...segments, "deep.md"].join("/");
-    write(join(f.contextRoot, deepRelative), "too deep\n");
+  it("accepts the exact context depth boundary and rejects the next segment", () => {
+    const allowed = fixture();
+    const allowedRelative = [...Array.from({ length: 31 }, (_, index) => `d${index}`), "allowed.md"].join("/");
+    write(join(allowed.contextRoot, allowedRelative), "at depth boundary\n");
+    expect(captureRequirementSource(request(allowed, { contextPaths: [allowedRelative] })).contextCount).toBe(1);
 
-    expect(() => captureRequirementSource(request(f, { contextPaths: [deepRelative] }))).toThrowError(
+    const rejected = fixture();
+    const rejectedRelative = [...Array.from({ length: 32 }, (_, index) => `d${index}`), "rejected.md"].join("/");
+    write(join(rejected.contextRoot, rejectedRelative), "past depth boundary\n");
+    expect(() => captureRequirementSource(request(rejected, { contextPaths: [rejectedRelative] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
-    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+    expect(existsSync(join(rejected.workspace, "requirements"))).toBe(false);
   });
 
   it("accepts exactly MAX_REQUIREMENT_CONTEXT_FILES files and exactly MAX_REQUIREMENT_CONTEXT_BYTES total bytes", () => {
@@ -295,6 +302,17 @@ describe("US-WS-007 RequirementSourceStore", () => {
 
     const result = captureRequirementSource(request(f, { contextPaths }));
     expect(result.contextCount).toBe(MAX_REQUIREMENT_CONTEXT_FILES);
+  });
+
+  it("rejects MAX_REQUIREMENT_CONTEXT_FILES plus one before any immutable write", () => {
+    const f = fixture();
+    const contextPaths = Array.from({ length: MAX_REQUIREMENT_CONTEXT_FILES + 1 }, (_, index) => `count-${index}.md`);
+    for (const relativePath of contextPaths) write(join(f.contextRoot, relativePath), "x");
+
+    expect(() => captureRequirementSource(request(f, { contextPaths }))).toThrowError(
+      expect.objectContaining({ code: "context_limit" }),
+    );
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
   it("rejects a multi-file context set whose aggregate exceeds the byte limit even though every single file is under it", () => {
@@ -408,6 +426,22 @@ describe("US-WS-007 RequirementSourceStore", () => {
     }
   });
 
+  it("fails loud when a context file changes while it is being captured", () => {
+    const f = fixture();
+    const contextPath = join(f.contextRoot, "domain.md");
+    let mutated = false;
+
+    expect(() => captureRequirementSource(request(f), {
+      afterReadFile: (path) => {
+        if (!path.endsWith("/domain.md") || mutated) return;
+        mutated = true;
+        writeFileSync(path, "changed during capture\n", "utf8");
+      },
+    })).toThrowError(expect.objectContaining({ code: "source_changed" }));
+    expect(mutated).toBe(true);
+    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+  });
+
   it("commits source authority before projections but requires an explicit repair after interruption", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f), { beforeProjection: () => { throw new Error("projection failed"); } }))
@@ -422,14 +456,14 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(requirementPath, "requirement.md"))).toBe(false);
   });
 
-  it("does not switch source authority when the projection journal cannot be prepared", () => {
+  it("reports a pre-authority projection journal failure as I/O failure", () => {
     const f = fixture();
     expect(() => captureRequirementSource(request(f), {
       renameFile: (from, to) => {
         if (to.endsWith("projection.pending.json")) throw new Error("journal unavailable");
         renameSync(from, to);
       },
-    })).toThrowError(expect.objectContaining({ code: "projection_repair_required" }));
+    })).toThrowError(expect.objectContaining({ code: "io_failure" }));
     const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
     expect(existsSync(join(requirementPath, "source.yaml"))).toBe(false);
   });
@@ -804,13 +838,30 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(evidencePath, "utf8")).toBe("US-WS-007 issue evidence: 12 passed\n");
   });
 
-  it("reports a linked Story with no captured Issue evidence yet as pending rather than silently omitting it", () => {
+  it("does not inspect the Issue evidence tree during Requirement capture", async () => {
     const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const attest = readFileSync(join(first.requirementPath, "attest.md"), "utf8");
-    expect(attest).toContain("US-WS-007");
-    expect(attest).toContain("US-WS-008");
-    expect(attest).toMatch(/no evidence captured yet|pending/iu);
+    write(join(f.workspace, "issues", "US-WS-007", "evidence", "vitest.txt"), "Issue-owned evidence\n");
+    vi.resetModules();
+    vi.doMock("node:fs", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("node:fs")>();
+      return {
+        ...actual,
+        lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
+          const normalized = String(args[0]).replaceAll("\\", "/");
+          if (normalized.includes("/issues/")) throw new Error(`Issue evidence access trap: ${normalized}`);
+          return actual.lstatSync(...args);
+        },
+      };
+    });
+    try {
+      const isolated = await import("../src/requirement-source-store.js");
+      const captured = isolated.captureRequirementSource(request(f));
+      expect(captured.outcome).toBe("created");
+      expect(readFileSync(join(captured.requirementPath, "attest.md"), "utf8")).toContain("US-WS-007: no evidence captured yet");
+    } finally {
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    }
   });
 
   it("reports all missing current projection files without recreating them during capture", () => {

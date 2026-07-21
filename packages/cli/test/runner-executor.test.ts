@@ -6303,6 +6303,30 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       vi.useRealTimers();
     }
   });
+
+  it("reports commit-probe failures instead of silently treating them as zero progress", async () => {
+    vi.useFakeTimers();
+    try {
+      const probeError = new Error("repository observation failed");
+      const onCommitProbeError = vi.fn();
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-probe-error",
+        thresholds: { wallSec: 100000, noProgressSec: 100000 },
+        clock: () => 0,
+        commitCount: async () => { throw probeError; },
+        onCommitProbeError,
+        appendEvent: () => {},
+        pollMs: 1000,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      wd.stop();
+
+      expect(onCommitProbeError).toHaveBeenCalledWith(probeError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {

@@ -1,9 +1,10 @@
-import type { CycleContext } from "@roll/core";
+import type { CycleContext, ObservedCommit } from "@roll/core";
 import type { BoundRepositoryPorts } from "./ports.js";
 
 export type RepositoryObservationOperation =
   | "commits_ahead"
   | "tcr_count"
+  | "recent_commits"
   | "dirty";
 
 export class RepositoryObservationError extends Error {
@@ -71,4 +72,22 @@ export async function observeWritableRepositories(
     tcrCount: legs.reduce((sum, leg) => sum + leg.tcrCount, 0),
     worktreeDirty: legs.some((leg) => leg.worktreeDirty),
   };
+}
+
+export async function observeWritableRepositoryCommitCount(
+  ctx: CycleContext,
+  repositories: BoundRepositoryPorts,
+): Promise<number> {
+  let total = 0;
+  for (const repoId of writableRepositoryIds(ctx)) {
+    total += await observe(repoId, "commits_ahead", () => repositories.git.commitsAhead(repoId));
+  }
+  return total;
+}
+
+export function observeRepositoryRecentCommits(
+  repoId: string,
+  repositories: BoundRepositoryPorts,
+): Promise<ObservedCommit[]> {
+  return observe(repoId, "recent_commits", () => repositories.git.recentCommits(repoId));
 }

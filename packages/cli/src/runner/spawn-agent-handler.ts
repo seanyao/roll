@@ -10,7 +10,7 @@ import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agen
 import { buildLowScoreFixForwardPrompt, injectRepositoryContext, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
-import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
+import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startRepositoryCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
 import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -18,6 +18,10 @@ import { readSkillBody } from "./skill-body.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import type { ExecuteResult, Ports } from "./ports.js";
+import {
+  RepositoryObservationError,
+  observeWritableRepositoryCommitCount,
+} from "./repository-observation.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
 
@@ -78,7 +82,9 @@ export async function executeSpawnAgentCommand(
       // commits (no cycle:tcr events) and the watchdog's commitCount read 0. The
       // baseline is resolved from execRepoCwd, never the detached worktree. No
       // targetSubmodule ⇒ resolveIntegrationBranch(repoCwd) → origin/main default.
-      const observeBase = resolveIntegrationBranch(execRepoCwd);
+      const observeBase = ctx.repositoryExecution === undefined
+        ? resolveIntegrationBranch(execRepoCwd)
+        : undefined;
       await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
       const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
       if (credentialBlock !== null) {
@@ -139,7 +145,9 @@ export async function executeSpawnAgentCommand(
       // git commits on the worktree branch + the wall clock — and DERIVES standard
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
-      const observer = await startCycleObserver(ports, ctx.cycleId ?? "", execCwd, observeBase);
+      const observer = ctx.repositoryExecution === undefined
+        ? await startCycleObserver(ports, ctx.cycleId ?? "", legacyExecCwd, observeBase)
+        : await startRepositoryCycleObserver(ports, ctx);
       // FIX-907 — the HUNG-BUILDER KILLER. The agentSpawn below is a single
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
@@ -162,11 +170,40 @@ export async function executeSpawnAgentCommand(
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
         thresholdSec: readStallThreshold(ports.repoCwd).thresholdSec,
       });
+      const repositoryPorts = ctx.repositoryExecution === undefined
+        ? undefined
+        : ports.repositories?.bind(ctx);
+      if (ctx.repositoryExecution !== undefined && repositoryPorts === undefined) {
+        throw new Error("missing_repository_ports");
+      }
+      const reportedCommitProbeFailures = new Set<string>();
       const timeoutWatchdog = startSpawnTimeoutWatchdog({
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
-        commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
+        commitCount: repositoryPorts === undefined
+          ? () => ports.git.commitsAhead(legacyExecCwd, observeBase)
+          : () => observeWritableRepositoryCommitCount(ctx, repositoryPorts),
+        ...(repositoryPorts === undefined ? {} : {
+          onCommitProbeError: (error: unknown) => {
+            const failure = error instanceof RepositoryObservationError ? error : undefined;
+            const key = failure === undefined ? "unknown" : `${failure.repoId}:${failure.operation}`;
+            if (reportedCommitProbeFailures.has(key)) return;
+            reportedCommitProbeFailures.add(key);
+            if (failure !== undefined) {
+              repositoryPorts.events.append(failure.repoId, {
+                type: "repository:observation_failed",
+                operation: failure.operation,
+                detail: failure.cause instanceof Error ? failure.cause.message : String(failure.cause ?? "unknown"),
+                ts: Date.now(),
+              });
+            }
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `repository_observation_failed: ${failure?.repoId ?? "unknown"}: ${failure?.operation ?? "commits_ahead"} (cycle ${ctx.cycleId ?? ""})`,
+            );
+          },
+        }),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a

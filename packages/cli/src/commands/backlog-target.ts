@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   detectLegacyProject,
   resolveWorkspaceTarget,
@@ -183,6 +184,31 @@ export function emitBacklogTarget(target: ResolvedBacklogTarget): void {
   process.stdout.write(
     `${backlogMessage("backlog.title", target.workspaceId, target.canonicalRoot)}\n`,
   );
+}
+
+function contained(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
+}
+
+/** Validate an existing target or its nearest existing ancestor against the canonical Workspace root. */
+export function workspaceOwnsPath(canonicalRoot: string, targetPath: string): boolean {
+  let probe = targetPath;
+  while (true) {
+    try {
+      lstatSync(probe);
+      break;
+    } catch {
+      const parent = dirname(probe);
+      if (parent === probe) return false;
+      probe = parent;
+    }
+  }
+  try {
+    return contained(realpathSync(canonicalRoot), realpathSync(probe));
+  } catch {
+    return false;
+  }
 }
 
 function realCommandTargetDeps(): BacklogCommandTargetDeps {

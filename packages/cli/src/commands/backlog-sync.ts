@@ -29,6 +29,7 @@ import {
   emitBacklogTargetError,
   resolveBacklogCommandTarget,
   stripBacklogScopeArgs,
+  workspaceOwnsPath,
   type BacklogTargetResolver,
 } from "./backlog-target.js";
 
@@ -201,11 +202,15 @@ function missingParentDirs(path: string): readonly string[] {
 
 function applySyncWrites(
   writes: readonly PlannedWrite[],
+  canonicalRoot: string,
   writeFile: (path: string, content: string) => void = writeFileSync,
 ): void {
   const snapshots: WriteSnapshot[] = [];
   const createdDirs = new Set<string>();
   for (const write of writes) {
+    if (!workspaceOwnsPath(canonicalRoot, write.path)) {
+      throw new Error(`Workspace-owned path escapes canonical root: ${write.path}`);
+    }
     if (existsSync(write.path) && statSync(write.path).isDirectory()) {
       throw new Error(`file target is a directory: ${write.path}`);
     }
@@ -261,6 +266,10 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
   const backlog = decision.backlogPath;
   const featuresDir = decision.storyRoot;
   const localYaml = decision.configPath;
+  if (![backlog, featuresDir, localYaml].every((path) => workspaceOwnsPath(decision.canonicalRoot, path))) {
+    process.stderr.write("backlog: invalid_target — Workspace-owned path escapes canonical root\n");
+    return 1;
+  }
   emitBacklogTarget(decision);
 
   let cfg: SyncConfig;
@@ -271,13 +280,18 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
     return 1;
   }
   const explicitRepo = flagValue(commandArgs, "--repo");
-  if (explicitRepo !== undefined && cfg.repo !== undefined && cfg.repo !== "" && cfg.repo !== explicitRepo) {
+  const configuredRepo = cfg.repo?.trim() ?? "";
+  const explicitRepoIdentity = explicitRepo?.trim().toLowerCase();
+  const configuredRepoIdentity = configuredRepo.toLowerCase();
+  if (explicitRepoIdentity !== undefined && configuredRepo !== "" && configuredRepoIdentity !== explicitRepoIdentity) {
     process.stderr.write(
       `backlog sync source conflict: Workspace is bound to ${cfg.repo}; refusing ${explicitRepo}\n`,
     );
     return 1;
   }
-  const repoArg = explicitRepo ?? cfg.repo ?? "";
+  const repoArg = explicitRepoIdentity !== undefined && configuredRepoIdentity === explicitRepoIdentity
+    ? configuredRepo
+    : (explicitRepo ?? configuredRepo);
   if (!repoArg) {
     process.stderr.write(
       "usage: roll backlog sync [--workspace <id|path>] --repo <owner/repo> [--label <a,b>] [--dry-run]\n" +
@@ -345,7 +359,7 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
       ...addedIssues.map((issue) => planFeatureStub(issue, featuresDir)),
       { path: localYaml, content: configContent },
     ];
-    applySyncWrites(writes, deps.writeFile);
+    applySyncWrites(writes, decision.canonicalRoot, deps.writeFile);
   } catch (error) {
     process.stderr.write(`sync write error: ${(error as Error).message}\n`);
     return 1;

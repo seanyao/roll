@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -363,5 +363,25 @@ describe("US-WS-009 Workspace backlog reads", () => {
     expect(shown.status).toBe(0);
     expect(shown.stdout).toContain("# FIX-GH-7 closed bug remains planning work");
     expect(shown.stdout).toContain("- [ ] verify workspace scope");
+  });
+
+  it("rejects management mutations whose Workspace paths escape through symlinks", async () => {
+    const f = fixture();
+    const alpha = createWorkspace(join(f.home, "alpha"), "ws-alpha");
+    await registerActive(f, "ws-alpha", alpha);
+    const externalBacklog = mkdtempSync(join(tmpdir(), "workspace-backlog-external-"));
+    sandboxes.push(externalBacklog);
+    writeFileSync(join(externalBacklog, "index.md"), "| Story | Description | Status |\n|---|---|---|\n| US-1 | outside | 📋 Todo |\n");
+    rmSync(join(alpha, "backlog"), { recursive: true, force: true });
+    symlinkSync(externalBacklog, join(alpha, "backlog"), "dir");
+    const outsideBefore = treeState(externalBacklog);
+
+    const read = await runCli(["backlog", "--workspace", "ws-alpha"], f);
+    expect(read.status).toBe(1);
+    expect(read.stderr).toContain("invalid_target");
+    const blocked = await runCli(["backlog", "block", "US-1", "--workspace", "ws-alpha"], f);
+    expect(blocked.status).toBe(1);
+    expect(blocked.stderr).toContain("invalid_target");
+    expect(treeState(externalBacklog)).toEqual(outsideBefore);
   });
 });

@@ -11,6 +11,7 @@ import { c, pad, renderState, RESET_RAW, row, trunc } from "../render.js";
 import {
   emitBacklogTargetError,
   resolveBacklogCommandTarget,
+  workspaceOwnsPath,
   type BacklogAggregateEntry,
   type BacklogOperation,
   type BacklogTargetDecision,
@@ -118,6 +119,7 @@ function positionalArgs(args: readonly string[]): string[] | undefined {
 function renderAggregate(entries: readonly BacklogAggregateEntry[]): number {
   const lines = [msg("backlog.header")];
   for (const entry of entries) {
+    if (!workspaceOwnsPath(entry.canonicalRoot, entry.backlogPath)) return emitError("invalid_target", entries);
     if (!existsSync(entry.backlogPath)) continue;
     for (const item of parseBacklog(entry.backlogPath)) {
       lines.push([entry.workspaceId, item.id, item.status, item.desc].join("\t"));
@@ -170,6 +172,7 @@ export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBa
     return emitBacklogTargetError(decision);
   }
   if ("aggregate" in decision) return renderAggregate(decision.aggregate);
+  if (!workspaceOwnsPath(decision.canonicalRoot, decision.backlogPath)) return emitError("invalid_target");
   if (storyId !== undefined) return showStory(decision, storyId);
 
   const backlog = decision.backlogPath;

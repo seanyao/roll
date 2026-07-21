@@ -25,6 +25,7 @@ import {
   emitBacklogTargetError,
   resolveBacklogCommandTarget,
   stripBacklogScopeArgs,
+  workspaceOwnsPath,
   type BacklogTargetResolver,
   type ResolvedBacklogTarget,
 } from "./backlog-target.js";
@@ -62,6 +63,13 @@ function resolveOneTarget(
     return 1;
   }
   return decision;
+}
+
+function requireOwnedPaths(target: ResolvedBacklogTarget, paths: readonly string[]): boolean {
+  const escaped = paths.find((path) => !workspaceOwnsPath(target.canonicalRoot, path));
+  if (escaped === undefined) return true;
+  errLine(`backlog: invalid_target — Workspace-owned path escapes canonical root: ${escaped}`);
+  return false;
 }
 
 /**
@@ -104,6 +112,7 @@ export function backlogSetStatusCommand(
   if (newStatus === null) return 1; // unreachable via the dispatcher
   const target = resolveOneTarget(args, "mutation", deps);
   if (typeof target === "number") return target;
+  if (!requireOwnedPaths(target, [target.backlogPath])) return 1;
   if (!existsSync(target.backlogPath)) {
     errLine(`[roll] ${msg("backlog.roll_backlog_md_not_found_run")}`);
     return 1;
@@ -153,6 +162,8 @@ export function backlogClaimCommand(args: string[], deps: ClaimDeps = realClaimD
   }
   const target = resolveOneTarget(args, "mutation", deps);
   if (typeof target === "number") return target;
+  const leasePath = join(target.runtimeRoot, "locks", "story-leases.json");
+  if (!requireOwnedPaths(target, [target.backlogPath, leasePath])) return 1;
   if (!existsSync(target.backlogPath)) {
     errLine(`[roll] ${msg("backlog.roll_backlog_md_not_found_run")}`);
     return 1;
@@ -164,7 +175,6 @@ export function backlogClaimCommand(args: string[], deps: ClaimDeps = realClaimD
     out(msg("backlog.no_items_matched", pattern));
     return 0;
   }
-  const leasePath = join(target.runtimeRoot, "locks", "story-leases.json");
   mkdirSync(dirname(leasePath), { recursive: true });
   setLease(leasePath, pattern, { source, claimedAt: deps.nowMs() });
   out(`claimed ${pattern} (${source} lease)`);
@@ -252,13 +262,15 @@ export function backlogUnstickCommand(args: string[], deps: UnstickDeps = realUn
   }
   const target = resolveOneTarget(args, "mutation", deps);
   if (typeof target === "number") return target;
+  const eventsPath = join(target.runtimeRoot, "events.ndjson");
+  const alertPath = join(target.runtimeRoot, "alerts", "unstick.md");
+  if (!requireOwnedPaths(target, [target.backlogPath, eventsPath, alertPath])) return 1;
   if (!existsSync(target.backlogPath)) {
     errLine(`backlog not found: ${target.backlogPath}`);
     return 0;
   }
 
   emitBacklogTarget(target);
-  const eventsPath = join(target.runtimeRoot, "events.ndjson");
   const events = existsSync(eventsPath) ? parseUnstickEvents(readFileSync(eventsPath, "utf8")) : [];
   const content = readFileSync(target.backlogPath, "utf8");
   const nowMs = deps.nowMs();
@@ -274,7 +286,6 @@ export function backlogUnstickCommand(args: string[], deps: UnstickDeps = realUn
 
   writeFileSync(target.backlogPath, applyStuckReverts(content, candidates));
 
-  const alertPath = join(target.runtimeRoot, "alerts", "unstick.md");
   mkdirSync(dirname(alertPath), { recursive: true });
   const ts = new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z");
   let alertBlock = "";
@@ -324,6 +335,7 @@ export function backlogLintCommand(args: string[], deps: BacklogMgmtTargetDeps =
   }
   const target = resolveOneTarget(args, "read", deps);
   if (typeof target === "number") return target;
+  if (!requireOwnedPaths(target, [target.backlogPath])) return 1;
   if (!existsSync(target.backlogPath)) {
     errLine(`[roll] backlog not found: ${target.backlogPath}`);
     return 1;

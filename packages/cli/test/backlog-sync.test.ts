@@ -3,7 +3,7 @@
  * Injected opener / loadIssues keep it network-free.
  */
 import type { GhIssue } from "@roll/core";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -244,19 +244,48 @@ describe("backlogSyncCommand — US-PORT-019", () => {
     expect(treeState(dir)).toEqual(before);
   });
 
+  it("treats GitHub owner/repo identity as case-insensitive", async () => {
+    seedBacklog();
+    mkdirSync("runtime");
+    writeFileSync(join("runtime", "backlog-sync.yaml"), "backlog_sync:\n  repo: Owner/Repo\n  labels: []\n");
+    const r = await capture(() => backlogSyncCommand(["--repo", "owner/repo"], deps([])));
+    expect(r.status).toBe(0);
+    expect(readFileSync(join("runtime", "backlog-sync.yaml"), "utf8")).toContain("repo: Owner/Repo");
+  });
+
+  it("rejects a Workspace path that escapes through a symlink before writing", async () => {
+    seedBacklog();
+    const external = mkdtempSync(join(tmpdir(), "backlog-sync-external-"));
+    mkdirSync(external, { recursive: true });
+    writeFileSync(join(external, "sentinel"), "outside\n");
+    symlinkSync(external, join(dir, "runtime"), "dir");
+    const backlogBefore = readFileSync(join("backlog", "index.md"), "utf8");
+    const externalBefore = treeState(external);
+    const r = await capture(() => backlogSyncCommand(["--repo", "a/b"], deps([{ number: 31, title: "escape" }])));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("invalid_target");
+    expect(readFileSync(join("backlog", "index.md"), "utf8")).toBe(backlogBefore);
+    expect(treeState(external)).toEqual(externalBefore);
+    rmSync(external, { recursive: true, force: true });
+  });
+
   it("rolls back the whole Workspace mutation when a later file write fails", async () => {
     seedBacklog();
+    mkdirSync(join("backlog", "backlog-lifecycle", "US-GH-21"), { recursive: true });
+    writeFileSync(join("backlog", "backlog-lifecycle", "US-GH-21", "spec.md"), "preexisting contract\n");
+    mkdirSync("runtime");
+    writeFileSync(join("runtime", "backlog-sync.yaml"), "backlog_sync:\n  repo: a/b\n  labels: []\n");
     const before = treeState(dir);
-    const injected = deps([{ number: 21, title: "atomic", state: "open" }]);
+    const injected = deps([{ number: 21, title: "atomic", state: "open", body: "- [ ] appended AC" }]);
     let writes = 0;
     injected.writeFile = (path, content) => {
       writes += 1;
-      if (writes === 2) throw new Error("injected contract write failure");
       writeFileSync(path, content);
+      if (writes === 3) throw new Error("injected config write failure");
     };
     const r = await capture(() => backlogSyncCommand(["--repo", "a/b"], injected));
     expect(r.status).toBe(1);
-    expect(r.err).toContain("sync write error: injected contract write failure");
+    expect(r.err).toContain("sync write error: injected config write failure");
     expect(treeState(dir)).toEqual(before);
   });
 });

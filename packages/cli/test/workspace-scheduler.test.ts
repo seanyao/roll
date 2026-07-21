@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -119,12 +120,41 @@ describe("US-WS-016 Workspace scheduler contract", () => {
       rollBin: "/tmp/roll",
     });
 
-    expect(script).toContain(`RT="${join(root, "runtime")}"`);
+    expect(script).toContain(`PROJECT='${root}'`);
+    expect(script).toContain(`RT='${join(root, "runtime")}'`);
     expect(script).toContain("export ROLL_WORKSPACE='ws-alpha'");
     expect(script).toContain(`export ROLL_PROJECT_RUNTIME_DIR='${join(root, "runtime")}'`);
     expect(script).toContain(`export ROLL_WORKSPACE_BACKLOG_PATH='${join(root, "backlog", "index.md")}'`);
     expect(script).toContain("loop run-once --workspace 'ws-alpha'");
     expect(script).not.toContain(`${root}/.roll/loop`);
+  });
+
+  it("quotes adversarial Workspace and runtime paths without executing shell syntax", () => {
+    const root = workspaceRoot("runner-shell-safe");
+    const project = join(root, "workspace-$(touch project-dollar)-`touch project-tick`-'\"");
+    const runtime = join(root, "runtime-$(touch runtime-dollar)-`touch runtime-tick`-'\"");
+    mkdirSync(project, { recursive: true });
+    const runner = join(root, "runner.sh");
+    writeFileSync(runner, buildLoopRunnerScript({
+      projectPath: project,
+      slug: "ws-alpha",
+      workspaceId: "ws-alpha",
+      runtimeRoot: runtime,
+      activeStart: 0,
+      activeEnd: 24,
+      rollBin: "/usr/bin/true",
+    }));
+
+    execFileSync("/bin/bash", [runner], {
+      cwd: root,
+      env: { ...process.env, ROLL_LOOP_FORCE: "1", ROLL_TMUX_BIN: "/usr/bin/false" },
+    });
+
+    expect(existsSync(join(runtime, "cron.log"))).toBe(true);
+    expect(existsSync(join(root, "project-dollar"))).toBe(false);
+    expect(existsSync(join(root, "project-tick"))).toBe(false);
+    expect(existsSync(join(root, "runtime-dollar"))).toBe(false);
+    expect(existsSync(join(root, "runtime-tick"))).toBe(false);
   });
 
   it("installs independent scheduler identities and only mutates the selected Workspace", async () => {

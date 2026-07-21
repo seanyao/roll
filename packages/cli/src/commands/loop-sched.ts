@@ -305,7 +305,6 @@ function shellQuote(value: string): string {
  */
 export function buildLoopRunnerScript(input: LoopRunnerInput): string {
   const rt = input.runtimeRoot ?? `${input.projectPath}/.roll/loop`;
-  const project = shellQuote(input.projectPath);
   const workspaceExports = input.workspaceId === undefined
     ? ""
     : `export ROLL_WORKSPACE=${shellQuote(input.workspaceId)}\nexport ROLL_PROJECT_RUNTIME_DIR=${shellQuote(rt)}\nexport ROLL_WORKSPACE_BACKLOG_PATH=${shellQuote(join(input.projectPath, "backlog", "index.md"))}\n`;
@@ -318,7 +317,8 @@ for _d in /opt/homebrew/bin /usr/local/bin /opt/local/bin "$HOME/.local/bin" "$H
   case ":$PATH:" in *":$_d:"*) ;; *) [ -d "$_d" ] && PATH="$_d:$PATH" ;; esac
 done
 export PATH
-RT="${rt}"
+PROJECT=${shellQuote(input.projectPath)}
+RT=${shellQuote(rt)}
 LOG="$RT/cron.log"
 mkdir -p "$RT"
 ${workspaceExports}# Workspace-bound scheduler state above is the only runtime authority.
@@ -381,8 +381,9 @@ ROLL_BIN="\${ROLL_BIN:-${input.rollBin ?? '$(command -v roll || echo /opt/homebr
 TMUX_BIN="\${ROLL_TMUX_BIN:-tmux}"
 if [ -z "$ROLL_TMUX_WRAPPED" ] && [ -z "$ROLL_LOOP_NO_TMUX" ] && command -v "$TMUX_BIN" >/dev/null 2>&1; then
   _sess="roll-loop-${input.slug}"
+  printf -v _watch_cmd 'cd %q && %q loop watch --since all' "$PROJECT" "$ROLL_BIN"
   "$TMUX_BIN" has-session -t "$_sess" 2>/dev/null || \\
-    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "cd ${project} && '$ROLL_BIN' loop watch --since all" 2>/dev/null || true
+    "$TMUX_BIN" new-session -d -s "$_sess" -x 200 -y 50 -n watch "$_watch_cmd" 2>/dev/null || true
   if "$TMUX_BIN" new-window -d -t "$_sess" -n "c$(date +%H%M%S)" "ROLL_TMUX_WRAPPED=1 ROLL_LOOP_FORCE='\${ROLL_LOOP_FORCE:-}' ${tmuxEnvPassthrough} ROLL_BIN='$ROLL_BIN' exec bash '$0'" 2>/dev/null; then
     exit 0
   fi
@@ -402,7 +403,7 @@ printf '%s:%s\\n' "$$" "$(date -u +%s)" > "$CYCLE_LOCK"
 trap 'rm -f "$CYCLE_LOCK"' EXIT
 # Keep the box awake for the duration of the cycle.
 caffeinate -i -w $$ 2>/dev/null &
-cd "${input.projectPath}" || exit 0
+cd "$PROJECT" || exit 0
 echo "[$(date '+%Y-%m-%dT%H:%M:%S%z')] cycle start (v3 run-once)" >> "$LOG"
 # FIX-230 observability: the effective proxy env, so an env-drift failure is
 # readable straight from the log instead of needing a session autopsy.

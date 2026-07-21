@@ -258,7 +258,6 @@ function captureMetadataMatches(
     : source.previousRevisions.find((entry) => entry.revision === revision)?.capturedAt;
   if (
     expectedHistory === undefined || expectedCapturedAt === undefined ||
-    capture.requirementId !== source.requirementId || capture.provider !== source.provider || capture.ref !== source.ref ||
     capture.revision !== revision || capture.capturedAt !== expectedCapturedAt ||
     !samePreviousRevisions(capture.previousRevisions, expectedHistory)
   ) {
@@ -266,6 +265,14 @@ function captureMetadataMatches(
   }
   if (revision !== source.revision) return true;
   return JSON.stringify(capture) === JSON.stringify(source);
+}
+
+function captureIdentityMatches(
+  source: RequirementSourceManifest,
+  capture: RequirementSourceManifest,
+): boolean {
+  return capture.requirementId === source.requirementId &&
+    capture.provider === source.provider && capture.ref === source.ref;
 }
 
 interface WalkState {
@@ -378,7 +385,11 @@ function scanRevision(
   } catch {
     capture = undefined;
   }
-  if (capture === undefined || !captureMetadataMatches(source, capture, revision)) {
+  if (capture === undefined || !captureIdentityMatches(source, capture)) {
+    findings.push({ code: "manifest_invalid", revision, evidencePath: captureRelative });
+    return;
+  }
+  if (!captureMetadataMatches(source, capture, revision)) {
     findings.push({ code: "revision_metadata_mismatch", revision, evidencePath: captureRelative });
     return;
   }

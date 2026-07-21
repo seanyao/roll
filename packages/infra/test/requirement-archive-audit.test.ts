@@ -173,6 +173,27 @@ describe("US-WS-007a Requirement archive audit", () => {
   });
 
   it.each([
+    ["unsupported capture schema", (capture: Record<string, unknown>) => { capture["schema"] = "roll.requirement-source/v2"; }],
+    ["invalid capture identity", (capture: Record<string, unknown>) => { capture["requirementId"] = "req-000000000000"; }],
+  ])("maps %s to an untrusted manifest finding", (_name, mutate) => {
+    const f = fixture();
+    const evidencePath = `revisions/${requirementRevisionKey("6")}/capture.yaml`;
+    const capturePath = join(f.requirementPath, evidencePath);
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as Record<string, unknown>;
+    mutate(capture);
+    writeFileSync(capturePath, `${JSON.stringify(capture, null, 2)}\n`);
+
+    expect(auditRequirementArchive(f.auditInput)).toMatchObject({
+      status: "untrusted",
+      findings: [{
+        code: "manifest_invalid",
+        revision: "6",
+        evidencePath,
+      }],
+    });
+  });
+
+  it.each([
     {
       name: "Requirement root",
       plant: (f: ReturnType<typeof fixture>, outside: string) => {

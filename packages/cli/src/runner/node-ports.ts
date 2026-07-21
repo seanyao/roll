@@ -21,7 +21,12 @@ import {
   type StoryDeliveryTruth,
   type Tier,
 } from "@roll/core";
-import { absent, present } from "@roll/spec";
+import {
+  absent,
+  present,
+  type CycleRepositoryExecutionContext,
+  type RepositoryExecutionContext,
+} from "@roll/spec";
 import {
   acquireLock,
   branchCleanlyRebasesOntoMain,
@@ -57,7 +62,14 @@ import { probeAgentReachable } from "./agent-liveness.js";
 import { readPendingPublish } from "./pending-publish.js";
 import { resolveScopedStoryExecute } from "./scoped-route.js";
 import { readSelfHeal } from "./selfheal-budget.js";
-import type { Ports, ProcessClock, RunnerPaths } from "./ports.js";
+import type {
+  Ports,
+  ProcessClock,
+  RepositoryPortAdapters,
+  RepositoryPorts,
+  RunnerPaths,
+} from "./ports.js";
+import { injectRepositoryContext } from "./project-map.js";
 import {
   bootstrapWorktreeSkills,
   commitRollMetadataRepo,
@@ -66,6 +78,131 @@ import {
 import { rescueLeakedMain } from "./sandbox-boundary.js";
 
 const execFileAsync = promisify(execFile);
+
+async function commitsAheadAt(worktreeCwd: string, baseRef = "origin/main"): Promise<number> {
+  const r = await execFileAsync("git", ["rev-list", "--count", `${baseRef}..HEAD`], {
+    cwd: worktreeCwd,
+    encoding: "utf8",
+  }).catch(() => ({ stdout: "0" }));
+  const n = Number((r.stdout ?? "0").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+async function tcrCountAt(worktreeCwd: string, baseRef = "origin/main"): Promise<number | undefined> {
+  const r = await execFileAsync("git", ["log", "--oneline", `${baseRef}..HEAD`], {
+    cwd: worktreeCwd,
+    encoding: "utf8",
+  }).catch(() => undefined);
+  if (r === undefined) return undefined;
+  return (r.stdout ?? "").split("\n").filter((line) => line.includes(" tcr:")).length;
+}
+
+async function recentCommitsAt(worktreeCwd: string, baseRef = "origin/main"): Promise<ObservedCommit[]> {
+  const r = await execFileAsync(
+    "git",
+    ["log", "--reverse", "--format=%H%x09%ct%x09%s", `${baseRef}..HEAD`],
+    { cwd: worktreeCwd, encoding: "utf8" },
+  ).catch(() => ({ stdout: "" }));
+  const out: ObservedCommit[] = [];
+  for (const line of (r.stdout ?? "").split("\n")) {
+    if (line.trim() === "") continue;
+    const [hash, ct, ...rest] = line.split("\t");
+    if (hash === undefined || hash === "") continue;
+    const tsSec = Number((ct ?? "0").trim());
+    out.push({
+      hash,
+      message: rest.join("\t"),
+      tsSec: Number.isFinite(tsSec) ? tsSec : 0,
+    });
+  }
+  return out;
+}
+
+function defaultRepositoryAdapters(): RepositoryPortAdapters {
+  return {
+    git: {
+      commitsAhead: (repository, baseRef) => commitsAheadAt(repository.worktreePath, baseRef),
+      tcrCount: (repository, baseRef) => tcrCountAt(repository.worktreePath, baseRef),
+      recentCommits: (repository, baseRef) => recentCommitsAt(repository.worktreePath, baseRef),
+      push: (repository, branch) => gitPush(repository.worktreePath, branch),
+    },
+    provider: {
+      async repoSlug(repository) {
+        return ghRepoSlug(await remoteUrl(repository.worktreePath));
+      },
+      async prState(repository, branch) {
+        const slug = ghRepoSlug(await remoteUrl(repository.worktreePath));
+        return slug === undefined ? "UNKNOWN" : prViewState(slug, branch);
+      },
+      async prMergeInfo(repository, branch) {
+        const slug = ghRepoSlug(await remoteUrl(repository.worktreePath));
+        return slug === undefined ? undefined : prViewMergeInfo(slug, branch);
+      },
+    },
+  };
+}
+
+export function createRepositoryPorts(
+  execution: CycleRepositoryExecutionContext,
+  adapters: RepositoryPortAdapters = defaultRepositoryAdapters(),
+): RepositoryPorts {
+  const entries = Object.entries(execution.repositories);
+  const aliases = new Set<string>();
+  for (const [key, repository] of entries) {
+    if (key !== repository.repoId || aliases.has(repository.alias)) {
+      throw new Error("invalid_repository_map: keys must match unique repoId/alias identities");
+    }
+    aliases.add(repository.alias);
+  }
+  if (entries.length === 0) throw new Error("invalid_repository_map: at least one repository is required");
+  const context = (repoId: string): RepositoryExecutionContext => {
+    const repository = execution.repositories[repoId];
+    if (repository === undefined) throw new Error(`unknown_repository: ${repoId}`);
+    return repository;
+  };
+  const writable = (repoId: string, operation: "publish"): RepositoryExecutionContext => {
+    const repository = context(repoId);
+    if (repository.access === "read") {
+      throw new Error(`read_only_repository: ${repoId} cannot ${operation}`);
+    }
+    return repository;
+  };
+  return {
+    context,
+    git: {
+      commitsAhead: async (repoId, baseRef) => adapters.git.commitsAhead(context(repoId), baseRef),
+      tcrCount: async (repoId, baseRef) => adapters.git.tcrCount(context(repoId), baseRef),
+      recentCommits: async (repoId, baseRef) => adapters.git.recentCommits(context(repoId), baseRef),
+      push: async (repoId, branch) => adapters.git.push(writable(repoId, "publish"), branch),
+    },
+    provider: {
+      repoSlug: async (repoId) => adapters.provider.repoSlug(context(repoId)),
+      prState: async (repoId, branch) => adapters.provider.prState(context(repoId), branch),
+      prMergeInfo: async (repoId, branch) => adapters.provider.prMergeInfo(context(repoId), branch),
+    },
+  };
+}
+
+const REPOSITORY_BUILDER_PURPOSES = new Set(["builder", "test_author", "implementer", "attacker"]);
+
+function repositoryAwareSpawn(
+  spawn: AgentSpawn,
+  execution: CycleRepositoryExecutionContext | undefined,
+): AgentSpawn {
+  if (execution === undefined) return spawn;
+  const scoped: AgentSpawn = async (agent, opts) => {
+    if (opts.purpose === undefined || !REPOSITORY_BUILDER_PURPOSES.has(opts.purpose)) {
+      return spawn(agent, opts);
+    }
+    return spawn(agent, {
+      ...opts,
+      cwd: execution.issueRoot,
+      skillBody: injectRepositoryContext(opts.skillBody, execution),
+    });
+  };
+  scoped.supportedPurposes = spawn.supportedPurposes;
+  return scoped;
+}
 
 /**
  * FIX-1249 — config-rig model backstop for POOL-PICKED agents. A `select` role
@@ -133,10 +270,15 @@ export function nodePorts(opts: {
   routeDeps: RouteDeps;
   agentSpawn?: AgentSpawn;
   clock?: ProcessClock;
+  repositoryExecution?: CycleRepositoryExecutionContext;
+  repositoryAdapters?: RepositoryPortAdapters;
 }): Ports {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
-  const spawn = opts.agentSpawn ?? realAgentSpawn;
+  const spawn = repositoryAwareSpawn(opts.agentSpawn ?? realAgentSpawn, opts.repositoryExecution);
+  const repositories = opts.repositoryExecution === undefined
+    ? undefined
+    : createRepositoryPorts(opts.repositoryExecution, opts.repositoryAdapters);
 
   // FIX-906: the unified delivery-truth predicate. The structured projection
   // (`ensureDeliveriesFresh`, FIX-904/905) rebuilds deliveries.jsonl from BOTH
@@ -195,6 +337,7 @@ export function nodePorts(opts: {
     repoCwd: opts.repoCwd,
     paths: opts.paths,
     skillBody: opts.skillBody,
+    ...(repositories === undefined ? {} : { repositories }),
     clock,
     agentSpawn: spawn,
     // FIX-906: unified delivery-truth predicate (structured projection over
@@ -240,12 +383,7 @@ export function nodePorts(opts: {
         // E8: count ahead of the caller's integration branch (defaults to the
         // historical origin/main). A submodule cycle has no origin/main, so the
         // observer callers pass resolveIntegrationBranch(execRepoCwd) instead.
-        const r = await execFileAsync("git", ["rev-list", "--count", `${baseRef}..HEAD`], {
-          cwd: worktreeCwd,
-          encoding: "utf8",
-        }).catch(() => ({ stdout: "0" }));
-        const n = Number((r.stdout ?? "0").trim());
-        return Number.isFinite(n) ? n : 0;
+        return commitsAheadAt(worktreeCwd, baseRef);
       },
       async mainAhead(repoCwd) {
         const r = await execFileAsync("git", ["rev-list", "--count", "origin/main..main"], {
@@ -265,38 +403,14 @@ export function nodePorts(opts: {
         // FIX-1244: a git failure (missing/stale ref, gone worktree) means the
         // count is UNKNOWN — return undefined so callers never misread it as a
         // real zero (the zero-TCR self-heal gate consumes this).
-        const r = await execFileAsync("git", ["log", "--oneline", `${baseRef}..HEAD`], {
-          cwd: worktreeCwd,
-          encoding: "utf8",
-        }).catch(() => undefined);
-        if (r === undefined) return undefined;
-        return (r.stdout ?? "")
-          .split("\n")
-          .filter((l) => l.includes(" tcr:")).length;
+        return tcrCountAt(worktreeCwd, baseRef);
       },
       async recentCommits(worktreeCwd, baseRef = "origin/main") {
         // The runner's OWN git observation — oldest-first so observeCommits()
         // appends events in chronological order. %ct = committer epoch seconds.
         // E8: baseRef defaults to origin/main; a submodule cycle passes the
         // submodule's integration branch so the observer sees the real commits.
-        const r = await execFileAsync(
-          "git",
-          ["log", "--reverse", "--format=%H%x09%ct%x09%s", `${baseRef}..HEAD`],
-          { cwd: worktreeCwd, encoding: "utf8" },
-        ).catch(() => ({ stdout: "" }));
-        const out: ObservedCommit[] = [];
-        for (const line of (r.stdout ?? "").split("\n")) {
-          if (line.trim() === "") continue;
-          const [hash, ct, ...rest] = line.split("\t");
-          if (hash === undefined || hash === "") continue;
-          const tsSec = Number((ct ?? "0").trim());
-          out.push({
-            hash,
-            message: rest.join("\t"),
-            tsSec: Number.isFinite(tsSec) ? tsSec : 0,
-          });
-        }
-        return out;
+        return recentCommitsAt(worktreeCwd, baseRef);
       },
       // RESUME-PRIOR-WORK probes (un-merged audit-branch reuse).
       async fetchRemoteBranch(repoCwd, branch) {

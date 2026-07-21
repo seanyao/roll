@@ -176,17 +176,6 @@ export interface RepositoryExecutionContext {
  * cardinality one and many intentionally share this exact contract. */
 export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecutionContext>>;
 
-/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
-export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
-  readonly issueRoot: string;
-  readonly repositories: RepositoryExecutionMap;
-}
-
-/** Required identity envelope for every repository-specific Cycle fact. */
-export interface RepositoryCycleIdentity extends RepositoryIssueIdentity {
-  readonly cycleId: string;
-}
-
 export interface IssueManifest {
   readonly schema: typeof ISSUE_MANIFEST_V1;
   readonly workspaceId: string;

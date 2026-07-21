@@ -1,5 +1,5 @@
 import type { CycleContext, CycleEvent, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
-import type { RollEvent } from "@roll/spec";
+import type { RepositoryExecutionContext, RollEvent } from "@roll/spec";
 import type { CaptureMarker, Clock, ScreenshotResult } from "@roll/infra";
 import type { AgentSpawn } from "./agent-spawn.js";
 import type { ReachResult } from "./agent-liveness.js";
@@ -125,6 +125,44 @@ export interface GithubPort {
   openPrTitles(repoCwd: string): Promise<OpenPrReferenceInput[]>;
 }
 
+/** Low-level Node adapters receive the resolved repository context. Public
+ * runner ports below accept only repoId, so cwd/path strings can never become a
+ * competing repository identity. */
+export interface RepositoryPortAdapters {
+  readonly git: {
+    commitsAhead(repository: RepositoryExecutionContext, baseRef?: string): Promise<number>;
+    tcrCount(repository: RepositoryExecutionContext, baseRef?: string): Promise<number | undefined>;
+    recentCommits(repository: RepositoryExecutionContext, baseRef?: string): Promise<ObservedCommit[]>;
+    push(repository: RepositoryExecutionContext, branch: string): Promise<{ code: number }>;
+  };
+  readonly provider: {
+    repoSlug(repository: RepositoryExecutionContext): Promise<string | undefined>;
+    prState(repository: RepositoryExecutionContext, branch: string): Promise<string>;
+    prMergeInfo(
+      repository: RepositoryExecutionContext,
+      branch: string,
+    ): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
+  };
+}
+
+export interface RepositoryPorts {
+  readonly context: (repoId: string) => RepositoryExecutionContext;
+  readonly git: {
+    commitsAhead(repoId: string, baseRef?: string): Promise<number>;
+    tcrCount(repoId: string, baseRef?: string): Promise<number | undefined>;
+    recentCommits(repoId: string, baseRef?: string): Promise<ObservedCommit[]>;
+    push(repoId: string, branch: string): Promise<{ code: number }>;
+  };
+  readonly provider: {
+    repoSlug(repoId: string): Promise<string | undefined>;
+    prState(repoId: string, branch: string): Promise<string>;
+    prMergeInfo(
+      repoId: string,
+      branch: string,
+    ): Promise<{ state: string; mergedAt?: string; mergeCommit?: string } | undefined>;
+  };
+}
+
 /** Process facet — lock + heartbeat (infra/process.ts). */
 export interface ProcessPort {
   acquireLock(
@@ -240,6 +278,9 @@ export type DepsExec = (
 export interface Ports {
   git: GitPort;
   github: GithubPort;
+  /** Workspace repository operations, keyed only by stable repoId. Absent for
+   * pre-Workspace runner construction; never synthesized from repoCwd. */
+  repositories?: RepositoryPorts;
   process: ProcessPort;
   events: EventsPort;
   backlog: BacklogPort;

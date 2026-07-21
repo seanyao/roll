@@ -170,6 +170,25 @@ describe("US-WS-007a Requirement archive audit", () => {
     expect(snapshotTree(f.workspace)).toEqual(before);
   });
 
+  it("ignores undeclared archive entries because trust is driven only by manifest descriptors", () => {
+    const f = fixture();
+    const outside = join(f.root, "outside-undeclared");
+    write(join(outside, "secret.md"), "undeclared outside content\n");
+    symlinkSync(
+      join(outside, "secret.md"),
+      join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "undeclared.md"),
+    );
+    symlinkSync(outside, join(f.requirementPath, "revisions", "rev-undeclared"));
+
+    // Neither path is declared by source.yaml or an immutable capture descriptor,
+    // so the archive auditor must not enumerate or follow either one.
+    expect(auditRequirementArchive(f.auditInput)).toMatchObject({
+      status: "healthy",
+      checkedRevisions: ["7", "6"],
+      findings: [],
+    });
+  });
+
   it.each([
     {
       name: "missing revision directory",
@@ -385,7 +404,7 @@ describe("US-WS-007a Requirement archive audit", () => {
     });
   });
 
-  it("does not follow a directory swapped to an outside symlink between lstat and enumeration", () => {
+  it("does not follow a directory swapped to an outside symlink between lstat and anchored open", () => {
     const f = fixture();
     const relative = `revisions/${requirementRevisionKey("6")}/context/brief/nested`;
     const target = join(f.requirementPath, relative);
@@ -433,98 +452,6 @@ describe("US-WS-007a Requirement archive audit", () => {
     expect(result.findings).toContainEqual({
       code: "archive_changed_during_read",
       evidencePath: "source.yaml",
-    });
-  });
-
-  it.each([
-    ["regular entry", false, "corrupt", "revision_metadata_mismatch"],
-    ["symlink entry", true, "untrusted", "unsafe_archive_path"],
-  ])("classifies an undeclared revision-root %s without hiding it behind a scan-limit result", (_name, symlink, status, code) => {
-    const f = fixture();
-    const revisionRoot = join(f.requirementPath, "revisions", requirementRevisionKey("6"));
-    const extra = join(revisionRoot, "extra.bin");
-    if (symlink) {
-      const outside = join(f.root, "outside-extra.bin");
-      write(outside, "outside\n");
-      symlinkSync(outside, extra);
-    } else {
-      write(extra, "unexpected\n");
-    }
-
-    const result = auditRequirementArchive(f.auditInput);
-
-    expect(result.status).toBe(status);
-    expect(result.findings).toContainEqual({
-      code,
-      revision: "6",
-      evidencePath: `revisions/${requirementRevisionKey("6")}/extra.bin`,
-    });
-  });
-
-  it("detects a sibling archive entry added after its parent directory was enumerated", () => {
-    const f = fixture();
-    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "requirement.md");
-    const added = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "late.bin");
-    let changed = false;
-
-    const result = auditRequirementArchive(f.auditInput, {
-      afterReadFile: (path) => {
-        if (path !== trigger || changed) return;
-        changed = true;
-        write(added, "late mutation\n");
-      },
-    });
-
-    expect(changed).toBe(true);
-    expect(result.status).toBe("untrusted");
-    expect(result.findings).toContainEqual({
-      code: "archive_changed_during_read",
-      revision: "6",
-      evidencePath: `revisions/${requirementRevisionKey("6")}`,
-    });
-  });
-
-  it("detects a nested context entry added after that directory was enumerated", () => {
-    const f = fixture();
-    const nestedRoot = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "brief", "nested");
-    const trigger = join(nestedRoot, "rules.md");
-    let changed = false;
-
-    const result = auditRequirementArchive(f.auditInput, {
-      afterReadFile: (path) => {
-        if (path !== trigger || changed) return;
-        changed = true;
-        write(join(nestedRoot, "late.md"), "late context mutation\n");
-      },
-    });
-
-    expect(changed).toBe(true);
-    expect(result.status).toBe("untrusted");
-    expect(result.findings).toContainEqual({
-      code: "archive_changed_during_read",
-      revision: "6",
-      evidencePath: `revisions/${requirementRevisionKey("6")}/context/brief/nested`,
-    });
-  });
-
-  it("detects a revision directory added after revisions/ was enumerated", () => {
-    const f = fixture();
-    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("7"), "requirement.md");
-    let changed = false;
-
-    const result = auditRequirementArchive(f.auditInput, {
-      afterReadFile: (path) => {
-        if (path !== trigger || changed) return;
-        changed = true;
-        mkdirSync(join(f.requirementPath, "revisions", "rev-late"));
-      },
-    });
-
-    expect(changed).toBe(true);
-    expect(result.status).toBe("untrusted");
-    expect(result.findings).toContainEqual({
-      code: "archive_changed_during_read",
-      evidencePath: "revisions",
     });
   });
 

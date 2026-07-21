@@ -314,22 +314,23 @@ const CARD_SKIP_THRESHOLD = 3;
  * FIX-363: a card was just skip-listed (failed K times). Write an ACTIONABLE
  * alert so the owner knows WHICH card was parked and that the loop kept going —
  * instead of the loop silently auto-pausing on it. The card stays Todo; an owner
- * fixes it (or clears `.roll/loop/skip-cards.json`) to re-arm it.
+ * fixes it (or clears the active runtime's `skip-cards.json`) to re-arm it.
  */
-function writeCardSkipAlert(
+export function writeCardSkipAlert(
   alertsPath: string,
   eventsPath: string,
   cycleId: string,
   storyId: string,
   count: number,
 ): void {
+  const skipCardsPath = join(dirname(eventsPath), "skip-cards.json");
   const msg =
     `# ALERT — poison-pill card parked (loop kept running)\n\n` +
     `**Cycle**: ${cycleId}\n` +
     `**Card**: ${storyId}\n` +
     `**Reason**: failed ${count}× — skip-listed so the loop keeps delivering OTHER cards instead of pausing.\n` +
     `**Action**: investigate ${storyId} (it likely needs a smaller split, a spec fix, or manual delivery). ` +
-    `Once addressed, remove it from \`.roll/loop/skip-cards.json\` (or just fix the card) to re-arm it.\n`;
+    `Once addressed, remove it from \`${skipCardsPath}\` (or just fix the card) to re-arm it.\n`;
   try {
     appendFileSync(alertsPath, `${msg}\n`, "utf8");
   } catch {

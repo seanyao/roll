@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter, writeCardSkipAlert } from "../src/commands/loop-run-once.js";
 import { buildRunOnceChildEnv } from "../src/commands/loop-go.js";
 import { GOAL_ALLOWED_CARDS_ENV, GOAL_GUIDED_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
@@ -83,6 +83,17 @@ async function runPausedRunOnce(project: string, childEnv: NodeJS.ProcessEnv): P
 }
 
 describe("loop run-once CLI wiring", () => {
+  it("writes the active runtime skip-cards path in poison-pill alerts", () => {
+    const runtime = tmp("skip-alert-runtime");
+    const alertsPath = join(runtime, "alerts.md");
+    const eventsPath = join(runtime, "events.ndjson");
+
+    writeCardSkipAlert(alertsPath, eventsPath, "cycle-1", "US-WS-016", 3);
+
+    expect(readFileSync(alertsPath, "utf8")).toContain(join(runtime, "skip-cards.json"));
+    expect(readFileSync(alertsPath, "utf8")).not.toContain(".roll/loop/skip-cards.json");
+  });
+
   it("registers `loop` TS-first (run-once + status are ported)", () => {
     registerAll();
     expect(isPorted("loop")).toBe(true);

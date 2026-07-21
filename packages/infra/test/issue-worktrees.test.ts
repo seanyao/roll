@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IssueStoryContract } from "@roll/core";
@@ -32,6 +33,29 @@ function sandbox(): string {
 
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync("git", [...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function treeDigest(root: string): string {
+  const hash = createHash("sha256");
+  const visit = (path: string, relativePath: string): void => {
+    const stat = lstatSync(path);
+    hash.update(`${relativePath}\0${stat.mode}\0${stat.size}\0${stat.mtimeMs}\0${stat.ctimeMs}\0`);
+    if (stat.isSymbolicLink()) {
+      hash.update(`L\0${readlinkSync(path)}\0`);
+      return;
+    }
+    if (stat.isDirectory()) {
+      hash.update("D\0");
+      for (const name of readdirSync(path).sort()) {
+        visit(join(path, name), relativePath === "" ? name : join(relativePath, name));
+      }
+      return;
+    }
+    hash.update("F\0");
+    hash.update(readFileSync(path));
+  };
+  visit(root, "");
+  return hash.digest("hex");
 }
 
 /** Materialize a real remote with one commit on main. */
@@ -180,6 +204,112 @@ describe("inspectIssueInit", () => {
     });
     expect(statSync(f.rollHome).mtimeMs).toBe(beforeDigest); // still zero writes
     expect(report.manifest.state).toBe("conflict");
+  });
+
+  it("reports conflict for a brand-new target whose governed branch already exists, with zero writes", async () => {
+    const f = fixture();
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    await ensureRepositoryCache({ binding: sot1Binding, rollHome: f.rollHome, integrationRefspec: "+refs/heads/main:refs/remotes/origin/main" });
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    git(cachePath, ["branch", "roll/ws-demo/US-XX1/sot1", "refs/remotes/origin/main"]);
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    const rollHomeBefore = treeDigest(f.rollHome);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(existsSync(f.issueRoot)).toBe(false);
+  });
+
+  it("reports repaired for a pinned target whose branch is recoverable after a clean worktree removal", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    writeFileSync(join(sot1Path, "story-work.txt"), "work\n", "utf8");
+    git(sot1Path, ["add", "story-work.txt"]);
+    git(sot1Path, ["commit", "-q", "-m", "story work before path loss"]);
+    git(cachePath, ["worktree", "remove", "--force", sot1Path]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("repaired");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+  });
+
+  it("reports repaired without pruning a pinned target whose deleted worktree has stale prunable admin metadata", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    rmSync(sot1Path, { recursive: true, force: true });
+    expect(git(cachePath, ["worktree", "list", "--porcelain"])).toContain("prunable");
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("repaired");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
+    expect(git(cachePath, ["worktree", "list", "--porcelain"])).toContain("prunable");
+  });
+
+  it("reports conflict for a pinned target whose governed branch diverged", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(cachePath, ["worktree", "remove", "--force", sot1Path]);
+    git(cachePath, ["update-ref", "-d", "refs/heads/roll/ws-demo/US-XX1/sot1"]);
+    const unrelated = join(f.root, "unrelated");
+    mkdirSync(unrelated, { recursive: true });
+    git(unrelated, ["init", "-q", "-b", "unrelated"]);
+    git(unrelated, ["config", "user.email", "roll@example.test"]);
+    git(unrelated, ["config", "user.name", "Roll Test"]);
+    writeFileSync(join(unrelated, "unrelated.txt"), "unrelated\n", "utf8");
+    git(unrelated, ["add", "unrelated.txt"]);
+    git(unrelated, ["commit", "-q", "-m", "unrelated history"]);
+    git(cachePath, ["fetch", unrelated, "unrelated:roll/ws-demo/US-XX1/sot1"]);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+  });
+
+  it("reports conflict when a pinned target's governed branch is checked out in another real worktree", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = { storyId: "US-XX1", repositories: [{ alias: "sot1", access: "write", requiredDelivery: true }] };
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const sot1Binding = f.bindings.find((candidate) => candidate.alias === "sot1");
+    if (sot1Binding === undefined) throw new Error("fixture must resolve sot1's binding");
+    const cachePath = join(f.rollHome, "repos", `${sot1Binding.repoId}.git`);
+    const sot1Path = join(f.issueRoot, "sot1");
+    git(cachePath, ["worktree", "remove", "--force", sot1Path]);
+    const elsewhere = join(f.root, "elsewhere-检出");
+    git(cachePath, ["worktree", "add", elsewhere, "roll/ws-demo/US-XX1/sot1"]);
+    const rollHomeBefore = treeDigest(f.rollHome);
+    const workspaceBefore = treeDigest(f.workspaceRoot);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(treeDigest(f.rollHome)).toBe(rollHomeBefore);
+    expect(treeDigest(f.workspaceRoot)).toBe(workspaceBefore);
   });
 });
 

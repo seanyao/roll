@@ -33,7 +33,9 @@ import {
   type RepositoryCacheProbeState,
 } from "./repository-cache.js";
 import {
+  branchExists,
   checkWorktreeCompatibility,
+  inspectGovernedBranchState,
   issueWorktreeAdd,
   issueWorktreeIdentity,
   issueWorktreeRemove,
@@ -585,6 +587,21 @@ function combineTargetState(cacheState: RepositoryCacheProbeState, worktreeState
   return worktreeState;
 }
 
+async function resolveAbsentWriteTargetState(
+  cachePath: string,
+  workBranch: string,
+  baseSha: string | null,
+  isPinned: boolean,
+): Promise<IssueTargetProbeState> {
+  if (baseSha === null) {
+    return await branchExists(cachePath, workBranch) ? "conflict" : isPinned ? "repairable" : "absent";
+  }
+  const branchState = await inspectGovernedBranchState(cachePath, workBranch, baseSha);
+  if (branchState === "absent") return isPinned ? "repairable" : "absent";
+  if (!isPinned) return "conflict";
+  return branchState === "conflict" ? "conflict" : "repairable";
+}
+
 /** Resolve a target's real worktree state against what THIS Issue target
  *  EXPECTS (its pinned base — never the shared cache's current ref — plus
  *  its declared access and governed branch). A present worktree that fails
@@ -605,9 +622,13 @@ async function probeWorktreeState(
   cachePath: string,
   expected: ExpectedWorktreeFacts,
   isPinned: boolean,
+  inspectGovernedBranch: boolean,
 ): Promise<IssueTargetProbeState> {
   const identity = await issueWorktreeIdentity(path, cachePath);
-  if (identity.state === "absent") return isPinned ? "repairable" : "absent";
+  if (identity.state === "absent") {
+    if (expected.workBranch === null || !inspectGovernedBranch) return isPinned ? "repairable" : "absent";
+    return resolveAbsentWriteTargetState(cachePath, expected.workBranch, expected.baseSha, isPinned);
+  }
   if (identity.state === "conflict") return "conflict";
   const compatible = await checkWorktreeCompatibility(identity, cachePath, expected);
   return compatible ? "compatible" : "conflict";
@@ -683,7 +704,7 @@ export async function inspectIssueInit(input: InspectIssueInitInput): Promise<Is
       continue;
     }
     const worktreePath = join(input.issueRoot, declared.alias);
-    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned);
+    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned, true);
     const combined = combineTargetState(cacheState, worktreeState);
     const decision: IssueInitOutcome | "conflict" = combined === "absent" ? "created" : combined === "compatible" ? "reused" : combined === "repairable" ? "repaired" : "conflict";
     targets[declared.alias] = {
@@ -899,7 +920,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       throw new IssueInitializationError("rejected", `Issue-local pinned facts for ${declared.alias} are malformed or conflicting: ${(error as Error).message}`, { cause: error });
     }
     const worktreePath = join(input.issueRoot, declared.alias);
-    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned);
+    const worktreeState = await probeWorktreeState(worktreePath, identity.cachePath, expected, isPinned, false);
     worktreeStates[declared.alias] = combineTargetState(cacheState, worktreeState);
   }
 

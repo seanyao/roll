@@ -134,7 +134,7 @@ export function unprotectReadOnlyWorktree(path: string): void {
 }
 
 /** True when `branch` already exists as a real ref in this cache. */
-async function branchExists(cachePath: string, branch: string): Promise<boolean> {
+export async function branchExists(cachePath: string, branch: string): Promise<boolean> {
   const result = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], cachePath);
   return result.code === 0;
 }
@@ -242,6 +242,38 @@ function worktreeListPaths(porcelain: string): Set<string> {
     if (line.startsWith("worktree ")) paths.add(line.slice("worktree ".length).trim());
   }
   return paths;
+}
+
+/** Branches checked out by live worktrees. Missing/prunable registrations are
+ *  deliberately ignored: apply prunes those records before recovering the
+ *  governed branch, and a zero-write check must report the same decision. */
+function worktreeListActiveBranches(porcelain: string): Set<string> {
+  const branches = new Set<string>();
+  const prefix = "refs/heads/";
+  for (const block of porcelain.split("\n\n")) {
+    const lines = block.split("\n");
+    const worktreeLine = lines.find((line) => line.startsWith("worktree "));
+    const branchLine = lines.find((line) => line.startsWith("branch "));
+    if (worktreeLine === undefined || branchLine === undefined) continue;
+    if (lines.some((line) => line.startsWith("prunable"))) continue;
+    const worktreePath = worktreeLine.slice("worktree ".length).trim();
+    if (!existsSync(worktreePath)) continue;
+    const ref = branchLine.slice("branch ".length).trim();
+    if (ref.startsWith(prefix)) branches.add(ref.slice(prefix.length));
+  }
+  return branches;
+}
+
+export type GovernedBranchState = "absent" | "recoverable" | "conflict";
+
+/** Inspect a write target's governed branch without mutating the shared cache. */
+export async function inspectGovernedBranchState(cachePath: string, branch: string, baseSha: string): Promise<GovernedBranchState> {
+  if (!await branchExists(cachePath, branch)) return "absent";
+  const list = await git(["worktree", "list", "--porcelain"], cachePath);
+  if (list.code !== 0) return "conflict";
+  if (worktreeListActiveBranches(list.stdout).has(branch)) return "conflict";
+  const ancestor = await git(["merge-base", "--is-ancestor", baseSha, branch], cachePath);
+  return ancestor.code === 0 ? "recoverable" : "conflict";
 }
 
 /** Probe the REAL git identity of a path claiming to be an Issue worktree:

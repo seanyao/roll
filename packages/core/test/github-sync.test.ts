@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendRowsToTable,
   dryRunPreview,
+  existingStoryIdForIssue,
   extractAcItems,
   filterIssuesByLabel,
   ghId,
@@ -57,6 +58,15 @@ describe("ghIdPresent boundary", () => {
     expect(ghIdPresent(content, "GH-13")).toBe(true);
     expect(ghIdPresent(content, "GH-1")).toBe(false);
     expect(ghIdPresent(content, "GH-3")).toBe(false);
+  });
+  it("recovers the durable Story ID when labels change", () => {
+    const content =
+      "| [US-GH-8](backlog-lifecycle/US-GH-8/spec.md) | mentions GH-7 in prose | 📋 Todo |\n" +
+      "| [US-GH-7](backlog-lifecycle/US-GH-7/spec.md) | imported | 📋 Todo |\n";
+    const relabeled = issue({ number: 7, labels: [{ name: "bug" }] });
+    expect(existingStoryIdForIssue(content, relabeled)).toBe("US-GH-7");
+    expect(dryRunPreview([relabeled], content).lines).toEqual(["= US-GH-7 [US] (skipped, already exists)"]);
+    expect(syncToBacklog([relabeled], content).skippedIds).toEqual(["US-GH-7"]);
   });
 });
 

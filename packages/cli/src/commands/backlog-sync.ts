@@ -9,6 +9,7 @@ import {
   type GhIssue,
   type SyncConfig,
   dryRunPreview,
+  existingStoryIdForIssue,
   featureStubContent,
   filterIssuesByLabel,
   parseLabelsFilter,
@@ -21,7 +22,7 @@ import {
   writeSyncBlock,
 } from "@roll/core";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   emitBacklogTarget,
@@ -154,6 +155,7 @@ export interface SyncDeps {
   /** Now, as an RFC3339 UTC stamp (for the persisted last_sync_at). */
   nowIso: () => string;
   resolveTarget?: BacklogTargetResolver;
+  writeFile?: (path: string, content: string) => void;
 }
 function realSyncDeps(): SyncDeps {
   return {
@@ -170,6 +172,69 @@ function realSyncDeps(): SyncDeps {
 function flagValue(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+interface PlannedWrite {
+  readonly path: string;
+  readonly content: string;
+}
+
+interface WriteSnapshot {
+  readonly path: string;
+  readonly content?: string;
+}
+
+function missingParentDirs(path: string): readonly string[] {
+  const missing: string[] = [];
+  let current = dirname(path);
+  while (!existsSync(current)) {
+    missing.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (existsSync(current) && !statSync(current).isDirectory()) {
+    throw new Error(`parent path is not a directory: ${current}`);
+  }
+  return missing;
+}
+
+function applySyncWrites(
+  writes: readonly PlannedWrite[],
+  writeFile: (path: string, content: string) => void = writeFileSync,
+): void {
+  const snapshots: WriteSnapshot[] = [];
+  const createdDirs = new Set<string>();
+  for (const write of writes) {
+    if (existsSync(write.path) && statSync(write.path).isDirectory()) {
+      throw new Error(`file target is a directory: ${write.path}`);
+    }
+    snapshots.push({
+      path: write.path,
+      ...(existsSync(write.path) ? { content: readFileSync(write.path, "utf8") } : {}),
+    });
+    for (const dir of missingParentDirs(write.path)) createdDirs.add(dir);
+  }
+
+  try {
+    for (const write of writes) {
+      mkdirSync(dirname(write.path), { recursive: true });
+      writeFile(write.path, write.content);
+    }
+  } catch (error) {
+    for (const snapshot of [...snapshots].reverse()) {
+      if (snapshot.content === undefined) rmSync(snapshot.path, { force: true });
+      else writeFileSync(snapshot.path, snapshot.content);
+    }
+    for (const dir of [...createdDirs].sort((left, right) => right.length - left.length)) {
+      try {
+        rmdirSync(dir);
+      } catch {
+        // A non-empty directory either predates the transaction or was restored.
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -198,8 +263,21 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
   const localYaml = decision.configPath;
   emitBacklogTarget(decision);
 
-  const cfg: SyncConfig = existsSync(localYaml) ? readSyncConfig(readFileSync(localYaml, "utf8")) : {};
-  const repoArg = flagValue(commandArgs, "--repo") ?? cfg.repo ?? "";
+  let cfg: SyncConfig;
+  try {
+    cfg = existsSync(localYaml) ? readSyncConfig(readFileSync(localYaml, "utf8")) : {};
+  } catch (error) {
+    process.stderr.write(`sync config error: ${(error as Error).message}\n`);
+    return 1;
+  }
+  const explicitRepo = flagValue(commandArgs, "--repo");
+  if (explicitRepo !== undefined && cfg.repo !== undefined && cfg.repo !== "" && cfg.repo !== explicitRepo) {
+    process.stderr.write(
+      `backlog sync source conflict: Workspace is bound to ${cfg.repo}; refusing ${explicitRepo}\n`,
+    );
+    return 1;
+  }
+  const repoArg = explicitRepo ?? cfg.repo ?? "";
   if (!repoArg) {
     process.stderr.write(
       "usage: roll backlog sync [--workspace <id|path>] --repo <owner/repo> [--label <a,b>] [--dry-run]\n" +
@@ -257,41 +335,39 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
   }
 
   const result = syncToBacklog(issues, content);
-  writeFileSync(backlog, result.content);
-
-  // US-SYNC-005: materialize a feature stub (AC = top-level issue checkboxes)
-  // per newly-added issue.
-  const skippedSet = new Set(result.skippedIds);
-  for (const issue of issues) {
-    if (skippedSet.has(storyIdFromIssue(issue))) continue;
-    writeFeatureStub(issue, featuresDir);
+  try {
+    const addedIssues = issues.filter((issue) => existingStoryIdForIssue(content, issue) === undefined);
+    const block = renderSyncBlock(repoArg, wanted, deps.nowIso());
+    const originalConfig = existsSync(localYaml) ? readFileSync(localYaml, "utf8") : "";
+    const configContent = originalConfig === "" ? block + "\n" : writeSyncBlock(originalConfig, block);
+    const writes: PlannedWrite[] = [
+      { path: backlog, content: result.content },
+      ...addedIssues.map((issue) => planFeatureStub(issue, featuresDir)),
+      { path: localYaml, content: configContent },
+    ];
+    applySyncWrites(writes, deps.writeFile);
+  } catch (error) {
+    process.stderr.write(`sync write error: ${(error as Error).message}\n`);
+    return 1;
   }
 
   for (const row of result.rows) process.stdout.write(`+ ${row}\n`);
   for (const ident of result.skippedIds) process.stdout.write(`skipped (already exists): ${ident}\n`);
   process.stdout.write(`added: ${result.added}, skipped: ${result.skipped}, total issues: ${result.total}\n`);
 
-  // US-SYNC-006: persist resolved repo/labels/timestamp for flagless re-sync.
-  const block = renderSyncBlock(repoArg, wanted, deps.nowIso());
-  const original = existsSync(localYaml) ? readFileSync(localYaml, "utf8") : "";
-  mkdirSync(dirname(localYaml) || ".", { recursive: true });
-  writeFileSync(localYaml, original === "" ? block + "\n" : writeSyncBlock(original, block));
   return 0;
 }
 
-/** Create or AC-append a Story contract beneath the Workspace backlog. */
-function writeFeatureStub(issue: GhIssue, featuresDir: string, epic = "backlog-lifecycle"): string {
+/** Plan one create-or-append Story contract without mutating the filesystem. */
+function planFeatureStub(issue: GhIssue, featuresDir: string, epic = "backlog-lifecycle"): PlannedWrite {
   const storyDir = join(featuresDir, epic, storyIdFromIssue(issue));
-  mkdirSync(storyDir, { recursive: true });
   const path = join(storyDir, "spec.md");
   const ac = renderAcSection(issue);
   if (existsSync(path)) {
     const existing = readFileSync(path, "utf8");
     const block = ac ? ac + "\n" : "";
     const sep = existing.endsWith("\n") || existing === "" ? "" : "\n";
-    if (block) appendFileSync(path, sep + block);
-    return path;
+    return { path, content: block === "" ? existing : existing + sep + block };
   }
-  writeFileSync(path, featureStubContent(issue));
-  return path;
+  return { path, content: featureStubContent(issue) };
 }

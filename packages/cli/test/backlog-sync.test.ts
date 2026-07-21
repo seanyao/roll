@@ -3,7 +3,7 @@
  * Injected opener / loadIssues keep it network-free.
  */
 import type { GhIssue } from "@roll/core";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -73,6 +73,17 @@ function deps(issues: GhIssue[]): SyncDeps {
     nowIso: () => "2026-06-09T00:00:00Z",
     resolveTarget: () => target(),
   };
+}
+
+function treeState(root: string, relative = ""): readonly string[] {
+  const path = relative === "" ? root : join(root, relative);
+  if (!existsSync(path)) return [];
+  if (!statSync(path).isDirectory()) return [`F ${relative} ${readFileSync(path, "utf8")}`];
+  const rows = relative === "" ? [] : [`D ${relative}`];
+  for (const name of readdirSync(path).sort()) {
+    rows.push(...treeState(root, relative === "" ? name : join(relative, name)));
+  }
+  return rows;
 }
 
 describe("resolveToken — US-PORT-019", () => {
@@ -210,5 +221,42 @@ describe("backlogSyncCommand — US-PORT-019", () => {
     expect(backlog).toContain("[FIX-GH-11](backlog-lifecycle/FIX-GH-11/spec.md)");
     expect(backlog).toContain("📋 Todo");
     expect(backlog).not.toContain("✅ Done");
+  });
+
+  it("keeps the durable Story ID when an imported Issue is relabeled", async () => {
+    seedBacklog("| [US-GH-7](backlog-lifecycle/US-GH-7/spec.md) | existing | 🔨 In Progress |\n");
+    const issues: GhIssue[] = [{ number: 7, title: "now labeled bug", state: "open", labels: [{ name: "bug" }] }];
+    const r = await capture(() => backlogSyncCommand(["--repo", "a/b"], deps(issues)));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain("skipped (already exists): US-GH-7");
+    expect(readFileSync(join("backlog", "index.md"), "utf8")).toContain("🔨 In Progress");
+    expect(existsSync(join("backlog", "backlog-lifecycle", "FIX-GH-7"))).toBe(false);
+  });
+
+  it("fails loud when an explicit repo conflicts with the Workspace sync source", async () => {
+    seedBacklog();
+    mkdirSync("runtime");
+    writeFileSync(join("runtime", "backlog-sync.yaml"), "backlog_sync:\n  repo: first/repo\n  labels: []\n");
+    const before = treeState(dir);
+    const r = await capture(() => backlogSyncCommand(["--repo", "second/repo"], deps([])));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("source conflict");
+    expect(treeState(dir)).toEqual(before);
+  });
+
+  it("rolls back the whole Workspace mutation when a later file write fails", async () => {
+    seedBacklog();
+    const before = treeState(dir);
+    const injected = deps([{ number: 21, title: "atomic", state: "open" }]);
+    let writes = 0;
+    injected.writeFile = (path, content) => {
+      writes += 1;
+      if (writes === 2) throw new Error("injected contract write failure");
+      writeFileSync(path, content);
+    };
+    const r = await capture(() => backlogSyncCommand(["--repo", "a/b"], injected));
+    expect(r.status).toBe(1);
+    expect(r.err).toContain("sync write error: injected contract write failure");
+    expect(treeState(dir)).toEqual(before);
   });
 });

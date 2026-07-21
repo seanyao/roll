@@ -101,7 +101,19 @@
  * state back in with the next observed event; the {@link CycleCommand}s name the
  * existing ports/plans so the adapter dispatches them 1:1.
  */
-import type { AgentId, BuilderFinalizationFacts, CycleCost, CyclePhase, ExecutionProfile, FailureClass, ModelId, TerminalOutcome } from "@roll/spec";
+import type {
+  AgentId,
+  BuilderFinalizationFacts,
+  CycleCost,
+  CyclePhase,
+  CycleRepositoryExecutionContext,
+  ExecutionProfile,
+  FailureClass,
+  ModelId,
+  RepositoryCycleIdentity,
+  RepositoryExecutionContext,
+  TerminalOutcome,
+} from "@roll/spec";
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
@@ -886,6 +898,122 @@ export interface CycleContext {
    *  so the user's real submodule checkout sees the branch advance. Absent ⇒ the
    *  cycle runs entirely against the superproject (the existing path, unchanged). */
   targetSubmodule?: string;
+  /** US-WS-010: the only repository carrier for Workspace execution. A
+   * cardinality-one Workspace still has one map entry; no repoCwd/worktree
+   * compatibility fields are mirrored onto CycleContext. */
+  repositoryExecution?: CycleRepositoryExecutionContext;
+}
+
+export type RepositoryCommandOperation = "context" | "edit" | "test" | "tcr" | "publish";
+
+export interface RepositoryScopedCommand extends RepositoryCycleIdentity {
+  readonly operation: RepositoryCommandOperation;
+}
+
+export type RepositoryCommandPlan =
+  | { readonly ok: true; readonly commands: readonly RepositoryScopedCommand[] }
+  | {
+      readonly ok: false;
+      readonly code: "missing_repository_context" | "invalid_repository_map" | "unknown_repository";
+      readonly repoId?: string;
+    }
+  | {
+      readonly ok: false;
+      readonly code: "read_only_repository";
+      readonly repoId: string;
+      readonly operation: RepositoryCommandOperation;
+    };
+
+export type RepositoryEventIdentityResult =
+  | { readonly ok: true; readonly identity: RepositoryCycleIdentity }
+  | {
+      readonly ok: false;
+      readonly code: "missing_repository_context" | "invalid_repository_map" | "unknown_repository";
+      readonly repoId?: string;
+    };
+
+const REPOSITORY_MUTATIONS = new Set<RepositoryCommandOperation>(["edit", "tcr", "publish"]);
+type RepositoryEntry = readonly [string, RepositoryExecutionContext];
+
+function orderedRepositoryEntries(
+  ctx: CycleContext,
+):
+  | { readonly ok: true; readonly entries: RepositoryEntry[] }
+  | { readonly ok: false; readonly code: "missing_repository_context" | "invalid_repository_map" } {
+  if (ctx.storyId === undefined || ctx.repositoryExecution === undefined) {
+    return { ok: false, code: "missing_repository_context" };
+  }
+  const entries = Object.entries(ctx.repositoryExecution.repositories);
+  if (entries.length === 0) return { ok: false, code: "invalid_repository_map" };
+  const aliases = new Set<string>();
+  for (const [key, repository] of entries) {
+    if (key !== repository.repoId || aliases.has(repository.alias)) {
+      return { ok: false, code: "invalid_repository_map" };
+    }
+    aliases.add(repository.alias);
+  }
+  entries.sort(([, left], [, right]) => left.repoId.localeCompare(right.repoId));
+  return { ok: true, entries };
+}
+
+/** Pure repository command planner. It selects by stable repoId, never by cwd,
+ * path basename or agent output; explicit read-only mutations fail loud. */
+export function planRepositoryCommands(
+  ctx: CycleContext,
+  operation: RepositoryCommandOperation,
+  repoIds?: readonly string[],
+): RepositoryCommandPlan {
+  const ordered = orderedRepositoryEntries(ctx);
+  if (!ordered.ok) return ordered;
+  const selected: RepositoryEntry[] = [];
+  if (repoIds === undefined) {
+    selected.push(...ordered.entries.filter(([, repository]) =>
+      !REPOSITORY_MUTATIONS.has(operation) || repository.access === "write"));
+  } else {
+    for (const repoId of repoIds) {
+      const found = ordered.entries.find(([key]) => key === repoId);
+      if (found === undefined) return { ok: false, code: "unknown_repository", repoId };
+      selected.push(found);
+    }
+  }
+  for (const [, repository] of selected) {
+    if (REPOSITORY_MUTATIONS.has(operation) && repository.access === "read") {
+      return { ok: false, code: "read_only_repository", repoId: repository.repoId, operation };
+    }
+  }
+  const execution = ctx.repositoryExecution;
+  const storyId = ctx.storyId;
+  if (execution === undefined || storyId === undefined) {
+    return { ok: false, code: "missing_repository_context" };
+  }
+  return {
+    ok: true,
+    commands: selected.map(([, repository]) => ({
+      operation,
+      workspaceId: execution.workspaceId,
+      storyId,
+      cycleId: ctx.cycleId,
+      repoId: repository.repoId,
+    })),
+  };
+}
+
+/** Build the mandatory identity envelope for a repository-specific event. */
+export function repositoryEventIdentity(
+  ctx: CycleContext,
+  repoId: string,
+): RepositoryEventIdentityResult {
+  const plan = planRepositoryCommands(ctx, "context", [repoId]);
+  if (!plan.ok) {
+    if (plan.code === "read_only_repository") {
+      return { ok: false, code: "invalid_repository_map", repoId };
+    }
+    return plan;
+  }
+  const command = plan.commands[0];
+  if (command === undefined) return { ok: false, code: "unknown_repository", repoId };
+  const { operation: _operation, ...identity } = command;
+  return { ok: true, identity };
 }
 
 /** Minimal context for building a terminal cycle:end event + runs row. */

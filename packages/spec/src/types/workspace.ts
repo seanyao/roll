@@ -152,6 +152,41 @@ export interface WriteIssueRepositoryTarget extends IssueRepositoryTargetBase {
 
 export type IssueRepositoryTarget = ReadIssueRepositoryTarget | WriteIssueRepositoryTarget;
 
+/** Commands declared by one repository leg for the Builder and later
+ * repository-scoped verification gates. Commands are data only; the pure
+ * orchestrator never executes or infers them from agent output. */
+export interface RepositoryExecutionCommands {
+  readonly test: readonly string[];
+  readonly integration: readonly string[];
+}
+
+/** Resolved execution facts for one repository bound to an Issue Cycle. */
+export interface RepositoryExecutionContext {
+  readonly repoId: string;
+  readonly alias: string;
+  readonly access: RepositoryAccess;
+  readonly requiredDelivery: boolean;
+  readonly worktreePath: string;
+  readonly baseSha: string;
+  readonly headSha: string;
+  readonly commands: RepositoryExecutionCommands;
+}
+
+/** The sole repository carrier for a Cycle. Keys are stable repoId values;
+ * cardinality one and many intentionally share this exact contract. */
+export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecutionContext>>;
+
+/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
+export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
+  readonly issueRoot: string;
+  readonly repositories: RepositoryExecutionMap;
+}
+
+/** Required identity envelope for every repository-specific Cycle fact. */
+export interface RepositoryCycleIdentity extends RepositoryIssueIdentity {
+  readonly cycleId: string;
+}
+
 export interface IssueManifest {
   readonly schema: typeof ISSUE_MANIFEST_V1;
   readonly workspaceId: string;

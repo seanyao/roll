@@ -31,6 +31,8 @@ import {
   watchdogVerdict,
   cycleTimeoutVerdict,
   stallVerdict,
+  planRepositoryCommands,
+  repositoryEventIdentity,
   finalizeBuilder,
   handoffKindFor,
   type BuilderFinalizationFacts,
@@ -42,12 +44,45 @@ import {
   CYCLE_STALL_THRESHOLD_SEC,
   STALL_STARTUP_GRACE_SEC,
 } from "../src/index.js";
+import type { RepositoryExecutionContext, RepositoryExecutionMap } from "@roll/spec";
 
 const CTX: CycleContext = {
   cycleId: "20260605-013000-12345",
   branch: "loop/cycle-20260605-013000-12345",
   loop: "main",
 };
+
+function repository(
+  repoId: string,
+  alias: string,
+  access: "read" | "write",
+): RepositoryExecutionContext {
+  return {
+    repoId,
+    alias,
+    access,
+    requiredDelivery: access === "write",
+    worktreePath: `/workspace/issues/US-WS-010/${alias}`,
+    baseSha: `${alias}-base`,
+    headSha: `${alias}-head`,
+    commands: {
+      test: [`pnpm --dir ${alias} test`],
+      integration: [`pnpm --dir ${alias} test:integration`],
+    },
+  };
+}
+
+function workspaceContext(repositories: RepositoryExecutionMap): CycleContext {
+  return {
+    ...CTX,
+    storyId: "US-WS-010",
+    repositoryExecution: {
+      workspaceId: "ws-20260717001",
+      issueRoot: "/workspace/issues/US-WS-010",
+      repositories,
+    },
+  };
+}
 
 /** Drive a list of events through the stepper from a fresh start, collecting the
  *  command kinds in order (the SEQUENCE assertions read these). */
@@ -89,6 +124,144 @@ describe("classifyCaptured — pre-publish six-state (bin/roll:9127-9157)", () =
   });
   it("exit 0 + commits → built (bin/roll:9142)", () => {
     expect(classifyCaptured({ usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 2 })).toBe("built");
+  });
+});
+
+describe("US-WS-010 — one Story Cycle carries a repository execution map", () => {
+  const writable = repository("repo-111111111111", "sot1", "write");
+  const secondWritable = repository("repo-222222222222", "sot2", "write");
+  const readonly = repository("repo-333333333333", "reference", "read");
+
+  it("projects cardinality one through the same repository command contract", () => {
+    const ctx = workspaceContext({ [writable.repoId]: writable });
+
+    expect(planRepositoryCommands(ctx, "test")).toEqual({
+      ok: true,
+      commands: [
+        {
+          operation: "test",
+          workspaceId: "ws-20260717001",
+          storyId: "US-WS-010",
+          cycleId: CTX.cycleId,
+          repoId: writable.repoId,
+        },
+      ],
+    });
+
+    const terminalEvents: CycleEvent[] = [
+      { type: "start", ctx },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "US-WS-010" },
+      { type: "route_resolved", agent: "codex", model: "" },
+      { type: "agent_exited", exit: 0, timedOut: false },
+      {
+        type: "facts_captured",
+        facts: { usedWorktree: true, agentExit: 0, timedOut: false, commitsAhead: 1 },
+      },
+      { type: "published", result: { status: 0 } },
+      { type: "cleaned" },
+    ];
+    const workspaceResult = walk(terminalEvents);
+    const legacyResult = walk([
+      ...terminalEvents.slice(0, 1).map(() => ({ type: "start", ctx: CTX }) as const),
+      ...terminalEvents.slice(1),
+    ]);
+    expect(workspaceResult.state.terminal).toBe(legacyResult.state.terminal);
+    expect(workspaceResult.kinds).toEqual(legacyResult.kinds);
+  });
+
+  it("plans deterministic per-repository commands while retaining one Cycle lifecycle", () => {
+    const repositories = {
+      [secondWritable.repoId]: secondWritable,
+      [writable.repoId]: writable,
+    } satisfies RepositoryExecutionMap;
+    const ctx = workspaceContext(repositories);
+
+    expect(planRepositoryCommands(ctx, "tcr")).toEqual({
+      ok: true,
+      commands: [
+        {
+          operation: "tcr",
+          workspaceId: "ws-20260717001",
+          storyId: "US-WS-010",
+          cycleId: CTX.cycleId,
+          repoId: writable.repoId,
+        },
+        {
+          operation: "tcr",
+          workspaceId: "ws-20260717001",
+          storyId: "US-WS-010",
+          cycleId: CTX.cycleId,
+          repoId: secondWritable.repoId,
+        },
+      ],
+    });
+
+    const { commands } = walk([
+      { type: "start", ctx },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "story_picked", storyId: "US-WS-010" },
+      { type: "route_resolved", agent: "codex", model: "" },
+    ]);
+    expect(commands.filter((command) => command.kind === "spawn_agent")).toHaveLength(1);
+    expect(
+      commands.filter(
+        (command) => command.kind === "emit_event" && command.event.type === "cycle:start",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("allows read-only repositories as context but rejects edit, TCR and publish selection", () => {
+    const ctx = workspaceContext({
+      [writable.repoId]: writable,
+      [readonly.repoId]: readonly,
+    });
+
+    expect(planRepositoryCommands(ctx, "context")).toMatchObject({
+      ok: true,
+      commands: [
+        { operation: "context", repoId: writable.repoId },
+        { operation: "context", repoId: readonly.repoId },
+      ],
+    });
+    for (const operation of ["edit", "tcr", "publish"] as const) {
+      expect(planRepositoryCommands(ctx, operation, [readonly.repoId])).toEqual({
+        ok: false,
+        code: "read_only_repository",
+        repoId: readonly.repoId,
+        operation,
+      });
+    }
+  });
+
+  it("binds repository events to Workspace, Story, Cycle and repository identity", () => {
+    const ctx = workspaceContext({ [writable.repoId]: writable });
+
+    expect(repositoryEventIdentity(ctx, writable.repoId)).toEqual({
+      ok: true,
+      identity: {
+        workspaceId: "ws-20260717001",
+        storyId: "US-WS-010",
+        cycleId: CTX.cycleId,
+        repoId: writable.repoId,
+      },
+    });
+    expect(repositoryEventIdentity(ctx, "repo-ffffffffffff")).toEqual({
+      ok: false,
+      code: "unknown_repository",
+      repoId: "repo-ffffffffffff",
+    });
+  });
+
+  it("rejects a map key that disagrees with the repository identity", () => {
+    const ctx = workspaceContext({ "repo-ffffffffffff": writable });
+
+    expect(planRepositoryCommands(ctx, "context")).toEqual({
+      ok: false,
+      code: "invalid_repository_map",
+    });
   });
 });
 

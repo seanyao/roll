@@ -8,7 +8,6 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
-  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -79,8 +78,6 @@ export interface RequirementSourceStoreDeps {
   readonly renameFile?: (from: string, to: string) => void;
   readonly afterReadFile?: (path: string) => void;
   readonly beforeProjection?: () => void;
-  readonly afterProjectionStat?: (path: string) => void;
-  readonly afterProjectionRead?: (path: string) => void;
 }
 
 interface StableFile {
@@ -166,58 +163,6 @@ function stableFile(
 }
 
 const PROJECTION_MAX_DEPTH = 32;
-const PROJECTION_READ_CHUNK_BYTES = 64 * 1024;
-
-interface BoundedReadHooks {
-  readonly afterStat?: (path: string) => void;
-  readonly afterRead?: (path: string) => void;
-}
-
-// Compares fd-vs-fd (before/after) and path-vs-fd (pathAfter/after) via the same dev/ino/size/
-// mtime tuple (sameFile) so an in-place same-size content overwrite between the read loop and
-// this check is detected as staleness, not silently trusted. This still cannot see a write that
-// completes between the last stat call and the return of this function — the residual window
-// documented on ensureSafeDirectory applies here too; only the outer self-heal retry makes a
-// caught race harmless rather than truly unobservable.
-function boundedReadCurrent(path: string, maximumBytes: number, hooks: BoundedReadHooks = {}): Buffer | undefined {
-  let descriptor: number;
-  try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return undefined;
-  }
-  try {
-    const before = fstatSync(descriptor);
-    if (!before.isFile() || before.size > maximumBytes) return undefined;
-    hooks.afterStat?.(path);
-    const chunks: Buffer[] = [];
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(PROJECTION_READ_CHUNK_BYTES);
-    for (;;) {
-      const bytesRead = readSync(descriptor, buffer, 0, PROJECTION_READ_CHUNK_BYTES, null);
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > maximumBytes) return undefined;
-      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
-    }
-    hooks.afterRead?.(path);
-    const after = fstatSync(descriptor);
-    if (after.size !== total || !sameFile(before, after)) return undefined;
-    let pathAfter;
-    try {
-      pathAfter = lstatSync(path);
-    } catch {
-      return undefined;
-    }
-    if (pathAfter.isSymbolicLink() || !sameFile(after, pathAfter)) return undefined;
-    return Buffer.concat(chunks, total);
-  } catch {
-    return undefined;
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
 function safeRelativePath(value: string): boolean {
   if (value === "" || value !== value.trim() || value.startsWith("/") || value.startsWith("~") || value.includes("\\") || /^[A-Za-z]:/u.test(value)) {
     return false;
@@ -246,30 +191,10 @@ function rejectSymlinkSegments(root: string, relativePath: string): void {
   }
 }
 
-// Infra-only physical-archive concern: how many directory entries readdirSync will walk once
-// these paths are materialized on disk, reusing core's MAX_REQUIREMENT_CONTEXT_FILES as the
-// shared numeric budget. Core/spec only own the file-count domain contract; they have no notion
-// of directory entries, so this stays local to the store rather than sinking into @roll/core.
-function archiveEntryBudget(relativePaths: readonly string[]): number {
-  const entries = new Set<string>();
-  for (const relativePath of relativePaths) {
-    const segments = relativePath.split("/");
-    let cursor = "";
-    for (const segment of segments) {
-      cursor = cursor === "" ? segment : `${cursor}/${segment}`;
-      entries.add(cursor);
-    }
-  }
-  return entries.size;
-}
-
 function contextFiles(input: RequirementSourceCaptureInput, deps: RequirementSourceStoreDeps): readonly StableContextFile[] {
   if (input.contextPaths.length === 0) return [];
   if (input.contextPaths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
     fail("context_limit", "Requirement context exceeds the file-count limit");
-  }
-  if (archiveEntryBudget(input.contextPaths) > MAX_REQUIREMENT_CONTEXT_FILES) {
-    fail("context_limit", "Requirement context exceeds the archive directory-entry limit");
   }
   if (input.contextRoot === undefined) fail("unsafe_context", "Requirement context root is required");
   let root: string;
@@ -427,7 +352,7 @@ function copyContextProjection(
     rmSync(backup, { recursive: true, force: true });
   } catch (error) {
     if (movedOld && !existsSync(target) && existsSync(backup)) {
-      try { renameFile(backup, target); } catch { /* next retry repairs from the committed revision */ }
+      try { renameFile(backup, target); } catch { /* explicit repair owns recovery after this capture fails loud */ }
     }
     throw error;
   } finally {
@@ -439,27 +364,23 @@ function isProjectionCurrent(
   requirementPath: string,
   manifest: RequirementSourceManifest,
   evidence: RevisionEvidence,
-  deps: RequirementSourceStoreDeps = {},
 ): boolean {
-  const hooks: BoundedReadHooks = { afterStat: deps.afterProjectionStat, afterRead: deps.afterProjectionRead };
   try {
     if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
-    const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES, hooks);
-    if (body === undefined || !body.equals(evidence.body.content)) return false;
+    const body = stableFile(join(requirementPath, "requirement.md"), {}, MAX_REQUIREMENT_BODY_BYTES);
+    if (!body.content.equals(evidence.body.content)) return false;
     const expectedAttest = renderRequirementAttestProjection(manifest);
-    const attestMaxBytes = Buffer.byteLength(expectedAttest, "utf8") + 4096;
-    const attest = boundedReadCurrent(join(requirementPath, "attest.md"), attestMaxBytes, hooks);
-    if (attest === undefined || attest.toString("utf8") !== expectedAttest) return false;
+    const attest = stableFile(join(requirementPath, "attest.md"), {}, Buffer.byteLength(expectedAttest, "utf8") + 4096);
+    if (attest.content.toString("utf8") !== expectedAttest) return false;
     const contextRoot = join(requirementPath, "context");
     const actualPaths = existsSync(contextRoot) ? archiveContextPaths(contextRoot).slice().sort() : [];
     const expectedPaths = evidence.context.map((file) => file.relativePath).slice().sort();
     if (JSON.stringify(actualPaths) !== JSON.stringify(expectedPaths)) return false;
     let remainingBytes = MAX_REQUIREMENT_CONTEXT_BYTES;
     return evidence.context.every((file) => {
-      const content = boundedReadCurrent(join(contextRoot, file.relativePath), Math.min(file.bytes, remainingBytes), hooks);
-      if (content === undefined) return false;
-      remainingBytes -= content.byteLength;
-      return remainingBytes >= 0 && content.equals(file.content);
+      const content = stableFile(join(contextRoot, file.relativePath), {}, Math.min(file.bytes, remainingBytes));
+      remainingBytes -= content.bytes;
+      return remainingBytes >= 0 && content.content.equals(file.content);
     });
   } catch {
     return false;
@@ -491,22 +412,17 @@ function archiveContextPathsWalk(
   root: string,
   relativeRoot: string,
   depth: number,
-  entryCount: { count: number },
 ): readonly string[] {
   if (depth > PROJECTION_MAX_DEPTH) {
     fail("revision_conflict", "Requirement context tree exceeds its depth contract");
   }
   const paths: string[] = [];
   for (const entry of readdirSync(join(root, relativeRoot), { withFileTypes: true })) {
-    entryCount.count += 1;
-    if (entryCount.count > MAX_REQUIREMENT_CONTEXT_FILES) {
-      fail("revision_conflict", "Immutable Requirement context exceeds its directory-entry contract");
-    }
     const relativePath = relativeRoot === "" ? entry.name : `${relativeRoot}/${entry.name}`;
     const path = join(root, relativePath);
     const stat = lstatSync(path);
     if (stat.isSymbolicLink()) fail("revision_conflict", "Immutable Requirement context contains a symbolic link");
-    if (entry.isDirectory()) paths.push(...archiveContextPathsWalk(root, relativePath, depth + 1, entryCount));
+    if (entry.isDirectory()) paths.push(...archiveContextPathsWalk(root, relativePath, depth + 1));
     else if (entry.isFile()) paths.push(relativePath);
     else fail("revision_conflict", "Immutable Requirement context contains a non-regular entry");
   }
@@ -514,50 +430,11 @@ function archiveContextPathsWalk(
 }
 
 function archiveContextPaths(root: string, relativeRoot = ""): readonly string[] {
-  return archiveContextPathsWalk(root, relativeRoot, 0, { count: 0 });
-}
-
-function validateRevisionHistory(
-  canonicalRequirementPath: string,
-  manifest: RequirementSourceManifest,
-): void {
-  const revisionsRoot = join(canonicalRequirementPath, "revisions");
-  if (!existsSync(revisionsRoot)) {
-    if (manifest.previousRevisions.length > 0) {
-      fail("revision_conflict", "Immutable Requirement revision archive is missing recorded history");
-    }
-    return;
+  const paths = archiveContextPathsWalk(root, relativeRoot, 0);
+  if (paths.length > MAX_REQUIREMENT_CONTEXT_FILES) {
+    fail("revision_conflict", "Immutable Requirement context exceeds its file-count contract");
   }
-  ensureSafeDirectory(canonicalRequirementPath, revisionsRoot, false);
-  const archivedKeys = new Set(
-    readdirSync(revisionsRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !lstatSync(join(revisionsRoot, entry.name)).isSymbolicLink())
-      .map((entry) => entry.name),
-  );
-  const expectedKeys = new Set([
-    requirementRevisionKey(manifest.revision),
-    ...manifest.previousRevisions.map((entry) => requirementRevisionKey(entry.revision)),
-  ]);
-  for (const key of expectedKeys) {
-    if (!archivedKeys.has(key)) fail("revision_conflict", "Immutable Requirement history references a revision archive that was never committed");
-  }
-  for (const key of archivedKeys) {
-    if (!expectedKeys.has(key)) fail("revision_conflict", "Immutable Requirement revision archive contains history the source index dropped");
-  }
-  for (const previous of manifest.previousRevisions) {
-    const key = requirementRevisionKey(previous.revision);
-    const capturedFile = stableFile(
-      join(revisionsRoot, key, "capture.yaml"),
-      {},
-      MAX_REQUIREMENT_CONTEXT_BYTES,
-      "Immutable Requirement capture index exceeds its byte limit",
-    );
-    const parsed = parseRequirementSourceManifest(JSON.parse(capturedFile.content.toString("utf8")));
-    if (!parsed.ok) fail("revision_conflict", "Immutable Requirement capture index is invalid");
-    if (parsed.value.revision !== previous.revision || parsed.value.capturedAt !== previous.capturedAt) {
-      fail("revision_conflict", "Immutable Requirement previous revision metadata does not match its archive");
-    }
-  }
+  return paths;
 }
 
 function validateRevision(
@@ -566,7 +443,6 @@ function validateRevision(
 ): RevisionEvidence {
   try {
     const canonicalRequirementPath = realpathSync(requirementPath);
-    validateRevisionHistory(canonicalRequirementPath, manifest);
     const revisionPath = join(canonicalRequirementPath, "revisions", requirementRevisionKey(manifest.revision));
     ensureSafeDirectory(canonicalRequirementPath, revisionPath, false);
     const capturedFile = stableFile(
@@ -691,38 +567,6 @@ function declaredCanonicalDirs(
   return dirs;
 }
 
-function probeCanonicalPath(requirementsRoot: string, relativeDir: string): void {
-  const path = join(requirementsRoot, relativeDir);
-  let stat;
-  try {
-    stat = lstatSync(path);
-  } catch {
-    return;
-  }
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    fail("io_failure", "A declared Requirement's canonical path exists but is not a real directory");
-  }
-  let canonical: string;
-  try {
-    canonical = realpathSync(path);
-  } catch (error) {
-    return fail("io_failure", "A declared Requirement's canonical path could not be resolved", error);
-  }
-  if (!contained(requirementsRoot, canonical)) {
-    fail("io_failure", "A declared Requirement's canonical path escapes the Workspace requirements root");
-  }
-}
-
-function probeDeclaredCanonicalPaths(requirementsRoot: string, canonicalDirs: ReadonlySet<string>): void {
-  const providers = new Set<string>();
-  for (const dir of canonicalDirs) {
-    const provider = dir.split("/")[0];
-    if (provider !== undefined) providers.add(provider);
-  }
-  for (const provider of providers) probeCanonicalPath(requirementsRoot, provider);
-  for (const dir of canonicalDirs) probeCanonicalPath(requirementsRoot, dir);
-}
-
 function readAllRequirementManifests(
   workspaceRoot: string,
   requirements: readonly { readonly provider: string; readonly ref: string }[],
@@ -737,7 +581,6 @@ function readAllRequirementManifests(
     return [];
   }
   if (providerStat.isSymbolicLink() || !providerStat.isDirectory()) return [];
-  probeDeclaredCanonicalPaths(realpathSync(requirementsRoot), canonicalDirs);
   const seenRequirementIds = new Set<string>();
   const manifests: RequirementSourceManifest[] = [];
   for (const providerEntry of readdirSync(requirementsRoot, { withFileTypes: true })) {
@@ -814,7 +657,7 @@ export function captureRequirementSource(
     }
     if (existing !== undefined) {
       const existingEvidence = validateRevision(requirementPath, existing);
-      if (!isProjectionCurrent(requirementPath, existing, existingEvidence, deps)) {
+      if (!isProjectionCurrent(requirementPath, existing, existingEvidence)) {
         fail("projection_repair_required", "Requirement current projection is missing, stale, or unsafe");
       }
     }

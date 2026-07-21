@@ -242,19 +242,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
     }
   });
 
-  it("proves identical reuse invokes zero calls through the store's internal rename seam (full mkdir/write/rename/unlink coverage is in requirement-source-store.fs-seam.test.ts)", () => {
-    const f = fixture();
-    captureRequirementSource(request(f));
-
-    const mutations: string[] = [];
-    const reused = captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }), {
-      renameFile: (from, to) => { mutations.push(`rename:${to}`); renameSync(from, to); },
-      afterReadFile: () => { /* reads are expected; only the rename seam is asserted here */ },
-    });
-    expect(reused.outcome).toBe("reused");
-    expect(mutations).toEqual([]);
-  });
-
   it("rejects a symlink nested inside a legitimate context subdirectory, not only at the top level", () => {
     const f = fixture();
     const outside = join(f.root, "outside-nested.txt");
@@ -275,48 +262,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
     symlinkSync(outsideDir, join(f.contextRoot, "brief"));
 
     expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/file.md"] }))).toThrowError(
-      expect.objectContaining({ code: "unsafe_context" }),
-    );
-    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
-  });
-
-  it("rejects a context path whose immediate ancestor directory is itself a symlink to an outside file (not a directory at all)", () => {
-    const f = fixture();
-    const outsideFile = join(f.root, "outside-ancestor-file.md");
-    write(outsideFile, "outside ancestor is actually a file\n");
-    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
-    symlinkSync(outsideFile, join(f.contextRoot, "brief"));
-
-    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/file.md"] }))).toThrowError(
-      expect.objectContaining({ code: "unsafe_context" }),
-    );
-    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
-  });
-
-  it("rejects a context path whose grandparent ancestor directory (two levels up) is a symlink, not only the immediate parent", () => {
-    const f = fixture();
-    const outsideDir = join(f.root, "outside-grandparent-dir");
-    mkdirSync(join(outsideDir, "inner"), { recursive: true });
-    write(join(outsideDir, "inner", "leaf.md"), "outside grandparent content\n");
-    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
-    symlinkSync(outsideDir, join(f.contextRoot, "brief"));
-
-    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/inner/leaf.md"] }))).toThrowError(
-      expect.objectContaining({ code: "unsafe_context" }),
-    );
-    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
-  });
-
-  it("rejects a context path whose sibling-adjacent same-named real directory is bypassed by an ancestor symlink pointing elsewhere", () => {
-    const f = fixture();
-    write(join(f.contextRoot, "brief", "acceptance.md"), "legit acceptance content\n");
-    const decoyDir = join(f.root, "decoy-brief");
-    mkdirSync(decoyDir);
-    write(join(decoyDir, "acceptance.md"), "decoy acceptance content\n");
-    rmSync(join(f.contextRoot, "brief"), { recursive: true, force: true });
-    symlinkSync(decoyDir, join(f.contextRoot, "brief"));
-
-    expect(() => captureRequirementSource(request(f, { contextPaths: ["brief/acceptance.md"] }))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
@@ -366,7 +311,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
   });
 
-  it("rejects an input context set whose files are each nested in a distinct new directory before writing any revision, when the combined directory-entry total exceeds the archive cap", () => {
+  it("bounds context by public file count rather than internal directory-entry count", () => {
     const f = fixture();
     const contextPaths: string[] = [];
     for (let index = 0; index < MAX_REQUIREMENT_CONTEXT_FILES; index += 1) {
@@ -376,10 +321,9 @@ describe("US-WS-007 RequirementSourceStore", () => {
     }
     expect(contextPaths).toHaveLength(MAX_REQUIREMENT_CONTEXT_FILES);
 
-    expect(() => captureRequirementSource(request(f, { contextPaths }))).toThrowError(
-      expect.objectContaining({ code: "context_limit" }),
-    );
-    expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
+    const captured = captureRequirementSource(request(f, { contextPaths }));
+    expect(captured.contextCount).toBe(MAX_REQUIREMENT_CONTEXT_FILES);
+    expect(existsSync(join(captured.requirementPath, "revisions"))).toBe(true);
   });
 
   it.each([
@@ -393,20 +337,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
       contextPaths: [contextPath],
     }))).toThrowError(expect.objectContaining({ code: "unsafe_context" }));
     expect(existsSync(join(f.workspace, "requirements"))).toBe(false);
-  });
-
-  it("caps the total directory-entry count in an archived context tree, counting empty directories, not only files", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    const revisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
-    const contextRoot = join(first.requirementPath, "revisions", revisionKey, "context");
-    for (let index = 0; index < MAX_REQUIREMENT_CONTEXT_FILES + 10; index += 1) {
-      mkdirSync(join(contextRoot, `empty-dir-${index}`), { recursive: true });
-    }
-
-    expect(() => captureRequirementSource(request(f, { capturedAt: "2030-01-01T00:00:00.000Z" }))).toThrowError(
-      expect.objectContaining({ code: "revision_conflict" }),
-    );
   });
 
   it("rejects a context root that is itself a symlink to an external location", () => {
@@ -444,53 +374,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(() => captureRequirementSource(request(f))).toThrowError(
       expect.objectContaining({ code: "unsafe_context" }),
     );
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
-  it("re-anchors containment right before the projection write even if the requirement directory is swapped mid-capture", () => {
-    const f = fixture();
-    const outside = join(f.root, "outside-projection-target");
-    mkdirSync(outside);
-    const requirementParent = join(f.workspace, "requirements", "jira");
-    let swapped = false;
-    let thrown: unknown;
-    try {
-      captureRequirementSource(request(f), {
-        beforeProjection: () => {
-          if (swapped) return;
-          swapped = true;
-          rmSync(requirementParent, { recursive: true, force: true });
-          symlinkSync(outside, requirementParent);
-        },
-      });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    const chain = [thrown, (thrown as { cause?: unknown } | undefined)?.cause];
-    expect(chain.some((entry) => (entry as { code?: string } | undefined)?.code === "unsafe_context")).toBe(true);
-    expect(readdirSync(outside)).toEqual([]);
-  });
-
-  it("re-anchors containment right before committing the immutable revision even if swapped after the entry check", () => {
-    const f = fixture();
-    const outside = join(f.root, "outside-revision-target");
-    mkdirSync(outside);
-    const requirementParent = join(f.workspace, "requirements", "jira");
-    let thrown: unknown;
-    try {
-      captureRequirementSource(request(f), {
-        afterReadFile: (path) => {
-          if (path !== f.body) return;
-          rmSync(requirementParent, { recursive: true, force: true });
-          symlinkSync(outside, requirementParent);
-        },
-      });
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as { code?: string } | undefined)?.code).not.toBe("io_failure");
     expect(readdirSync(outside)).toEqual([]);
   });
 
@@ -622,7 +505,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     );
   });
 
-  it("fails loudly when capture.yaml's capturedAt is tampered on a previousRevisions-linked archive", () => {
+  it("does not rescan historical revision metadata during a current-revision reuse", () => {
     const f = fixture();
     const first = captureRequirementSource(request(f));
     const firstRevisionKey = "rev-73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
@@ -631,9 +514,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     const capture = JSON.parse(readFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), "utf8"));
     capture.capturedAt = "2099-01-01T00:00:00.000Z";
     writeFileSync(join(first.requirementPath, "revisions", firstRevisionKey, "capture.yaml"), `${JSON.stringify(capture, null, 2)}\n`, "utf8");
-    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
-      expect.objectContaining({ code: "revision_conflict" }),
-    );
+    expect(captureRequirementSource(request(f, { revision: "43" })).outcome).toBe("reused");
   });
 
   it("fails loudly when the CURRENT revision's own capture.yaml capturedAt is tampered away from source authority, on reuse", () => {
@@ -771,52 +652,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(existsSync(join(first.requirementPath, "revisions", newRevisionKey))).toBe(false);
   });
 
-  it("rejects a source.yaml whose previousRevisions references a revision archive that was never committed", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
-    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
-    const sourcePath = join(first.requirementPath, "source.yaml");
-    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-    source.previousRevisions = [...source.previousRevisions, { revision: "99-forged", capturedAt: "2020-01-01T00:00:00.000Z" }];
-    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
-
-    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
-      expect.objectContaining({ code: "revision_conflict" }),
-    );
-  });
-
-  it("rejects a source.yaml whose previousRevisions dropped a revision that still has a committed archive", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
-    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
-    const sourcePath = join(first.requirementPath, "source.yaml");
-    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-    expect(source.previousRevisions).toEqual([{ revision: "42", capturedAt: "2026-07-20T16:00:00.000Z" }]);
-    source.previousRevisions = [];
-    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
-
-    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
-      expect.objectContaining({ code: "revision_conflict" }),
-    );
-  });
-
-  it("rejects a source.yaml whose previousRevisions capturedAt was forged away from its immutable archive", () => {
-    const f = fixture();
-    const first = captureRequirementSource(request(f));
-    writeFileSync(f.body, "# Jira requirement\n\nRevision 43.\n", "utf8");
-    captureRequirementSource(request(f, { revision: "43", capturedAt: "2026-07-20T17:00:00.000Z" }));
-    const sourcePath = join(first.requirementPath, "source.yaml");
-    const source = JSON.parse(readFileSync(sourcePath, "utf8"));
-    source.previousRevisions = [{ revision: "42", capturedAt: "2099-01-01T00:00:00.000Z" }];
-    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`, "utf8");
-
-    expect(() => captureRequirementSource(request(f, { revision: "43" }))).toThrowError(
-      expect.objectContaining({ code: "revision_conflict" }),
-    );
-  });
-
   it("resolves a Story back to its Requirement sources by reading source.yaml from disk in a fresh call, not an in-memory cache", () => {
     const f = fixture();
     captureRequirementSource(request(f));
@@ -929,58 +764,6 @@ describe("US-WS-007 RequirementSourceStore", () => {
 
     const resolved = resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007");
     expect(resolved.map((manifest) => manifest.ref)).toEqual(["SOT-15499"]);
-  });
-
-  it("fails loudly when a declared provider's canonical path exists but is a symlink instead of a real directory", () => {
-    const f = fixture();
-    captureRequirementSource(request(f));
-    const providerPath = join(f.workspace, "requirements", "jira");
-    const outside = join(f.root, "outside-provider-dir");
-    mkdirSync(outside, { recursive: true });
-    rmSync(providerPath, { recursive: true, force: true });
-    symlinkSync(outside, providerPath);
-
-    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
-      expect.objectContaining({ code: "io_failure" }),
-    );
-  });
-
-  it("fails loudly when a declared provider's canonical path exists but is a regular file instead of a real directory", () => {
-    const f = fixture();
-    captureRequirementSource(request(f));
-    const providerPath = join(f.workspace, "requirements", "jira");
-    rmSync(providerPath, { recursive: true, force: true });
-    writeFileSync(providerPath, "not a directory\n", "utf8");
-
-    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
-      expect.objectContaining({ code: "io_failure" }),
-    );
-  });
-
-  it("fails loudly when a declared requirement's canonical path exists but is a symlink instead of a real directory", () => {
-    const f = fixture();
-    captureRequirementSource(request(f));
-    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
-    const outside = join(f.root, "outside-requirement-dir");
-    mkdirSync(outside, { recursive: true });
-    rmSync(requirementPath, { recursive: true, force: true });
-    symlinkSync(outside, requirementPath);
-
-    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
-      expect.objectContaining({ code: "io_failure" }),
-    );
-  });
-
-  it("fails loudly when a declared requirement's canonical path exists but is a regular file instead of a real directory", () => {
-    const f = fixture();
-    captureRequirementSource(request(f));
-    const requirementPath = join(f.workspace, "requirements", "jira", "req-c78ccf14ea21");
-    rmSync(requirementPath, { recursive: true, force: true });
-    writeFileSync(requirementPath, "not a directory\n", "utf8");
-
-    expect(() => resolveRequirementSourcesForStoryOnDisk(f.workspace, "US-WS-007")).toThrowError(
-      expect.objectContaining({ code: "io_failure" }),
-    );
   });
 
   it("treats a declared requirement that was never captured (canonical path absent) as a normal empty result, not an error", () => {

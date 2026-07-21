@@ -380,6 +380,50 @@ describe("US-WS-007a Requirement archive audit", () => {
     });
   });
 
+  it("detects a nested context entry added after that directory was enumerated", () => {
+    const f = fixture();
+    const nestedRoot = join(f.requirementPath, "revisions", requirementRevisionKey("6"), "context", "brief", "nested");
+    const trigger = join(nestedRoot, "rules.md");
+    let changed = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== trigger || changed) return;
+        changed = true;
+        write(join(nestedRoot, "late.md"), "late context mutation\n");
+      },
+    });
+
+    expect(changed).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      revision: "6",
+      evidencePath: `revisions/${requirementRevisionKey("6")}/context/brief/nested`,
+    });
+  });
+
+  it("detects a revision directory added after revisions/ was enumerated", () => {
+    const f = fixture();
+    const trigger = join(f.requirementPath, "revisions", requirementRevisionKey("7"), "requirement.md");
+    let changed = false;
+
+    const result = auditRequirementArchive(f.auditInput, {
+      afterReadFile: (path) => {
+        if (path !== trigger || changed) return;
+        changed = true;
+        mkdirSync(join(f.requirementPath, "revisions", "rev-late"));
+      },
+    });
+
+    expect(changed).toBe(true);
+    expect(result.status).toBe("untrusted");
+    expect(result.findings).toContainEqual({
+      code: "archive_changed_during_read",
+      evidencePath: "revisions",
+    });
+  });
+
   it.each([
     ["unsupported schema", (source: Record<string, unknown>) => { source["schema"] = "roll.requirement-source/v2"; }],
     ["identity mismatch", (source: Record<string, unknown>) => { source["requirementId"] = "req-000000000000"; }],

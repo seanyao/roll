@@ -197,13 +197,14 @@ function stableReadDirectory(path: string, maximumEntries: number): DirectoryRea
   return { ok: true, entries: entries.sort(), identity: afterIdentity };
 }
 
-function directoryIdentityChanged(path: string, initial: FileIdentity): boolean {
-  try {
-    const current = lstatSync(path);
-    return current.isSymbolicLink() || !current.isDirectory() || !sameIdentity(initial, identity(current));
-  } catch {
-    return true;
-  }
+function directorySnapshotChanged(
+  path: string,
+  initial: Extract<DirectoryRead, { readonly ok: true }>,
+  maximumEntries: number,
+): boolean {
+  const current = stableReadDirectory(path, maximumEntries);
+  return !current.ok || !sameIdentity(initial.identity, current.identity) ||
+    JSON.stringify(initial.entries) !== JSON.stringify(current.entries);
 }
 
 function contained(root: string, target: string): boolean {
@@ -272,8 +273,17 @@ interface WalkState {
   files: number;
 }
 
+interface ContextDirectorySnapshot {
+  readonly relativePath: string;
+  readonly directory: Extract<DirectoryRead, { readonly ok: true }>;
+}
+
 type ContextWalk =
-  | { readonly ok: true; readonly paths: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly paths: readonly string[];
+      readonly directories: readonly ContextDirectorySnapshot[];
+    }
   | { readonly ok: false; readonly kind: ReadFailureKind; readonly evidencePath: string };
 
 function walkContext(
@@ -288,6 +298,7 @@ function walkContext(
   const directory = stableReadDirectory(directoryPath, limits.maxContextEntries - state.entries);
   if (!directory.ok) return { ok: false, kind: directory.kind, evidencePath: relativeRoot };
   const paths: string[] = [];
+  const directories: ContextDirectorySnapshot[] = [];
   for (const name of directory.entries) {
     state.entries += 1;
     if (state.entries > limits.maxContextEntries) return { ok: false, kind: "limit", evidencePath: relativeRoot };
@@ -304,6 +315,7 @@ function walkContext(
       const nested = walkContext(root, relativePath, depth + 1, limits, state);
       if (!nested.ok) return nested;
       paths.push(...nested.paths);
+      directories.push(...nested.directories);
       continue;
     }
     if (!stat.isFile()) return { ok: false, kind: "unsafe", evidencePath: relativePath };
@@ -311,7 +323,11 @@ function walkContext(
     if (state.files > limits.maxContextFiles) return { ok: false, kind: "limit", evidencePath: relativePath };
     paths.push(relativePath);
   }
-  return { ok: true, paths };
+  if (directorySnapshotChanged(directoryPath, directory, limits.maxContextEntries)) {
+    return { ok: false, kind: "changed", evidencePath: relativeRoot };
+  }
+  directories.push({ relativePath: relativeRoot, directory });
+  return { ok: true, paths, directories };
 }
 
 function compareText(left: string, right: string): number {
@@ -409,7 +425,18 @@ function scanRevision(
       findings.push({ code: "context_digest_mismatch", revision, evidencePath: relativePath });
     }
   }
-  if (directoryIdentityChanged(revisionRoot, revisionDirectory.identity)) {
+  for (const snapshot of walked.directories) {
+    const directoryPath = snapshot.relativePath === "" ? contextRoot : join(contextRoot, snapshot.relativePath);
+    if (!directorySnapshotChanged(directoryPath, snapshot.directory, limits.maxContextEntries)) continue;
+    const suffix = snapshot.relativePath === "" ? "" : `/${snapshot.relativePath}`;
+    findings.push({
+      code: "archive_changed_during_read",
+      revision,
+      evidencePath: `${contextRelative}${suffix}`,
+    });
+    break;
+  }
+  if (directorySnapshotChanged(revisionRoot, revisionDirectory, limits.maxRevisionEntries)) {
     findings.push({ code: "archive_changed_during_read", revision, evidencePath: revisionRelative });
   }
 }
@@ -506,6 +533,9 @@ export function auditRequirementArchive(
       }
     }
     for (const revision of graph) scanRevision(requirementRoot, source, revision, limits, deps, findings);
+    if (directorySnapshotChanged(revisionsRoot, revisionsDirectory, limits.maxRevisionEntries)) {
+      findings.push({ code: "archive_changed_during_read", evidencePath: "revisions" });
+    }
   }
 
   const sourceAfter = stableReadFile(join(requirementRoot, "source.yaml"), limits.maxSourceBytes, deps);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### 稳定性
+- 临时 Git 不再污染主检出（FIX-1473）[loop]
+  <!-- evidence: .roll/features/loop-engine/FIX-1473/latest/FIX-1473-report.html -->
+
 ## v4.720.1 — 2026-07-20
 
 ### 稳定性

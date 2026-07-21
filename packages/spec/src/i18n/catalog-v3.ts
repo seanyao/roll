@@ -9,6 +9,20 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  "backlog.usage": {
+    en: "Usage: roll backlog [--workspace <id|path>]\n       roll backlog show <story-id> [--workspace <id|path>]\n       roll backlog --all",
+    zh: "用法：roll backlog [--workspace <ID|路径>]\n      roll backlog show <Story ID> [--workspace <ID|路径>]\n      roll backlog --all",
+  },
+  "backlog.title": { en: "Backlog %s (%s)", zh: "待办 %s（%s）" },
+  "backlog.header": { en: "Workspace\tStory\tStatus\tDescription", zh: "工作区\tStory\t状态\t说明" },
+  "backlog.empty": { en: "No backlog items", zh: "没有待办事项" },
+  "backlog.show.title": { en: "Story %s in %s", zh: "Story %s（工作区 %s）" },
+  "backlog.show.path": { en: "Contract: %s", zh: "契约：%s" },
+  "backlog.error.line": { en: "backlog: %s — %s", zh: "待办：%s — %s" },
+  "backlog.error.candidates": { en: "Candidates: %s", zh: "候选目标：%s" },
+  "backlog.error.migration_command": { en: "Run: %s", zh: "请运行：%s" },
+  "backlog.error.story_not_found": { en: "Story contract was not found in this Workspace backlog", zh: "该工作区待办中找不到 Story 契约" },
+  "backlog.error.invalid_arguments": { en: "Invalid arguments; run `roll backlog --help`", zh: "参数无效；请运行 `roll backlog --help`" },
   "workspace.usage": {
     en: "Usage: roll workspace <init|issue|requirement|list|show|register|activate|pause|archive> [options]\n  `init <id> --config <file> [--check] [--json]`\n  `issue init <story-id> --workspace <id> [--check] [--json]`\n  `requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]`\n  `list [--json] [--all]`\n  `show <id|path> [--json]`\n  `register <id> <path> [--json]`\n  `activate|pause|archive <id|path> [--json]`\n  Init/issue --check is read-only; lifecycle mutations require one explicit target; --all is read-only.\n",
     zh: "用法：roll workspace <init|issue|requirement|list|show|register|activate|pause|archive> [选项]\n  `init <ID> --config <文件> [--check] [--json]`\n  `issue init <Story ID> --workspace <ID> [--check] [--json]`\n  `requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]`\n  `list [--json] [--all]`\n  `show <ID|路径> [--json]`\n  `register <ID> <路径> [--json]`\n  `activate|pause|archive <ID|路径> [--json]`\n  init/issue --check 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。\n",

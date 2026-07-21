@@ -36,7 +36,7 @@ describe("resolveBacklogTarget", () => {
       operation: "mutation",
       registry: [candidate("/workspaces/ws-a", "ws-a")],
       all: true,
-    })).toMatchObject({ ok: false, code: "all_requires_readonly" });
+    })).toMatchObject({ ok: false, code: "all_requires_readonly", candidates: [{ workspaceId: "ws-a" }] });
   });
 
   it("returns an exact migration diagnostic without adopting the legacy backlog", () => {
@@ -52,6 +52,7 @@ describe("resolveBacklogTarget", () => {
       ok: false,
       code: "migration_required",
       migrationCheckCommand: "roll workspace migrate --from '/tmp/legacy repo' --check",
+      candidates: [],
     });
   });
 });

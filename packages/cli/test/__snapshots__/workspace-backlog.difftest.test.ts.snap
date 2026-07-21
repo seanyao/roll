@@ -1,0 +1,70 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-WS-009 Workspace backlog reads > freezes English and Chinese read/show/all output 1`] = `
+{
+  "en": {
+    "all": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "Workspace	Story	Status	Description
+ws-alpha	US-1	📋 Todo	ws-alpha story
+ws-beta	US-1	📋 Todo	ws-beta story
+",
+    },
+    "read": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "Backlog ws-alpha (<WS_1>)
+
+  BACKLOG  ·  待处理任务                                                                   1 Pending
+
+  User Stories  ·  用户故事  (1)
+    US-1              ws-alpha story
+
+  triage: roll backlog block/defer/unblock <pattern> [reason]
+
+",
+    },
+    "show": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "Story US-1 in ws-alpha
+Contract: <WS_1>/backlog/epic/feature/US-1/spec.md
+# US-1 ws-alpha contract
+",
+    },
+  },
+  "zh": {
+    "all": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "工作区	Story	状态	说明
+ws-alpha	US-1	📋 Todo	ws-alpha story
+ws-beta	US-1	📋 Todo	ws-beta story
+",
+    },
+    "read": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "待办 ws-alpha（<WS_1>）
+
+  BACKLOG  ·  待处理任务                                                                   1 Pending
+
+  User Stories  ·  用户故事  (1)
+    US-1              ws-alpha story
+
+  triage: roll backlog block/defer/unblock <pattern> [reason]
+
+",
+    },
+    "show": {
+      "status": 0,
+      "stderr": "",
+      "stdout": "Story US-1（工作区 ws-alpha）
+契约：<WS_1>/backlog/epic/feature/US-1/spec.md
+# US-1 ws-alpha contract
+",
+    },
+  },
+}
+`;

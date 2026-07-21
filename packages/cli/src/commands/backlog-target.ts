@@ -6,7 +6,14 @@ import {
   type WorkspaceRegistryCandidate,
   type WorkspaceTargetFailureCode,
 } from "@roll/core";
-import { workspaceTargetSelector, type LegacyWorkspaceProject } from "./workspace-target.js";
+import { WorkspaceRegistry, type InspectedWorkspace } from "@roll/infra";
+import {
+  inspectWorkspaceCwd,
+  workspaceRegistryCandidates,
+  workspaceRollHome,
+  workspaceTargetSelector,
+  type LegacyWorkspaceProject,
+} from "./workspace-target.js";
 
 export type BacklogOperation = "read" | "mutation";
 
@@ -42,8 +49,8 @@ export interface ResolvedBacklogTarget {
 export type BacklogTargetDecision =
   | ResolvedBacklogTarget
   | { readonly ok: true; readonly aggregate: readonly BacklogAggregateEntry[] }
-  | { readonly ok: false; readonly code: "migration_required"; readonly migrationCheckCommand: string }
-  | { readonly ok: false; readonly code: WorkspaceTargetFailureCode };
+  | { readonly ok: false; readonly code: "migration_required"; readonly migrationCheckCommand: string; readonly candidates: readonly BacklogAggregateEntry[] }
+  | { readonly ok: false; readonly code: WorkspaceTargetFailureCode; readonly candidates: readonly BacklogAggregateEntry[] };
 
 function resolvedTarget(workspaceId: string, workspaceRoot: string, canonicalRoot: string): ResolvedBacklogTarget {
   return {
@@ -75,11 +82,22 @@ export function resolveBacklogTarget(input: BacklogTargetInput): BacklogTargetDe
       repositoryRoot: input.legacyProject.repositoryRoot,
     });
     if (legacy.legacy) {
-      return { ok: false, code: "migration_required", migrationCheckCommand: legacy.migrationCheckCommand };
+      return { ok: false, code: "migration_required", migrationCheckCommand: legacy.migrationCheckCommand, candidates: [] };
     }
   }
 
-  if (!decision.ok) return { ok: false, code: decision.error.code };
+  if (!decision.ok) {
+    return {
+      ok: false,
+      code: decision.error.code,
+      candidates: decision.error.candidates.map((workspace) => ({
+        workspaceId: workspace.workspaceId,
+        workspaceRoot: workspace.root,
+        canonicalRoot: workspace.canonicalRoot,
+        backlogPath: join(workspace.root, "backlog", "index.md"),
+      })),
+    };
+  }
   if (decision.target.kind === "all") {
     return {
       ok: true,
@@ -92,4 +110,49 @@ export function resolveBacklogTarget(input: BacklogTargetInput): BacklogTargetDe
     };
   }
   return resolvedTarget(decision.target.workspaceId, decision.target.root, decision.target.canonicalRoot);
+}
+
+export interface BacklogCommandTargetDeps {
+  readonly cwd: () => string;
+  readonly environmentWorkspace: () => string | undefined;
+  readonly inspectRegistry: () => readonly InspectedWorkspace[];
+}
+
+function realCommandTargetDeps(): BacklogCommandTargetDeps {
+  return {
+    cwd: () => process.cwd(),
+    environmentWorkspace: () => process.env["ROLL_WORKSPACE"],
+    inspectRegistry: () => new WorkspaceRegistry({ rollHome: workspaceRollHome() }).inspect(),
+  };
+}
+
+function flagValue(args: readonly string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+export function resolveBacklogCommandTarget(
+  args: readonly string[],
+  operation: BacklogOperation,
+  deps: BacklogCommandTargetDeps = realCommandTargetDeps(),
+): BacklogTargetDecision {
+  let entries: readonly InspectedWorkspace[];
+  try {
+    entries = deps.inspectRegistry();
+  } catch {
+    return { ok: false, code: "invalid_target", candidates: [] };
+  }
+  const cwdInspection = inspectWorkspaceCwd(deps.cwd(), entries);
+  const explicitWorkspace = flagValue(args, "--workspace");
+  const environmentWorkspace = deps.environmentWorkspace();
+  return resolveBacklogTarget({
+    operation,
+    registry: workspaceRegistryCandidates(entries),
+    all: args.includes("--all"),
+    ...(explicitWorkspace === undefined ? {} : { explicitWorkspace }),
+    ...(environmentWorkspace === undefined || environmentWorkspace === "" ? {} : { environmentWorkspace }),
+    ...(cwdInspection.cwdManifest === undefined ? {} : { cwdManifest: cwdInspection.cwdManifest }),
+    ...(cwdInspection.legacyProject === undefined ? {} : { legacyProject: cwdInspection.legacyProject }),
+    hasReachableWorkspaceManifest: cwdInspection.hasReachableWorkspaceManifest,
+  });
 }

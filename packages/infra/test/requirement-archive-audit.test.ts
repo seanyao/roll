@@ -136,6 +136,18 @@ describe("US-WS-007a Requirement archive audit", () => {
       checkedRevisions: ["7", "6"],
       findings: [],
     });
+
+    // source.yaml.stories is mutable Story-link authority. The archived copy is
+    // historical projection data, not an immutable trust anchor for the archive.
+    const sourcePath = join(f.requirementPath, "source.yaml");
+    const source = JSON.parse(readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+    source["stories"] = ["US-WS-RELINKED"];
+    writeFileSync(sourcePath, `${JSON.stringify(source, null, 2)}\n`);
+    expect(auditRequirementArchive(f.auditInput)).toMatchObject({
+      status: "healthy",
+      checkedRevisions: ["7", "6"],
+      findings: [],
+    });
   });
 
   it("validates the complete immutable revision graph without reading projections or Issue evidence", () => {

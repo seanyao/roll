@@ -301,10 +301,11 @@ function captureMetadataMatches(
     return false;
   }
   if (revision !== source.revision) return true;
+  // source.yaml.stories is mutable Story-link authority. capture.yaml.stories
+  // is only the link projection at capture time and is not an archive trust anchor.
   return JSON.stringify(capture.requirement) === JSON.stringify(source.requirement) &&
     JSON.stringify(capture.context) === JSON.stringify(source.context) &&
-    JSON.stringify(capture.attest) === JSON.stringify(source.attest) &&
-    capture.stories.every((storyId) => source.stories.includes(storyId));
+    JSON.stringify(capture.attest) === JSON.stringify(source.attest);
 }
 
 function captureIdentityMatches(

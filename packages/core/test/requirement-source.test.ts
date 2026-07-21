@@ -162,6 +162,23 @@ describe("US-WS-007 RequirementSource planning", () => {
     expect(renderRequirementAttestProjection(first.manifest)).toContain("Issue-owned evidence remains authoritative");
   });
 
+  it("keeps the Requirement attest projection pending even when Issue evidence exists elsewhere", () => {
+    const planned = planRequirementCapture(facts());
+    expect(planned.ok).toBe(true);
+    if (!planned.ok) return;
+    const renderWithLegacyIssueEvidence = renderRequirementAttestProjection as unknown as (
+      manifest: typeof planned.value.manifest,
+      issueEvidence: readonly { readonly storyId: string; readonly evidencePath: string | null }[],
+    ) => string;
+
+    const rendered = renderWithLegacyIssueEvidence(planned.value.manifest, [
+      { storyId: "US-WS-007", evidencePath: "issues/US-WS-007/evidence" },
+    ]);
+
+    expect(rendered).toContain("- US-WS-007: no evidence captured yet");
+    expect(rendered).not.toContain("issues/US-WS-007/evidence");
+  });
+
   it("rejects unknown providers, unsafe context paths, malformed digests and credential-shaped refs without echoing secrets", () => {
     const secret = "https://token:credential-sentinel@example.test/issue/1";
     const result = planRequirementCapture(facts({

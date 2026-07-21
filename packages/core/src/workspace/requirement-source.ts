@@ -297,24 +297,12 @@ export function resolveRequirementSourcesForStory(
     .sort((left, right) => compareText(left.provider, right.provider) || compareText(left.ref, right.ref));
 }
 
-export interface RequirementIssueEvidenceSummary {
-  readonly storyId: string;
-  readonly evidencePath: string | null;
-}
-
 export function renderRequirementAttestProjection(
   manifest: RequirementSourceManifest,
-  issueEvidence: readonly RequirementIssueEvidenceSummary[] = [],
 ): string {
-  const evidenceByStory = new Map(issueEvidence.map((entry) => [entry.storyId, entry.evidencePath]));
   const storyLines = manifest.stories.length === 0
     ? ["- none"]
-    : manifest.stories.map((storyId) => {
-      const evidencePath = evidenceByStory.get(storyId);
-      return evidencePath === undefined || evidencePath === null
-        ? `- ${storyId}: no evidence captured yet`
-        : `- ${storyId}: ${evidencePath}`;
-    });
+    : manifest.stories.map((storyId) => `- ${storyId}: no evidence captured yet`);
   return [
     `# Requirement ${manifest.provider}:${manifest.ref} attestation`,
     "",

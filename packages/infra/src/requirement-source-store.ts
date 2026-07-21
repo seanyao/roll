@@ -26,7 +26,6 @@ import {
   requirementRevisionKey,
   resolveRequirementSourcesForStory,
   type RequirementCaptureOutcome,
-  type RequirementIssueEvidenceSummary,
 } from "@roll/core";
 import {
   parseRequirementSourceManifest,
@@ -369,35 +368,6 @@ function declaredSource(
   });
 }
 
-function realContainedDirectory(root: string, target: string): boolean {
-  if (!contained(root, target)) return false;
-  const rel = relative(root, target);
-  let cursor = root;
-  for (const segment of rel === "" ? [] : rel.split(sep)) {
-    cursor = join(cursor, segment);
-    let stat;
-    try {
-      stat = lstatSync(cursor);
-    } catch {
-      return false;
-    }
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-  }
-  return true;
-}
-
-function discoverIssueEvidence(
-  workspaceRoot: string,
-  stories: readonly string[],
-): readonly RequirementIssueEvidenceSummary[] {
-  return stories.map((storyId) => {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(storyId)) return { storyId, evidencePath: null };
-    const evidencePath = join(workspaceRoot, "issues", storyId, "evidence");
-    if (!realContainedDirectory(workspaceRoot, evidencePath)) return { storyId, evidencePath: null };
-    return { storyId, evidencePath: `issues/${storyId}/evidence` };
-  });
-}
-
 function collectStoryIds(root: string, depth = 0): readonly string[] {
   if (depth > 10 || !existsSync(root)) return [];
   const ids: string[] = [];
@@ -466,7 +436,6 @@ function copyContextProjection(
 }
 
 function isProjectionCurrent(
-  workspaceRoot: string,
   requirementPath: string,
   manifest: RequirementSourceManifest,
   evidence: RevisionEvidence,
@@ -477,8 +446,7 @@ function isProjectionCurrent(
     if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) return false;
     const body = boundedReadCurrent(join(requirementPath, "requirement.md"), MAX_REQUIREMENT_BODY_BYTES, hooks);
     if (body === undefined || !body.equals(evidence.body.content)) return false;
-    const issueEvidence = discoverIssueEvidence(workspaceRoot, manifest.stories);
-    const expectedAttest = renderRequirementAttestProjection(manifest, issueEvidence);
+    const expectedAttest = renderRequirementAttestProjection(manifest);
     const attestMaxBytes = Buffer.byteLength(expectedAttest, "utf8") + 4096;
     const attest = boundedReadCurrent(join(requirementPath, "attest.md"), attestMaxBytes, hooks);
     if (attest === undefined || attest.toString("utf8") !== expectedAttest) return false;
@@ -512,8 +480,7 @@ function projectCurrent(
     ensureSafeDirectory(workspaceRoot, requirementPath, false);
     atomicWrite(join(requirementPath, "requirement.md"), evidence.body.content, renameFile);
     copyContextProjection(evidence.context, requirementPath, renameFile);
-    const issueEvidence = discoverIssueEvidence(workspaceRoot, manifest.stories);
-    atomicWrite(join(requirementPath, "attest.md"), renderRequirementAttestProjection(manifest, issueEvidence), renameFile);
+    atomicWrite(join(requirementPath, "attest.md"), renderRequirementAttestProjection(manifest), renameFile);
     rmSync(journal, { force: true });
   } catch (error) {
     return fail("projection_repair_required", "Requirement revision committed but its current projection needs repair", error);
@@ -875,7 +842,7 @@ export function captureRequirementSource(
     const plan = planned.value;
     if (plan.outcome === "reused") {
       const evidence = validateRevision(requirementPath, plan.manifest);
-      if (!isProjectionCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps)) {
+      if (!isProjectionCurrent(requirementPath, plan.manifest, evidence, deps)) {
         projectCurrent(workspaceRoot, requirementPath, plan.manifest, evidence, deps);
       }
       return {

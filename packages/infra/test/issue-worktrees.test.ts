@@ -661,4 +661,56 @@ describe("applyIssueInit", () => {
     expect(events).toHaveLength(3); // sot1, sot2, sot3 — exactly once each, no stale/duplicate facts.
     expect(new Set(events.map((e) => e.alias)).size).toBe(3);
   });
+
+  it("fails loud, with zero mutation, when a completed event's workspaceId/storyId/repoId no longer matches what is currently resolving", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+
+    // Hand-corrupt the completed event's repoId — a real scenario where the
+    // Story Contract's declared repository binding for this alias changed
+    // (e.g. the Workspace was reconfigured to point the alias at a
+    // DIFFERENT repository) after the Issue already pinned facts under the
+    // OLD repoId.
+    const events = eventsBefore.trim().split("\n").map((line) => JSON.parse(line));
+    const corrupted = events.map((event) => (event.alias === "sot1" ? { ...event, repoId: "repo-0000deadbeef" } : event));
+    writeFileSync(join(f.issueRoot, "events.jsonl"), `${corrupted.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    const report = await inspectIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings });
+    expect(report.targets["sot1"]?.decision).toBe("conflict");
+    expect(existsSync(join(f.issueRoot, "sot1", ".git"))).toBe(true); // the real worktree is untouched
+  });
+
+  it("fails loud with zero destructive mutation when an OLD journal is missing a required pinned field", async () => {
+    const f = fixture();
+    await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });
+    const eventsBefore = readFileSync(join(f.issueRoot, "events.jsonl"), "utf8");
+    const manifestBefore = readFileSync(join(f.issueRoot, "manifest.json"), "utf8");
+
+    // Plant an OLD-SHAPE journal predating the repoId/baseSha pinning
+    // contract entirely — a real forward-compatibility scenario (an
+    // earlier build of this code wrote journals without these fields).
+    const incompleteJournal = {
+      schema: "roll.issue-init-journal/v1",
+      transactionId: "old-transaction",
+      workspaceId: "ws-demo",
+      storyId: "US-XX1",
+      status: "repair_required",
+      targets: [
+        { alias: "sot1", path: join(f.issueRoot, "sot1"), created: false, workBranch: "roll/ws-demo/US-XX1/sot1", access: "write" }, // no repoId, no baseSha
+      ],
+    };
+    writeFileSync(join(f.issueRoot, "issue-init.pending.json"), `${JSON.stringify(incompleteJournal, null, 2)}\n`, "utf8");
+
+    await expect(applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests }))
+      .rejects.toThrow(IssueInitializationError);
+
+    expect(readFileSync(join(f.issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
+    expect(readFileSync(join(f.issueRoot, "manifest.json"), "utf8")).toBe(manifestBefore);
+
+    rmSync(join(f.issueRoot, "issue-init.pending.json"), { force: true });
+  });
 });

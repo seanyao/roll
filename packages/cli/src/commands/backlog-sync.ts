@@ -3,7 +3,7 @@
  * lib/github_sync.py's `sync` subcommand). The pure mapping/merge/config logic
  * lives in @roll/core (backlog/github-sync); this module owns the I/O: token
  * resolution, the paginated HTTP fetch (injectable opener), the fixture seam,
- * and the backlog / feature-stub / local.yaml writes.
+ * and the Workspace backlog / Story-contract / runtime-config writes.
  */
 import {
   type GhIssue,
@@ -11,18 +11,25 @@ import {
   dryRunPreview,
   featureStubContent,
   filterIssuesByLabel,
-  ghId,
   parseLabelsFilter,
   parseLinkHeader,
   readSyncConfig,
   renderAcSection,
   renderSyncBlock,
+  storyIdFromIssue,
   syncToBacklog,
   writeSyncBlock,
 } from "@roll/core";
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  emitBacklogTarget,
+  emitBacklogTargetError,
+  resolveBacklogCommandTarget,
+  stripBacklogScopeArgs,
+  type BacklogTargetResolver,
+} from "./backlog-target.js";
 
 const API_ROOT = "https://api.github.com";
 const RATE_LIMIT_FLOOR = 5;
@@ -146,6 +153,7 @@ export interface SyncDeps {
   loadIssues: (owner: string, repo: string) => Promise<GhIssue[]>;
   /** Now, as an RFC3339 UTC stamp (for the persisted last_sync_at). */
   nowIso: () => string;
+  resolveTarget?: BacklogTargetResolver;
 }
 function realSyncDeps(): SyncDeps {
   return {
@@ -155,6 +163,7 @@ function realSyncDeps(): SyncDeps {
       return fetchIssues(owner, repo, { state: "open" });
     },
     nowIso: () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+    resolveTarget: resolveBacklogCommandTarget,
   };
 }
 
@@ -164,23 +173,37 @@ function flagValue(args: string[], name: string): string | undefined {
 }
 
 /**
- * `roll backlog sync [--repo owner/repo] [--backlog P] [--features D]
- *  [--local-yaml P] [--label a,b]... [--dry-run]`. Resolves the repo from the
+ * `roll backlog sync [--workspace id|path] [--repo owner/repo]
+ *  [--label a,b]... [--dry-run]`. Resolves the repo from the
  * flag or the persisted backlog_sync.repo, fetches issues (or a fixture), maps
  * them to rows (idempotent by GH id), writes feature stubs, and persists config.
  * Exit codes mirror the oracle: auth 2, rate-limit 3, api 4, usage 1.
  */
 export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSyncDeps()): Promise<number> {
-  const backlog = flagValue(args, "--backlog") ?? ".roll/backlog.md";
-  const featuresDir = flagValue(args, "--features") ?? ".roll/features";
-  const localYaml = flagValue(args, "--local-yaml") ?? ".roll/local.yaml";
+  const scoped = stripBacklogScopeArgs(args);
+  if (!scoped.ok) return 1;
+  const commandArgs = [...scoped.args];
+  if (["--backlog", "--features", "--local-yaml"].some((flag) => commandArgs.includes(flag))) {
+    process.stderr.write("backlog: invalid_arguments — Workspace-owned paths cannot be overridden\n");
+    return 1;
+  }
+  const decision = (deps.resolveTarget ?? resolveBacklogCommandTarget)(args, "mutation");
+  if (!decision.ok) return emitBacklogTargetError(decision);
+  if ("aggregate" in decision) {
+    process.stderr.write("backlog: invalid_arguments — aggregate management commands are not supported\n");
+    return 1;
+  }
+  const backlog = decision.backlogPath;
+  const featuresDir = decision.storyRoot;
+  const localYaml = decision.configPath;
+  emitBacklogTarget(decision);
 
   const cfg: SyncConfig = existsSync(localYaml) ? readSyncConfig(readFileSync(localYaml, "utf8")) : {};
-  const repoArg = flagValue(args, "--repo") ?? cfg.repo ?? "";
+  const repoArg = flagValue(commandArgs, "--repo") ?? cfg.repo ?? "";
   if (!repoArg) {
     process.stderr.write(
-      "usage: roll backlog sync --repo <owner/repo> [--backlog <path>] [--features <dir>] [--label <a,b>] [--dry-run]\n" +
-        "  首次 sync 必须显式 --repo（local.yaml 中尚无 backlog_sync.repo）。\n",
+      "usage: roll backlog sync [--workspace <id|path>] --repo <owner/repo> [--label <a,b>] [--dry-run]\n" +
+        "  首次 sync 必须显式 --repo（Workspace runtime config 中尚无 backlog_sync.repo）。\n",
     );
     return 1;
   }
@@ -192,14 +215,14 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
 
   // --label may repeat; each value is comma-separated → one flat OR list.
   const labelParts: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--label" && args[i + 1] !== undefined) labelParts.push(args[i + 1]!);
+  for (let i = 0; i < commandArgs.length; i++) {
+    if (commandArgs[i] === "--label" && commandArgs[i + 1] !== undefined) labelParts.push(commandArgs[i + 1]!);
   }
   const wanted =
     labelParts.length > 0
       ? parseLabelsFilter(labelParts.join(","))
       : parseLabelsFilter((cfg.labels ?? []).join(","));
-  const dryRun = args.includes("--dry-run");
+  const dryRun = commandArgs.includes("--dry-run");
 
   let issues: GhIssue[];
   try {
@@ -240,7 +263,7 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
   // per newly-added issue.
   const skippedSet = new Set(result.skippedIds);
   for (const issue of issues) {
-    if (skippedSet.has(ghId(issue))) continue;
+    if (skippedSet.has(storyIdFromIssue(issue))) continue;
     writeFeatureStub(issue, featuresDir);
   }
 
@@ -256,11 +279,11 @@ export async function backlogSyncCommand(args: string[], deps: SyncDeps = realSy
   return 0;
 }
 
-/** Create or AC-append a feature stub `<features>/backlog-lifecycle/GH-<n>.md`. */
+/** Create or AC-append a Story contract beneath the Workspace backlog. */
 function writeFeatureStub(issue: GhIssue, featuresDir: string, epic = "backlog-lifecycle"): string {
-  const epicDir = join(featuresDir, epic);
-  mkdirSync(epicDir, { recursive: true });
-  const path = join(epicDir, `${ghId(issue)}.md`);
+  const storyDir = join(featuresDir, epic, storyIdFromIssue(issue));
+  mkdirSync(storyDir, { recursive: true });
+  const path = join(storyDir, "spec.md");
   const ac = renderAcSection(issue);
   if (existsSync(path)) {
     const existing = readFileSync(path, "utf8");

@@ -31,10 +31,6 @@ const LABEL_TYPE_MAP: Record<string, string> = {
 export const DEFAULT_TYPE = "US";
 
 // Single-source markers (FIX-300): consume @roll/spec, never re-spell a literal.
-const STATE_STATUS_MAP: Record<string, string> = {
-  open: STATUS_MARKER.todo,
-  closed: STATUS_MARKER.done,
-};
 export const DEFAULT_STATUS = STATUS_MARKER.todo;
 
 function labelName(label: { name?: string } | string): string {
@@ -50,9 +46,9 @@ export function mapLabelToType(labels: GhIssue["labels"]): string {
   return DEFAULT_TYPE;
 }
 
-/** Map a GitHub state (open/closed) to a backlog status. */
-export function mapStateToStatus(state: string | undefined): string {
-  return STATE_STATUS_MAP[(state ?? "").trim().toLowerCase()] ?? DEFAULT_STATUS;
+/** External Issue state never decides planning completion. */
+export function mapStateToStatus(_state: string | undefined): string {
+  return DEFAULT_STATUS;
 }
 
 /** Canonical, type-independent GitHub id token, e.g. `GH-13` (idempotency key). */
@@ -60,12 +56,17 @@ export function ghId(issue: GhIssue): string {
   return `GH-${issue.number}`;
 }
 
+/** Canonical planning identity for an imported GitHub issue. */
+export function storyIdFromIssue(issue: GhIssue): string {
+  return `${mapLabelToType(issue.labels)}-${ghId(issue)}`;
+}
+
 /** Render one issue as a backlog table row `| <TYPE>-GH-<n> | <title> | <status> |`. */
-export function issueToRow(issue: GhIssue): string {
+export function issueToRow(issue: GhIssue, epic = "backlog-lifecycle"): string {
   const title = (issue.title ?? "").trim();
-  const typePrefix = mapLabelToType(issue.labels);
+  const storyId = storyIdFromIssue(issue);
   const status = mapStateToStatus(issue.state);
-  return `| ${typePrefix}-${ghId(issue)} | ${title} | ${status} |`;
+  return `| [${storyId}](${epic}/${storyId}/spec.md) | ${title} | ${status} |`;
 }
 
 /**
@@ -155,7 +156,7 @@ export function renderAcSection(issue: GhIssue): string {
 
 /** The body of a fresh feature stub for an issue (heading + AC). */
 export function featureStubContent(issue: GhIssue): string {
-  const ident = ghId(issue);
+  const ident = storyIdFromIssue(issue);
   const title = (issue.title ?? "").trim();
   const typePrefix = mapLabelToType(issue.labels);
   const ac = renderAcSection(issue);
@@ -174,7 +175,7 @@ export function featureStubContent(issue: GhIssue): string {
 
 /** `--dry-run` preview line for one issue (US-SYNC-004). */
 export function dryRunLine(issue: GhIssue, skipped: boolean): string {
-  const ident = ghId(issue);
+  const ident = storyIdFromIssue(issue);
   const typePrefix = mapLabelToType(issue.labels);
   if (skipped) return `= ${ident} [${typePrefix}] (skipped, already exists)`;
   return `+ ${ident} [${typePrefix}] ${(issue.title ?? "").trim()}`;
@@ -216,8 +217,9 @@ export function syncToBacklog(issues: GhIssue[], content: string): SyncResult {
   const rows: string[] = [];
   const skippedIds: string[] = [];
   for (const issue of issues) {
-    const ident = ghId(issue);
-    if (ghIdPresent(content, ident)) skippedIds.push(ident);
+    const externalId = ghId(issue);
+    const storyId = storyIdFromIssue(issue);
+    if (ghIdPresent(content, externalId)) skippedIds.push(storyId);
     else rows.push(issueToRow(issue));
   }
   return {

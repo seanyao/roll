@@ -14,7 +14,7 @@ interface Run {
 }
 
 const sandboxes: string[] = [];
-const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_WORKSPACE", "ROLL_LANG", "NO_COLOR", "LC_ALL", "LANG"] as const;
+const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_WORKSPACE", "ROLL_SYNC_FIXTURE", "ROLL_LANG", "NO_COLOR", "LC_ALL", "LANG"] as const;
 
 function fixture(): { readonly home: string; readonly rollHome: string } {
   const home = mkdtempSync(join(tmpdir(), "roll-workspace-backlog-"));
@@ -56,7 +56,7 @@ function createWorkspace(root: string, workspaceId: string): string {
 async function runCli(
   argv: string[],
   f: { readonly home: string; readonly rollHome: string },
-  options: { readonly lang?: "en" | "zh"; readonly cwd?: string; readonly workspaceEnv?: string } = {},
+  options: { readonly lang?: "en" | "zh"; readonly cwd?: string; readonly workspaceEnv?: string; readonly syncFixture?: string } = {},
 ): Promise<Run> {
   const saved: Partial<Record<typeof ENV_KEYS[number], string>> = {};
   for (const key of ENV_KEYS) {
@@ -69,6 +69,7 @@ async function runCli(
   process.env["ROLL_LANG"] = options.lang ?? "en";
   process.env["NO_COLOR"] = "1";
   if (options.workspaceEnv !== undefined) process.env["ROLL_WORKSPACE"] = options.workspaceEnv;
+  if (options.syncFixture !== undefined) process.env["ROLL_SYNC_FIXTURE"] = options.syncFixture;
   const previousCwd = process.cwd();
   if (options.cwd !== undefined) process.chdir(options.cwd);
   let stdout = "";
@@ -278,6 +279,7 @@ describe("US-WS-009 Workspace backlog reads", () => {
       ["backlog", "promote", "US-1", "--all"],
       ["backlog", "claim", "US-1", "--all"],
       ["backlog", "unstick", "--all"],
+      ["backlog", "sync", "--repo", "acme/widgets", "--all"],
     ];
     for (const command of aggregateCommands) {
       const result = await runCli(command, f);
@@ -291,6 +293,9 @@ describe("US-WS-009 Workspace backlog reads", () => {
     const overrideBefore = treeState(f.home);
     expect((await runCli(["backlog", "unstick", "--workspace", "ws-alpha", "--backlog", outside], f)).status).toBe(1);
     expect((await runCli(["backlog", "lint", outside, "--workspace", "ws-alpha"], f)).status).toBe(1);
+    expect((await runCli(["backlog", "sync", "--workspace", "ws-alpha", "--repo", "a/b", "--backlog", outside], f)).status).toBe(1);
+    expect((await runCli(["backlog", "sync", "--workspace", "ws-alpha", "--repo", "a/b", "--features", join(f.home, "outside-features")], f)).status).toBe(1);
+    expect((await runCli(["backlog", "sync", "--workspace", "ws-alpha", "--repo", "a/b", "--local-yaml", join(f.home, "outside.yaml")], f)).status).toBe(1);
     expect(treeState(f.home)).toEqual(overrideBefore);
   });
 
@@ -322,5 +327,41 @@ describe("US-WS-009 Workspace backlog reads", () => {
     expect(migration.stderr).toContain("migration_required");
     expect(migration.stderr).toContain(`roll workspace migrate --from '${realpathSync(legacy)}' --check`);
     expect(treeState(legacy)).toEqual(legacyBefore);
+  });
+
+  it("syncs one Workspace with canonical planning identity and can show the generated contract", async () => {
+    const f = fixture();
+    const alpha = createWorkspace(join(f.home, "alpha"), "ws-alpha");
+    const beta = createWorkspace(join(f.home, "beta"), "ws-beta");
+    await registerActive(f, "ws-alpha", alpha);
+    await registerActive(f, "ws-beta", beta);
+    const alphaBefore = treeState(alpha);
+    const issueFixture = join(f.home, "issues.json");
+    writeFileSync(issueFixture, `${JSON.stringify([{
+      number: 7,
+      title: "closed bug remains planning work",
+      state: "closed",
+      labels: [{ name: "bug" }],
+      body: "- [ ] verify workspace scope",
+    }])}\n`);
+
+    const synced = await runCli(
+      ["backlog", "sync", "--workspace", "ws-beta", "--repo", "acme/widgets"],
+      f,
+      { syncFixture: issueFixture },
+    );
+    expect(synced.status).toBe(0);
+    expect(synced.stdout).toContain(`Backlog ws-beta (${realpathSync(beta)})`);
+    const betaBacklog = readFileSync(join(beta, "backlog", "index.md"), "utf8");
+    expect(betaBacklog).toContain("[FIX-GH-7](backlog-lifecycle/FIX-GH-7/spec.md)");
+    expect(betaBacklog).toContain("📋 Todo");
+    expect(betaBacklog).not.toContain("✅ Done");
+    expect(readFileSync(join(beta, "runtime", "backlog-sync.yaml"), "utf8")).toContain("repo: acme/widgets");
+    expect(treeState(alpha)).toEqual(alphaBefore);
+
+    const shown = await runCli(["backlog", "show", "FIX-GH-7", "--workspace", "ws-beta"], f);
+    expect(shown.status).toBe(0);
+    expect(shown.stdout).toContain("# FIX-GH-7 closed bug remains planning work");
+    expect(shown.stdout).toContain("- [ ] verify workspace scope");
   });
 });

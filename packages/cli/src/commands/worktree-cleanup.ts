@@ -735,7 +735,7 @@ function rel(p: string): string {
   return p;
 }
 
-function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): string {
+export function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): string {
   const lines: string[] = [];
   lines.push(`Worktree cleanup (${mode})`);
   lines.push("");
@@ -802,7 +802,7 @@ function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): 
   return lines.join("\n").trimEnd() + "\n";
 }
 
-function renderResultHuman(result: WorktreeCleanupResult): string {
+export function renderResultHuman(result: WorktreeCleanupResult): string {
   const lines: string[] = [];
   lines.push("Worktree cleanup (apply)");
   lines.push("");
@@ -836,7 +836,7 @@ function renderResultHuman(result: WorktreeCleanupResult): string {
 // ─── CLI command ─────────────────────────────────────────────────────────────
 
 export const CLEANUP_USAGE =
-  "Usage: roll worktree cleanup [--dry-run | --apply] [--json] [--repo <path>]\n" +
+  "Usage: roll worktree cleanup [--dry-run | --apply] [--json] [--workspace <id|path> | --repo <path>]\n" +
   "  Safely recover from branch/worktree canary pressure using the worktree\n" +
   "  audit as the SOLE authority. Removes ONLY inactive, merged, clean\n" +
   "  `disposable_candidate` loop worktrees, plus (FIX-1454) standalone ephemeral\n" +
@@ -859,7 +859,8 @@ export const CLEANUP_USAGE =
   "             head / new dirt / missing path / concurrent activation fails\n" +
   "             closed (no substitution). Then resume explicitly: roll loop resume\n" +
   "  --json     emit the schema-1 plan (dry-run) or result (apply) as JSON\n" +
-  "  --repo     override the project root (default: current directory)\n" +
+  "  --workspace resolve Issue ownership through the Workspace registry\n" +
+  "  --repo     explicit historical repo-local/migration input (default: current directory)\n" +
   "  --reclaim-orphan <path>  (FIX-1460) bounded-rm ONE named orphan loop dir\n" +
   "             (deregistered from git; delivery not auto-provable) after you\n" +
   "             review it. Fails closed unless it is an inactive loop orphan\n" +

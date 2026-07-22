@@ -95,7 +95,10 @@ import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 import { worktreeAuditCommand } from "./worktree-audit.js";
 import { worktreeCleanupCommand } from "./worktree-cleanup.js";
-import { workspaceWorktreeAuditCommand } from "./workspace-worktree-lifecycle.js";
+import {
+  workspaceWorktreeAuditCommand,
+  workspaceWorktreeCleanupCommand,
+} from "./workspace-worktree-lifecycle.js";
 import { workspaceCommand, workspaceUsage } from "./workspace.js";
 
 let registered = false;
@@ -452,7 +455,13 @@ export function registerAll(): void {
       }
       return worktreeAuditCommand(rest);
     }
-    if (args[0] === "cleanup") return worktreeCleanupCommand(args.slice(1));
+    if (args[0] === "cleanup") {
+      const rest = args.slice(1);
+      if (rest.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "") !== "") {
+        return workspaceWorktreeCleanupCommand(rest);
+      }
+      return worktreeCleanupCommand(rest);
+    }
     process.stderr.write("roll worktree: unknown subcommand. Try 'roll worktree audit' or 'roll worktree cleanup'.\n");
     return 1;
   }, { help: "Usage: roll worktree <audit|cleanup> [options]\n  audit    Read-only audit of all git worktrees: ownership, dirt, merge evidence, disposition.\n  cleanup  Safe, audit-derived recovery for branch/worktree canary pressure (--dry-run first, then --apply, then roll loop resume).\n只读审计所有 git worktree,并对 canary 压力提供仅基于审计的安全清理(先 --dry-run,再 --apply,最后 roll loop resume)。" });

@@ -8,6 +8,7 @@ import type { WorktreeAuditOutput, WorktreeAuditRecord } from "../src/commands/w
 import {
   applyWorkspaceWorktreeCleanup,
   planWorkspaceWorktreeCleanup,
+  workspaceWorktreeCleanupCommand,
   type WorkspaceWorktreeAuditOutput,
 } from "../src/commands/workspace-worktree-lifecycle.js";
 
@@ -75,6 +76,21 @@ function workspaceAudit(records: readonly WorktreeAuditRecord[]): WorkspaceWorkt
       canaryTotal: records.length,
     },
   };
+}
+
+async function captureOutput(run: () => Promise<number>): Promise<{ readonly status: number; readonly stdout: string; readonly stderr: string }> {
+  let stdout = "";
+  let stderr = "";
+  const originalOut = process.stdout.write.bind(process.stdout);
+  const originalErr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string | Uint8Array) => (stdout += String(chunk), true)) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => (stderr += String(chunk), true)) as typeof process.stderr.write;
+  try {
+    return { status: await run(), stdout, stderr };
+  } finally {
+    process.stdout.write = originalOut;
+    process.stderr.write = originalErr;
+  }
 }
 
 describe("US-WS-011a Workspace worktree cleanup", () => {
@@ -155,5 +171,36 @@ describe("US-WS-011a Workspace worktree cleanup", () => {
       `remove:${safe.path}`,
       "unlock:repo-shared",
     ]);
+  });
+
+  it("exposes a Workspace-scoped dry-run plan without invoking mutation or a legacy repo layout", async () => {
+    const safe = record();
+    const lock = vi.fn(async <T>(_candidate: unknown, action: () => Promise<T>) => action());
+    const result = await captureOutput(() => workspaceWorktreeCleanupCommand([
+      "--workspace", "ws-alpha", "--dry-run", "--json",
+    ], {
+      resolveTarget: () => ({
+        ok: true,
+        workspaceId: "ws-alpha",
+        workspaceRoot: "/workspaces/alpha",
+        canonicalRoot: "/workspaces/alpha",
+        backlogPath: "/workspaces/alpha/backlog/index.md",
+        storyRoot: "/workspaces/alpha/backlog",
+        runtimeRoot: "/workspaces/alpha/runtime",
+        configPath: "/workspaces/alpha/runtime/backlog-sync.yaml",
+      }),
+      rollHome: () => "/roll-home",
+      threshold: () => 0,
+      auditWorkspace: () => workspaceAudit([safe]),
+      withRepositoryLock: lock,
+    }));
+
+    expect(result).toMatchObject({ status: 0, stderr: "" });
+    expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+      canaryTotal: 1,
+      projectedTotal: 0,
+      candidates: [expect.objectContaining({ path: safe.path, workspaceId: "ws-alpha" })],
+    }));
+    expect(lock).not.toHaveBeenCalled();
   });
 });

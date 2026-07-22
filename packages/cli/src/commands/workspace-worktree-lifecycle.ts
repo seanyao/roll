@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  DEFAULT_BRANCH_CANARY_MAX,
   deriveIssueCompletion,
   isHumanSoftLeaseActive,
   isLeaseAlive,
@@ -11,6 +12,7 @@ import {
   readRepositoryBoundFacts,
   readWorkspace,
   resolveRepositoryCacheIdentity,
+  withRepositoryCacheLock,
   WorkspaceRegistry,
   type InspectedWorkspace,
   type IssueCompletionEvidenceCollection,
@@ -39,6 +41,8 @@ import { workspaceRollHome } from "./workspace-target.js";
 import {
   applyWorktreeCleanup,
   planWorktreeCleanup,
+  renderPlanHuman,
+  renderResultHuman,
   type CleanupCandidate,
   type WorktreeCleanupPlan,
   type WorktreeCleanupResult,
@@ -96,6 +100,17 @@ export interface WorkspaceWorktreeAuditCommandDeps {
   readonly resolveTarget: (args: readonly string[]) => BacklogTargetDecision;
   readonly rollHome: () => string;
   readonly auditWorkspace: typeof auditWorkspaceWorktrees;
+}
+
+export interface WorkspaceWorktreeCleanupCommandDeps {
+  readonly resolveTarget: (args: readonly string[]) => BacklogTargetDecision;
+  readonly rollHome: () => string;
+  readonly threshold: () => number;
+  readonly auditWorkspace: typeof auditWorkspaceWorktrees;
+  readonly readSelectedWorkspace: (root: string) => WorkspaceManifest;
+  readonly withRepositoryLock?: ApplyWorkspaceWorktreeCleanupOptions["withRepositoryLock"];
+  readonly removeWorktree?: ApplyWorkspaceWorktreeCleanupOptions["removeWorktree"];
+  readonly nowMs?: () => number;
 }
 
 export interface ApplyWorkspaceWorktreeCleanupOptions {
@@ -480,4 +495,84 @@ export function workspaceWorktreeAuditCommand(
   if (args.includes("--json")) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
   else process.stdout.write(renderWorkspaceAudit(output));
   return 0;
+}
+
+function cleanupThreshold(): number {
+  const parsed = Number.parseInt(process.env["ROLL_BRANCH_CANARY_MAX"] ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BRANCH_CANARY_MAX;
+}
+
+function realCleanupCommandDeps(): WorkspaceWorktreeCleanupCommandDeps {
+  return {
+    resolveTarget: (args) => resolveBacklogCommandTarget(args, "mutation"),
+    rollHome: workspaceRollHome,
+    threshold: cleanupThreshold,
+    auditWorkspace: auditWorkspaceWorktrees,
+    readSelectedWorkspace: readWorkspace,
+  };
+}
+
+export async function workspaceWorktreeCleanupCommand(
+  args: readonly string[],
+  overrides: Partial<WorkspaceWorktreeCleanupCommandDeps> = {},
+): Promise<number> {
+  if (args.includes("--repo")) {
+    process.stderr.write("roll worktree cleanup: --repo and --workspace are mutually exclusive.\n");
+    return 2;
+  }
+  const workspaceIndex = args.indexOf("--workspace");
+  if (workspaceIndex >= 0 && (args[workspaceIndex + 1] ?? "") === "") {
+    process.stderr.write("roll worktree cleanup: --workspace requires <id|path>.\n");
+    return 2;
+  }
+  if (args.includes("--apply") && args.includes("--dry-run")) {
+    process.stderr.write("roll worktree cleanup: --apply and --dry-run are mutually exclusive.\n");
+    return 2;
+  }
+  if (args.includes("--reclaim-orphan")) {
+    process.stderr.write("roll worktree cleanup: Workspace mode never reclaims unregistered orphan directories.\n");
+    return 2;
+  }
+
+  const deps = { ...realCleanupCommandDeps(), ...overrides };
+  const decision = deps.resolveTarget(args);
+  if (!decision.ok) return emitBacklogTargetError(decision);
+  if ("aggregate" in decision) {
+    process.stderr.write("roll worktree cleanup: --all is not supported; select one Workspace.\n");
+    return 2;
+  }
+  const auditInput: WorkspaceWorktreeAuditInput = {
+    selectedWorkspaceId: decision.workspaceId,
+    selectedWorkspaceRoot: decision.workspaceRoot,
+    rollHome: deps.rollHome(),
+  };
+  const plan = planWorkspaceWorktreeCleanup(deps.auditWorkspace(auditInput), deps.threshold());
+  const json = args.includes("--json");
+  if (!args.includes("--apply")) {
+    if (json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+    else process.stdout.write(renderPlanHuman(plan, "dry-run"));
+    return 0;
+  }
+
+  const selectedManifest = deps.readSelectedWorkspace(decision.workspaceRoot);
+  const bindingByRepo = new Map(selectedManifest.repositories.map((binding) => [binding.repoId, binding]));
+  const withLock = deps.withRepositoryLock ?? (async <T>(
+    candidate: CleanupCandidate,
+    action: () => Promise<T>,
+  ): Promise<T> => {
+    const binding = candidate.repoId === undefined ? undefined : bindingByRepo.get(candidate.repoId);
+    if (binding === undefined) throw new Error(`workspace_cleanup_binding_missing: ${candidate.repoId ?? "unknown"}`);
+    return withRepositoryCacheLock({ rollHome: deps.rollHome(), binding }, action);
+  });
+  const result = await applyWorkspaceWorktreeCleanup(plan, {
+    selectedWorkspaceId: decision.workspaceId,
+    auditWorkspace: () => deps.auditWorkspace(auditInput),
+    withRepositoryLock: withLock,
+    ...(deps.removeWorktree === undefined ? {} : { removeWorktree: deps.removeWorktree }),
+    ...(deps.nowMs === undefined ? {} : { nowMs: deps.nowMs }),
+  });
+  if (json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  else process.stdout.write(renderResultHuman(result));
+  const anyRemoved = result.removed.length > 0 || result.branchesRemoved.length > 0;
+  return !anyRemoved && result.refused.length > 0 ? 1 : 0;
 }

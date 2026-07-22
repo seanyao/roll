@@ -176,6 +176,22 @@ describe("US-WS-011 Workspace repository preparation", () => {
         ["sot", "write"],
         ["docs", "read"],
       ]);
+
+      const firstHeads = Object.fromEntries(Object.values(execution?.repositories ?? {}).map((entry) => [
+        entry.repoId,
+        { path: realpathSync(entry.worktreePath), headSha: entry.headSha },
+      ]));
+      renameSync(
+        join(f.workspace, "backlog", "workspace-orchestration", f.storyId, "spec.md"),
+        join(f.workspace, "backlog", "workspace-orchestration", f.storyId, "spec.md.removed"),
+      );
+      const resumed = await ports.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-12" });
+      expect(resumed).toEqual({ kind: "prepared", outcome: "reused" });
+      const resumedExecution = await ports.repositories?.resolve(f.storyId);
+      expect(Object.fromEntries(Object.values(resumedExecution?.repositories ?? {}).map((entry) => [
+        entry.repoId,
+        { path: realpathSync(entry.worktreePath), headSha: entry.headSha },
+      ]))).toEqual(firstHeads);
     } finally {
       if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = previousRollHome;
@@ -202,13 +218,13 @@ describe("US-WS-011 Workspace repository preparation", () => {
       if (writable === undefined || readOnly === undefined) throw new Error("fixture access modes missing");
       const gitCommon = git(writable.worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
 
-      expect(writableRoots).toEqual(expect.arrayContaining([
-        realpathSync(writable.worktreePath),
-        realpathSync(gitCommon),
+      expect(writableRoots).toEqual([
         realpathSync(join(execution.issueRoot, "artifacts")),
         realpathSync(join(execution.issueRoot, "evidence")),
         realpathSync(join(execution.issueRoot, "runtime")),
-      ]));
+        realpathSync(writable.worktreePath),
+        realpathSync(gitCommon),
+      ]);
       expect(writableRoots).not.toContain(realpathSync(readOnly.worktreePath));
       expect(writableRoots).not.toContain(execution.issueRoot);
     } finally {
@@ -372,11 +388,10 @@ describe("US-WS-011 Workspace repository preparation", () => {
       });
       // Six Workspaces all sharing ONE remote cache (same repoId) prepare the
       // SAME story CONCURRENTLY. Six racers on one shared bare cache make the
-      // `git worktree prune`/`add` interleaving highly likely on every run, so
-      // this is a DETERMINISTIC regression tripwire for the per-repoId machine
-      // lock — not a single 2-way race that could pass by luck if the lock were
-      // removed. Only real serialization of the cache add/branch mutations lets
-      // every Workspace resolve to its own isolated worktree + governed branch.
+      // `git worktree prune`/`add` interleaving much more likely than a single
+      // 2-way race. Deterministic lock ownership is pinned separately in the
+      // infra suite; this real-git stress case protects the end-to-end isolation
+      // outcome across Workspace roots.
       const workspaces = [f.alpha, f.beta, ...["ws-gamma", "ws-delta", "ws-epsilon", "ws-zeta"].map(f.build)];
       await Promise.all(workspaces.map((ws) =>
         portsFor(ws).repositories?.prepare({ storyId: f.storyId, cycleId: `cycle-${ws.workspaceId}` }),

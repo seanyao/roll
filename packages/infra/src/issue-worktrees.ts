@@ -752,6 +752,13 @@ export interface ApplyIssueInitDeps {
    *  decision. Fires whether the preflight decided this target absent,
    *  reused, or repaired. */
   readonly beforeMutateTarget?: (alias: string, path: string) => void;
+  /** Test-only observation fired INSIDE the owning repoId machine lock,
+   * immediately before `git worktree add` mutates the shared bare cache. */
+  readonly beforeAddMutation?: (alias: string, path: string) => void;
+  /** Test-only observation fired INSIDE the owning repoId machine lock,
+   * immediately before rollback removes a newly-created worktree and its
+   * governed branch from the shared bare cache. */
+  readonly beforeRollbackMutation?: (alias: string, path: string) => void;
 }
 
 export interface ApplyIssueInitInput {
@@ -847,6 +854,7 @@ function writeJournal(issueRoot: string, journal: IssueInitJournal): void {
 async function rollbackCreatedTargets(
   targets: readonly JournalTarget[],
   cacheByAlias: ReadonlyMap<string, ResolvedTargetCache>,
+  deps: Pick<ApplyIssueInitDeps, "beforeRollbackMutation">,
 ): Promise<void> {
   for (const target of [...targets].reverse()) {
     if (!target.created) continue;
@@ -860,6 +868,7 @@ async function rollbackCreatedTargets(
     // Workspace's add cannot interleave with either half of this rollback.
     try {
       await withRepositoryCacheLock({ rollHome: cache.rollHome, binding: cache.binding }, async () => {
+        deps.beforeRollbackMutation?.(target.alias, target.path);
         await issueWorktreeRemove(cache.cachePath, target.path, { readOnly: target.access === "read" });
         // The worktree is gone; also delete the governed branch, but ONLY when
         // THIS run actually created it — so a repair retry can `worktree add
@@ -1091,13 +1100,16 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       // branch (US-WS-011 concurrent-isolation gate).
       const added = await withRepositoryCacheLock(
         { rollHome: cache.rollHome, binding: cache.binding },
-        () => issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
-          // Orphan governed-branch recovery is only ever permitted for a
-          // target that already carries a valid Issue-local pin — a
-          // brand-new, never-pinned target must never silently adopt a
-          // pre-existing branch of the same name.
-          allowOrphanRecovery: cache.isPinned,
-        }),
+        () => {
+          deps.beforeAddMutation?.(target.alias, targetPath);
+          return issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
+            // Orphan governed-branch recovery is only ever permitted for a
+            // target that already carries a valid Issue-local pin — a
+            // brand-new, never-pinned target must never silently adopt a
+            // pre-existing branch of the same name.
+            allowOrphanRecovery: cache.isPinned,
+          });
+        },
       );
       // Journal the creation BEFORE protecting: if protection throws, rollback
       // must still know this worktree was created THIS run so it gets cleaned
@@ -1138,7 +1150,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
     rmSync(journalPath(input.issueRoot), { force: true });
     return { outcome: plan.outcome, manifest: plan.manifest };
   } catch (error) {
-    await rollbackCreatedTargets(targets, cacheByAlias);
+    await rollbackCreatedTargets(targets, cacheByAlias, deps);
     journal = { ...journal, status: "repair_required", targets: [...targets] };
     writeJournal(input.issueRoot, journal);
     if (error instanceof IssueInitializationError) throw error;

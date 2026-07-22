@@ -12,7 +12,8 @@ import {
   inspectIssueInit,
 } from "../src/issue-worktrees.js";
 import { protectReadOnlyWorktree, unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
-import { ensureRepositoryCache } from "../src/repository-cache.js";
+import { ensureRepositoryCache, resolveRepositoryCacheIdentity } from "../src/repository-cache.js";
+import { readLockOwner } from "../src/process.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -351,6 +352,47 @@ describe("inspectIssueInit", () => {
 });
 
 describe("applyIssueInit", () => {
+  it("holds the owning repoId machine lock around worktree add and rollback mutations", async () => {
+    const f = fixture();
+    const contract: IssueStoryContract = {
+      storyId: "US-XX1",
+      repositories: [
+        { alias: "sot1", access: "write", requiredDelivery: true },
+        { alias: "sot2", access: "write", requiredDelivery: true },
+      ],
+    };
+    const observed: string[] = [];
+    const assertOwned = (alias: string, phase: "add" | "rollback"): void => {
+      const repository = f.bindings.find((candidate) => candidate.alias === alias);
+      if (repository === undefined) throw new Error(`fixture binding missing: ${alias}`);
+      const identity = resolveRepositoryCacheIdentity({ rollHome: f.rollHome, binding: repository });
+      expect(readLockOwner(identity.lockPath)).toMatchObject({
+        pid: process.pid,
+        cycleId: expect.stringMatching(new RegExp(`^${identity.repoId}:`, "u")),
+      });
+      observed.push(`${phase}:${alias}`);
+    };
+
+    await expect(applyIssueInit({
+      workspaceId: "ws-demo",
+      rollHome: f.rollHome,
+      workspaceRoot: f.workspaceRoot,
+      issueRoot: f.issueRoot,
+      contract,
+      bindings: f.bindings,
+      requirementManifests: f.requirementManifests,
+    }, {
+      beforeAddMutation: (alias) => assertOwned(alias, "add"),
+      beforeMutateTarget: (alias) => {
+        if (alias === "sot2") throw new Error("force rollback after sot1 creation");
+      },
+      beforeRollbackMutation: (alias) => assertOwned(alias, "rollback"),
+    })).rejects.toThrow(IssueInitializationError);
+
+    expect(observed).toEqual(["add:sot1", "rollback:sot1"]);
+    expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
+  });
+
   it("creates the Issue root with real git worktrees, the immutable manifest, and one issue:repository_bound event per target with full facts", async () => {
     const f = fixture();
     const result = await applyIssueInit({ workspaceId: "ws-demo", rollHome: f.rollHome, workspaceRoot: f.workspaceRoot, issueRoot: f.issueRoot, contract: f.contract, bindings: f.bindings, requirementManifests: f.requirementManifests });

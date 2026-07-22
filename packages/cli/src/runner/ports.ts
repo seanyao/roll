@@ -1,10 +1,11 @@
-import type { CycleContext, CycleEvent, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
+import type { CycleContext, CycleEvent, IssueInitOutcome, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
 import type {
   CycleRepositoryExecutionContext,
   RepositoryExecutionContext,
   RepositoryExecutionEvent,
   RepositoryExecutionEventPayload,
   RollEvent,
+  WorkspaceIssueInitFailureCode,
 } from "@roll/spec";
 import type { CaptureMarker, Clock, ScreenshotResult } from "@roll/infra";
 import type { AgentSpawn } from "./agent-spawn.js";
@@ -175,6 +176,17 @@ export interface BoundRepositoryPorts {
 }
 
 export interface RepositoryPorts {
+  prepare(request: {
+    readonly storyId: string;
+    readonly cycleId: string;
+  }): Promise<
+    | { readonly kind: "prepared"; readonly outcome: IssueInitOutcome }
+    | {
+        readonly kind: "failed";
+        readonly code: WorkspaceIssueInitFailureCode;
+        readonly repairJournal: string | null;
+      }
+  >;
   resolve(storyId: string): Promise<CycleRepositoryExecutionContext | undefined>;
   bind(ctx: CycleContext): BoundRepositoryPorts;
 }

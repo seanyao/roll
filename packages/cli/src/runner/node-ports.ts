@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   BacklogStore,
@@ -54,6 +55,11 @@ import {
   worktreeSubmoduleInit,
   writeHeartbeat,
   push as gitPush,
+  applyIssueInit,
+  IssueInitializationError,
+  readWorkspace,
+  resolveRequirementSourcesForStoryOnDisk,
+  resolveWorkspaceBacklogStoryContract,
 } from "@roll/infra";
 import { cardArchiveDir } from "../lib/archive.js";
 import { attestCommand } from "../commands/attest.js";
@@ -242,6 +248,39 @@ function createWorkspaceRepositoryPorts(
   adapters: RepositoryPortAdapters = defaultRepositoryAdapters(),
 ): RepositoryPorts {
   return {
+    async prepare(request) {
+      const workspace = readWorkspace(workspaceRoot);
+      const contract = resolveWorkspaceBacklogStoryContract(workspaceRoot, request.storyId);
+      if (!contract.ok) {
+        return {
+          kind: "failed",
+          code: contract.code === "symlink_escape" ? "symlink_escape" : "rejected",
+          repairJournal: null,
+        };
+      }
+      const issueRoot = join(workspaceRoot, "issues", request.storyId);
+      const journalPath = join(issueRoot, "issue-init.pending.json");
+      const repairJournal = (): string | null => existsSync(journalPath)
+        ? relative(workspaceRoot, journalPath)
+        : null;
+      try {
+        const result = await applyIssueInit({
+          workspaceId: workspace.workspaceId,
+          rollHome: process.env["ROLL_HOME"] ?? resolve(homedir(), ".roll"),
+          workspaceRoot,
+          issueRoot,
+          contract: contract.value,
+          bindings: workspace.repositories,
+          requirementManifests: resolveRequirementSourcesForStoryOnDisk(workspaceRoot, request.storyId),
+        });
+        return { kind: "prepared", outcome: result.outcome };
+      } catch (error) {
+        if (error instanceof IssueInitializationError) {
+          return { kind: "failed", code: error.code, repairJournal: repairJournal() };
+        }
+        return { kind: "failed", code: "unexpected", repairJournal: repairJournal() };
+      }
+    },
     resolve: (storyId) => resolveRepositoryExecutionContext(workspaceRoot, storyId),
     bind: (ctx) => createRepositoryPorts(ctx, adapters),
   };

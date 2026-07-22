@@ -58,6 +58,8 @@ function acceptance(): IssueIntegrationAcceptanceEvidence {
     workspaceId: WORKSPACE,
     storyId: STORY,
     inputMergeCommits: { [REPO]: MERGE },
+    commandDigest: "c".repeat(64),
+    profile: "workspace-integration/v1",
     verdict: "pass",
     artifactPath: "evidence/integration.txt",
     recordedAt: 4,
@@ -115,6 +117,20 @@ describe("US-WS-013 Issue completion evidence store", () => {
     expect(() => appendRepositoryMergeEvidence(issueRoot, {
       ...mergeEvidence(),
       storyId: "US-WS-OTHER",
+    })).toThrow(IssueCompletionEvidenceError);
+    expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
+  });
+
+  it("rejects acceptance evidence without a stable command/profile identity or Issue-owned artifact path", () => {
+    const issueRoot = fixture();
+
+    expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, {
+      ...acceptance(),
+      commandDigest: "not-a-digest",
+    })).toThrow(IssueCompletionEvidenceError);
+    expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, {
+      ...acceptance(),
+      artifactPath: "../outside.txt",
     })).toThrow(IssueCompletionEvidenceError);
     expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
   });

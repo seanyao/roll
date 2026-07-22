@@ -208,6 +208,8 @@ export interface IssueIntegrationAcceptanceEvidence {
   readonly workspaceId: string;
   readonly storyId: string;
   readonly inputMergeCommits: Readonly<Record<string, string>>;
+  readonly commandDigest: string;
+  readonly profile: string;
   readonly verdict: "pass" | "fail";
   readonly artifactPath: string;
   readonly recordedAt: number;

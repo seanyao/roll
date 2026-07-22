@@ -154,6 +154,8 @@ describe("US-WS-011a Workspace worktree lifecycle terminal fixture", () => {
       workspaceId: "ws-alpha",
       storyId: "US-A",
       inputMergeCommits: { [binding.repoId]: alphaHead },
+      commandDigest: "c".repeat(64),
+      profile: "workspace-integration/v1",
       verdict: "pass",
       artifactPath: "evidence/integration.txt",
       recordedAt: 3,

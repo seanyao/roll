@@ -38,6 +38,7 @@ export { deliveriesPath, validateDeliveryRecord, appendDelivery, readDeliveries,
 export * from "./delivery/tcr.js";
 export * from "./delivery/multi-repo-tcr.js";
 export * from "./delivery/issue-completion.js";
+export * from "./delivery/integration-acceptance.js";
 export * from "./delivery/test-runner-resolver.js";
 export * from "./delivery/rebuild.js";
 export * from "./delivery/state.js";

@@ -185,6 +185,8 @@ describe("US-WS-011a Workspace worktree audit", () => {
           workspaceId: "ws-alpha",
           storyId: "US-A",
           inputMergeCommits: { "repo-shared": HEAD },
+          commandDigest: "c".repeat(64),
+          profile: "workspace-integration/v1",
           verdict: "pass",
           artifactPath: "evidence/integration.txt",
           recordedAt: 2,

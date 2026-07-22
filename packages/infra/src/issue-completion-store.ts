@@ -204,7 +204,7 @@ function validateRepositoryEvent(raw: unknown): RepositoryMergeEvidenceRecordedE
 
 function validateAcceptanceEvent(raw: unknown): IssueIntegrationAcceptanceEvidenceRecordedEvent {
   const value = requireRecord(raw, "integration acceptance evidence event");
-  assertClosed(value, new Set(["type", "ts", "workspaceId", "storyId", "inputMergeCommits", "verdict", "artifactPath", "recordedAt"]), "integration acceptance evidence");
+  assertClosed(value, new Set(["type", "ts", "workspaceId", "storyId", "inputMergeCommits", "commandDigest", "profile", "verdict", "artifactPath", "recordedAt"]), "integration acceptance evidence");
   if (value["type"] !== ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED) {
     throw new IssueCompletionEvidenceError("integration acceptance evidence event has an invalid type");
   }
@@ -225,14 +225,29 @@ function validateAcceptanceEvent(raw: unknown): IssueIntegrationAcceptanceEviden
   if (verdict !== "pass" && verdict !== "fail") {
     throw new IssueCompletionEvidenceError("integration acceptance verdict is invalid");
   }
+  const commandDigest = requireString(value["commandDigest"], "integration acceptance commandDigest");
+  if (!/^[0-9a-f]{64}$/u.test(commandDigest)) {
+    throw new IssueCompletionEvidenceError("integration acceptance commandDigest must be lowercase SHA-256");
+  }
+  const profile = requireString(value["profile"], "integration acceptance profile");
+  if (profile !== profile.trim() || /[\x00-\x1f\x7f]/u.test(profile)) {
+    throw new IssueCompletionEvidenceError("integration acceptance profile is invalid");
+  }
+  const artifactPath = requireString(value["artifactPath"], "integration acceptance artifactPath");
+  if (!artifactPath.startsWith("evidence/") || artifactPath.includes("\\") ||
+    artifactPath.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
+    throw new IssueCompletionEvidenceError("integration acceptance artifactPath must remain under evidence/");
+  }
   return {
     type: ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
     ts,
     workspaceId: requireString(value["workspaceId"], "integration acceptance workspaceId"),
     storyId: requireString(value["storyId"], "integration acceptance storyId"),
     inputMergeCommits,
+    commandDigest,
+    profile,
     verdict,
-    artifactPath: requireString(value["artifactPath"], "integration acceptance artifactPath"),
+    artifactPath,
     recordedAt,
   };
 }

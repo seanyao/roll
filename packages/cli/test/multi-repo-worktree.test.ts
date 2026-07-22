@@ -365,8 +365,41 @@ describe("US-WS-011 Workspace repository preparation", () => {
       const leaseReleased = !existsSync(f.paths.storyLeasePath!)
         || JSON.parse(readFileSync(f.paths.storyLeasePath!, "utf8"))[f.storyId] === undefined;
       expect(leaseReleased).toBe(true);
-      // The teardown recorded the scope-skip for recovery observability.
-      expect(readFileSync(f.paths.alertsPath, "utf8")).toContain(
+      const alerts = readFileSync(f.paths.alertsPath, "utf8");
+      // The teardown records the exact preserved Issue worktree facts so an
+      // owner can recover the dirty/unpushed leg rather than seeing only a
+      // generic "cleanup skipped" message.
+      const preservedLine = alerts.split("\n").find((line) => line.startsWith("workspace_issue_worktrees_preserved: "));
+      expect(preservedLine).toBeDefined();
+      const preserved = JSON.parse(preservedLine?.slice("workspace_issue_worktrees_preserved: ".length) ?? "null") as {
+        workspaceId: string;
+        storyId: string;
+        cycleId: string;
+        repositories: Array<{
+          repoId: string;
+          alias: string;
+          worktreePath: string;
+          headSha: string;
+          baseSha: string;
+          dirty: boolean;
+          commitsAheadBase: number;
+        }>;
+      };
+      expect(preserved).toMatchObject({
+        workspaceId: "ws-alpha",
+        storyId: f.storyId,
+        cycleId: "cycle-signal",
+      });
+      expect(preserved.repositories).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          repoId: writable.repoId,
+          alias: writable.alias,
+          worktreePath: realpathSync(writable.worktreePath),
+          dirty: true,
+          commitsAheadBase: 0,
+        }),
+      ]));
+      expect(alerts).toContain(
         "workspace_repository_scope_required: cleanup_worktree",
       );
     } finally {

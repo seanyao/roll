@@ -51,6 +51,49 @@ const LEGACY_REPOSITORY_TERMINAL_COMMANDS = new Set<TerminalCommand["kind"]>([
   "wait_merge",
 ]);
 
+function preservedIssueWorktreeFacts(ctx: CycleContext): object | undefined {
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) return undefined;
+  const repositories = Object.values(execution.repositories)
+    .sort((left, right) => left.repoId.localeCompare(right.repoId))
+    .map((repository) => {
+      const worktreePath = existsSync(repository.worktreePath)
+        ? realpathSync(repository.worktreePath)
+        : repository.worktreePath;
+      let headSha = repository.headSha;
+      let dirty = true;
+      let commitsAheadBase = -1;
+      try {
+        headSha = execFileSync("git", ["-C", worktreePath, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+        dirty = execFileSync("git", ["-C", worktreePath, "status", "--porcelain"], { encoding: "utf8" }).trim() !== "";
+        const ahead = execFileSync("git", ["-C", worktreePath, "rev-list", "--count", `${repository.baseSha}..HEAD`], {
+          encoding: "utf8",
+        }).trim();
+        commitsAheadBase = Number.parseInt(ahead, 10);
+        if (!Number.isFinite(commitsAheadBase)) commitsAheadBase = -1;
+      } catch {
+        // Preserve a conservative recovery record even when Git probing fails:
+        // unknown work is never mislabeled clean or silently omitted.
+      }
+      return {
+        repoId: repository.repoId,
+        alias: repository.alias,
+        worktreePath,
+        headSha,
+        baseSha: repository.baseSha,
+        dirty,
+        commitsAheadBase,
+      };
+    });
+  return {
+    workspaceId: execution.workspaceId,
+    storyId: ctx.storyId ?? "",
+    cycleId: ctx.cycleId,
+    issueRoot: existsSync(execution.issueRoot) ? realpathSync(execution.issueRoot) : execution.issueRoot,
+    repositories,
+  };
+}
+
 export async function executeTerminalCommand(
   cmd: TerminalCommand,
   ports: Ports,
@@ -70,6 +113,13 @@ export async function executeTerminalCommand(
       return {};
     }
     if (cmd.kind === "cleanup_environment" || cmd.kind === "cleanup_worktree") {
+      const preserved = preservedIssueWorktreeFacts(ctx);
+      if (preserved !== undefined) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `workspace_issue_worktrees_preserved: ${JSON.stringify(preserved)}`,
+        );
+      }
       ports.events.appendAlert(
         ports.paths.alertsPath,
         `workspace_repository_scope_required: ${cmd.kind} skipped legacy repo-global cleanup for cycle ${ctx.cycleId}`,

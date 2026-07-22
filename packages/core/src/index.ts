@@ -3,6 +3,7 @@ export * from "./agent/specs.js";
 export * from "./agent/config-v4.js";
 export * from "./agent/model-config.js";
 export * from "./agent/scope-config.js";
+export * from "./agent/capacity.js";
 export * from "./agent/scope-resolver.js";
 export * from "./agent/scope-migration.js";
 export * from "./agent/role-cast-ranker.js";

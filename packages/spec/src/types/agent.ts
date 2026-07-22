@@ -322,6 +322,24 @@ export interface AgentScopeDefaults {
   readonly roles: Readonly<Partial<Record<AgentScopeRole, AgentScopeRoleBinding>>>;
 }
 
+/** Machine-owned process-capacity policy. Lower scopes may select an agent but
+ * cannot declare or enlarge the machine's execution limits. */
+export interface AgentCapacityPolicy {
+  readonly global: number | "auto";
+  readonly defaultPerAgent: number;
+  readonly agents: Readonly<Partial<Record<AgentName, number>>>;
+  readonly heartbeatSeconds: number;
+  readonly staleAfterSeconds: number;
+}
+
+/** Fully derived limits used by the broker. Disabled agents have no entry. */
+export interface NormalizedAgentCapacityPolicy {
+  readonly global: number;
+  readonly perAgent: Readonly<Partial<Record<AgentName, number>>>;
+  readonly heartbeatSeconds: number;
+  readonly staleAfterSeconds: number;
+}
+
 export type AgentScopeResolutionStrategy = AgentBindingStrategy | "fixed";
 
 export interface AgentScopeSkippedCandidate {
@@ -372,6 +390,7 @@ export interface AgentScopeConfig {
   readonly models: Readonly<Record<ModelId, AgentScopeModel>>;
   readonly roles: Readonly<Partial<Record<AgentScopeRole, AgentScopeRoleBinding>>>;
   readonly defaults: Readonly<Record<string, AgentScopeDefaults>>;
+  readonly capacity?: AgentCapacityPolicy;
 }
 
 export interface AgentScopeConfigParse {

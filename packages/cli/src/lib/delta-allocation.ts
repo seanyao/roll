@@ -138,8 +138,10 @@ export function claimHostDelegationLease(
     mkdirSync(loopDir, { recursive: true });
   }
 
+  // Host-delegation leases are persistent host protocol leases, not
+  // short-lived CLI process leases. No pid — cleanDeadLeases must never
+  // clean a live host delegation. Identity is delegationId + runId.
   const result = claimStoryLease(path, storyId, {
-    pid: process.pid,
     claimedAt: Date.now(),
     source: "host-delegation",
     delegationId,
@@ -159,10 +161,12 @@ export function releaseHostDelegationLease(
   projectPath: string,
   storyId: string,
   delegationId: string,
+  runId: string,
 ): boolean {
   return releaseStoryLease(storyLeasesPath(projectPath), storyId, {
     source: "host-delegation",
     delegationId,
+    runId,
   });
 }
 
@@ -313,7 +317,7 @@ export function prepareDelegation(
       mkdirSync(frameDir);
     } catch {
       // Own-lease collision only — release our lease and retry with new ID
-      releaseHostDelegationLease(projectPath, input.storyId, delegationId);
+      releaseHostDelegationLease(projectPath, input.storyId, delegationId, runId);
       lastError = new PrepareError(
         "builder_lease_conflict",
         `Frame directory collision for ${delegationId} (attempt ${attempt + 1}/${MAX_COLLISION_RETRIES})`,
@@ -369,7 +373,7 @@ export function prepareDelegation(
       };
     } catch (err) {
       // Cleanup on write failure
-      releaseHostDelegationLease(projectPath, input.storyId, delegationId);
+      releaseHostDelegationLease(projectPath, input.storyId, delegationId, runId);
       try { rmSync(frameDir, { recursive: true, force: true }); } catch { /* best-effort */ }
       throw err;
     }

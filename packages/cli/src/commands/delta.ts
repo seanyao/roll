@@ -491,10 +491,105 @@ function validateCommand(args: string[]): number {
     return 1;
   }
 
-  // Invoke the validator (injectable for testing, default is thin artifact-existence check)
+  // ── Stage admission ──────────────────────────────────────────────────────
+  // Admission checks run before the validator and short-circuit on failure.
+  // Admission failures produce a typed `delta:blocked` event and never call
+  // the validator.
+  const now = Date.now();
+
+  // Admission check 1: delegation must not be terminal
+  const terminalEvent = delegationEvents.find((e) => e.type === "delta:terminal");
+  if (terminalEvent) {
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      role: stage,
+      reason: "terminal_path_unselected",
+      detail: `Delegation ${delegationId} is terminal (outcome: ${(terminalEvent as Record<string, unknown>).outcome}); cannot validate further stages`,
+      ts: now,
+    });
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "terminal_path_unselected", detail: `Delegation is terminal`, role: stage }) + "\n");
+    } else {
+      process.stderr.write(`Delegation ${delegationId} is terminal` + "\n");
+    }
+    return 1;
+  }
+
+  // Admission check 2: delegation must not be blocked
+  const blockedEvent = delegationEvents.find((e) => e.type === "delta:blocked");
+  if (blockedEvent) {
+    const blocked = blockedEvent as Record<string, unknown>;
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      role: stage,
+      reason: "host_supervisor_required",
+      detail: `Delegation ${delegationId} is blocked (${blocked.reason as string ?? "unknown"}); cannot validate further stages`,
+      ts: now,
+    });
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "host_supervisor_required", detail: `Delegation is blocked`, role: stage }) + "\n");
+    } else {
+      process.stderr.write(`Delegation ${delegationId} is blocked` + "\n");
+    }
+    return 1;
+  }
+
+  // Admission check 3: stage must be a role resolved in this delegation
+  const resolvedRoles = delegationEvents
+    .filter((e) => e.type === "delta:role_resolved")
+    .map((e) => (e as Record<string, unknown>).role as string);
+  if (stage && !resolvedRoles.includes(stage)) {
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      role: stage,
+      reason: "invalid_resolution",
+      detail: `Stage '${stage}' is not a resolved role in delegation ${delegationId}. Resolved roles: ${resolvedRoles.join(", ")}`,
+      ts: now,
+    });
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "invalid_resolution", detail: `Stage '${stage}' not in resolved roles`, role: stage }) + "\n");
+    } else {
+      process.stderr.write(`Stage '${stage}' is not a resolved role in delegation ${delegationId}` + "\n");
+    }
+    return 1;
+  }
+
+  // Admission check 4: stage must not already be published
+  const alreadyPublished = delegationEvents.find(
+    (e) => e.type === "delta:artifact_published" && (e as Record<string, unknown>).role === stage,
+  );
+  if (alreadyPublished) {
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      role: stage,
+      reason: "identity_collision",
+      detail: `Stage '${stage}' has already been published for delegation ${delegationId}`,
+      ts: now,
+    });
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "identity_collision", detail: `Stage '${stage}' already published`, role: stage }) + "\n");
+    } else {
+      process.stderr.write(`Stage '${stage}' has already been published` + "\n");
+    }
+    return 1;
+  }
+
+  // ── Invoke validator ────────────────────────────────────────────────────
+  // Admission passed — call the validator with the fixed stage artifact path
+  // and the evaluation manifest placeholder path.
+  const stageArtifactPath = join(frameDir, "role-artifacts", stage);
+  const evaluationManifestPath = join(frameDir, "role-artifacts", stage, "evaluation-manifest.json");
+
   const validator = _injectedValidator ?? defaultValidator;
   const result = validator(delegationId, stage, frameDir);
-  const now = Date.now();
 
   if (!result.ok) {
     // Block: append delta:blocked event, return non-zero
@@ -532,9 +627,9 @@ function validateCommand(args: string[]): number {
     delegationId,
     storyId,
     role: stage,
-    path: join(frameDir, "role-artifacts", stage),
+    path: stageArtifactPath,
     sha256: "", // US-004 will compute real digest
-    manifestPath: "", // US-004 will populate manifest
+    manifestPath: evaluationManifestPath,
     sessionId: "host-native",
     roleInstanceId: (roleResolved?.roleInstanceId as string) ?? "",
     identityProvenance: "host-attested" as const,
@@ -662,8 +757,9 @@ function concludeCommand(args: string[]): number {
     ts: now,
   });
 
-  // Release host-delegation lease
-  releaseHostDelegationLease(cwd, storyId, delegationId);
+  // Release host-delegation lease (identity match requires delegationId + runId)
+  const runId = (preparedEvent.runId as string) ?? `delta-${delegationId}`;
+  releaseHostDelegationLease(cwd, storyId, delegationId, runId);
 
   if (json) {
     process.stdout.write(JSON.stringify({

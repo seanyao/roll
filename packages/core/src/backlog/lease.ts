@@ -206,10 +206,17 @@ export function claimStoryLease(
  * Returns `true` if the lease was released, `false` if identity mismatch
  * or no lease existed.
  */
+export interface ReleaseIdentity {
+  source: LeaseSource;
+  pid?: number;
+  delegationId?: string;
+  runId?: string;
+}
+
 export function releaseStoryLease(
   leasePath: string,
   storyId: string,
-  identity: { source: LeaseSource; pid?: number; delegationId?: string },
+  identity: ReleaseIdentity,
 ): boolean {
   const lockFile = lockPathFor(leasePath);
   const release = acquireLeaseLock(lockFile);
@@ -221,9 +228,12 @@ export function releaseStoryLease(
     // Source must match
     if (existing.source !== identity.source) return false;
 
-    // For host-delegation: delegationId must match
+    // For host-delegation: delegationId must be non-empty and match, runId must also match
     if (identity.source === "host-delegation") {
-      if (identity.delegationId !== undefined && existing.delegationId !== identity.delegationId) {
+      if (!identity.delegationId || existing.delegationId !== identity.delegationId) {
+        return false;
+      }
+      if (identity.runId !== undefined && existing.runId !== identity.runId) {
         return false;
       }
     }
@@ -308,7 +318,11 @@ export function cleanDeadLeases(path: string): string[] {
   const leases = readLeases(path);
   const cleaned: string[] = [];
   for (const [id, entry] of Object.entries(leases)) {
-    if (entry.pid !== undefined && !isPidAlive(entry.pid)) {
+    // Only clean cycle leases with dead PIDs.
+    // Host-delegation leases are persistent host protocol leases (no pid)
+    // and are NEVER cleaned by this function. Human/supervisor leases also
+    // have no pid and are never cleaned.
+    if (entry.pid !== undefined && entry.source !== "host-delegation" && !isPidAlive(entry.pid)) {
       delete leases[id];
       cleaned.push(id);
     }

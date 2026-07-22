@@ -844,14 +844,14 @@ export function renderPlanHuman(
   }
   lines.push("");
 
-  // FIX-1460 (#1468): surface preserved orphan dirs (deregistered, delivery not
-  // provable). They are counted + visible but NEVER auto-deleted — the operator
-  // reclaims one explicitly after review.
+  // Preserved orphan dirs remain counted + visible. Cleanup offers no review-only
+  // override: the operator must rescue or remove untrusted material first, then
+  // rerun audit so a complete path-specific proof can authorize the exact path.
   const preservedOrphans = plan.preserved.filter((p) => p.disposition === "preserved_orphan");
   if (preservedOrphans.length > 0) {
     lines.push(`preserved orphan dirs (${preservedOrphans.length}) — visible + counted, never auto-deleted`);
     for (const p of preservedOrphans) lines.push(`  ${rel(p.path)}  — ${p.reason}`);
-    lines.push("  Reclaim one after review with: roll worktree cleanup --reclaim-orphan <path>");
+    lines.push("  Resolve or rescue the reported material, then rerun audit; preserved proof cannot be overridden.");
     lines.push("");
   }
 
@@ -925,10 +925,10 @@ export const CLEANUP_USAGE =
   "             Workspace/Story/repository identity plus delivery proof\n" +
   "  --repo     explicit historical repo-local/migration input (default: current directory)\n" +
   "  --reclaim-orphan <path>  legacy --repo mode only: bounded-rm ONE named orphan loop dir\n" +
-  "             (deregistered from git; delivery not auto-provable) after you\n" +
-  "             review it. Fails closed unless it is an inactive loop orphan\n" +
-  "             inside .roll/loop/worktrees. Auto-reclaim of provably-delivered\n" +
-  "             orphans happens under --apply.\n" +
+  "             only when the fresh audit supplies the same complete path-specific proof\n" +
+  "             required by --apply: delivered + inactive, no Git ownership metadata,\n" +
+  "             trusted generated residue only, and an unchanged material fingerprint.\n" +
+  "             Preserved or ambiguous orphans can never be overridden.\n" +
   "\n" +
   "  安全清理:仅移除审计判定为已合并、干净、非活跃的 disposable_candidate;\n" +
   "  先跑 --dry-run,再 --apply,最后手动 roll loop resume。";
@@ -1231,11 +1231,8 @@ export async function worktreeCleanupCommand(
     integrationBranch: deps?.integrationBranch,
   };
 
-  // FIX-1460 (#1468): explicit operator reclaim of ONE preserved orphan dir whose
-  // delivery could not be auto-proven. The operator names the exact path (having
-  // reviewed it); we still fail-closed on: not-in-audit, not loop-owned, active,
-  // a registered/other worktree (must use --apply), or a path outside the bounded
-  // `.roll/loop/worktrees` scratch dir. Never a broad or substituted delete.
+  // Legacy exact-path route. It is NOT a manual override: the same complete
+  // path-specific proof required by --apply must be fresh and reclaimable.
   const reclaimIdx = args.indexOf("--reclaim-orphan");
   if (reclaimIdx >= 0) {
     const named = args[reclaimIdx + 1];

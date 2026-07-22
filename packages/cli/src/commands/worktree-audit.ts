@@ -61,8 +61,9 @@ export type WorktreeDisposition =
   // registration was removed — e.g. a failed `git worktree remove` that left
   // untracked scratch). The runtime canary counts these dirs, so they must be
   // visible here or they leak. `orphan_reclaimable` = owning cycle is provably
-  // delivered → safe bounded reclaim; `preserved_orphan` = delivery not provable
-  // → preserved + surfaced (never auto-deleted).
+  // delivered AND the path-specific recovery proof contains only trusted
+  // generated residue; every missing, linked, untrusted, or ambiguous proof is
+  // `preserved_orphan` and cannot be overridden by cleanup.
   | "orphan_reclaimable"
   | "preserved_orphan";
 
@@ -421,9 +422,10 @@ export function inspectOrphanRecoveryProof(repoRoot: string, path: string, name:
  * so the runtime canary keeps counting it while cleanup cannot see it.
  *
  * Each orphan becomes a loop-owned record so it is COUNTED + VISIBLE. It is marked
- * `orphan_reclaimable` ONLY when it is inactive AND its owning cycle's recorded
- * outcome is delivered/merged (its work is on main → the checkout is redundant);
- * otherwise `preserved_orphan` (delivery not provable → never auto-deleted).
+ * `orphan_reclaimable` ONLY when it is inactive, its owning cycle is delivered,
+ * linked Git metadata is absent, and a bounded material inspection produces a
+ * stable fingerprint for empty or explicitly trusted generated residue. Otherwise
+ * it is `preserved_orphan`; no manual cleanup override is authorized.
  */
 function scanOrphanLoopWorktrees(
   repoRoot: string,
@@ -474,7 +476,7 @@ function scanOrphanLoopWorktrees(
       rec.disposition = "orphan_reclaimable";
       rec.reason = `orphan loop dir (deregistered from git); owning cycle outcome '${outcome}' is delivered and material is ${recoveryProof.state} — bounded reclaim`;
     } else {
-      rec.reason = `orphan loop dir (deregistered from git); delivery not provable (cycle outcome '${outcome ?? "unknown"}') — preserved, reclaim manually after review`;
+      rec.reason = `orphan loop dir (deregistered from git); delivery not provable (cycle outcome '${outcome ?? "unknown"}') — preserved until a complete recovery proof exists`;
     }
     out.push(rec);
   }

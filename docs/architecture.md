@@ -377,12 +377,12 @@ Backlog-clearing 模式下，Supervisor 的默认 scope 是所有 live 且非 Ho
 The branch/worktree leak canary (US-LOOP-096) counts every ephemeral branch + every dir under `.roll/loop/worktrees` and PAUSEs the loop over threshold (`ROLL_BRANCH_CANARY_MAX`, default 8). It counts inactive worktrees deliberately preserved for unpublished commits or dirty recovery too — so historical pressure can pause the loop even when nothing is genuinely leaking.
 
 - 触发即枚举 / Auditable trip：canary 触发时,PAUSE marker、ALERT 与 `branch_canary_tripped` 事件枚举出被计数的**每一条** ephemeral branch 与 loop worktree,并附上各 worktree 的审计处置 (disposition),而不是一个裸数字。
-- 唯一权威是审计 / Audit is the sole authority：`roll worktree cleanup` 从 `roll worktree audit` 派生动作,**只**移除审计判定为 inactive + merged + clean 的 `disposable_candidate`。它绝不因为 worktree "旧" 或 "被计数" 就删除,也绝不把 canary 计数翻译成批量删除。
+- 唯一权威是审计 / Audit is the sole authority：`roll worktree cleanup` 从 `roll worktree audit` 派生动作,**只**移除审计判定为 inactive + merged + clean 的 `disposable_candidate`。Git 已不注册但仍存在于 `.roll/loop/worktrees/` 的直属孤儿目录也必须继续计入并显示；只有 cycle 已交付、无 active lock/heartbeat、无 `.git` 或 common-dir linked-worktree metadata，且内容为空或仅含明确受信的 `.next` 生成残留时，才产生带 material fingerprint 的 `orphan_reclaimable`。源码样文件、未发布材料、符号链接、外部 Git 所有权或任一无法确认的检查都落为 `preserved_orphan`。它绝不因为 worktree "旧" 或 "被计数" 就删除,也绝不把 canary 计数翻译成批量删除。
 - 先演练后执行 / Dry-run first：`roll worktree cleanup --dry-run`(默认)打印被计数的 refs/dirs、审计处置、以及把总数拉回阈值以下所需的**最小**候选集;它绝不改动 git 状态。
-- 应用即复核 / Apply revalidates：`roll worktree cleanup --apply` 在**每一次**移除前立刻重跑审计,要求 path + head + inactive + no-tracked-dirt + merged-ancestry + `disposable_candidate` 全部一致,才通过 git 移除该 worktree 并 prune 注册、发出 `worktree_cleanup_applied` 事件。changed head / 新脏 / 缺失 path / 并发激活一律 fail-closed(发 `worktree_cleanup_refused`),绝不改删其它 preserved worktree 作替补。
+- 应用即复核 / Apply revalidates：`roll worktree cleanup --apply` 在**每一次**移除前立刻重跑审计。已注册 worktree 要求 path + head + inactive + no-tracked-dirt + merged-ancestry + `disposable_candidate` 全部一致；孤儿目录要求同一 exact path 的 reclaimable disposition 与 material fingerprint 都和计划一致，并在 bounded-rm 前再次检查。changed head / 新脏 / 指纹变化 / linked metadata 出现 / 缺失 path / 并发激活一律 fail-closed(发 `worktree_cleanup_refused`),绝不改删其它 preserved worktree 作替补。
 - 恢复要显式 / Explicit resume：成功清理后,unpublished / dirty / active / external worktree 依旧保留在 canary 账上;操作者确认压力已清除后,显式执行 `roll loop resume` 让 loop 重新派卡。
 
-Preserved（unpublished / dirty / active / external）worktree 永远不会被 cleanup 移除;它们仍计入 canary,是 Truth preflight 里 “preserved worktree” 这一停摆信号的一部分。
+Preserved（unpublished / dirty / active / external / ambiguous orphan）worktree 永远不会被 cleanup 移除;`--reclaim-orphan` 也不构成 review-only 或 trust-all 绕过，只接受与 `--apply` 相同的完整新鲜证明。它们仍计入 canary,是 Truth preflight 里 “preserved worktree” 这一停摆信号的一部分。
 
 #### Retired terms and breaking boundary
 

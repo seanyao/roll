@@ -490,6 +490,10 @@ describe("AC6: CLI help + guidance", () => {
     expect(CLEANUP_USAGE).toContain("Workspace Issue worktrees");
     expect(CLEANUP_USAGE).toContain("machine repository lock");
     expect(CLEANUP_USAGE).toContain("legacy --repo mode only");
+    expect(CLEANUP_USAGE).toContain("path-specific proof");
+    expect(CLEANUP_USAGE).toContain("fingerprint");
+    expect(CLEANUP_USAGE).not.toContain("delivery not auto-provable");
+    expect(CLEANUP_USAGE).not.toContain("after you\n  review it");
   });
 
   it("--help prints usage and exits 0 without side effects", async () => {

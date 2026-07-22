@@ -5,6 +5,7 @@
 ### 稳定性
 - 临时 Git 不再污染主检出（FIX-1473）[loop]
   <!-- evidence: .roll/features/loop-engine/FIX-1473/latest/FIX-1473-report.html -->
+- 孤儿 loop worktree 目录不再只凭“cycle 已交付”就获准删除：审计现在逐路径排除 active、Git ownership metadata、源码/未发布材料、符号链接和歧义状态，只对空目录或明确的 `.next` 生成残留生成指纹；`--apply` 与最终 bounded-rm 都复核同一指纹，`--reclaim-orphan` 不能再绕过 preserved 判定（FIX-1459）[loop]
 
 ## v4.721.2 — 2026-07-21
 

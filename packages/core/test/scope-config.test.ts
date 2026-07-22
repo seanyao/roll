@@ -232,4 +232,102 @@ defaults:
     });
     expect(errors).toEqual(["defaults.story.roles.execute: unknown strategy 'roulette'"]);
   });
+
+  it("parses the closed workspace casting schema", () => {
+    const { config, errors } = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: workspace
+inherits: machine
+roles:
+  supervise:
+    kind: fixed
+    agent: codex
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [codex, kimi]
+        require: [execute]
+  skill:
+    roles:
+      evaluate:
+        kind: fixed
+        agent: kimi
+`);
+
+    expect(errors).toEqual([]);
+    expect(config).toEqual({
+      schema: "roll-agents/v1",
+      scope: "workspace",
+      inherits: "machine",
+      agents: {},
+      models: {},
+      roles: { supervise: { kind: "fixed", agent: "codex" } },
+      defaults: {
+        story: {
+          roles: {
+            execute: {
+              kind: "select",
+              from: ["codex", "kimi"],
+              require: ["execute"],
+              avoid: [],
+              strategy: "first-available",
+            },
+          },
+        },
+        skill: { roles: { evaluate: { kind: "fixed", agent: "kimi" } } },
+      },
+    });
+  });
+
+  it("rejects workspace declarations, machine policy, and unknown top-level fields", () => {
+    const { config, errors } = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: workspace
+inherits: machine
+agents:
+  codex:
+    capabilities: [execute]
+models:
+  gpt-5.5:
+    provider: openai
+disabled: [kimi]
+capacity: 2
+repositories: [app]
+`);
+
+    expect(config?.scope).toBe("workspace");
+    expect(config?.agents).toEqual({});
+    expect(config?.models).toEqual({});
+    expect(errors).toEqual([
+      "workspace: key 'agents' is not allowed",
+      "workspace: key 'models' is not allowed",
+      "workspace: key 'disabled' is not allowed",
+      "workspace: key 'capacity' is not allowed",
+      "workspace: key 'repositories' is not allowed",
+    ]);
+  });
+
+  it("requires machine inheritance and only story or skill workspace defaults", () => {
+    const { errors } = normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: workspace
+inherits: project
+defaults:
+  workspace:
+    roles:
+      execute: { use: codex }
+  project:
+    roles:
+      execute: { use: kimi }
+  story:
+    roles: {}
+    agents: {}
+`);
+
+    expect(errors).toEqual([
+      "workspace.inherits: expected 'machine'",
+      "workspace.defaults.workspace: unknown default scope",
+      "workspace.defaults.project: unknown default scope",
+      "workspace.defaults.story.agents: unknown key",
+    ]);
+  });
 });

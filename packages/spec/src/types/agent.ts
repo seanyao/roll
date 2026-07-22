@@ -273,7 +273,7 @@ export interface AgentConfigParse {
 export const AGENT_SCOPE_SCHEMA = "roll-agents/v1" as const;
 export type AgentScopeSchema = typeof AGENT_SCOPE_SCHEMA;
 
-export const AGENT_SCOPE_KINDS = ["machine", "project", "story", "skill", "review", "score"] as const;
+export const AGENT_SCOPE_KINDS = ["machine", "workspace", "project", "story", "skill", "review", "score"] as const;
 export type AgentScopeKind = (typeof AGENT_SCOPE_KINDS)[number];
 
 /** Minimal Role vocabulary for the recursive Agent-domain model. */

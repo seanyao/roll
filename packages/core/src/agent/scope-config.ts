@@ -189,11 +189,30 @@ function parseModels(node: YamlValue | undefined): Record<ModelId, AgentScopeMod
   return models;
 }
 
-function parseDefaults(node: YamlValue | undefined, errors: string[]): Record<string, AgentScopeDefaults> {
+const WORKSPACE_TOP_LEVEL_KEYS = new Set(["schema", "scope", "inherits", "roles", "defaults"]);
+const WORKSPACE_DEFAULT_SCOPES = new Set(["story", "skill"]);
+
+function validateWorkspaceTopLevel(root: YamlMap, errors: string[]): void {
+  for (const key of Object.keys(root)) {
+    if (!WORKSPACE_TOP_LEVEL_KEYS.has(key)) errors.push(`workspace: key '${key}' is not allowed`);
+  }
+  if (stringValue(root["inherits"]) !== "machine") errors.push("workspace.inherits: expected 'machine'");
+}
+
+function parseDefaults(node: YamlValue | undefined, errors: string[], workspace = false): Record<string, AgentScopeDefaults> {
   const defaults: Record<string, AgentScopeDefaults> = {};
   if (!isMap(node)) return defaults;
   for (const [scopeName, rawNode] of Object.entries(node)) {
+    if (workspace && !WORKSPACE_DEFAULT_SCOPES.has(scopeName)) {
+      errors.push(`workspace.defaults.${scopeName}: unknown default scope`);
+      continue;
+    }
     const m = isMap(rawNode) ? rawNode : {};
+    if (workspace) {
+      for (const key of Object.keys(m)) {
+        if (key !== "roles") errors.push(`workspace.defaults.${scopeName}.${key}: unknown key`);
+      }
+    }
     defaults[scopeName] = { roles: parseRoles(m["roles"], `defaults.${scopeName}.roles`, errors) };
   }
   return defaults;
@@ -211,15 +230,17 @@ export function normalizeAgentScopeConfig(text: string): AgentScopeConfigParse {
     ? rawScope
     : null;
   if (scope === null) errors.push(`scope: unknown or missing scope '${rawScope ?? ""}'`);
+  const workspace = scope === "workspace";
+  if (workspace) validateWorkspaceTopLevel(root, errors);
 
   const config: AgentScopeConfig = {
     schema: AGENT_SCOPE_SCHEMA,
     scope: (scope ?? "project") as AgentScopeConfig["scope"],
     ...(stringValue(root["inherits"]) !== undefined ? { inherits: stringValue(root["inherits"]) as string } : {}),
-    agents: parseAgents(root["agents"], errors),
-    models: parseModels(root["models"]),
+    agents: workspace ? {} : parseAgents(root["agents"], errors),
+    models: workspace ? {} : parseModels(root["models"]),
     roles: parseRoles(root["roles"], "roles", errors),
-    defaults: parseDefaults(root["defaults"], errors),
+    defaults: parseDefaults(root["defaults"], errors, workspace),
   };
   return { config, errors };
 }

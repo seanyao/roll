@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath } from "../src/lib/delta-allocation.js";
-import { claimStoryLease, releaseStoryLease } from "@roll/core";
+import { claimStoryLease, releaseStoryLease, readLeases } from "@roll/core";
 import { deltaCommand, injectValidator, injectPrepareInterrupt, injectEventAppendFailure } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
@@ -2966,6 +2966,596 @@ describe("US-DELTA-003 — core claim primitive worker contention", () => {
     releaseHostDelegationLease(dir, "US-DELTA-LOCK-LIVE", delegId1, `delta-${delegId1}`);
   });
 });
+
+// ── BLOCK #1: Artifact immutability through controlled frame/id seam ────────
+
+describe("US-DELTA-003 — artifact immutability via frame/id seam (BLOCK #1)", () => {
+  it("pre-placed marker in same frame is immutable; no events/lease change", () => {
+    const dir = setupMinimalProject("US-DELTA-IMMUT-M", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-IMMUT-M", "local-preset");
+
+    // Control ID generator: first attempt collides with pre-placed frame,
+    // second produces fresh ID.
+    injectIdGenerator(() => {
+      // Return the same ID that we pre-placed for collision
+      return "immut-marker-test";
+    });
+
+    try {
+      // Pre-place frame directory with marker at controlled path
+      const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-IMMUT-M");
+      const controlledFrame = join(cardDir, "delta-immut-marker-test");
+      mkdirSync(controlledFrame, { recursive: true });
+      const markerContent = JSON.stringify({
+        schema: "roll-delta-delegation-open/v1",
+        delegationId: "immut-marker-test",
+        storyId: "US-DELTA-IMMUT-M",
+        createdAt: new Date().toISOString(),
+      }, null, 2) + "\n";
+      writeFileSync(join(controlledFrame, "delegation-open.json"), markerContent, "utf8");
+      const originalBytes = readFileSync(join(controlledFrame, "delegation-open.json"));
+
+      // Prepare: mkdirSync fails on controlled frame → collision retry exhausts
+      // (generator always returns same ID) → throws builder_lease_conflict
+      const r = tsRunCwd([
+        "prepare", "US-DELTA-IMMUT-M",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+      expect(r.code).toBe(1);
+      const err = JSON.parse(r.stderr);
+      expect(err.error).toBe("builder_lease_conflict");
+
+      // Original marker bytes unchanged
+      const afterBytes = readFileSync(join(controlledFrame, "delegation-open.json"));
+      expect(Buffer.compare(originalBytes, afterBytes)).toBe(0);
+
+      // No events appended (collision retry releases own lease only)
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      expect(existsSync(eventsPath)).toBe(false);
+
+      // Lease not retained for failed prepare (own-lease released on retry)
+      const slPath = storyLeasesPath(dir);
+      if (existsSync(slPath)) {
+        const sl = JSON.parse(readFileSync(slPath, "utf8"));
+        expect(sl["US-DELTA-IMMUT-M"]).toBeUndefined();
+      }
+    } finally {
+      injectIdGenerator(null);
+    }
+  });
+
+  it("pre-placed resolution in same frame immutable through collision retry", () => {
+    const dir = setupMinimalProject("US-DELTA-IMMUT-R", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-IMMUT-R", "local-preset");
+
+    // First collision, then fresh ID
+    let callCount = 0;
+    injectIdGenerator(() => {
+      callCount++;
+      return callCount === 1 ? "immut-res-test" : `immut-res-test-${randomUUID()}`;
+    });
+
+    try {
+      // Pre-place frame with resolution file at controlled path
+      const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-IMMUT-R");
+      const controlledFrame = join(cardDir, "delta-immut-res-test");
+      mkdirSync(controlledFrame, { recursive: true });
+      const resContent = JSON.stringify({ schema: "test", delegationId: "immut-res-test" }, null, 2) + "\n";
+      writeFileSync(join(controlledFrame, "delegation-open.json"), "test", "utf8");
+      const originalBytes = readFileSync(join(controlledFrame, "delegation-open.json"));
+
+      const r = tsRunCwd([
+        "prepare", "US-DELTA-IMMUT-R",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+      // Collision retry → second ID succeeds
+      expect(r.code).toBe(0);
+      const result = JSON.parse(r.stdout);
+      expect(result.delegationId).not.toBe("immut-res-test");
+
+      // Original frame bytes unchanged
+      const afterBytes = readFileSync(join(controlledFrame, "delegation-open.json"));
+      expect(Buffer.compare(originalBytes, afterBytes)).toBe(0);
+
+      // Only one committed frame's events written (no duplicates from collision)
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const events = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      const preparedEvents = events.filter((l: string) => {
+        try { return JSON.parse(l).type === "delta:prepared"; } catch { return false; }
+      });
+      expect(preparedEvents.length).toBe(1);
+      expect(JSON.parse(preparedEvents[0]!).delegationId).toBe(result.delegationId);
+    } finally {
+      injectIdGenerator(null);
+    }
+  });
+
+  it("pre-placed preparation.json immutable through collision retry", () => {
+    const dir = setupMinimalProject("US-DELTA-IMMUT-P", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-IMMUT-P", "local-preset");
+
+    let callCount = 0;
+    injectIdGenerator(() => {
+      callCount++;
+      return callCount === 1 ? "immut-prep-test" : `immut-prep-test-${randomUUID()}`;
+    });
+
+    try {
+      const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-IMMUT-P");
+      const controlledFrame = join(cardDir, "delta-immut-prep-test");
+      mkdirSync(controlledFrame, { recursive: true });
+      writeFileSync(join(controlledFrame, "delegation-open.json"), "test-marker", "utf8");
+      writeFileSync(join(controlledFrame, "preparation.json"), "test-preparation", "utf8");
+      const originalPrepBytes = readFileSync(join(controlledFrame, "preparation.json"));
+
+      const r = tsRunCwd([
+        "prepare", "US-DELTA-IMMUT-P",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+      expect(r.code).toBe(0);
+      const result = JSON.parse(r.stdout);
+      expect(result.delegationId).not.toBe("immut-prep-test");
+
+      // Original preparation.json bytes unchanged
+      const afterPrepBytes = readFileSync(join(controlledFrame, "preparation.json"));
+      expect(Buffer.compare(originalPrepBytes, afterPrepBytes)).toBe(0);
+
+      // Only one frame committed
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const events = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      const preparedEvents = events.filter((l: string) => {
+        try { return JSON.parse(l).type === "delta:prepared"; } catch { return false; }
+      });
+      expect(preparedEvents.length).toBe(1);
+    } finally {
+      injectIdGenerator(null);
+    }
+  });
+});
+
+// ── BLOCK #2: Exact role event order and per-role bindings ────────────────
+
+describe("US-DELTA-003 — exact role event order and bindings (BLOCK #2)", () => {
+  it("delta:role_resolved events match resolution role order exactly with all fields", () => {
+    const dir = setupMinimalProject("US-DELTA-ROLEBIND", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ROLEBIND", "local-preset");
+
+    // Read the resolution template to get exact expected role order
+    const template = JSON.parse(readFileSync(resPath, "utf8"));
+    const expectedRoles = template.roles as Array<Record<string, unknown>>;
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-ROLEBIND",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(0);
+
+    const events = readFileSync(join(dir, ".roll", "loop", "events.ndjson"), "utf8")
+      .trim().split("\n").map(l => JSON.parse(l));
+
+    // First event: delta:prepared
+    expect(events[0]!.type).toBe("delta:prepared");
+
+    // Following events: delta:role_resolved in exact resolution order
+    const roleEvents = events.slice(1);
+    expect(roleEvents.length).toBe(expectedRoles.length);
+
+    for (let i = 0; i < expectedRoles.length; i++) {
+      const re = roleEvents[i];
+      const expected = expectedRoles[i]!;
+
+      expect(re.type).toBe("delta:role_resolved");
+      expect(re.role).toBe(expected.role);
+      expect(re.roleInstanceId).toBe(expected.roleInstanceId);
+      expect(re.hostId).toBe(expected.hostId);
+      expect(re.modelId).toBe(expected.modelId);
+      expect(re.source).toBe(expected.source);
+      expect(re.reasons).toEqual(expected.reasons);
+      expect(typeof re.inventorySha256).toBe("string");
+      expect(re.inventorySha256.length).toBeGreaterThan(0);
+      expect(typeof re.inventoryObservedAt).toBe("string");
+      expect(re.inventoryObservedAt.length).toBeGreaterThan(0);
+    }
+
+    // All role types from resolution are present exactly once (no Set coverage)
+    const roleSet = new Set(roleEvents.map(e => e.role));
+    expect(roleSet.size).toBe(expectedRoles.length);
+    for (const er of expectedRoles) {
+      expect(roleSet.has(er.role as string)).toBe(true);
+    }
+  });
+});
+
+// ── BLOCK #3: Admission edge cases (validator 0 calls) ─────────────────────
+
+describe("US-DELTA-003 — validate admission blocks with 0 validator calls (BLOCK #3)", () => {
+  it("terminal delegation admission: validator not called, exact block event", () => {
+    const dir = setupMinimalProject("US-DELTA-ADM-TERM", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ADM-TERM", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-ADM-TERM",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Conclude to make it terminal
+    const rc = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(rc.code).toBe(0);
+
+    // Now validate on terminal delegation — admission blocks, validator 0 calls
+    injectValidator((_input) => {
+      throw new Error("validator must not be called for terminal delegation");
+    });
+    try {
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+      const r2 = tsRunCwd([
+        "validate", "--delegation", delegationId,
+        "--stage", "designer", "--json",
+      ], dir);
+      expect(r2.code).toBe(1);
+      const err = JSON.parse(r2.stderr);
+      expect(err.error).toBe("terminal_path_unselected");
+
+      // Exactly one delta:blocked event appended with typed reason
+      const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+      const blockEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+      expect(blockEvent.type).toBe("delta:blocked");
+      expect(blockEvent.reason).toBe("terminal_path_unselected");
+      expect(blockEvent.role).toBe("designer");
+      expect(typeof blockEvent.detail).toBe("string");
+    } finally {
+      injectValidator(null);
+    }
+  });
+
+  it("already-blocked delegation admission: validator not called, exact block event", () => {
+    const dir = setupMinimalProject("US-DELTA-ADM-BLK", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ADM-BLK", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-ADM-BLK",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // First block the delegation (by validating without artifact → artifact_invalid block)
+    const rBlock = tsRunCwd([
+      "validate", "--delegation", delegationId,
+      "--stage", "designer", "--json",
+    ], dir);
+    expect(rBlock.code).toBe(1);
+
+    // Now try to validate again — admission blocks because already blocked
+    injectValidator((_input) => {
+      throw new Error("validator must not be called for already-blocked delegation");
+    });
+    try {
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+      const r2 = tsRunCwd([
+        "validate", "--delegation", delegationId,
+        "--stage", "evaluator", "--json",
+      ], dir);
+      expect(r2.code).toBe(1);
+      const err = JSON.parse(r2.stderr);
+      expect(err.error).toBe("host_supervisor_required");
+
+      // Exactly one new delta:blocked event appended
+      const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+      const blockEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+      expect(blockEvent.type).toBe("delta:blocked");
+      expect(blockEvent.reason).toBe("host_supervisor_required");
+      expect(blockEvent.role).toBe("evaluator");
+    } finally {
+      injectValidator(null);
+    }
+  });
+
+  it("already-published stage admission: validator not called, exact block event", () => {
+    const dir = setupMinimalProject("US-DELTA-ADM-PUB", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ADM-PUB", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-ADM-PUB",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Publish the designer stage (create artifact file + validate allow)
+    const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ADM-PUB",
+      `delta-${delegationId}`, "role-artifacts", "designer");
+    mkdirSync(stageDir, { recursive: true });
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    const rPub = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
+    expect(rPub.code).toBe(0);
+
+    // Try to publish designer again — admission blocks as already-published
+    injectValidator((_input) => {
+      throw new Error("validator must not be called for already-published stage");
+    });
+    try {
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+      const r2 = tsRunCwd([
+        "validate", "--delegation", delegationId,
+        "--stage", "designer", "--json",
+      ], dir);
+      expect(r2.code).toBe(1);
+      const err = JSON.parse(r2.stderr);
+      expect(err.error).toBe("identity_collision");
+
+      // Exactly one delta:blocked event appended
+      const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+      const blockEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+      expect(blockEvent.type).toBe("delta:blocked");
+      expect(blockEvent.reason).toBe("identity_collision");
+      expect(blockEvent.role).toBe("designer");
+      expect(blockEvent.delegationId).toBe(delegationId);
+    } finally {
+      injectValidator(null);
+    }
+  });
+});
+
+// ── BLOCK #5: Conclude append-failure lease retention ─────────────────────
+
+describe("US-DELTA-003 — conclude append-failure lease retention (BLOCK #5)", () => {
+  it("conclude append failure retains lease, no success output, event ledger reflects append-then-crash", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-APPFAIL2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-APPFAIL2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-APPFAIL2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Inject event append failure
+    injectEventAppendFailure(() => {
+      throw new Error("simulated event append failure");
+    });
+
+    try {
+      expect(() => {
+        tsRunCwd([
+          "conclude", "--delegation", delegationId,
+          "--delivery-disposition", "owner_continue", "--json",
+        ], dir);
+      }).toThrow("simulated event append failure");
+
+      // Lease MUST be retained (not released) — the failure prevents release
+      const slPath = storyLeasesPath(dir);
+      expect(existsSync(slPath)).toBe(true);
+      const sl = JSON.parse(readFileSync(slPath, "utf8"));
+      expect(sl["US-DELTA-CONC-APPFAIL2"]).toBeDefined();
+      expect(sl["US-DELTA-CONC-APPFAIL2"].source).toBe("host-delegation");
+      expect(sl["US-DELTA-CONC-APPFAIL2"].delegationId).toBe(delegationId);
+
+      // The terminal event IS written (append, then crash — "append then crash" semantics)
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const events = readFileSync(eventsPath, "utf8").trim().split("\n").map(l => JSON.parse(l));
+      const terminalEvents = events.filter(e => e.type === "delta:terminal");
+      expect(terminalEvents.length).toBe(1);
+      expect(terminalEvents[0]!.delegationId).toBe(delegationId);
+      expect(terminalEvents[0]!.outcome).toBe("handoff_ready");
+
+      // Cleanup: release the lease
+      releaseHostDelegationLease(dir, "US-DELTA-CONC-APPFAIL2", delegationId, `delta-${delegationId}`);
+    } finally {
+      injectEventAppendFailure(null);
+    }
+  });
+
+  it("conclude same-story mismatched lease fail-loud, no terminal, lease retained", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-MISMATCH2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-MISMATCH2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-MISMATCH2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationIdA = JSON.parse(r1.stdout).delegationId;
+
+    // Overwrite lease with mismatched delegationId (same story)
+    const slPath = storyLeasesPath(dir);
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    sl["US-DELTA-CONC-MISMATCH2"] = {
+      claimedAt: Date.now(), source: "host-delegation",
+      delegationId: "wrong-deleg-id", runId: "delta-wrong-deleg-id",
+    };
+    writeFileSync(slPath, JSON.stringify(sl, null, 2) + "\n", "utf8");
+
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    // Conclude with delegationIdA — fail-loud
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationIdA,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err2 = JSON.parse(r2.stderr);
+    expect(err2.error).toBe("lease_mismatch");
+
+    // NO terminal event written
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length);
+
+    // Lease entry preserved with mismatched delegationId
+    const slAfter = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(slAfter["US-DELTA-CONC-MISMATCH2"]).toBeDefined();
+    expect(slAfter["US-DELTA-CONC-MISMATCH2"].delegationId).toBe("wrong-deleg-id");
+
+    // Cleanup
+    delete slAfter["US-DELTA-CONC-MISMATCH2"];
+    writeFileSync(slPath, JSON.stringify(slAfter, null, 2) + "\n", "utf8");
+  });
+});
+
+// ── BLOCK #6: Status read-only with content hashes and mtimes ────────────
+
+describe("US-DELTA-003 — status read-only with content hashes (BLOCK #6)", () => {
+  it("status does not change any file content or mtime", () => {
+    const dir = setupMinimalProject("US-DELTA-RDONLY2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-RDONLY2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-RDONLY2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Snapshot all files with content hash and mtime
+    const snapshotBefore = fileSnapshot(dir);
+
+    // Run status multiple times
+    tsRunCwd(["status", "--delegation", delegationId], dir);
+    tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
+    tsRunCwd(["status", "--story", "US-DELTA-RDONLY2"], dir);
+
+    // Snapshot after
+    const snapshotAfter = fileSnapshot(dir);
+
+    // Every file from before must have the same content hash and mtime
+    for (const [filePath, beforeStats] of Object.entries(snapshotBefore)) {
+      const afterStats = snapshotAfter[filePath];
+      expect(afterStats).toBeDefined();
+      expect(afterStats!.hash).toBe(beforeStats.hash);
+      expect(afterStats!.mtime).toBe(beforeStats.mtime);
+    }
+    // No new files created
+    const beforeFiles = Object.keys(snapshotBefore);
+    const afterFiles = Object.keys(snapshotAfter);
+    expect(afterFiles.sort()).toEqual(beforeFiles.sort());
+  });
+});
+
+// ── BLOCK #8: Core claim human/supervisor parameterized tests ─────────────
+
+describe("US-DELTA-003 — human/supervisor claim and release parameterized (BLOCK #8)", () => {
+  it("human claim atomically blocks host claim", () => {
+    const dir = setupMinimalProject("US-DELTA-HUMAN-CLAIM", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    const hResult = claimStoryLease(slPath, "US-DELTA-HUMAN-CLAIM", {
+      claimedAt: Date.now(), source: "human",
+    });
+    expect(hResult.status).toBe("claimed");
+
+    // Host claim must fail
+    const hostResult = claimHostDelegationLease(dir, "US-DELTA-HUMAN-CLAIM", randomUUID(), "delta-host");
+    expect(hostResult).toBe("exists");
+
+    // Human entry preserved
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(sl["US-DELTA-HUMAN-CLAIM"].source).toBe("human");
+
+    // Human release (no pid required)
+    const releaseResult = releaseStoryLease(slPath, "US-DELTA-HUMAN-CLAIM", { source: "human" });
+    expect(releaseResult).toBe(true);
+  });
+
+  it("supervisor claim atomically blocks host claim", () => {
+    const dir = setupMinimalProject("US-DELTA-SUP-CLAIM", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    const sResult = claimStoryLease(slPath, "US-DELTA-SUP-CLAIM", {
+      claimedAt: Date.now(), source: "supervisor",
+    });
+    expect(sResult.status).toBe("claimed");
+
+    // Host claim must fail
+    const hostResult = claimHostDelegationLease(dir, "US-DELTA-SUP-CLAIM", randomUUID(), "delta-host");
+    expect(hostResult).toBe("exists");
+
+    // Supervisor entry preserved
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(sl["US-DELTA-SUP-CLAIM"].source).toBe("supervisor");
+
+    // Release
+    const releaseResult = releaseStoryLease(slPath, "US-DELTA-SUP-CLAIM", { source: "supervisor" });
+    expect(releaseResult).toBe(true);
+  });
+
+  it("human release refuses mismatched source", () => {
+    const dir = setupMinimalProject("US-DELTA-HREL", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    claimStoryLease(slPath, "US-DELTA-HREL", { claimedAt: Date.now(), source: "human" });
+
+    // Cycle cannot release human
+    const r = releaseStoryLease(slPath, "US-DELTA-HREL", { source: "cycle", pid: process.pid });
+    expect(r).toBe(false);
+
+    // Lease preserved
+    expect(readLeases(slPath)["US-DELTA-HREL"].source).toBe("human");
+
+    // Cleanup
+    releaseStoryLease(slPath, "US-DELTA-HREL", { source: "human" });
+  });
+});
+
+// ── File snapshot helper (content hash + mtime) ──────────────────────────
+
+function fileSnapshot(root: string): Record<string, { hash: string; mtime: string }> {
+  const { createHash } = require("node:crypto");
+  const result: Record<string, { hash: string; mtime: string }> = {};
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+      } else {
+        const content = readFileSync(p);
+        const hash = createHash("sha256").update(content).digest("hex");
+        const { mtime } = require("node:fs").statSync(p);
+        result[p] = { hash, mtime: mtime.toISOString() };
+      }
+    }
+  };
+  walk(root);
+  return result;
+}
 
 function readdirRecursive(root: string): string[] {
   const result: string[] = [];

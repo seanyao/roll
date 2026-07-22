@@ -228,12 +228,12 @@ export function releaseStoryLease(
     // Source must match
     if (existing.source !== identity.source) return false;
 
-    // For host-delegation: delegationId must be non-empty and match, runId must also match
+    // For host-delegation: delegationId AND runId must be non-empty and both match.
+    // runId is mandatory — omitting it does not bypass the identity check.
     if (identity.source === "host-delegation") {
-      if (!identity.delegationId || existing.delegationId !== identity.delegationId) {
-        return false;
-      }
-      if (identity.runId !== undefined && existing.runId !== identity.runId) {
+      if (!identity.delegationId || !identity.runId ||
+          existing.delegationId !== identity.delegationId ||
+          existing.runId !== identity.runId) {
         return false;
       }
     }

@@ -476,9 +476,9 @@ describe("releaseStoryLease — match-only release", () => {
         delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
       });
 
-      // Correct delegationId — releases
+      // Correct delegationId + runId — releases
       const r = releaseStoryLease(path, "US-001", {
-        source: "host-delegation", delegationId: "deleg-aaa",
+        source: "host-delegation", delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
       });
       expect(r).toBe(true);
       expect(readLeases(path)["US-001"]).toBeUndefined();
@@ -496,15 +496,65 @@ describe("releaseStoryLease — match-only release", () => {
         delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
       });
 
-      // Wrong delegationId — refuses
+      // Wrong delegationId — refuses (runId correct but delegationId mismatched)
       const r = releaseStoryLease(path, "US-001", {
-        source: "host-delegation", delegationId: "deleg-WRONG",
+        source: "host-delegation", delegationId: "deleg-WRONG", runId: "delta-deleg-aaa",
       });
       expect(r).toBe(false);
 
       // Lease is preserved
       const leases = readLeases(path);
       expect(leases["US-001"]!.delegationId).toBe("deleg-aaa");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("refuses to release host-delegation when runId is missing (mandatory contract)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+
+      // Missing runId — host-delegation requires both delegationId AND runId
+      const r = releaseStoryLease(path, "US-001", {
+        source: "host-delegation", delegationId: "deleg-aaa",
+      });
+      expect(r).toBe(false);
+
+      // Lease is preserved
+      const leases = readLeases(path);
+      expect(leases["US-001"]).toBeDefined();
+      expect(leases["US-001"]!.delegationId).toBe("deleg-aaa");
+      expect(leases["US-001"]!.runId).toBe("delta-deleg-aaa");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("refuses to release host-delegation when runId is mismatched", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+
+      // Correct delegationId but wrong runId — refuses
+      const r = releaseStoryLease(path, "US-001", {
+        source: "host-delegation", delegationId: "deleg-aaa", runId: "delta-deleg-WRONG",
+      });
+      expect(r).toBe(false);
+
+      // Lease is preserved
+      const leases = readLeases(path);
+      expect(leases["US-001"]).toBeDefined();
+      expect(leases["US-001"]!.delegationId).toBe("deleg-aaa");
+      expect(leases["US-001"]!.runId).toBe("delta-deleg-aaa");
     } finally {
       try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
     }
@@ -595,7 +645,7 @@ describe("releaseStoryLease — match-only release", () => {
 
       // Release only US-001
       releaseStoryLease(path, "US-001", {
-        source: "host-delegation", delegationId: "deleg-aaa",
+        source: "host-delegation", delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
       });
 
       const leases = readLeases(path);

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { repositoryIdFromRemote } from "@roll/spec";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import { executeSetupCommand } from "../src/runner/setup-handlers.js";
+import { executeTerminalCommand } from "../src/runner/terminal-handlers.js";
 import { repositoryAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
 
 function git(cwd: string, args: readonly string[]): string {
@@ -221,6 +222,69 @@ describe("US-WS-011 Workspace repository preparation", () => {
         code: "apply_failed",
         repairJournal: null,
       });
+    } finally {
+      if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = previousRollHome;
+    }
+  });
+
+  it("preserves the prepared Issue worktrees on signal/timeout teardown while releasing only the Cycle lease", async () => {
+    const f = fixture();
+    const previousRollHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = f.rollHome;
+    try {
+      const ports = nodePorts({
+        repoCwd: f.workspace,
+        paths: f.paths,
+        skillBody: "BUILD STORY",
+        routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      });
+      await ports.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-signal" });
+      const execution = await ports.repositories?.resolve(f.storyId);
+      if (execution === undefined) throw new Error("repository execution must resolve");
+      // Stamp a live Cycle lease and leave unpushed work in the writable leg so
+      // teardown must NOT touch it (only setup rollback / explicit reclamation may).
+      mkdirSync(dirname(f.paths.storyLeasePath!), { recursive: true });
+      writeFileSync(f.paths.storyLeasePath!, `${JSON.stringify({
+        [f.storyId]: { pid: process.pid, claimedAt: 1, source: "cycle" },
+      })}\n`);
+      const writable = Object.values(execution.repositories).find((entry) => entry.access === "write");
+      if (writable === undefined) throw new Error("fixture must expose a writable leg");
+      writeFileSync(join(writable.worktreePath, "unpushed.txt"), "in-flight work\n", "utf8");
+
+      const ctx = {
+        cycleId: "cycle-signal",
+        branch: "loop/cycle-signal",
+        loop: "main" as const,
+        storyId: f.storyId,
+        repositoryExecution: execution,
+      };
+      // The signal/timeout terminal drives cleanup_worktree then append_run.
+      const cleanup = await executeTerminalCommand({ kind: "cleanup_worktree", branch: ctx.branch }, ports, ctx);
+      const bookkeeping = await executeTerminalCommand({
+        kind: "append_run",
+        status: "timeout",
+        outcome: "timeout",
+        cycleId: ctx.cycleId,
+      }, ports, ctx);
+
+      expect(cleanup).toEqual({});
+      expect(bookkeeping).toEqual({});
+      // Issue worktrees (both writable and read-only legs) survive on disk.
+      for (const entry of Object.values(execution.repositories)) {
+        expect(existsSync(entry.worktreePath)).toBe(true);
+      }
+      // The in-flight unpushed work is preserved, never removed by teardown.
+      expect(readFileSync(join(writable.worktreePath, "unpushed.txt"), "utf8")).toBe("in-flight work\n");
+      // Only the Cycle-owned lease is released (removeLease drops the file once
+      // its last entry is gone, so an absent file also means "released").
+      const leaseReleased = !existsSync(f.paths.storyLeasePath!)
+        || JSON.parse(readFileSync(f.paths.storyLeasePath!, "utf8"))[f.storyId] === undefined;
+      expect(leaseReleased).toBe(true);
+      // The teardown recorded the scope-skip for recovery observability.
+      expect(readFileSync(f.paths.alertsPath, "utf8")).toContain(
+        "workspace_repository_scope_required: cleanup_worktree",
+      );
     } finally {
       if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = previousRollHome;

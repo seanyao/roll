@@ -17,6 +17,39 @@ If you have a real project that's been alive for a while — code, tests, histor
 
 This page covers **graft**. For seed vs. replant, see [adoption patterns](https://github.com/seanyao/roll-meta) (maintainer-only repo, public summary in the README).
 
+## Already have a repository-local `.roll/`?
+
+That is a historical Roll migration, not a graft. Do not run onboarding over
+the existing metadata. First stop any active loop/cycle, make sure product work
+is committed and pushed, then run:
+
+```bash
+roll workspace migrate --from . --check
+```
+
+For a complete portable plan document that you can review and save:
+
+```bash
+roll workspace migrate --from . --check --json > workspace-migration-plan.json
+```
+
+The `>` redirection is your explicit shell write; `migrate --check` itself does
+not create a plan, cache, registry entry, Workspace destination, or source
+change. It reads Git with optional locks disabled, may use `ls-remote` for
+authoritative remote truth, and never fetches, prunes, or updates tracking refs.
+
+Interpret the result before any apply step:
+
+| Result | Meaning |
+|--------|---------|
+| `ready` (exit `0`) | The facts produce a closed migration plan. |
+| `repository_cutover_required` (exit `0`) | `.roll` is tracked by the product repository; remove that tracking through the normal reviewed TCR/PR/push flow, then check again. |
+| `manual_metadata_handoff` (exit `0`) | `.roll` is an independent Git repository; Roll reports its status/HEAD/branch/upstream/remote but will not link, commit, or push it. |
+| `migration_blocked` (exit `2`) | Dirty/unpushed/in-flight Git, unsafe worktrees/submodules, active runtime, symlinks, unverifiable remote truth, or cache/registry conflicts must be resolved first. |
+
+Omit `--workspace` to get the deterministic `ws-<repo hash>` proposal, or pass
+`--workspace <id>` to freeze an explicit target ID in the plan.
+
 ## What graft does
 
 - **Reads** your project to understand type, domains, and key modules

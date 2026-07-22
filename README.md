@@ -189,6 +189,23 @@ machine-owned. Repository-local Project Scope is migration input only for a
 Workspace run. Inspect the read-only effective trace with
 `roll agent --workspace <id|path>`; `roll agent list` and `roll agent readiness`
 always remain machine views.
+
+Before moving a historical repository-local Roll project into Workspace Scope,
+run the read-only migration check:
+
+```bash
+roll workspace migrate --from . --check
+roll workspace migrate --from . --check --json > workspace-migration-plan.json
+```
+
+The command reads product Git, linked worktrees, recursive submodules, runtime
+leases, `.roll` ownership/inventory, shared cache and registry facts. It never
+fetches, prunes, updates refs, or writes source/cache/registry/destination state.
+The second example is an explicit shell redirection by the owner; the command
+itself never creates a plan file. Exit `0` means the plan is ready or needs an
+explicit product cutover/manual metadata handoff; exit `2` means safety facts
+block migration.
+
 For open role casting, `strategy: health-aware` keeps the installed pool visible
 and ranks candidates by capability, recent health, successful deliveries, recent
 use, and cost band. Inspect a cast with
@@ -222,6 +239,11 @@ roll loop on
 ```
 
 Roll diagnoses the repository without destructive migration, writes or updates Roll metadata only after review, and then lets the Supervisor reason over existing backlog, docs, context, open PRs, and scoped role bindings. Current state is visible through CLI-first observability: `roll status`, `roll loop watch`, `roll loop runs`, `roll loop cycle <id>`, `roll loop alert`, and story reports.
+
+This path is for an existing codebase without current Roll markers. If the
+repository already contains a historical repository-local `.roll/`, use
+`roll workspace migrate --from . --check` first instead of grafting a second
+Roll layout onto it.
 
 ## Quick start for new projects
 
@@ -262,7 +284,7 @@ with `roll loop resume` when ready.
 | `roll setup [-f\|--force] [--reselect] [--no-capture-install]` / `roll setup skills\|offboard` | Install/sync conventions, repair Roll Capture.app readiness, or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
-| `roll workspace <init\|issue\|requirement\|doctor\|list\|show\|register\|activate\|pause\|archive>` | Initialize and target a Workspace, diagnose bounded registry/cache/Requirement/Issue/runtime drift, apply only doctor-emitted typed repairs, and inspect lifecycle state |
+| `roll workspace <init\|issue\|requirement\|doctor\|migrate\|list\|show\|register\|activate\|pause\|archive>` | Initialize and target a Workspace, generate a zero-write historical migration plan, diagnose bounded registry/cache/Requirement/Issue/runtime drift, apply only doctor-emitted typed repairs, and inspect lifecycle state |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |
 | `roll --version` / `roll -v` | Print installed roll version |
 

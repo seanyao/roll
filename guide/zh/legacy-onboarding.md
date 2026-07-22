@@ -17,6 +17,37 @@
 
 本页讲 **graft**。关于 seed / replant，见 [接入模式文档](https://github.com/seanyao/roll-meta)（维护者私有仓，README 有公开摘要）。
 
+## 已经有 repository-local `.roll/`？
+
+这属于历史 Roll 项目迁移，不是 graft。不要在现有元数据上再跑一套 onboarding。
+先停止仍在活动的 loop/cycle，确认产品改动已提交并推送，然后运行：
+
+```bash
+roll workspace migrate --from . --check
+```
+
+如需完整、可移植、可保存审阅的计划文档：
+
+```bash
+roll workspace migrate --from . --check --json > workspace-migration-plan.json
+```
+
+这里的 `>` 是 owner 显式执行的 shell 写入；`migrate --check` 自身不会创建
+plan、缓存、registry 条目、Workspace 目标或源变更。它读取 Git 时禁用 optional
+lock，可以用 `ls-remote` 验证权威远端事实，但绝不 fetch、prune 或更新 tracking ref。
+
+任何 apply 之前，先按结果处理：
+
+| 结果 | 含义 |
+|------|------|
+| `ready`（退出 `0`） | 当前事实已生成闭合迁移计划。 |
+| `repository_cutover_required`（退出 `0`） | `.roll` 被产品仓库跟踪；先走正常的受审 TCR/PR/push 流程移除跟踪，再重新检查。 |
+| `manual_metadata_handoff`（退出 `0`） | `.roll` 是独立 Git 仓库；Roll 会报告 status/HEAD/branch/upstream/remote，但不会 link、commit 或 push。 |
+| `migration_blocked`（退出 `2`） | 必须先解决 dirty/unpushed/in-flight Git、不安全 worktree/submodule、活动 runtime、symlink、不可验证远端事实或 cache/registry 冲突。 |
+
+不传 `--workspace` 时会提出确定性的 `ws-<repo hash>`；传入
+`--workspace <ID>` 可把显式目标 ID 固定进计划。
+
 ## Graft 做了什么
 
 - **读**你的项目，理解类型、领域、关键模块

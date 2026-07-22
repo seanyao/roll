@@ -83,6 +83,8 @@ async function run(input: HistoricalMigrationFacts, args: string[], language: "e
     const status = await workspaceMigrateCommand(args, {
       collectFacts: async () => input,
       plan: planHistoricalWorkspaceMigration,
+      apply: async () => { throw new Error("unexpected apply"); },
+      rollback: () => { throw new Error("unexpected rollback"); },
     });
     return { status, stdout, stderr };
   } finally {
@@ -209,6 +211,8 @@ describe("US-WS-019b migration check CLI contract", () => {
           return facts();
         },
         plan: planHistoricalWorkspaceMigration,
+        apply: async () => { throw new Error("unexpected apply"); },
+        rollback: () => { throw new Error("unexpected rollback"); },
       });
     } finally {
       process.stderr.write = realErr;

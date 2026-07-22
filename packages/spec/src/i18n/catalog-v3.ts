@@ -90,7 +90,7 @@ export const v3Catalog: Catalog = {
   "workspace.migrate.finding.cache_conflict": { en: "shared repository cache conflicts with the plan", zh: "共享仓库缓存与计划冲突" },
   "workspace.migrate.finding.workspace_conflict": { en: "Workspace registry conflicts with the plan", zh: "工作区 registry 与计划冲突" },
   "workspace.migrate.cutover": { en: "Repository cutover: HEAD %s, %d tracked .roll entries", zh: "仓库切换：HEAD %s，%d 个被产品仓库跟踪的 .roll 条目" },
-  "workspace.migrate.cutover.next": { en: "Next: remove product tracking through the existing TCR PR/push flow, then check again", zh: "下一步：通过现有 TCR PR/push 流程移除产品仓库跟踪，然后重新检查" },
+  "workspace.migrate.cutover.next": { en: "Next: remove product tracking through the existing TCR PR/push flow, then apply this saved plan", zh: "下一步：通过现有 TCR PR/push 流程移除产品仓库跟踪，然后应用这份已保存计划" },
   "workspace.migrate.handoff.gitdir": { en: "Metadata gitdir: %s", zh: "元数据 gitdir：%s" },
   "workspace.migrate.handoff.toplevel": { en: "Metadata top-level: %s", zh: "元数据顶层目录：%s" },
   "workspace.migrate.handoff.state": { en: "Metadata state: %s", zh: "元数据状态：%s" },

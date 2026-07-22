@@ -195,7 +195,8 @@ run the read-only migration check:
 
 ```bash
 roll workspace migrate --from . --check
-roll workspace migrate --from . --check --json > workspace-migration-plan.json
+roll workspace migrate --from . --workspace ws-team --check --json > workspace-migration-plan.json
+roll workspace migrate --from . --workspace ws-team --plan workspace-migration-plan.json
 ```
 
 The command reads product Git, linked worktrees, recursive submodules, runtime
@@ -205,6 +206,16 @@ The second example is an explicit shell redirection by the owner; the command
 itself never creates a plan file. Exit `0` means the plan is ready or needs an
 explicit product cutover/manual metadata handoff; exit `2` means safety facts
 block migration.
+
+Apply consumes that exact owner-saved plan and re-collects the source facts
+before any write. It prepares a durable journal and staging manifest, creates or
+reuses only the machine cache under `~/.roll/repos/`, verifies every mapped
+digest, then registers and activates the Workspace last. Re-running the same
+command resumes an interrupted transaction or reports `reused`; before
+registration, `--rollback` restores atomically moved source files and removes
+the non-active staging Workspace. Ordinary/product-tracked metadata is relocated
+and leaves `.roll/RELOCATED.json`; an independent roll-meta repository is copied
+without any link, commit, or push and keeps a manual handoff.
 
 For open role casting, `strategy: health-aware` keeps the installed pool visible
 and ranks candidates by capability, recent health, successful deliveries, recent
@@ -284,7 +295,7 @@ with `roll loop resume` when ready.
 | `roll setup [-f\|--force] [--reselect] [--no-capture-install]` / `roll setup skills\|offboard` | Install/sync conventions, repair Roll Capture.app readiness, or remove Roll-owned project artifacts |
 | `roll status [ci\|pulse] [--json]` | Project health, CI state, and delivery pulse |
 | `roll test [--where] [--reset]` | Run tests through the isolation adapter |
-| `roll workspace <init\|issue\|requirement\|doctor\|migrate\|list\|show\|register\|activate\|pause\|archive>` | Initialize and target a Workspace, generate a zero-write historical migration plan, diagnose bounded registry/cache/Requirement/Issue/runtime drift, apply only doctor-emitted typed repairs, and inspect lifecycle state |
+| `roll workspace <init\|issue\|requirement\|doctor\|migrate\|list\|show\|register\|activate\|pause\|archive>` | Initialize and target a Workspace, check/apply/resume/rollback historical migration, diagnose bounded registry/cache/Requirement/Issue/runtime drift, apply only doctor-emitted typed repairs, and inspect lifecycle state |
 | `roll update` | Upgrade the global Roll install and re-sync conventions |
 | `roll --version` / `roll -v` | Print installed roll version |
 

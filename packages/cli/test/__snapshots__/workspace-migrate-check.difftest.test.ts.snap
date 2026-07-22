@@ -110,7 +110,7 @@ Findings: 2
 - info: Workspace ID was derived from repoId
 - info: shared repository cache will be created during apply (repos/repo-ab12cd34ef56.git)
 Repository cutover: HEAD 1111111111111111111111111111111111111111, 1 tracked .roll entries
-Next: remove product tracking through the existing TCR PR/push flow, then check again
+Next: remove product tracking through the existing TCR PR/push flow, then apply this saved plan
 ",
   },
   "handoff": {

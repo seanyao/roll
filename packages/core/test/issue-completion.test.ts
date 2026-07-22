@@ -156,6 +156,26 @@ describe("US-WS-013 repository fact authority and rebuild", () => {
     expect(result).toMatchObject({ state: "blocked", conflicts: [{ repoId: API }] });
   });
 
+  it("falls back from provider UNKNOWN to integration-branch reachability", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [
+        provider(API, "UNKNOWN", { at: 2 }),
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c1", authority: "integration_branch", reachable: true, mergeCommit: API_MERGE, recordedAt: 1 },
+      ],
+    }))).toMatchObject({ state: "integration_pending", repositories: [{ authority: "integration_branch" }] });
+  });
+
+  it("fails loud when integration-branch facts disagree on the immutable merge commit", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c1", authority: "integration_branch", reachable: true, mergeCommit: API_MERGE, recordedAt: 1 },
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c2", authority: "integration_branch", reachable: true, mergeCommit: WEB_MERGE, recordedAt: 2 },
+      ],
+    }))).toMatchObject({ state: "blocked", conflicts: [{ repoId: API, code: "conflicting_merge_commit" }] });
+  });
+
   it("is idempotent under duplicate facts and rebuilds identically without generated projections", () => {
     const strong = provider(API, "MERGED", { mergeCommit: API_MERGE });
     const projection = { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c1", authority: "projection" as const, state: "building" as const, recordedAt: 2 };

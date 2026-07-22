@@ -60,10 +60,12 @@ function resolveRepository(repoId: string, facts: readonly RepositoryMergeEviden
     conflicts.push(conflict(repoId, "invalid_merge_evidence"));
   }
   if (mergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));
+  const branchMergeCommits = new Set(branches.filter((fact) => fact.reachable).map((fact) => fact.mergeCommit).filter((sha): sha is string => sha !== undefined && sha !== ""));
+  if (branchMergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));
   if (provider?.prState !== "MERGED" && providerMerges.some((fact) => fact.recordedAt <= (provider?.recordedAt ?? 0))) {
     conflicts.push(conflict(repoId, "strong_fact_conflict"));
   }
-  if (provider !== undefined && branch?.reachable === true) {
+  if (provider !== undefined && provider.prState !== "UNKNOWN" && branch?.reachable === true) {
     if (provider.prState !== "MERGED" || (provider.mergeCommit !== undefined && provider.mergeCommit !== branch.mergeCommit)) {
       conflicts.push(conflict(repoId, "strong_fact_conflict"));
     }

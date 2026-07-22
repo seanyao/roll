@@ -154,28 +154,26 @@ describe("US-DELTA-003 — delta CLI parser and help", () => {
     expect(r.stderr).not.toBe("");
   });
 
-  it("roll delta --json error format is valid JSON on stderr", () => {
-    // Test JSON error format for a known invalid scenario
+  it("roll delta --json error format is precise {ok:false,error,detail} on stderr, stdout empty", () => {
     const r = tsRun(["prepare", "US-TEST", "--json"]);
     expect(r.code).toBe(1);
-    // With --json, stderr should contain valid JSON
-    try {
-      JSON.parse(r.stderr);
-    } catch {
-      // If not on stderr, check stdout
-      try {
-        JSON.parse(r.stdout);
-      } catch {
-        // OK if not JSON for now — this is a structural test
-      }
-    }
+    // stdout must be empty under --json error
+    expect(r.stdout).toBe("");
+    // stderr must be valid JSON envelope { ok: false, error, detail }
+    expect(() => JSON.parse(r.stderr)).not.toThrow();
+    const err = JSON.parse(r.stderr);
+    expect(err.ok).toBe(false);
+    expect(typeof err.error).toBe("string");
+    expect(typeof err.detail).toBe("string");
+    expect(err.error.length).toBeGreaterThan(0);
+    expect(err.detail.length).toBeGreaterThan(0);
   });
 });
 
 // ── Architectural negative guard ────────────────────────────────────────────
 
 describe("US-DELTA-003 — import audit", () => {
-  it("delta CLI files do not import agentSpawn, Pi host API, cycle allocator, or runs.jsonl writer", () => {
+  it("delta CLI files exist and do not import agentSpawn, cycle, or host API (fail-closed)", () => {
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
 
@@ -188,6 +186,13 @@ describe("US-DELTA-003 — import audit", () => {
       path.join(libDir, "delta-artifacts.ts"),
     ];
 
+    // FAIL-CLOSED: every required file must exist
+    for (const file of filesToCheck) {
+      if (!fs.existsSync(file)) {
+        throw new Error(`Audit FAIL-CLOSED: required file missing: ${file}`);
+      }
+    }
+
     const forbidden = [
       "agentSpawn",
       "@anthropic",
@@ -197,13 +202,23 @@ describe("US-DELTA-003 — import audit", () => {
       "runs.jsonl",
       "createPR",
       "DeliveryRecord",
+      "cycle:terminal",
+      "upsertRun",
+      "artifact-protocol",
     ];
 
     for (const file of filesToCheck) {
-      if (!fs.existsSync(file)) continue;
       const content = fs.readFileSync(file, "utf8");
       for (const pattern of forbidden) {
-        expect(content).not.toContain(pattern);
+        const lines = content.split("\n");
+        const offending = lines.filter((l: string) => {
+          const t = l.trim();
+          if (t.startsWith("//") || t.startsWith("*") || t === "*") return false;
+          return l.includes(pattern);
+        });
+        if (offending.length > 0) {
+          throw new Error(`Audit FAIL-CLOSED: ${file} contains forbidden pattern "${pattern}"`);
+        }
       }
     }
   });

@@ -333,7 +333,7 @@ function inspectTrustedOrphanTree(path: string, entries: readonly string[]): Orp
   };
 }
 
-function defaultInspectOrphanDir(repoRoot: string, path: string, name: string): OrphanRecoveryProof {
+export function inspectOrphanRecoveryProof(repoRoot: string, path: string, name: string): OrphanRecoveryProof {
   let rootStat;
   try {
     rootStat = lstatSync(path);
@@ -444,7 +444,7 @@ function scanOrphanLoopWorktrees(
     const active = isActiveCycle(cycleId, repoRoot, deps);
     const recoveryProof = deps.inspectOrphanDir
       ? deps.inspectOrphanDir(repoRoot, absPath, name)
-      : defaultInspectOrphanDir(repoRoot, absPath, name);
+      : inspectOrphanRecoveryProof(repoRoot, absPath, name);
 
     const rec: WorktreeAuditRecord = {
       path: absPath,

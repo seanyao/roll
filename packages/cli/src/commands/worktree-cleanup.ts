@@ -28,11 +28,12 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_BRANCH_CANARY_MAX } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import {
   auditWorktrees,
+  inspectOrphanRecoveryProof,
   type WorktreeAuditDeps,
   type WorktreeAuditOutput,
   type WorktreeAuditRecord,
@@ -51,6 +52,8 @@ export interface CleanupCandidate {
   cachePath?: string;
   /** HEAD the audit observed; `--apply` refuses if the fresh head differs. */
   expectedHead: string;
+  /** Exact path-specific orphan material proof observed while planning. */
+  expectedOrphanFingerprint?: string;
   reason: "disposable_candidate" | "orphan_reclaimable";
   /**
    * FIX-1460 (#1468): how this path is reclaimed. `git_worktree` (default) uses
@@ -194,7 +197,15 @@ export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
  * is no registered worktree, so it is reclaimed by a bounded directory delete.
  */
 export function isReclaimableOrphan(rec: WorktreeAuditRecord): boolean {
-  return rec.owner === "loop" && rec.active === false && rec.disposition === "orphan_reclaimable";
+  const proof = rec.orphanRecoveryProof;
+  return (
+    rec.owner === "loop" &&
+    rec.active === false &&
+    rec.disposition === "orphan_reclaimable" &&
+    (proof?.state === "empty" || proof?.state === "trusted_generated") &&
+    typeof proof.fingerprint === "string" &&
+    proof.fingerprint.length > 0
+  );
 }
 
 /**
@@ -321,6 +332,7 @@ export function planWorktreeCleanup(
       ...(r.cachePath ? { cachePath: r.cachePath } : {}),
       // An orphan has no registered HEAD; apply skips the head check for rm_dir.
       expectedHead: orphan ? "" : (r.head as string),
+      ...(orphan ? { expectedOrphanFingerprint: r.orphanRecoveryProof?.fingerprint as string } : {}),
       reason: orphan ? ("orphan_reclaimable" as const) : ("disposable_candidate" as const),
       reclaim: orphan ? ("rm_dir" as const) : ("git_worktree" as const),
     };
@@ -366,7 +378,11 @@ export interface ApplyCleanupOptions {
   /** Remove one worktree via git + prune registration. Injectable for tests. */
   removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
   /** FIX-1460: reclaim one orphan loop dir via a bounded rm. Injectable for tests. */
-  reclaimOrphanDir?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+  reclaimOrphanDir?: (
+    repositoryRoot: string,
+    path: string,
+    expectedFingerprint: string,
+  ) => { ok: boolean; detail: string };
   /**
    * FIX-1454: fresh standalone-branch probes, called immediately before EVERY
    * branch deletion so a ref/merge/attach change between plan and apply is caught.
@@ -464,12 +480,26 @@ function defaultRemoveWorktree(repositoryRoot: string, path: string): { ok: bool
  * directory — but only after asserting it is a direct child of
  * `.roll/loop/worktrees`. Any path outside that boundary is a fail-loud refusal.
  */
-function defaultReclaimOrphanDir(repositoryRoot: string, path: string): { ok: boolean; detail: string } {
+function defaultReclaimOrphanDir(
+  repositoryRoot: string,
+  path: string,
+  expectedFingerprint: string,
+): { ok: boolean; detail: string } {
   if (!isBoundedLoopWorktreeDir(repositoryRoot, path)) {
     return { ok: false, detail: `refused: ${path} is outside .roll/loop/worktrees` };
   }
   if (!existsSync(path)) {
     return { ok: false, detail: "missing: orphan dir already gone" };
+  }
+  const proof = inspectOrphanRecoveryProof(repositoryRoot, path, basename(path));
+  if (
+    (proof.state !== "empty" && proof.state !== "trusted_generated") ||
+    proof.fingerprint !== expectedFingerprint
+  ) {
+    return {
+      ok: false,
+      detail: `changed-proof: expected ${expectedFingerprint}, found ${proof.fingerprint ?? proof.state}`,
+    };
   }
   try {
     rmSync(path, { recursive: true, force: true });
@@ -558,6 +588,18 @@ export async function applyWorktreeCleanup(
         refuse(`disposition: fresh audit reports '${rec.disposition}' (orphan no longer provably delivered)`);
         continue;
       }
+      const freshFingerprint = rec.orphanRecoveryProof?.fingerprint;
+      if (
+        typeof candidate.expectedOrphanFingerprint !== "string" ||
+        candidate.expectedOrphanFingerprint.length === 0 ||
+        freshFingerprint !== candidate.expectedOrphanFingerprint
+      ) {
+        refuse(
+          `changed-proof: expected ${candidate.expectedOrphanFingerprint ?? "none"}, ` +
+          `found ${freshFingerprint ?? "none"}`,
+        );
+        continue;
+      }
       const removal: CleanupRemoval = {
         path: rec.path,
         expectedHead: "",
@@ -568,7 +610,7 @@ export async function applyWorktreeCleanup(
         removed.push(removal);
         continue;
       }
-      const result = reclaimOrphanFn(repositoryRoot, rec.path);
+      const result = reclaimOrphanFn(repositoryRoot, rec.path, freshFingerprint);
       if (!result.ok) {
         refuse(`reclaim-failed: ${result.detail}`);
         continue;
@@ -1153,7 +1195,11 @@ export async function worktreeCleanupCommand(
   args: string[],
   deps?: Partial<WorktreeAuditDeps> & {
     removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
-    reclaimOrphanDir?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+    reclaimOrphanDir?: (
+      repositoryRoot: string,
+      path: string,
+      expectedFingerprint: string,
+    ) => { ok: boolean; detail: string };
     emit?: (event: RollEvent) => void;
     nowMs?: () => number;
   },
@@ -1179,6 +1225,7 @@ export async function worktreeCleanupCommand(
     git: deps?.git,
     readFile: deps?.readFile,
     readDir: deps?.readDir,
+    inspectOrphanDir: deps?.inspectOrphanDir,
     nowISO: deps?.nowISO,
     nowSec: deps?.nowSec,
     integrationBranch: deps?.integrationBranch,
@@ -1211,8 +1258,8 @@ export async function worktreeCleanupCommand(
       process.stderr.write(`refused: ${named} has an active cycle lock.\n`);
       return 2;
     }
-    if (rec.disposition !== "orphan_reclaimable" && rec.disposition !== "preserved_orphan") {
-      process.stderr.write(`refused: ${named} audits as '${rec.disposition}', not an orphan dir — use --apply for registered worktrees.\n`);
+    if (!isReclaimableOrphan(rec)) {
+      process.stderr.write(`refused: ${named} lacks a complete reclaimable orphan proof (${rec.disposition}).\n`);
       return 2;
     }
     if (!isBoundedLoopWorktreeDir(repoRoot, rec.path)) {
@@ -1220,7 +1267,7 @@ export async function worktreeCleanupCommand(
       return 2;
     }
     const reclaimFn = deps?.reclaimOrphanDir ?? defaultReclaimOrphanDir;
-    const r = reclaimFn(repoRoot, rec.path);
+    const r = reclaimFn(repoRoot, rec.path, rec.orphanRecoveryProof?.fingerprint as string);
     if (!r.ok) {
       process.stderr.write(`reclaim-failed: ${r.detail}\n`);
       return 1;
@@ -1273,6 +1320,7 @@ export async function worktreeCleanupCommand(
       return buildStandaloneBranchDeps(repoRoot, fresh, integrationBranch);
     },
     ...(deps?.removeWorktree ? { removeWorktree: deps.removeWorktree } : {}),
+    ...(deps?.reclaimOrphanDir ? { reclaimOrphanDir: deps.reclaimOrphanDir } : {}),
     emit,
     ...(deps?.nowMs ? { nowMs: deps.nowMs } : {}),
   });

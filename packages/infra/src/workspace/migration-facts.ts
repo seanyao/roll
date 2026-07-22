@@ -7,6 +7,7 @@ import {
   readlinkSync,
   realpathSync,
 } from "node:fs";
+import { hostname } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   REPOSITORY_BINDING_V1,
@@ -327,8 +328,15 @@ function activeCycles(rollRoot: string): readonly string[] {
       continue;
     }
     try {
-      const value = JSON.parse(text) as Record<string, unknown>;
-      if (typeof value["cycleId"] === "string" && SAFE_ID.test(value["cycleId"])) ids.add(value["cycleId"]);
+      const value = JSON.parse(text) as unknown;
+      if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      const cycleId = record["cycleId"];
+      if (typeof cycleId !== "string" || !SAFE_ID.test(cycleId)) continue;
+      const pid = record["pid"];
+      const ownerHost = record["hostname"];
+      const foreign = typeof ownerHost === "string" && ownerHost !== "" && ownerHost !== hostname();
+      if (typeof pid !== "number" || foreign || alive(pid)) ids.add(cycleId);
     } catch {
       for (const line of text.split("\n")) {
         const id = line.trim().split(/\s+/u)[0];

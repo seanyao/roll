@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import {
   REPOSITORY_BINDING_V1,
@@ -327,9 +327,16 @@ describe("historical Workspace migration fact collection", () => {
     mkdirSync(join(repo, ".roll", "loop", "inner.lock"), { recursive: true });
     writeFileSync(join(repo, ".roll", "loop", "inner.lock", "meta.json"), `${JSON.stringify({
       pid: process.pid,
-      hostname: "fixture",
+      hostname: hostname(),
       startedAt: 1,
       cycleId: "cycle-live",
+    })}\n`, "utf8");
+    mkdirSync(join(repo, ".roll", "loop", "cycle.lock"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "loop", "cycle.lock", "meta.json"), `${JSON.stringify({
+      pid: 999_999_999,
+      hostname: hostname(),
+      startedAt: 1,
+      cycleId: "cycle-stale",
     })}\n`, "utf8");
     writeFileSync(join(repo, ".roll", "loop", "locks", "story-leases.json"), `${JSON.stringify({
       "US-LIVE": { source: "cycle", pid: process.pid, claimedAt: 1 },

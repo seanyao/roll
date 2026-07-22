@@ -393,4 +393,51 @@ describe("US-WS-011 Workspace repository preparation", () => {
       else process.env["ROLL_HOME"] = previousRollHome;
     }
   });
+
+  it("prepares a one-repository Workspace through the same transaction path as many — cardinality one is not a mode", async () => {
+    // sharedCacheFixture builds single-repo Workspaces; drive one through the
+    // identical pick_story → prepare → In Progress path the two-repo case uses.
+    const f = sharedCacheFixture();
+    const previousRollHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = f.rollHome;
+    try {
+      const ports = nodePorts({
+        repoCwd: f.alpha.workspace,
+        paths: f.alpha.paths,
+        skillBody: "BUILD STORY",
+        routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      });
+
+      const result = await executeSetupCommand({ kind: "pick_story" }, ports, {
+        cycleId: "cycle-single",
+        branch: "loop/cycle-single",
+        loop: "main",
+      });
+
+      // Same event contract and lifecycle transition as the multi-repo case.
+      expect(result.event?.type).toBe("story_picked");
+      expect(result.event).toMatchObject({ storyId: f.storyId });
+      expect(readFileSync(join(f.alpha.workspace, "backlog", "index.md"), "utf8")).toContain("🔨 In Progress");
+
+      const execution = await ports.repositories?.resolve(f.storyId);
+      if (execution === undefined) throw new Error("one-repository Workspace must resolve");
+      // Exactly one leg, but the SAME resolved shape multi-repo returns.
+      expect(Object.keys(execution.repositories)).toHaveLength(1);
+      const leg = Object.values(execution.repositories)[0];
+      if (leg === undefined) throw new Error("the single leg must resolve");
+      expect(leg.alias).toBe("sot");
+      expect(realpathSync(leg.worktreePath)).toContain(`/issues/${f.storyId}/sot`);
+      // The governed branch follows the identical Workspace/Story/repo pattern.
+      const branch = execFileSync("git", ["-C", leg.worktreePath, "rev-parse", "--abbrev-ref", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      expect(branch).toBe("roll/ws-alpha/US-WS-011/sot");
+      // Writable-root projection works unchanged for cardinality one.
+      const writableRoots = repositoryAgentWritableRoots(execution);
+      expect(writableRoots).toContain(realpathSync(leg.worktreePath));
+    } finally {
+      if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = previousRollHome;
+    }
+  });
 });

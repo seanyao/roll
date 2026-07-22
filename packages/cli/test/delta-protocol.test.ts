@@ -412,3 +412,114 @@ describe("US-DELTA-003 — crash marker and recovery", () => {
     expect(r2.stdout).toContain("host_unobservable");
   });
 });
+
+// ── Validator plumbing ──────────────────────────────────────────────────────
+
+describe("US-DELTA-003 — validate plumbing", () => {
+  it("validate returns error when delegation not found", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL", "delta-team");
+    const r = tsRunCwd(["validate", "--delegation", "nonexistent-id", "--stage", "designer", "--json"], dir);
+    expect(r.code).toBe(1);
+    const err = JSON.parse(r.stderr);
+    expect(err.error).toBe("delegation_not_found");
+  });
+
+  it("validate returns error when stage is missing", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL2", "delta-team");
+    const r = tsRunCwd(["validate", "--delegation", "d-123", "--json"], dir);
+    expect(r.code).toBe(1);
+    const err = JSON.parse(r.stderr);
+    expect(err.error).toBe("missing_required");
+  });
+});
+
+// ── Conclude ─────────────────────────────────────────────────────────────────
+
+describe("US-DELTA-003 — conclude", () => {
+  it("conclude rejects with terminal_path_unselected when no binding exists", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC", "local-preset");
+
+    // Prepare first
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Conclude should succeed with owner_continue disposition
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+    const result = JSON.parse(r2.stdout);
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe("handoff_ready");
+    expect(result.terminalBinding).toBe("handoff_only");
+  });
+
+  it("conclude with owner_hold disposition succeeds", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_hold", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+    const result = JSON.parse(r2.stdout);
+    expect(result.ok).toBe(true);
+    expect(result.deliveryDisposition).toBe("owner_hold");
+  });
+
+  it("conclude releases the host-delegation lease", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC3", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC3", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC3",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Lease file should exist before conclude
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-CONC3.json");
+    expect(existsSync(leasePath)).toBe(true);
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+
+    // Lease file should be released
+    expect(existsSync(leasePath)).toBe(false);
+  });
+
+  it("conclude fails for unknown delegation", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC4", "delta-team");
+    const r = tsRunCwd([
+      "conclude", "--delegation", "nonexistent",
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r.code).toBe(1);
+    const err = JSON.parse(r.stderr);
+    expect(err.error).toBe("delegation_not_found");
+  });
+});

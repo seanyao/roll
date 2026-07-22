@@ -22,6 +22,7 @@ import {
   PrepareError,
   resolveExistingUniqueCardArchiveDir,
   detectOrphanFrames,
+  releaseHostDelegationLease,
   type PrepareInput,
 } from "../lib/delta-allocation.js";
 import { EventBus, projectDelegationStatus } from "@roll/core";
@@ -346,14 +347,108 @@ function validateCommand(args: string[]): number {
     return 1;
   }
 
-  // TODO: full implementation with validator invocation
-  const msg = "TODO: validate not yet implemented";
-  if (json) {
-    process.stderr.write(JSON.stringify({ ok: false, error: "not_implemented", detail: msg }) + "\n");
-  } else {
-    process.stderr.write(`${msg}\n`);
+  const stage = flags["stage"] as DeltaRole | undefined;
+  if (!stage) {
+    const msg = T("delta.error.missing_required", "--stage");
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "missing_required", detail: msg, flag: "stage" }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
   }
-  return 1;
+
+  // Load delegation events
+  const cwd = process.cwd();
+  const bus = new EventBus();
+  const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
+  const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
+
+  // Verify delegation exists
+  const delegationEvents = events.filter(
+    (e) => "delegationId" in e && (e as Record<string, unknown>).delegationId === delegationId,
+  );
+  if (delegationEvents.length === 0) {
+    const msg = `Delegation not found: ${delegationId}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  // Locate the frame directory and stage artifact
+  // For US-003, we check that the delegation's frame directory exists
+  // and that the stage artifact/manifest is at its prescribed path.
+  // Deep validation (digest, token, attestation) is US-004.
+  const preparedEvent = delegationEvents.find((e) => e.type === "delta:prepared") as Record<string, unknown> | undefined;
+  if (!preparedEvent) {
+    const msg = `Delegation ${delegationId}: no prepared event found`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  const storyId = preparedEvent.storyId as string;
+  const cardDir = resolveExistingUniqueCardArchiveDir(cwd, storyId);
+  if (!cardDir) {
+    const msg = `Story ${storyId}: card directory not found`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  const frameDir = join(cardDir, `delta-${delegationId}`);
+  if (!existsSync(frameDir)) {
+    const msg = `Frame directory not found: ${frameDir}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  // Stage artifact at prescribed path (host writes it before validate)
+  const stageArtifactPath = join(frameDir, "role-artifacts", stage);
+  if (!existsSync(stageArtifactPath)) {
+    const msg = `Stage artifact not found for role '${stage}' at ${stageArtifactPath}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({
+        ok: false,
+        error: "artifact_invalid",
+        detail: msg,
+        role: stage,
+      }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  // Thin validator interface — allow for US-003 (deep rules are US-004)
+  // In a full implementation, this would invoke the injected validator.
+  // For US-003, admission check passes if the stage artifact exists.
+  const now = Date.now();
+
+  if (json) {
+    process.stdout.write(JSON.stringify({
+      ok: true,
+      delegationId,
+      stage,
+      verdict: "allow",
+    }) + "\n");
+  } else {
+    process.stdout.write(`Validation passed: delegation ${delegationId} stage ${stage}\n`);
+  }
+  return 0;
 }
 
 // ── Conclude ─────────────────────────────────────────────────────────────────
@@ -399,14 +494,72 @@ function concludeCommand(args: string[]): number {
     return 1;
   }
 
-  // TODO: full implementation with terminal event + lease release
-  const msg2 = "TODO: conclude not yet implemented";
-  if (json) {
-    process.stderr.write(JSON.stringify({ ok: false, error: "not_implemented", detail: msg2 }) + "\n");
-  } else {
-    process.stderr.write(`${msg2}\n`);
+  // Load delegation events
+  const cwd = process.cwd();
+  const bus = new EventBus();
+  const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
+  const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
+
+  // Verify delegation exists
+  const delegationEvents = events.filter(
+    (e) => "delegationId" in e && (e as Record<string, unknown>).delegationId === delegationId,
+  );
+  if (delegationEvents.length === 0) {
+    const msg = `Delegation not found: ${delegationId}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
   }
-  return 1;
+
+  // Get the prepared event for storyId
+  const preparedEvent = delegationEvents.find((e) => e.type === "delta:prepared") as Record<string, unknown> | undefined;
+  if (!preparedEvent) {
+    const msg = `Delegation ${delegationId}: no prepared event found`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "delegation_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  const storyId = preparedEvent.storyId as string;
+  const now = Date.now();
+
+  // Record delta:terminal with Option C binding
+  bus.appendEvent(eventsPath, {
+    type: "delta:terminal",
+    delegationId,
+    storyId,
+    outcome: "handoff_ready",
+    terminalBinding: "handoff_only",
+    deliveryDisposition: disposition as "owner_continue" | "owner_hold" | "owner_redelegate",
+    ts: now,
+  });
+
+  // Release host-delegation lease
+  releaseHostDelegationLease(cwd, storyId, delegationId);
+
+  if (json) {
+    process.stdout.write(JSON.stringify({
+      ok: true,
+      delegationId,
+      storyId,
+      outcome: "handoff_ready",
+      terminalBinding: "handoff_only",
+      deliveryDisposition: disposition,
+    }) + "\n");
+  } else {
+    process.stdout.write(`Delegation concluded: ${delegationId}\n`);
+    process.stdout.write(`  Story: ${storyId}\n`);
+    process.stdout.write(`  Outcome: handoff_ready (handoff_only)\n`);
+    process.stdout.write(`  Disposition: ${disposition}\n`);
+  }
+
+  return 0;
 }
 
 // ── Status ───────────────────────────────────────────────────────────────────

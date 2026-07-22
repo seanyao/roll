@@ -88,6 +88,65 @@ repositories:
   return { workspace, rollHome, storyId, paths, remotes };
 }
 
+/** Build two independent Workspace roots that SHARE one bare remote cache
+ *  (same remote URL ⇒ same repoId ⇒ same machine cache under one ROLL_HOME). */
+function sharedCacheFixture() {
+  const root = mkdtempSync(join(tmpdir(), "roll-shared-cache-worktree-"));
+  const rollHome = join(root, "roll-home");
+  const storyId = "US-WS-011";
+  const remotePath = join(root, "remotes", "sot.git");
+  materializeRemote(join(root, "sources", "sot"), remotePath);
+  const remote = `file://${remotePath}`;
+  const repoId = repositoryIdFromRemote(remote);
+  if (!repoId.ok) throw new Error("fixture remote must be canonical");
+  const buildWorkspace = (workspaceId: string) => {
+    const workspace = join(root, workspaceId);
+    mkdirSync(join(workspace, "backlog", "workspace-orchestration", storyId), { recursive: true });
+    writeFileSync(join(workspace, "workspace.yaml"), `${JSON.stringify({
+      schema: "roll.workspace/v1",
+      workspaceId,
+      displayName: workspaceId,
+      createdAt: "2026-07-22T00:00:00.000Z",
+      requirements: [],
+      repositories: [{
+        schema: "roll.repository-binding/v1",
+        repoId: repoId.value,
+        alias: "sot",
+        remote,
+        integrationBranch: "main",
+        provider: "github",
+        workflow: {
+          branchPattern: "roll/{workspace_id}/{story_id}/{repo_alias}",
+          requiredChecks: [],
+        },
+      }],
+    }, null, 2)}\n`);
+    writeFileSync(join(workspace, "backlog", "index.md"), `| Story | Description | Status |\n|---|---|---|\n| ${storyId} | fixture | 📋 Todo |\n`);
+    writeFileSync(join(workspace, "backlog", "workspace-orchestration", storyId, "spec.md"), `---
+id: ${storyId}
+repositories:
+  - alias: sot
+    access: write
+    required_delivery: true
+---
+
+# ${storyId} fixture
+`);
+    const runtime = join(workspace, "runtime");
+    const paths: RunnerPaths = {
+      eventsPath: join(runtime, "events.ndjson"),
+      runsPath: join(runtime, "runs.jsonl"),
+      alertsPath: join(runtime, "alerts.log"),
+      lockPath: join(runtime, "cycle.lock"),
+      heartbeatPath: join(runtime, "heartbeat"),
+      worktreePath: join(runtime, "legacy-worktree"),
+      storyLeasePath: join(runtime, "locks", "story-leases.json"),
+    };
+    return { workspaceId, workspace, paths };
+  };
+  return { rollHome, storyId, alpha: buildWorkspace("ws-alpha"), beta: buildWorkspace("ws-beta") };
+}
+
 describe("US-WS-011 Workspace repository preparation", () => {
   it("prepares one transaction for every repository leg and resolves the durable execution map", async () => {
     const f = fixture();
@@ -285,6 +344,50 @@ describe("US-WS-011 Workspace repository preparation", () => {
       expect(readFileSync(f.paths.alertsPath, "utf8")).toContain(
         "workspace_repository_scope_required: cleanup_worktree",
       );
+    } finally {
+      if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = previousRollHome;
+    }
+  });
+
+  it("gives two concurrent Workspaces on one shared cache isolated worktrees and non-shared governed branches", async () => {
+    const f = sharedCacheFixture();
+    const previousRollHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = f.rollHome;
+    try {
+      const portsFor = (ws: { workspace: string; paths: RunnerPaths }) => nodePorts({
+        repoCwd: ws.workspace,
+        paths: ws.paths,
+        skillBody: "BUILD STORY",
+        routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      });
+      const alphaPorts = portsFor(f.alpha);
+      const betaPorts = portsFor(f.beta);
+      // Both Workspaces prepare the SAME story against the SAME remote cache.
+      await alphaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-alpha" });
+      await betaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-beta" });
+      const alpha = await alphaPorts.repositories?.resolve(f.storyId);
+      const beta = await betaPorts.repositories?.resolve(f.storyId);
+      if (alpha === undefined || beta === undefined) throw new Error("both Workspaces must resolve");
+
+      const alphaLeg = Object.values(alpha.repositories)[0];
+      const betaLeg = Object.values(beta.repositories)[0];
+      if (alphaLeg === undefined || betaLeg === undefined) throw new Error("each Workspace must expose the sot leg");
+      // Same remote → same repoId (the shared cache), but distinct worktree paths.
+      expect(alphaLeg.repoId).toBe(betaLeg.repoId);
+      expect(realpathSync(alphaLeg.worktreePath)).not.toBe(realpathSync(betaLeg.worktreePath));
+
+      const branchOf = (worktreePath: string): string => execFileSync(
+        "git",
+        ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"],
+        { encoding: "utf8" },
+      ).trim();
+      const alphaBranch = branchOf(alphaLeg.worktreePath);
+      const betaBranch = branchOf(betaLeg.worktreePath);
+      // Governed branches encode the workspace id, so they never collide.
+      expect(alphaBranch).toBe("roll/ws-alpha/US-WS-011/sot");
+      expect(betaBranch).toBe("roll/ws-beta/US-WS-011/sot");
+      expect(alphaBranch).not.toBe(betaBranch);
     } finally {
       if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = previousRollHome;

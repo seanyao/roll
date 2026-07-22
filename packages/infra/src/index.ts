@@ -1,6 +1,7 @@
 export * from "./config.js";
 export * from "./workspace-registry.js";
 export * from "./workspace-filesystem.js";
+export * from "./workspace/migration-facts.js";
 export * from "./requirement-source-store.js";
 export * from "./requirement-archive-audit.js";
 export * from "./requirement-attest-store.js";

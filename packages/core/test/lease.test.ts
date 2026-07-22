@@ -9,19 +9,21 @@
 import { describe, expect, it } from "vitest";
 import {
   buildClaimedByOther,
+  claimStoryLease,
   cleanDeadLeases,
   isHumanSoftLeaseActive,
   isLeaseAlive,
   isPidAlive,
   HUMAN_SOFT_LEASE_HOURS,
   readLeases,
+  releaseStoryLease,
   writeLeases,
   setLease,
   removeLease,
   reconcileExpiredClaims,
   type LeaseMap,
 } from "../src/index.js";
-import { mkdtempSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -321,5 +323,303 @@ describe("cleanDeadLeases (FIX-1232)", () => {
   it("returns empty array for missing or empty file", () => {
     expect(cleanDeadLeases("/nonexistent/path/file.json")).toEqual([]);
     expect(cleanDeadLeases("/dev/null")).toEqual([]);
+  });
+});
+
+// ─── US-DELTA-003: atomic claimStoryLease / releaseStoryLease ───────────────
+
+describe("claimStoryLease — atomic no-clobber claim", () => {
+  it("claims an unclaimed story and writes entry with source + delegationId", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      const result = claimStoryLease(path, "US-001", {
+        pid: process.pid,
+        claimedAt: NOW,
+        source: "host-delegation",
+        delegationId: "deleg-aaa",
+        runId: "delta-deleg-aaa",
+      });
+      expect(result.status).toBe("claimed");
+
+      const leases = readLeases(path);
+      expect(leases["US-001"]).toBeDefined();
+      expect(leases["US-001"]!.source).toBe("host-delegation");
+      expect(leases["US-001"]!.delegationId).toBe("deleg-aaa");
+      expect(leases["US-001"]!.runId).toBe("delta-deleg-aaa");
+      expect(leases["US-001"]!.pid).toBe(process.pid);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("returns exists when story already claimed by any source", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      // Pre-claim via cycle
+      const r1 = claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+
+      // Second claim from host-delegation must fail
+      const r2 = claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "deleg-bbb", runId: "delta-deleg-bbb",
+      });
+      expect(r2.status).toBe("exists");
+      if (r2.status === "exists") {
+        expect(r2.existingSource).toBe("cycle");
+      }
+
+      // First claim entry is preserved (not overwritten)
+      const leases = readLeases(path);
+      expect(leases["US-001"]!.source).toBe("cycle");
+      expect(leases["US-001"]!.delegationId).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("rejects host-delegation claim without delegationId", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      expect(() => claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+      })).toThrow("delegationId");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("two claims in same process: second returns exists", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-race-"));
+    const path = join(dir, "leases.json");
+    try {
+      const r1 = claimStoryLease(path, "US-RACE", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+
+      const r2 = claimStoryLease(path, "US-RACE", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "deleg-bbb", runId: "delta-bbb",
+      });
+      expect(r2.status).toBe("exists");
+
+      // Only first claim persists
+      const leases = readLeases(path);
+      expect(leases["US-RACE"]!.source).toBe("cycle");
+      expect(leases["US-RACE"]!.pid).toBe(process.pid);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("stale lock from dead PID is broken and claim succeeds", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-stale-"));
+    const path = join(dir, "leases.json");
+    const lockPath = `${path}.lock`;
+    try {
+      // Simulate a stale lock from a dead PID
+      writeFileSync(lockPath, "999999999", "utf8");
+      // Set mtime to be old (STALE_LOCK_MS + 1s)
+      const oldTime = new Date(Date.now() - 31_000);
+      utimesSync(lockPath, oldTime, oldTime);
+
+      const result = claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(result.status).toBe("claimed");
+
+      // Lock file must be cleaned up (released after claim)
+      expect(existsSync(lockPath)).toBe(false);
+
+      const leases = readLeases(path);
+      expect(leases["US-001"]!.source).toBe("cycle");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("lock from live PID is never broken (fail-loud, not silent)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "claim-live-"));
+    const path = join(dir, "leases.json");
+    const lockPath = `${path}.lock`;
+    try {
+      // Simulate a lock from the current live PID
+      writeFileSync(lockPath, String(process.pid), "utf8");
+      const oldTime = new Date(Date.now() - 31_000);
+      utimesSync(lockPath, oldTime, oldTime);
+
+      // Should time out because the lock-owning PID is alive
+      expect(() => claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow("Timed out");
+    } finally {
+      // Clean up our own lock
+      try { unlinkSync(lockPath); } catch {}
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  }, 10000);
+});
+
+describe("releaseStoryLease — match-only release", () => {
+  it("releases matching host-delegation lease by delegationId", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+
+      // Correct delegationId — releases
+      const r = releaseStoryLease(path, "US-001", {
+        source: "host-delegation", delegationId: "deleg-aaa",
+      });
+      expect(r).toBe(true);
+      expect(readLeases(path)["US-001"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("refuses to release mismatched delegationId (match-only)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+
+      // Wrong delegationId — refuses
+      const r = releaseStoryLease(path, "US-001", {
+        source: "host-delegation", delegationId: "deleg-WRONG",
+      });
+      expect(r).toBe(false);
+
+      // Lease is preserved
+      const leases = readLeases(path);
+      expect(leases["US-001"]!.delegationId).toBe("deleg-aaa");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("refuses to release mismatched source (cycle cannot release host-delegation)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+
+      // Cycle cannot release host-delegation
+      const r = releaseStoryLease(path, "US-001", {
+        source: "cycle", pid: process.pid,
+      });
+      expect(r).toBe(false);
+
+      // Lease preserved
+      expect(readLeases(path)["US-001"]!.source).toBe("host-delegation");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("refuses to release mismatched pid for cycle source", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+
+      // Wrong pid — refuses
+      const r = releaseStoryLease(path, "US-001", {
+        source: "cycle", pid: 99999,
+      });
+      expect(r).toBe(false);
+
+      // Lease preserved
+      expect(readLeases(path)["US-001"]!.pid).toBe(process.pid);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("releases matching cycle lease by pid", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+
+      const r = releaseStoryLease(path, "US-001", {
+        source: "cycle", pid: process.pid,
+      });
+      expect(r).toBe(true);
+      expect(readLeases(path)["US-001"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("returns false for non-existent story", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      expect(releaseStoryLease(path, "US-NOPE", { source: "cycle" })).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("does not remove other stories from the map", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-aaa", runId: "delta-deleg-aaa",
+      });
+      claimStoryLease(path, "US-002", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+
+      // Release only US-001
+      releaseStoryLease(path, "US-001", {
+        source: "host-delegation", delegationId: "deleg-aaa",
+      });
+
+      const leases = readLeases(path);
+      expect(leases["US-001"]).toBeUndefined();
+      expect(leases["US-002"]).toBeDefined();
+      expect(leases["US-002"]!.source).toBe("cycle");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("deletes the file when last entry is released", () => {
+    const dir = mkdtempSync(join(tmpdir(), "release-test-"));
+    const path = join(dir, "leases.json");
+    try {
+      claimStoryLease(path, "US-001", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(existsSync(path)).toBe(true);
+
+      releaseStoryLease(path, "US-001", { source: "cycle", pid: process.pid });
+      expect(existsSync(path)).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
   });
 });

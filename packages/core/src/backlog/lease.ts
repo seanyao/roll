@@ -15,7 +15,7 @@
  * Leases live at `.roll/loop/story-leases.json`, a gitignored runtime file.
  */
 
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 
 /** How long an explicit human/supervisor In Progress claim is respected. */
 export const HUMAN_SOFT_LEASE_HOURS = 24;
@@ -31,6 +31,10 @@ export interface LeaseEntry {
   claimedAt: number;
   /** Who claimed it. */
   source: LeaseSource;
+  /** Host delegation identity — only meaningful when source === "host-delegation". */
+  delegationId?: string;
+  /** Run ID for host delegation — only meaningful when source === "host-delegation". */
+  runId?: string;
 }
 
 /**
@@ -62,6 +66,184 @@ export function setLease(path: string, storyId: string, entry: LeaseEntry): void
   const leases = readLeases(path);
   leases[storyId] = entry;
   writeLeases(path, leases);
+}
+
+// ─── Atomic claim / release (US-DELTA-003) ──────────────────────────────────
+
+/** Outcome of an atomic story lease claim. */
+export type ClaimResult =
+  | { status: "claimed" }
+  | { status: "conflict"; existingSource: LeaseSource }
+  | { status: "exists"; existingSource: LeaseSource; existingDelegationId?: string };
+
+/** Maximum time (ms) to wait for a stale lock before failing. */
+const LOCK_TIMEOUT_MS = 5_000;
+
+/** Poll interval (ms) when waiting for lock. */
+const LOCK_POLL_MS = 50;
+
+/** Stale lock age threshold (ms) — after this, check if lock owner PID is alive. */
+const STALE_LOCK_MS = 30_000;
+
+function lockPathFor(leasePath: string): string {
+  return `${leasePath}.lock`;
+}
+
+/**
+ * Acquire a short-life advisory lock file for the lease store.
+ * Returns a cleanup function; call it to release the lock.
+ *
+ * The lock file is NOT state — it is purely a synchronisation mechanism.
+ * The single lease truth is `story-leases.json`.
+ *
+ * On stale lock (age > STALE_LOCK_MS with a dead PID), the lock is broken
+ * and re-acquired. This is fail-loud: a live PID's lock is never broken.
+ */
+function acquireLeaseLock(lockPath: string): () => void {
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      return () => {
+        try { unlinkSync(lockPath); } catch { /* best-effort */ }
+      };
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code;
+      if (code !== "EEXIST") throw err;
+
+      // Lock exists — check if stale
+      try {
+        const st = statSync(lockPath);
+        const age = Date.now() - st.mtimeMs;
+        if (age > STALE_LOCK_MS) {
+          const ownerPid = parseInt(readFileSync(lockPath, "utf8").trim(), 10);
+          if (!isNaN(ownerPid) && !isPidAlive(ownerPid)) {
+            // Stale lock from dead PID — break it
+            try { unlinkSync(lockPath); } catch { /* raced */ }
+            continue;
+          }
+        }
+      } catch {
+        // Lock file disappeared or is unreadable — retry
+        continue;
+      }
+
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for lease lock: ${lockPath}`);
+      }
+
+      // Busy-wait with small poll interval (acceptable for local FS lock)
+      const start = Date.now();
+      while (Date.now() - start < LOCK_POLL_MS) {
+        // spin
+      }
+    }
+  }
+}
+
+/**
+ * Atomically claim a story lease in `.roll/loop/story-leases.json`.
+ *
+ * Uses a short-life advisory lock file (`<path>.lock`) for synchronisation
+ * ONLY — the lock is not state. The single lease truth is the shared
+ * `story-leases.json` file.
+ *
+ * No-clobber contract:
+ * - If the story is already claimed (any source), returns conflict/exists.
+ * - Only claims when the story has no live lease entry.
+ * - Host-delegation claims include `delegationId` and `runId` in the lease
+ *   record so crash recovery can reconstruct ownership from the shared truth.
+ *
+ * The caller's identity (pid, source, delegationId, runId) is stored in the
+ * lease entry so `releaseStoryLease` can match-only release.
+ */
+export function claimStoryLease(
+  leasePath: string,
+  storyId: string,
+  entry: LeaseEntry,
+): ClaimResult {
+  // Host-delegation claims MUST carry delegationId for match-only release
+  if (entry.source === "host-delegation" && !entry.delegationId) {
+    throw new Error("claimStoryLease: host-delegation source requires delegationId");
+  }
+
+  const lockFile = lockPathFor(leasePath);
+  const release = acquireLeaseLock(lockFile);
+  try {
+    const leases = readLeases(leasePath);
+    const existing = leases[storyId];
+
+    if (existing !== undefined) {
+      // If the existing lease is dead (PID not alive) and from cycle source,
+      // it IS still a claim — the preflight reclaim step handles death recovery.
+      // We never silently overwrite here.
+      return {
+        status: "exists",
+        existingSource: existing.source,
+        existingDelegationId: existing.delegationId,
+      };
+    }
+
+    // No existing claim — write ours atomically
+    leases[storyId] = entry;
+    writeLeases(leasePath, leases);
+    return { status: "claimed" };
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Release a story lease with identity match.
+ *
+ * Match-only contract:
+ * - `source` must match the lease entry's source.
+ * - For `host-delegation` source: `delegationId` must also match.
+ * - For `cycle` source: `pid` must also match.
+ * - Never deletes other owners' entries.
+ *
+ * Returns `true` if the lease was released, `false` if identity mismatch
+ * or no lease existed.
+ */
+export function releaseStoryLease(
+  leasePath: string,
+  storyId: string,
+  identity: { source: LeaseSource; pid?: number; delegationId?: string },
+): boolean {
+  const lockFile = lockPathFor(leasePath);
+  const release = acquireLeaseLock(lockFile);
+  try {
+    const leases = readLeases(leasePath);
+    const existing = leases[storyId];
+    if (existing === undefined) return false;
+
+    // Source must match
+    if (existing.source !== identity.source) return false;
+
+    // For host-delegation: delegationId must match
+    if (identity.source === "host-delegation") {
+      if (identity.delegationId !== undefined && existing.delegationId !== identity.delegationId) {
+        return false;
+      }
+    }
+
+    // For cycle: pid must match
+    if (identity.source === "cycle" && identity.pid !== undefined) {
+      if (existing.pid !== identity.pid) return false;
+    }
+
+    delete leases[storyId];
+
+    if (Object.keys(leases).length === 0) {
+      try { unlinkSync(leasePath); } catch { /* best-effort */ }
+    } else {
+      writeLeases(leasePath, leases);
+    }
+    return true;
+  } finally {
+    release();
+  }
 }
 
 /**

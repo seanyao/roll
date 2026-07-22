@@ -205,6 +205,56 @@ describe("US-WS-011a Workspace worktree cleanup", () => {
     expect(lock).not.toHaveBeenCalled();
   });
 
+  it("discovers qualified standalone branches for the Workspace cleanup plan", async () => {
+    const branch: CleanupBranchCandidate = {
+      branch: "loop/cycle-shared",
+      expectedSha: HEAD,
+      mergeKind: "patch_equivalent",
+      workspaceId: "ws-alpha",
+      repoId: "repo-shared",
+      cachePath: "/roll-home/repos/repo-shared.git",
+    };
+    const aggregate: WorkspaceWorktreeAuditOutput = {
+      ...workspaceAudit([]),
+      ephemeralBranches: [{ repoId: "repo-shared", cachePath: branch.cachePath as string, branch: branch.branch }],
+      summary: {
+        worktrees: 0,
+        active: 0,
+        disposableCandidates: 0,
+        preserved: 0,
+        ephemeralBranches: 1,
+        canaryTotal: 1,
+      },
+    };
+    const resolveStandaloneBranches = vi.fn(() => [branch]);
+    const result = await captureOutput(() => workspaceWorktreeCleanupCommand([
+      "--workspace", "ws-alpha", "--dry-run", "--json",
+    ], {
+      resolveTarget: () => ({
+        ok: true,
+        workspaceId: "ws-alpha",
+        workspaceRoot: "/workspaces/alpha",
+        canonicalRoot: "/workspaces/alpha",
+        backlogPath: "/workspaces/alpha/backlog/index.md",
+        storyRoot: "/workspaces/alpha/backlog",
+        runtimeRoot: "/workspaces/alpha/runtime",
+        configPath: "/workspaces/alpha/runtime/backlog-sync.yaml",
+      }),
+      rollHome: () => "/roll-home",
+      threshold: () => 0,
+      auditWorkspace: () => aggregate,
+      resolveStandaloneBranches,
+    }));
+
+    expect(result).toMatchObject({ status: 0, stderr: "" });
+    expect(resolveStandaloneBranches).toHaveBeenCalledWith(aggregate);
+    expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+      canaryTotal: 1,
+      projectedTotal: 0,
+      branchCandidates: [expect.objectContaining({ branch: branch.branch, repoId: "repo-shared" })],
+    }));
+  });
+
   it("keeps standalone branch patch/final-tree revalidation inside the same repository lock", async () => {
     const branch: CleanupBranchCandidate = {
       branch: "loop/cycle-shared",

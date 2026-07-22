@@ -40,9 +40,11 @@ import {
 import { workspaceRollHome } from "./workspace-target.js";
 import {
   applyWorktreeCleanup,
+  buildStandaloneBranchDeps,
   planWorktreeCleanup,
   renderPlanHuman,
   renderResultHuman,
+  resolveStandaloneMergedBranches,
   type CleanupBranchCandidate,
   type CleanupCandidate,
   type StandaloneBranchDeps,
@@ -109,9 +111,12 @@ export interface WorkspaceWorktreeCleanupCommandDeps {
   readonly rollHome: () => string;
   readonly threshold: () => number;
   readonly auditWorkspace: typeof auditWorkspaceWorktrees;
+  readonly resolveStandaloneBranches: typeof resolveWorkspaceStandaloneMergedBranches;
+  readonly freshBranchDeps: typeof freshWorkspaceStandaloneBranchDeps;
   readonly readSelectedWorkspace: (root: string) => WorkspaceManifest;
   readonly withRepositoryLock?: ApplyWorkspaceWorktreeCleanupOptions["withRepositoryLock"];
   readonly removeWorktree?: ApplyWorkspaceWorktreeCleanupOptions["removeWorktree"];
+  readonly removeBranch?: ApplyWorkspaceWorktreeCleanupOptions["removeBranch"];
   readonly nowMs?: () => number;
 }
 
@@ -121,7 +126,7 @@ export interface ApplyWorkspaceWorktreeCleanupOptions {
   readonly auditWorkspace: () => WorkspaceWorktreeAuditOutput;
   readonly withRepositoryLock: <T>(candidate: CleanupCandidate | CleanupBranchCandidate, action: () => Promise<T>) => Promise<T>;
   readonly removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
-  readonly freshBranchDeps?: (candidate: CleanupBranchCandidate) => StandaloneBranchDeps;
+  readonly freshBranchDeps?: (candidate: CleanupBranchCandidate) => StandaloneBranchDeps | undefined;
   readonly removeBranch?: (repositoryRoot: string, branch: string, expectedSha: string) => { ok: boolean; detail: string };
   readonly nowMs?: () => number;
 }
@@ -370,6 +375,42 @@ function repositoryAudit(
   };
 }
 
+export function resolveWorkspaceStandaloneMergedBranches(
+  audit: WorkspaceWorktreeAuditOutput,
+): readonly CleanupBranchCandidate[] {
+  return audit.repositories.flatMap((repository) => {
+    const scopedAudit = repositoryAudit(audit, repository.repoId);
+    return resolveStandaloneMergedBranches(
+      scopedAudit,
+      buildStandaloneBranchDeps(
+        repository.cachePath,
+        scopedAudit,
+        `origin/${repository.integrationBranch}`,
+      ),
+    ).map((candidate) => ({
+      ...candidate,
+      workspaceId: audit.selectedWorkspaceId,
+      repoId: repository.repoId,
+      cachePath: repository.cachePath,
+    }));
+  });
+}
+
+export function freshWorkspaceStandaloneBranchDeps(
+  audit: WorkspaceWorktreeAuditOutput,
+  candidate: CleanupBranchCandidate,
+): StandaloneBranchDeps | undefined {
+  if (candidate.repoId === undefined || candidate.cachePath === undefined) return undefined;
+  const repository = audit.repositories.find((item) => item.repoId === candidate.repoId);
+  if (repository === undefined || repository.cachePath !== candidate.cachePath) return undefined;
+  const scopedAudit = repositoryAudit(audit, repository.repoId);
+  return buildStandaloneBranchDeps(
+    repository.cachePath,
+    scopedAudit,
+    `origin/${repository.integrationBranch}`,
+  );
+}
+
 export function planWorkspaceWorktreeCleanup(
   audit: WorkspaceWorktreeAuditOutput,
   threshold: number,
@@ -433,8 +474,9 @@ export async function applyWorkspaceWorktreeCleanup(
       continue;
     }
     const cachePath = candidate.cachePath;
-    const freshBranchDeps = options.freshBranchDeps;
+    const resolveFreshBranchDeps = options.freshBranchDeps;
     const result = await options.withRepositoryLock(candidate, async () => {
+      const freshBranchDeps = resolveFreshBranchDeps?.(candidate);
       const oneCandidatePlan: WorktreeCleanupPlan = {
         ...plan,
         candidates: [],
@@ -444,9 +486,7 @@ export async function applyWorkspaceWorktreeCleanup(
       return applyWorktreeCleanup(oneCandidatePlan, {
         repositoryRoot: cachePath,
         dryRun: options.dryRun === true,
-        ...(freshBranchDeps === undefined
-          ? {}
-          : { freshBranchDeps: () => freshBranchDeps(candidate) }),
+        ...(freshBranchDeps === undefined ? {} : { freshBranchDeps: () => freshBranchDeps }),
         ...(options.removeBranch === undefined ? {} : { removeBranch: options.removeBranch }),
         ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
       });
@@ -548,6 +588,8 @@ function realCleanupCommandDeps(): WorkspaceWorktreeCleanupCommandDeps {
     rollHome: workspaceRollHome,
     threshold: cleanupThreshold,
     auditWorkspace: auditWorkspaceWorktrees,
+    resolveStandaloneBranches: resolveWorkspaceStandaloneMergedBranches,
+    freshBranchDeps: freshWorkspaceStandaloneBranchDeps,
     readSelectedWorkspace: readWorkspace,
   };
 }
@@ -586,7 +628,12 @@ export async function workspaceWorktreeCleanupCommand(
     selectedWorkspaceRoot: decision.workspaceRoot,
     rollHome: deps.rollHome(),
   };
-  const plan = planWorkspaceWorktreeCleanup(deps.auditWorkspace(auditInput), deps.threshold());
+  const auditNow = deps.auditWorkspace(auditInput);
+  const plan = planWorkspaceWorktreeCleanup(
+    auditNow,
+    deps.threshold(),
+    deps.resolveStandaloneBranches(auditNow),
+  );
   const json = args.includes("--json");
   if (!args.includes("--apply")) {
     if (json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
@@ -608,7 +655,9 @@ export async function workspaceWorktreeCleanupCommand(
     selectedWorkspaceId: decision.workspaceId,
     auditWorkspace: () => deps.auditWorkspace(auditInput),
     withRepositoryLock: withLock,
+    freshBranchDeps: (candidate) => deps.freshBranchDeps(deps.auditWorkspace(auditInput), candidate),
     ...(deps.removeWorktree === undefined ? {} : { removeWorktree: deps.removeWorktree }),
+    ...(deps.removeBranch === undefined ? {} : { removeBranch: deps.removeBranch }),
     ...(deps.nowMs === undefined ? {} : { nowMs: deps.nowMs }),
   });
   if (json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

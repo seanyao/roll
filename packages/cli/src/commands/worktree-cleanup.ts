@@ -1017,7 +1017,7 @@ export function buildStandaloneBranchDeps(
 ): StandaloneBranchDeps {
   const attachedBranches = new Set(
     audit.records
-      .filter((r) => r.owner === "loop" && typeof r.branch === "string" && r.branch !== "")
+      .filter((r) => (r.owner === "loop" || r.owner === "workspace") && typeof r.branch === "string" && r.branch !== "")
       .map((r) => (r.branch as string).replace(/^refs\/heads\//, "")),
   );
   let currentBranch: string | null = null;

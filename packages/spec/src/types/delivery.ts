@@ -145,6 +145,83 @@ export interface DeliveryRecord {
   recordedAt: number;
 }
 
+// ── Workspace Issue completion evidence (US-WS-013) ────────────────────────
+
+export const ISSUE_COMPLETION_STATES = [
+  "planned",
+  "building",
+  "awaiting_repo_merges",
+  "partial_delivery",
+  "integration_pending",
+  "delivered",
+  "blocked",
+  "abandoned",
+] as const;
+export type IssueCompletionState = (typeof ISSUE_COMPLETION_STATES)[number];
+
+export type RepositoryMergeAuthority = "provider" | "integration_branch" | "projection";
+export type RepositoryProviderPrState = "OPEN" | "MERGED" | "CLOSED" | "UNKNOWN";
+export type RepositoryProviderCiState = "green" | "red" | "pending" | "unknown";
+
+interface RepositoryMergeEvidenceIdentity {
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly repoId: string;
+  readonly cycleId: string;
+  readonly recordedAt: number;
+}
+
+export type RepositoryMergeEvidence =
+  | (RepositoryMergeEvidenceIdentity & {
+      readonly authority: "provider";
+      readonly prNumber?: number;
+      readonly prUrl?: string;
+      readonly prState: RepositoryProviderPrState;
+      readonly ci: RepositoryProviderCiState;
+      readonly mergeCommit?: string;
+      readonly mergedAt?: number;
+    })
+  | (RepositoryMergeEvidenceIdentity & {
+      readonly authority: "integration_branch";
+      readonly reachable: boolean;
+      readonly mergeCommit?: string;
+    })
+  | (RepositoryMergeEvidenceIdentity & {
+      readonly authority: "projection";
+      readonly state: "building" | "awaiting_merge" | "merged" | "blocked" | "abandoned";
+      readonly mergeCommit?: string;
+    });
+
+export interface IssueIntegrationAcceptanceEvidence {
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly inputMergeCommits: Readonly<Record<string, string>>;
+  readonly verdict: "pass" | "fail";
+  readonly artifactPath: string;
+  readonly recordedAt: number;
+}
+
+export interface IssueRepositoryCompletion {
+  readonly repoId: string;
+  readonly status: "none" | "building" | "awaiting_merge" | "merged" | "blocked" | "abandoned";
+  readonly authority?: RepositoryMergeAuthority;
+  readonly mergeCommit?: string;
+}
+
+export interface IssueCompletionConflict {
+  readonly repoId: string;
+  readonly code: "conflicting_merge_commit" | "strong_fact_conflict" | "invalid_merge_evidence";
+}
+
+export interface IssueCompletionProjection {
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly state: IssueCompletionState;
+  readonly repositories: readonly IssueRepositoryCompletion[];
+  readonly mergeCommits: Readonly<Record<string, string>>;
+  readonly conflicts: readonly IssueCompletionConflict[];
+}
+
 // ── lifecycleFromFacts (AC3) ─────────────────────────────────────────────────
 
 /**

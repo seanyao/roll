@@ -134,7 +134,7 @@ describe("US-DELTA-001 — Delta events parse correctly", () => {
       role: "designer",
       roleInstanceId: "ri-1",
       hostId: "pi",
-      modelId: "opus",
+      modelId: "model-test-1",
       source: "preset-preference",
       reasons: ["preferred", "reasoning"],
       inventorySha256: "def456",
@@ -142,6 +142,8 @@ describe("US-DELTA-001 — Delta events parse correctly", () => {
     }));
     expect(e).not.toBeNull();
     expect(e?.type).toBe("delta:role_resolved");
+    // Audit: modelId must be a stable opaque ID, not a real model alias
+    expect((e as Record<string, unknown>)?.modelId).toBe("model-test-1");
   });
 
   it("parses delta:role_started event", () => {
@@ -153,13 +155,15 @@ describe("US-DELTA-001 — Delta events parse correctly", () => {
       sessionId: "s1",
       roleInstanceId: "ri-2",
       hostId: "pi",
-      modelId: "sonnet",
+      modelId: "model-test-2",
       identityProvenance: "host-attested",
       worktreeAccess: "builder-write",
       ts: 3,
     }));
     expect(e).not.toBeNull();
     expect(e?.type).toBe("delta:role_started");
+    // Audit: modelId must be a stable opaque ID, not a real model alias
+    expect((e as Record<string, unknown>)?.modelId).toBe("model-test-2");
   });
 
   it("parses delta:artifact_published event", () => {

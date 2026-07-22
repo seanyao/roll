@@ -54,6 +54,8 @@ describe("US-WS-013 Issue completion state matrix", () => {
     ["awaiting merges", [provider(API, "OPEN"), provider(WEB, "OPEN")], "awaiting_repo_merges"],
     ["partial delivery", [provider(API, "MERGED", { mergeCommit: API_MERGE }), provider(WEB, "OPEN", { ci: "red" })], "partial_delivery"],
     ["integration pending", [provider(API, "MERGED", { mergeCommit: API_MERGE }), provider(WEB, "MERGED", { mergeCommit: WEB_MERGE })], "integration_pending"],
+    ["blocked", [provider(API, "OPEN", { ci: "red" })], "blocked"],
+    ["abandoned", [provider(API, "CLOSED")], "abandoned"],
   ] as const)("derives %s", (_label, repositoryFacts, state) => {
     expect(deriveIssueCompletion(input({ repositoryFacts }))).toMatchObject({ state });
   });

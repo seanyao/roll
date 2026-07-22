@@ -379,8 +379,9 @@ export function configuredModelBackstop(repoCwd: string, agent: string): string 
 
 function scopedStoryExecuteRoute(
   repoCwd: string,
+  workspaceRoot?: string,
 ): { agent: string; model: string; excluded?: readonly string[]; rotationBlocked?: { previous: string } } | null {
-  const scoped = resolveScopedStoryExecute(repoCwd);
+  const scoped = resolveScopedStoryExecute(repoCwd, workspaceRoot === undefined ? {} : { workspaceRoot });
   if (scoped === null) return null;
   const { resolution, previousBuilder } = scoped;
   // FIX-1267 — the no-consecutive-repeat rotation excludes the previous builder.
@@ -691,7 +692,7 @@ export function nodePorts(opts: {
     route: opts.routeDeps
       ? {
           resolve(storyId, estMin) {
-            const scoped = scopedStoryExecuteRoute(opts.repoCwd);
+            const scoped = scopedStoryExecuteRoute(opts.repoCwd, repositories === undefined ? undefined : opts.repoCwd);
             // FIX-1267: the scoped route already carries the rotation exclusion
             // (excluded / rotationBlocked); return it verbatim so the handler can
             // enforce the no-consecutive-repeat constraint.

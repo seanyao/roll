@@ -15,7 +15,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   AGENT_REGISTRY_NAMES,
   agentsInstalled,
@@ -291,7 +291,11 @@ export function resolveScopedStoryExecute(repoCwd: string, deps: ScopedRouteDeps
 
 export function resolveScopedCastRole(repoCwd: string, castRole: CastRoleName, deps: ScopedRouteDeps = {}): ScopedExecuteRoute | null {
   const rollHome = deps.rollHome ?? process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
-  const workspaceRoot = deps.workspaceRoot ?? (existsSync(join(repoCwd, "workspace.yaml")) ? repoCwd : undefined);
+  const environmentRuntime = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  const environmentWorkspace = (process.env["ROLL_WORKSPACE"] ?? "").trim() !== "" && environmentRuntime !== ""
+    ? dirname(environmentRuntime)
+    : undefined;
+  const workspaceRoot = deps.workspaceRoot ?? environmentWorkspace;
   const workspacePath = workspaceRoot === undefined ? undefined : join(workspaceRoot, "agents.yaml");
   let workspaceLayer: { config: AgentScopeConfig; path: string } | null = null;
   if (workspacePath !== undefined && existsSync(workspacePath)) {

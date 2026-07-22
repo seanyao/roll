@@ -201,10 +201,19 @@ function validateWorkspaceTopLevel(root: YamlMap, errors: string[]): void {
 
 function parseDefaults(node: YamlValue | undefined, errors: string[], workspace = false): Record<string, AgentScopeDefaults> {
   const defaults: Record<string, AgentScopeDefaults> = {};
-  if (!isMap(node)) return defaults;
+  if (!isMap(node)) {
+    if (workspace && node !== undefined && node !== null) {
+      errors.push("workspace.defaults: malformed defaults block (expected a map)");
+    }
+    return defaults;
+  }
   for (const [scopeName, rawNode] of Object.entries(node)) {
     if (workspace && !WORKSPACE_DEFAULT_SCOPES.has(scopeName)) {
       errors.push(`workspace.defaults.${scopeName}: unknown default scope`);
+      continue;
+    }
+    if (workspace && !isMap(rawNode)) {
+      errors.push(`workspace.defaults.${scopeName}: malformed default block (expected a map)`);
       continue;
     }
     const m = isMap(rawNode) ? rawNode : {};

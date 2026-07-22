@@ -330,4 +330,19 @@ defaults:
       "workspace.defaults.story.agents: unknown key",
     ]);
   });
+
+  it("fails loud for malformed workspace defaults containers", () => {
+    expect(normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: workspace
+inherits: machine
+defaults: nope
+`).errors).toEqual(["workspace.defaults: malformed defaults block (expected a map)"]);
+
+    expect(normalizeAgentScopeConfig(`schema: roll-agents/v1
+scope: workspace
+inherits: machine
+defaults:
+  story: nope
+`).errors).toEqual(["workspace.defaults.story: malformed default block (expected a map)"]);
+  });
 });

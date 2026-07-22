@@ -9,10 +9,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   auditWorktrees,
+  inspectOrphanRecoveryProof,
   worktreeAuditCommand,
   type WorktreeAuditDeps,
   type WorktreeAuditOutput,
@@ -1096,5 +1097,63 @@ describe("FIX-1459 orphan recovery proof", () => {
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+
+  it("preserves a bounded-looking orphan when the worktree root resolves outside the repository", () => {
+    const { repo, orphan } = fixture();
+    const outside = mkdtempSync(join(tmpdir(), "roll-orphan-external-root-"));
+    try {
+      const worktreesRoot = join(repo, ".roll", "loop", "worktrees");
+      rmSync(worktreesRoot, { recursive: true, force: true });
+      const externalOrphan = join(outside, cycleId);
+      mkdirSync(join(externalOrphan, ".next"), { recursive: true });
+      symlinkSync(outside, worktreesRoot, "dir");
+      expect(orphan).toBe(join(worktreesRoot, cycleId));
+      const record = audit(repo);
+      expect(record.disposition).toBe("preserved_orphan");
+      expect(record.reason).toMatch(/external|symlink|boundary|ambiguous/i);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves an orphan referenced by differently named relative Git admin metadata", () => {
+    const { repo, orphan } = fixture();
+    try {
+      mkdirSync(join(orphan, ".next"), { recursive: true });
+      const admin = join(repo, ".git", "worktrees", "renamed-admin-entry");
+      mkdirSync(admin, { recursive: true });
+      writeFileSync(join(admin, "gitdir"), relative(admin, join(orphan, ".git")) + "\n", "utf8");
+      const proof = inspectOrphanRecoveryProof(repo, orphan, cycleId);
+      expect(proof.state).toBe("linked_metadata");
+      expect(proof.detail).toMatch(/git|linked|ownership/i);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves an orphan when cycle activity files cannot be read conclusively", () => {
+    const out = auditWorktrees(makeDeps({
+      git: (args) => args[0] === "worktree" && args[1] === "list"
+        ? porcelain([{ path: "/fake/repo", head: "abc", branch: "refs/heads/main" }])
+        : "",
+      readDir: () => [cycleId],
+      readFile: (path) => {
+        if (path.endsWith("events.ndjson")) {
+          return JSON.stringify({ cycleId, outcome: "delivered" }) + "\n";
+        }
+        throw new Error("permission denied");
+      },
+      inspectOrphanDir: () => ({
+        state: "trusted_generated",
+        fingerprint: "fixture-proof",
+        entries: [".next"],
+        detail: "trusted generated roots: .next",
+      }),
+    }));
+    const record = out.records.find((candidate) => candidate.cycleId === cycleId);
+    expect(record?.disposition).toBe("preserved_orphan");
+    expect(record?.active).toBe(true);
   });
 });

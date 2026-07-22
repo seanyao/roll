@@ -187,6 +187,17 @@ function readFileSafe(p: string): string | null {
   }
 }
 
+function readActivityFile(p: string, deps: WorktreeAuditDeps): string | null {
+  if (deps.readFile) return deps.readFile(p);
+  try {
+    return readFileSync(p, "utf8");
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 /** Known manual/sibling worktree directory name patterns. */
 const MANUAL_PATTERNS = [/roll-wt-/, /^wt-/, /roll-us-init-/];
 
@@ -221,7 +232,12 @@ interface CycleEvent {
 
 function readCycleContext(eventsPath: string, deps: WorktreeAuditDeps): Map<string, CycleEvent> {
   const map = new Map<string, CycleEvent>();
-  const text = deps.readFile ? deps.readFile(eventsPath) : readFileSafe(eventsPath);
+  let text: string | null;
+  try {
+    text = deps.readFile ? deps.readFile(eventsPath) : readFileSafe(eventsPath);
+  } catch {
+    return map;
+  }
   if (!text) return map;
   for (const line of text.split("\n")) {
     const trimmed = line.trim();
@@ -287,6 +303,13 @@ function inspectTrustedOrphanTree(path: string, entries: readonly string[]): Orp
   const pending = [...entries].sort().reverse();
   let seen = 0;
 
+  try {
+    const root = lstatSync(path);
+    hash.update(`.\0directory\0${root.mode}\0${root.mtimeMs}\0${root.ctimeMs}\0${root.dev}\0${root.ino}\n`);
+  } catch {
+    return ambiguousOrphanProof(entries, "orphan directory identity could not be fingerprinted");
+  }
+
   while (pending.length > 0) {
     const relativePath = pending.pop();
     if (relativePath === undefined) break;
@@ -335,6 +358,19 @@ function inspectTrustedOrphanTree(path: string, entries: readonly string[]): Orp
 }
 
 export function inspectOrphanRecoveryProof(repoRoot: string, path: string, name: string): OrphanRecoveryProof {
+  const worktreesRoot = resolve(repoRoot, ".roll", "loop", "worktrees");
+  try {
+    const root = lstatSync(worktreesRoot);
+    if (!root.isDirectory() || root.isSymbolicLink()) {
+      return ambiguousOrphanProof([], "loop worktree root is a symlink or external boundary");
+    }
+    if (dirname(realpathSync(path)) !== realpathSync(worktreesRoot)) {
+      return ambiguousOrphanProof([], "orphan path resolves outside the loop worktree root");
+    }
+  } catch {
+    return ambiguousOrphanProof([], "loop worktree boundary could not be verified");
+  }
+
   let rootStat;
   try {
     rootStat = lstatSync(path);
@@ -381,11 +417,15 @@ export function inspectOrphanRecoveryProof(repoRoot: string, path: string, name:
       };
     }
     for (const adminName of adminNames) {
-      const gitdir = readFileSafe(join(adminRoot, adminName, "gitdir"));
+      const gitdirPath = join(adminRoot, adminName, "gitdir");
+      const gitdir = readFileSafe(gitdirPath);
       if (gitdir === null) {
         return ambiguousOrphanProof(entries, `Git worktree metadata '${adminName}' could not be verified`);
       }
-      const linkedPath = dirname(resolve(commonDir, gitdir.trim()));
+      if (gitdir.trim() === "") {
+        return ambiguousOrphanProof(entries, `Git worktree metadata '${adminName}' has an empty gitdir`);
+      }
+      const linkedPath = dirname(resolve(dirname(gitdirPath), gitdir.trim()));
       if (realpathSafe(linkedPath) === realpathSafe(path)) {
         return {
           state: "linked_metadata",
@@ -465,7 +505,7 @@ function scanOrphanLoopWorktrees(
     };
 
     if (active) {
-      rec.reason = "orphan loop dir with an active cycle lock; never reclaimed";
+      rec.reason = "orphan loop dir with an active cycle or inconclusive activity proof; never reclaimed";
     } else if (recoveryProof.state === "linked_metadata") {
       rec.reason = `orphan loop dir has linked or external Git ownership metadata (${recoveryProof.detail}); preserved`;
     } else if (recoveryProof.state === "untrusted_material") {
@@ -588,7 +628,12 @@ function isActiveCycle(
 
   // Check inner.lock for the active cycleId
   const lockPath = join(repoRoot, ".roll", "loop", "inner.lock");
-  const lock = deps.readFile ? deps.readFile(lockPath) : readFileSafe(lockPath);
+  let lock: string | null;
+  try {
+    lock = readActivityFile(lockPath, deps);
+  } catch {
+    return true;
+  }
   if (lock) {
     for (const line of lock.split("\n")) {
       if (line.trim().startsWith(cycleId)) return true;
@@ -601,7 +646,7 @@ function isActiveCycle(
 
   try {
     const heartbeatPath = join(repoRoot, ".roll", "loop", "heartbeat");
-    const hb = deps.readFile ? deps.readFile(heartbeatPath) : readFileSafe(heartbeatPath);
+    const hb = readActivityFile(heartbeatPath, deps);
     if (hb) {
       for (const line of hb.split("\n")) {
         const parts = line.trim().split(/\s+/);
@@ -612,7 +657,7 @@ function isActiveCycle(
       }
     }
   } catch {
-    /* heartbeat read failed — not a reason to mark active */
+    return true;
   }
 
   return false;

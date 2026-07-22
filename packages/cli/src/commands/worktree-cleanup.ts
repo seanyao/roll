@@ -28,12 +28,11 @@
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { appendFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { DEFAULT_BRANCH_CANARY_MAX } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import {
   auditWorktrees,
-  inspectOrphanRecoveryProof,
   type WorktreeAuditDeps,
   type WorktreeAuditOutput,
   type WorktreeAuditRecord,
@@ -488,17 +487,17 @@ function defaultReclaimOrphanDir(
   if (!isBoundedLoopWorktreeDir(repositoryRoot, path)) {
     return { ok: false, detail: `refused: ${path} is outside .roll/loop/worktrees` };
   }
-  if (!existsSync(path)) {
-    return { ok: false, detail: "missing: orphan dir already gone" };
+  const finalAudit = auditWorktrees({ repoRoot: repositoryRoot, home: homedir() });
+  const record = finalAudit.records.find((candidate) => resolve(candidate.path) === resolve(path));
+  if (!record) {
+    return { ok: false, detail: "missing: orphan dir no longer appears in the final audit" };
   }
-  const proof = inspectOrphanRecoveryProof(repositoryRoot, path, basename(path));
-  if (
-    (proof.state !== "empty" && proof.state !== "trusted_generated") ||
-    proof.fingerprint !== expectedFingerprint
-  ) {
+  if (!isReclaimableOrphan(record) || record.orphanRecoveryProof?.fingerprint !== expectedFingerprint) {
     return {
       ok: false,
-      detail: `changed-proof: expected ${expectedFingerprint}, found ${proof.fingerprint ?? proof.state}`,
+      detail:
+        `changed-proof: expected ${expectedFingerprint}, found ` +
+        `${record.orphanRecoveryProof?.fingerprint ?? record.disposition}`,
     };
   }
   try {

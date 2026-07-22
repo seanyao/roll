@@ -1236,4 +1236,29 @@ describe("FIX-1460 (#1468) orphan reclaim", () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it("final bounded reclaim refuses a cycle that activates after the fresh audit", async () => {
+    const { repo, orphan } = realOrphanFixture();
+    try {
+      const plan = planWorktreeCleanup(realOrphanAudit(repo), 0);
+      const result = await applyWorktreeCleanup(plan, {
+        repositoryRoot: repo,
+        dryRun: false,
+        audit: () => {
+          const fresh = realOrphanAudit(repo);
+          writeFileSync(
+            join(repo, ".roll", "loop", "inner.lock"),
+            "cycle-20260723-130000-1 12345\n",
+            "utf8",
+          );
+          return fresh;
+        },
+      });
+      expect(result.removed).toHaveLength(0);
+      expect(result.refused[0].reason).toMatch(/active|proof|reclaim-failed/i);
+      expect(existsSync(orphan)).toBe(true);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });

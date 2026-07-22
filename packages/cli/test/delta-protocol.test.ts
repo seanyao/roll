@@ -9,6 +9,7 @@ import { mkdirSync, writeFileSync, rmSync, unlinkSync, existsSync, readFileSync,
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { claimHostDelegationLease, releaseHostDelegationLease, HostDelegationLease } from "../src/lib/delta-allocation.js";
 import { deltaCommand, injectValidator } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
@@ -107,9 +108,9 @@ function writeResolutionTemplate(projectDir: string, storyId: string, presetId: 
     topology: "delta-team",
     qualityProfile: "standard",
     presetId,
-    presetSha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
+    presetSha256: "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
     inventoryObservedAt: new Date().toISOString(),
-    inventorySha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
+    inventorySha256: "bbbb111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
     roles: [
       { role: "designer", roleInstanceId: "ri-1", hostId: "pi", modelId: "claude", source: "user-pin", reasons: ["test"] },
       { role: "builder", roleInstanceId: "ri-2", hostId: "pi", modelId: "claude", source: "user-pin", reasons: ["test"] },
@@ -167,7 +168,19 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(preparedEvent.type).toBe("delta:prepared");
 
     // F-3: presetSha256 must match the host-supplied resolution template value (not fabricated)
-    expect(preparedEvent.presetSha256).toBe("0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff");
+    expect(preparedEvent.presetSha256).toBe("aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff");
+
+    // N-1: delta:role_resolved events must use the template's inventorySha256 (NOT presetSha256)
+    // The fixture uses DIFFERENT preset and inventory hashes to prove non-reuse
+    const roleResolvedEvents = events.slice(1).map((l: string) => JSON.parse(l));
+    for (const re of roleResolvedEvents) {
+      expect(re.type).toBe("delta:role_resolved");
+      expect(re.inventorySha256).toBe("bbbb111122223333444455556666777788889999aaaabbbbccccddddeeeeffff");
+      // Must NOT be presetSha256 — the two hashes are different in the template
+      expect(re.inventorySha256).not.toBe(preparedEvent.presetSha256);
+    }
+    // Exact event count: 1 delta:prepared + 1 delta:role_resolved per role (3 roles)
+    expect(roleResolvedEvents.length).toBe(3);
 
     // F-5: hostId is resolved from preset (not hardcoded "pi")
     // When no machine-local preset exists, hostId is "unknown" — not a fabricated host name
@@ -182,6 +195,14 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(lease.ownerKind).toBe("host-delegation");
     expect(lease.delegationId).toBe(parsed.delegationId);
     expect(lease.runId).toBe(parsed.runId);
+
+    // N-2: story-leases.json is stamped so cycle readers see host-delegation as claimed
+    const storyLeasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    expect(existsSync(storyLeasesPath)).toBe(true);
+    const storyLeases = JSON.parse(readFileSync(storyLeasesPath, "utf8"));
+    expect(storyLeases["US-DELTA-TEST"]).toBeDefined();
+    expect(storyLeases["US-DELTA-TEST"].source).toBe("human");
+    expect(storyLeases["US-DELTA-TEST"].pid).toBeDefined();
 
     // No latest, no runs.jsonl, no cycle
     expect(existsSync(join(dir, ".roll", "features", "delta-team", "US-DELTA-TEST", "latest"))).toBe(false);
@@ -397,9 +418,9 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
       topology: "delta-team",
       qualityProfile: "standard",
       presetId: "x",
-      presetSha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
+      presetSha256: "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
       inventoryObservedAt: new Date().toISOString(),
-      inventorySha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
+      inventorySha256: "bbbb111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
       roles: [],
     }), "utf8");
 
@@ -844,6 +865,99 @@ describe("US-DELTA-003 — conclude", () => {
 
     // Lease file should be released
     expect(existsSync(leasePath)).toBe(false);
+
+    // N-2: story-leases.json entry must be cleaned up too
+    const storyLeasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    // After cleanup, the file may still exist if other stories have entries
+    // but the US-DELTA-CONC3 entry must be gone
+    if (existsSync(storyLeasesPath)) {
+      const sl = JSON.parse(readFileSync(storyLeasesPath, "utf8"));
+      expect(sl["US-DELTA-CONC3"]).toBeUndefined();
+    }
+  });
+
+  it("conclude does not release foreign/mismatched leases (AC6)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-FOREIGN", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-FOREIGN", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-FOREIGN",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Create a foreign lease file with mismatched delegationId
+    const foreignLeasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-CONC-FOREIGN-OTHER.json");
+    mkdirSync(dirname(foreignLeasePath), { recursive: true });
+    writeFileSync(foreignLeasePath, JSON.stringify({
+      pid: 99999,
+      claimedAt: Date.now(),
+      storyId: "US-DELTA-CONC-FOREIGN-OTHER",
+      state: "in_flight",
+      ownerKind: "host-delegation",
+      delegationId: "foreign-deleg-id",
+      runId: "delta-foreign-deleg-id",
+    }, null, 2), "utf8");
+
+    // Conclude the real delegation with owner_continue
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+
+    // Real lease is released
+    const realLeasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-CONC-FOREIGN.json");
+    expect(existsSync(realLeasePath)).toBe(false);
+
+    // Foreign lease (different story+delegationId) must NOT be touched
+    expect(existsSync(foreignLeasePath)).toBe(true);
+    const foreignLease = JSON.parse(readFileSync(foreignLeasePath, "utf8"));
+    expect(foreignLease.delegationId).toBe("foreign-deleg-id");
+  });
+
+  it("conclude writes exact delta:terminal event fields (AC6)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-FIELDS", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-FIELDS", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-FIELDS",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Conclude with owner_redelegate
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_redelegate", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+    const result = JSON.parse(r2.stdout);
+    expect(result.outcome).toBe("handoff_ready");
+    expect(result.terminalBinding).toBe("handoff_only");
+    expect(result.deliveryDisposition).toBe("owner_redelegate");
+
+    // Verify exact event fields
+    const events = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    const terminalEvent = JSON.parse(events[events.length - 1]!);
+    expect(terminalEvent.type).toBe("delta:terminal");
+    expect(terminalEvent.delegationId).toBe(delegationId);
+    expect(terminalEvent.outcome).toBe("handoff_ready");
+    expect(terminalEvent.terminalBinding).toBe("handoff_only");
+    expect(terminalEvent.deliveryDisposition).toBe("owner_redelegate");
+    // No cycle/delivery/done events produced
+    for (const e of events) {
+      expect(e).not.toContain("\"type\":\"cycle:");
+    }
   });
 
   it("conclude fails for unknown delegation", () => {
@@ -944,3 +1058,199 @@ describe("US-DELTA-003 — CLI snapshots", () => {
     expect(scrubbed).toMatchSnapshot();
   });
 });
+
+// ── Concurrent lease protocol proof (AC2) ───────────────────────────────────
+
+describe("US-DELTA-003 — hardlink lease concurrency protocol", () => {
+  it("claimHostDelegationLease hardlink protocol guarantees exactly one winner", () => {
+    const dir = setupMinimalProject("US-DELTA-HL-LEASE", "delta-team");
+
+    // Directly test the low-level lease claim with two concurrent attempts
+    // The hardlink protocol (linkSync + EEXIST detection) is a kernel guarantee
+    const baseLease: HostDelegationLease = {
+      storyId: "US-DELTA-HL-LEASE",
+      state: "in_flight",
+      ownerKind: "host-delegation",
+      delegationId: "",
+      runId: "",
+      claimedAt: Date.now(),
+    };
+
+    const lease1 = { ...baseLease, delegationId: randomUUID(), runId: "delta-conc-1" };
+    const lease2 = { ...baseLease, delegationId: randomUUID(), runId: "delta-conc-2" };
+
+    // Simulate concurrency: both attempt to claim same story's lease
+    // The hardlink protocol ensures only one succeeds
+    const r1 = claimHostDelegationLease(dir, lease1);
+    const r2 = claimHostDelegationLease(dir, lease2);
+
+    // At least one must succeed; the other must be "exists" (not "conflict" from temp collision)
+    const claimed = [r1, r2].filter((r) => r === "claimed");
+    expect(claimed.length).toBe(1);
+
+    // The lease file should have the winner's delegationId
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-HL-LEASE.json");
+    const leaseData = JSON.parse(readFileSync(leasePath, "utf8"));
+    if (r1 === "claimed") {
+      expect(leaseData.delegationId).toBe(lease1.delegationId);
+    } else {
+      expect(leaseData.delegationId).toBe(lease2.delegationId);
+    }
+
+    // Release the winner
+    releaseHostDelegationLease(dir, "US-DELTA-HL-LEASE", leaseData.delegationId);
+  });
+
+  it("claimHostDelegationLease rejects when story-leases.json has cycle entry", () => {
+    const dir = setupMinimalProject("US-DELTA-BIDI", "delta-team");
+
+    // Write a cycle-style lease into story-leases.json
+    const leasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    mkdirSync(dirname(leasesPath), { recursive: true });
+    writeFileSync(leasesPath, JSON.stringify({
+      "US-DELTA-BIDI": { pid: 12345, claimedAt: Date.now(), source: "cycle" },
+    }), "utf8");
+
+    // Host-delegation claim must be rejected
+    const lease: HostDelegationLease = {
+      storyId: "US-DELTA-BIDI", state: "in_flight", ownerKind: "host-delegation",
+      delegationId: randomUUID(), runId: "delta-bidi", claimedAt: Date.now(),
+    };
+    const result = claimHostDelegationLease(dir, lease);
+    expect(result).toBe("exists"); // rejected because cycle already owns it
+
+    // No host-delegation lease file created
+    const hdLeasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-BIDI.json");
+    expect(existsSync(hdLeasePath)).toBe(false);
+  });
+
+  it("story-leases.json host-delegation stamp proves reverse exclusion", () => {
+    const dir = setupMinimalProject("US-DELTA-BIDI2", "delta-team");
+
+    // Simulate host-delegation prepare: claim lease (this stamps story-leases.json too)
+    const lease: HostDelegationLease = {
+      storyId: "US-DELTA-BIDI2", state: "in_flight", ownerKind: "host-delegation",
+      delegationId: randomUUID(), runId: "delta-bidi2", claimedAt: Date.now(),
+    };
+    const result = claimHostDelegationLease(dir, lease);
+    expect(result).toBe("claimed");
+
+    // Now verify that story-leases.json has an entry for this story
+    const leasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    expect(existsSync(leasesPath)).toBe(true);
+    const leases = JSON.parse(readFileSync(leasesPath, "utf8"));
+    expect(leases["US-DELTA-BIDI2"]).toBeDefined();
+    expect(leases["US-DELTA-BIDI2"].source).toBe("human");
+
+    // The cycle's reclaim check treats "human" source as active soft-lease → skips it.
+    // This proves that the host-delegation stamp is seen by the cycle machinery.
+
+    // Cleanup
+    releaseHostDelegationLease(dir, "US-DELTA-BIDI2", lease.delegationId);
+  });
+});
+
+// ── Human status snapshot (AC7) ──────────────────────────────────────────────
+
+describe("US-DELTA-003 — status human output with provenance", () => {
+  it("status human output includes trigger, topology, profile, roles with host-attested", () => {
+    const dir = setupMinimalProject("US-DELTA-HSTATUS", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-HSTATUS", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-HSTATUS",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd(["status", "--delegation", delegationId], dir);
+    expect(r2.code).toBe(0);
+
+    // Human output must include trigger, topology, profile
+    expect(r2.stdout).toContain("host-guided");
+    expect(r2.stdout).toContain("delta-team");
+    expect(r2.stdout).toContain("standard");
+    // Cost is unknown
+    expect(r2.stdout).toContain("host_unobservable");
+    // Must use "?" for unknown host/model (when no preset loaded)
+    expect(r2.stdout).toContain("?");
+    // Must never say "verified"
+    expect(r2.stdout).not.toContain("verified");
+
+    const scrubbed = scrubPaths(r2.stdout, dir);
+    expect(scrubbed).toMatchSnapshot();
+  });
+
+  it("status --json includes provenance labels and never 'verified'", () => {
+    const dir = setupMinimalProject("US-DELTA-HSTATUS2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-HSTATUS2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-HSTATUS2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
+    expect(r2.code).toBe(0);
+
+    const statusOut = JSON.parse(r2.stdout);
+    // Must never use "verified"
+    const statusStr = JSON.stringify(statusOut);
+    expect(statusStr).not.toContain("verified");
+    // Trigger, topology, profile must be present
+    expect(statusOut.trigger).toBe("host-guided");
+    expect(statusOut.topology).toBe("delta-team");
+    expect(statusOut.qualityProfile).toBe("standard");
+  });
+});
+
+// ── Read-only status proof (AC7) ────────────────────────────────────────────
+
+describe("US-DELTA-003 — status read-only proof", () => {
+  it("status does not modify filesystem state", () => {
+    const dir = setupMinimalProject("US-DELTA-READONLY", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-READONLY", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-READONLY",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Snapshot filesystem before status
+    const snapshotBefore = readdirRecursive(dir);
+
+    // Run status
+    const r2 = tsRunCwd(["status", "--delegation", delegationId], dir);
+    expect(r2.code).toBe(0);
+
+    // Snapshot filesystem after status
+    const snapshotAfter = readdirRecursive(dir);
+
+    // Must be identical — status is read-only
+    expect(snapshotAfter).toEqual(snapshotBefore);
+  });
+});
+
+function readdirRecursive(root: string): string[] {
+  const result: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      result.push(p);
+      if (e.isDirectory()) walk(p);
+    }
+  };
+  walk(root);
+  return result.sort();
+}

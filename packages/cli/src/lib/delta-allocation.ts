@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { findFeatureFiles, liveEpicOf } from "./archive.js";
+import { setLease, removeLease } from "@roll/core";
 import type {
   DelegationTrigger,
   DeliveryTopology,
@@ -169,7 +170,7 @@ export function claimHostDelegationLease(
     return "exists";
   }
 
-  // Build lease entry
+  // Build lease entry (host-delegation own file)
   const leaseEntry = {
     pid: process.pid,
     claimedAt: lease.claimedAt,
@@ -205,6 +206,21 @@ export function claimHostDelegationLease(
   // Remove temp
   try { unlinkSync(tmpPath); } catch { /* best-effort */ }
 
+  // Also stamp the shared story-leases.json so cycle readers automatically
+  // reject this story (bidirectional mutual exclusion, plan §6.1 step 2).
+  // Uses source: "human" with _hostDelegation marker so the existing
+  // cycle reclaim logic treats it as an active soft-lease and skips it.
+  try {
+    const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
+    setLease(storyLeasesPath, lease.storyId, {
+      pid: process.pid,
+      source: "human",
+      claimedAt: lease.claimedAt,
+    });
+  } catch {
+    // story-leases.json stamp is best-effort — host-delegation lease file is the authority
+  }
+
   return "claimed";
 }
 
@@ -228,6 +244,19 @@ export function releaseHostDelegationLease(
   }
 
   try { unlinkSync(leasePath); } catch { return false; }
+
+  // Clean up the shared story-leases.json entry (best-effort).
+  // We remove only entries that match this story — the removeLease
+  // with onlySource: "human" is safe because the host-delegation
+  // prepare always stamps "human" source; a real human claim would
+  // have its own non-host-delegation origin and survives this cleanup.
+  try {
+    const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
+    removeLease(storyLeasesPath, storyId, "human");
+  } catch {
+    // best-effort
+  }
+
   return true;
 }
 

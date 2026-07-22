@@ -224,9 +224,13 @@ function prepareCommand(args: string[]): number {
     return 1;
   }
 
-  // Read presetSha256 from the host-supplied resolution template (credible provenance claim).
-  // If the template omits it, fall back to computing from the preset file content.
-  const hostPresetSha256 = (resolutionTemplate as Record<string, unknown>).presetSha256 as string | undefined;
+  // Read presetSha256 / inventorySha256 / inventoryObservedAt from the host-supplied
+  // resolution template (credible provenance claims). The host is the attestation authority
+  // for these fields; they must never be fabricated or re-used from other sources.
+  const templateRecord = resolutionTemplate as Record<string, unknown>;
+  const hostPresetSha256 = templateRecord.presetSha256 as string | undefined;
+  const hostInventorySha256 = templateRecord.inventorySha256 as string | undefined;
+  const hostInventoryObservedAt = templateRecord.inventoryObservedAt as string | undefined;
 
   // Resolve hostId from the machine-local preset identified by presetId.
   const presetId = flags["preset"] as string;
@@ -288,7 +292,7 @@ function prepareCommand(args: string[]): number {
           modelId: r.modelId as string,
           source: r.source as "user-pin" | "preset-preference" | "availability-fallback",
           reasons: r.reasons as string[],
-          inventorySha256: input.presetSha256,
+          inventorySha256: hostInventorySha256 ?? "",
           ts: now,
         });
       }

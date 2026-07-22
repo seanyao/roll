@@ -19,3 +19,19 @@ exports[`US-DELTA-003 — CLI snapshots > validate block on missing artifact is 
 "{"ok":false,"error":"artifact_invalid","detail":"Stage artifact not found for role 'designer' at /private<TMP>/roll-delta-test-<DELEGATION_ID>/.roll/features/delta-team/US-DELTA-SNAP-3/delta-<DELEGATION_ID>/role-artifacts/designer","role":"designer"}
 "
 `;
+
+exports[`US-DELTA-003 — status human output with provenance > status human output includes trigger, topology, profile, roles with host-attested 1`] = `
+"Delegation: <DELEGATION_ID>
+  Story: US-DELTA-HSTATUS
+  Status: in_progress
+  Mode: delta-team
+  Trigger: host-guided
+  Topology: delta-team
+  Profile: standard
+  Cost: ? (host_unobservable)
+  Roles:
+    designer: resolved [pi/claude] cost=? (host_unobservable)
+    builder: resolved [pi/claude] cost=? (host_unobservable)
+    evaluator: resolved [pi/claude] cost=? (host_unobservable)
+"
+`;

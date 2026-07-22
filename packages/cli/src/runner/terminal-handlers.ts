@@ -27,6 +27,7 @@ import { eventTs } from "./runner-time.js";
 import { cleanStaleEvidence, isParkedAtHold, resetStaleSpecTruth, revertPrematureDone } from "./resume-truth.js";
 import { appendCleanupEvent, cleanupGuardResult, recordCleanupFailures } from "./sandbox-boundary.js";
 import { resolveStoryLeasePath } from "./story-lease-path.js";
+import { commitInRepoBacklog, isInRepoRollLayout } from "./in-repo-backlog.js";
 
 type TerminalCommand = Extract<CycleCommand, { kind:
   | "publish_pr"
@@ -736,7 +737,7 @@ export async function executeTerminalCommand(
       // git), commitRollMetadata is a no-op. Commit and push the backlog.md flip
       // to origin/main so the Done status is durable on the remote.
       if (terminalStoryId !== "" && isInRepoRollLayout(ports.paths.worktreePath)) {
-        await commitInRepoBacklog(ports, ctx, terminalStoryId, terminalMerged);
+        await commitInRepoBacklog(ports, ctx, terminalStoryId);
       }
       // US-OBS-032: best-effort cycle role summary from the event stream
       if (ctx.cycleId !== undefined) {
@@ -759,63 +760,5 @@ export async function executeTerminalCommand(
       const _exhaustive: never = cmd;
       throw new Error(`executeTerminalCommand: unmapped command ${JSON.stringify(_exhaustive)}`);
     }
-  }
-}
-
-// ── FIX-1238: in-repo layout helpers ─────────────────────────────────────────
-
-/**
- * Detect whether `.roll` is part of the main repo (in-repo layout) rather than
- * its own independent git repo (nested roll-meta layout). For in-repo layout,
- * `commitRollMetadata` is a no-op — backlog.md changes must be committed to the
- * main repo and pushed to origin/main explicitly.
- */
-function isInRepoRollLayout(worktreePath: string): boolean {
-  try {
-    const rollDir = join(worktreePath, ".roll");
-    if (!existsSync(rollDir)) return false;
-    const top = execFileSync("git", ["-C", rollDir, "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (top === "") return false;
-    const topReal = realpathSync(top);
-    const rollReal = realpathSync(rollDir);
-    return topReal !== rollReal;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * FIX-1238: for in-repo layout, commit backlog.md changes to the main checkout
- * and push to origin. This makes the backlog status flip durable on the remote.
- */
-async function commitInRepoBacklog(
-  ports: Ports,
-  ctx: CycleContext,
-  storyId: string,
-  terminalMerged: boolean,
-): Promise<void> {
-  const msg = `chore: ${storyId} status update (cycle ${ctx.cycleId})`;
-  const backlogRel = join(".roll", "backlog.md");
-  try {
-    if (!existsSync(join(ports.repoCwd, backlogRel))) return;
-    execFileSync("git", ["add", "--", backlogRel], { cwd: ports.repoCwd, stdio: "ignore" });
-    const dirty = execFileSync("git", ["status", "--porcelain", "--", backlogRel], {
-      cwd: ports.repoCwd,
-      encoding: "utf8",
-    }).trim();
-    if (dirty === "") return;
-    execFileSync("git", ["commit", "-m", msg], { cwd: ports.repoCwd, stdio: "ignore" });
-    execFileSync("git", ["push", "origin", "HEAD:refs/heads/main"], {
-      cwd: ports.repoCwd,
-      stdio: "ignore",
-    });
-  } catch (e) {
-    ports.events.appendAlert(
-      ports.paths.alertsPath,
-      `FIX-1238: in-repo backlog commit/push failed for ${storyId} (cycle ${ctx.cycleId}) — ${String(e)}`,
-    );
   }
 }

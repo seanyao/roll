@@ -3,6 +3,7 @@ import {
   applyWorktreeCleanup,
   isSafelyDisposable,
   planWorktreeCleanup,
+  type CleanupBranchCandidate,
 } from "../src/commands/worktree-cleanup.js";
 import type { WorktreeAuditOutput, WorktreeAuditRecord } from "../src/commands/worktree-audit.js";
 import {
@@ -202,5 +203,63 @@ describe("US-WS-011a Workspace worktree cleanup", () => {
       candidates: [expect.objectContaining({ path: safe.path, workspaceId: "ws-alpha" })],
     }));
     expect(lock).not.toHaveBeenCalled();
+  });
+
+  it("keeps standalone branch patch/final-tree revalidation inside the same repository lock", async () => {
+    const branch: CleanupBranchCandidate = {
+      branch: "loop/cycle-shared",
+      expectedSha: HEAD,
+      mergeKind: "final_tree",
+      workspaceId: "ws-alpha",
+      repoId: "repo-shared",
+      cachePath: "/roll-home/repos/repo-shared.git",
+    };
+    const aggregate: WorkspaceWorktreeAuditOutput = {
+      ...workspaceAudit([]),
+      ephemeralBranches: [{ repoId: "repo-shared", cachePath: branch.cachePath as string, branch: branch.branch }],
+      summary: {
+        worktrees: 0,
+        active: 0,
+        disposableCandidates: 0,
+        preserved: 0,
+        ephemeralBranches: 1,
+        canaryTotal: 1,
+      },
+    };
+    const plan = planWorkspaceWorktreeCleanup(aggregate, 0, [branch]);
+    const calls: string[] = [];
+    const result = await applyWorkspaceWorktreeCleanup(plan, {
+      selectedWorkspaceId: "ws-alpha",
+      auditWorkspace: () => aggregate,
+      withRepositoryLock: async (candidate, action) => {
+        calls.push(`lock:${candidate.repoId}`);
+        try {
+          return await action();
+        } finally {
+          calls.push(`unlock:${candidate.repoId}`);
+        }
+      },
+      freshBranchDeps: () => ({
+        attachedBranches: new Set(),
+        currentBranch: null,
+        refSha: () => (calls.push("ref"), HEAD),
+        branchMerge: () => (calls.push("merge-proof"), "final_tree"),
+      }),
+      removeBranch: (_repoRoot, name, sha) => (calls.push(`delete:${name}:${sha}`), { ok: true, detail: "" }),
+    });
+
+    expect(result.refused).toEqual([]);
+    expect(result.branchesRemoved).toEqual([expect.objectContaining({
+      branch: branch.branch,
+      mergeKind: "final_tree",
+      repoId: "repo-shared",
+    })]);
+    expect(calls).toEqual([
+      "lock:repo-shared",
+      "ref",
+      "merge-proof",
+      `delete:${branch.branch}:${HEAD}`,
+      "unlock:repo-shared",
+    ]);
   });
 });

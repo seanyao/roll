@@ -69,6 +69,9 @@ export interface CleanupCandidate {
  */
 export interface CleanupBranchCandidate {
   branch: string;
+  workspaceId?: string;
+  repoId?: string;
+  cachePath?: string;
   /** Ref SHA the plan observed; `--apply` refuses if the fresh ref differs. */
   expectedSha: string;
   /**
@@ -135,6 +138,9 @@ export interface BranchRemoval {
   branch: string;
   expectedSha: string;
   mergeKind: "ancestor" | "patch_equivalent" | "final_tree";
+  workspaceId?: string;
+  repoId?: string;
+  cachePath?: string;
 }
 
 export interface WorktreeCleanupResult {
@@ -654,7 +660,14 @@ export async function applyWorktreeCleanup(
       const mk = bd.branchMerge(bc.branch, sha);
       if (mk === null) { refuseB("not-merged: fresh check no longer proves a merge"); continue; }
 
-      const removalB: BranchRemoval = { branch: bc.branch, expectedSha: bc.expectedSha, mergeKind: mk };
+      const removalB: BranchRemoval = {
+        branch: bc.branch,
+        expectedSha: bc.expectedSha,
+        mergeKind: mk,
+        ...(bc.workspaceId === undefined ? {} : { workspaceId: bc.workspaceId }),
+        ...(bc.repoId === undefined ? {} : { repoId: bc.repoId }),
+        ...(bc.cachePath === undefined ? {} : { cachePath: bc.cachePath }),
+      };
       if (options.dryRun) { branchesRemoved.push(removalB); continue; }
       // Atomic compare-and-delete against the observed sha — a ref that advanced
       // between this check and the delete makes update-ref fail, so we refuse.

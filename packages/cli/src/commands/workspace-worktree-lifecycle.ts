@@ -43,7 +43,9 @@ import {
   planWorktreeCleanup,
   renderPlanHuman,
   renderResultHuman,
+  type CleanupBranchCandidate,
   type CleanupCandidate,
+  type StandaloneBranchDeps,
   type WorktreeCleanupPlan,
   type WorktreeCleanupResult,
 } from "./worktree-cleanup.js";
@@ -117,8 +119,10 @@ export interface ApplyWorkspaceWorktreeCleanupOptions {
   readonly selectedWorkspaceId: string;
   readonly dryRun?: boolean;
   readonly auditWorkspace: () => WorkspaceWorktreeAuditOutput;
-  readonly withRepositoryLock: <T>(candidate: CleanupCandidate, action: () => Promise<T>) => Promise<T>;
+  readonly withRepositoryLock: <T>(candidate: CleanupCandidate | CleanupBranchCandidate, action: () => Promise<T>) => Promise<T>;
   readonly removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+  readonly freshBranchDeps?: (candidate: CleanupBranchCandidate) => StandaloneBranchDeps;
+  readonly removeBranch?: (repositoryRoot: string, branch: string, expectedSha: string) => { ok: boolean; detail: string };
   readonly nowMs?: () => number;
 }
 
@@ -369,11 +373,12 @@ function repositoryAudit(
 export function planWorkspaceWorktreeCleanup(
   audit: WorkspaceWorktreeAuditOutput,
   threshold: number,
+  standaloneBranches: readonly CleanupBranchCandidate[] = [],
 ): WorktreeCleanupPlan {
   return planWorktreeCleanup(
     repositoryAudit(audit),
     threshold,
-    [],
+    standaloneBranches,
     { workspaceId: audit.selectedWorkspaceId },
   );
 }
@@ -411,6 +416,41 @@ export async function applyWorkspaceWorktreeCleanup(
       });
     });
     removed.push(...result.removed);
+    branchesRemoved.push(...result.branchesRemoved);
+    refused.push(...result.refused);
+  }
+
+  for (const candidate of plan.branchCandidates) {
+    if (
+      candidate.workspaceId !== options.selectedWorkspaceId ||
+      candidate.repoId === undefined ||
+      candidate.cachePath === undefined
+    ) {
+      refused.push({
+        path: `branch:${candidate.branch}`,
+        reason: "identity: cleanup branch candidate is outside the selected Workspace",
+      });
+      continue;
+    }
+    const cachePath = candidate.cachePath;
+    const freshBranchDeps = options.freshBranchDeps;
+    const result = await options.withRepositoryLock(candidate, async () => {
+      const oneCandidatePlan: WorktreeCleanupPlan = {
+        ...plan,
+        candidates: [],
+        branchCandidates: [candidate],
+        preserved: [],
+      };
+      return applyWorktreeCleanup(oneCandidatePlan, {
+        repositoryRoot: cachePath,
+        dryRun: options.dryRun === true,
+        ...(freshBranchDeps === undefined
+          ? {}
+          : { freshBranchDeps: () => freshBranchDeps(candidate) }),
+        ...(options.removeBranch === undefined ? {} : { removeBranch: options.removeBranch }),
+        ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
+      });
+    });
     branchesRemoved.push(...result.branchesRemoved);
     refused.push(...result.refused);
   }
@@ -557,7 +597,7 @@ export async function workspaceWorktreeCleanupCommand(
   const selectedManifest = deps.readSelectedWorkspace(decision.workspaceRoot);
   const bindingByRepo = new Map(selectedManifest.repositories.map((binding) => [binding.repoId, binding]));
   const withLock = deps.withRepositoryLock ?? (async <T>(
-    candidate: CleanupCandidate,
+    candidate: CleanupCandidate | CleanupBranchCandidate,
     action: () => Promise<T>,
   ): Promise<T> => {
     const binding = candidate.repoId === undefined ? undefined : bindingByRepo.get(candidate.repoId);

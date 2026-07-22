@@ -777,11 +777,12 @@ function renderHuman(output: WorktreeAuditOutput): string {
 // ─── CLI command ────────────────────────────────────────────────────────────
 
 const USAGE =
-  "Usage: roll worktree audit [--json] [--repo <path>]\n" +
-  "  Read-only audit of all git worktrees registered for this repo.\n" +
+  "Usage: roll worktree audit [--json] [--workspace <id|path> | --repo <path>]\n" +
+  "  Read-only audit of Workspace Issue worktrees or historical repo-local worktrees.\n" +
   "  Classifies ownership, dirt, merge evidence, and disposition.\n" +
   "  --json    print schema-1 JSON output\n" +
-  "  --repo    override the project root (default: current directory)\n";
+  "  --workspace resolve Issue ownership through the Workspace registry\n" +
+  "  --repo    explicit historical repo-local/migration input (default: current directory)\n";
 
 export function worktreeAuditCommand(args: string[], deps?: Partial<WorktreeAuditDeps>): number {
   if (args.includes("--help") || args.includes("-h")) {

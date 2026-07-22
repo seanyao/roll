@@ -30,6 +30,12 @@ import {
   type WorkspaceDeliveryProof,
   type WorkspaceWorktreeOwnership,
 } from "./worktree-audit.js";
+import {
+  emitBacklogTargetError,
+  resolveBacklogCommandTarget,
+  type BacklogTargetDecision,
+} from "./backlog-target.js";
+import { workspaceRollHome } from "./workspace-target.js";
 
 export interface WorkspaceWorktreeAuditInput {
   readonly selectedWorkspaceId: string;
@@ -77,6 +83,12 @@ export interface WorkspaceWorktreeLifecycleDeps {
   readonly resolveCache: (binding: RepositoryBinding) => WorkspaceCacheIdentity;
   readonly auditRepository: (deps: WorktreeAuditDeps) => WorktreeAuditOutput;
   readonly nowISO: () => string;
+}
+
+export interface WorkspaceWorktreeAuditCommandDeps {
+  readonly resolveTarget: (args: readonly string[]) => BacklogTargetDecision;
+  readonly rollHome: () => string;
+  readonly auditWorkspace: typeof auditWorkspaceWorktrees;
 }
 
 function listIssueIds(root: string): readonly string[] {
@@ -291,4 +303,76 @@ export function auditWorkspaceWorktrees(
     repositories,
     summary,
   };
+}
+
+function renderWorkspaceAudit(output: WorkspaceWorktreeAuditOutput): string {
+  const lines = [
+    "Workspace worktree audit",
+    "",
+    `  workspace: ${output.selectedWorkspaceId}`,
+    `  worktrees: ${output.summary.worktrees}`,
+    `  active: ${output.summary.active}`,
+    `  disposable candidates: ${output.summary.disposableCandidates}`,
+    `  preserved: ${output.summary.preserved}`,
+    `  ephemeral branches: ${output.summary.ephemeralBranches}`,
+    `  canary total: ${output.summary.canaryTotal}`,
+    "",
+  ];
+  for (const record of output.records) {
+    lines.push(`${record.disposition}`);
+    lines.push(`  ${record.workspaceId}/${record.storyId}/${record.repoId} (${record.repositoryAlias})`);
+    lines.push(`  path: ${record.path}`);
+    lines.push(`  branch: ${record.branch ?? "<detached>"}`);
+    lines.push(`  HEAD: ${record.head ?? "<unknown>"}`);
+    lines.push(`  active: ${record.active ? "yes" : "no"}`);
+    lines.push(`  delivery: ${record.deliveryProof ?? "unknown"}`);
+    lines.push(`  reason: ${record.reason}`);
+    lines.push("");
+  }
+  if (output.ephemeralBranches.length > 0) {
+    lines.push("ephemeral branches (canary-counted)");
+    for (const branch of output.ephemeralBranches) {
+      lines.push(`  ${branch.repoId}:${branch.branch}`);
+    }
+    lines.push("");
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function realCommandDeps(): WorkspaceWorktreeAuditCommandDeps {
+  return {
+    resolveTarget: (args) => resolveBacklogCommandTarget(args, "read"),
+    rollHome: workspaceRollHome,
+    auditWorkspace: auditWorkspaceWorktrees,
+  };
+}
+
+export function workspaceWorktreeAuditCommand(
+  args: readonly string[],
+  overrides: Partial<WorkspaceWorktreeAuditCommandDeps> = {},
+): number {
+  if (args.includes("--repo")) {
+    process.stderr.write("roll worktree audit: --repo and --workspace are mutually exclusive.\n");
+    return 2;
+  }
+  const workspaceIndex = args.indexOf("--workspace");
+  if (workspaceIndex >= 0 && (args[workspaceIndex + 1] ?? "") === "") {
+    process.stderr.write("roll worktree audit: --workspace requires <id|path>.\n");
+    return 2;
+  }
+  const deps = { ...realCommandDeps(), ...overrides };
+  const decision = deps.resolveTarget(args);
+  if (!decision.ok) return emitBacklogTargetError(decision);
+  if ("aggregate" in decision) {
+    process.stderr.write("roll worktree audit: --all is not supported; select one Workspace.\n");
+    return 2;
+  }
+  const output = deps.auditWorkspace({
+    selectedWorkspaceId: decision.workspaceId,
+    selectedWorkspaceRoot: decision.workspaceRoot,
+    rollHome: deps.rollHome(),
+  });
+  if (args.includes("--json")) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+  else process.stdout.write(renderWorkspaceAudit(output));
+  return 0;
 }

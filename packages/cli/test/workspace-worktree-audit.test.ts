@@ -3,7 +3,10 @@ import {
   auditWorktrees,
   type WorkspaceWorktreeOwnership,
 } from "../src/commands/worktree-audit.js";
-import { auditWorkspaceWorktrees } from "../src/commands/workspace-worktree-lifecycle.js";
+import {
+  auditWorkspaceWorktrees,
+  workspaceWorktreeAuditCommand,
+} from "../src/commands/workspace-worktree-lifecycle.js";
 import {
   ISSUE_MANIFEST_V1,
   REPOSITORY_BINDING_V1,
@@ -13,6 +16,21 @@ import {
 } from "@roll/spec";
 
 const HEAD = "a".repeat(40);
+
+function captureStdout(run: () => number): { readonly status: number; readonly stdout: string; readonly stderr: string } {
+  let stdout = "";
+  let stderr = "";
+  const originalOut = process.stdout.write.bind(process.stdout);
+  const originalErr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((chunk: string | Uint8Array) => (stdout += String(chunk), true)) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => (stderr += String(chunk), true)) as typeof process.stderr.write;
+  try {
+    return { status: run(), stdout, stderr };
+  } finally {
+    process.stdout.write = originalOut;
+    process.stderr.write = originalErr;
+  }
+}
 
 describe("US-WS-011a Workspace worktree audit", () => {
   it("projects registry-bound Workspace identity and delivery proof onto an owned worktree", () => {
@@ -221,5 +239,53 @@ describe("US-WS-011a Workspace worktree audit", () => {
       branch: "loop/cycle-shared",
     }]);
     expect(output.summary).toMatchObject({ worktrees: 2, ephemeralBranches: 1, canaryTotal: 3 });
+  });
+
+  it("exposes the registry-resolved Workspace audit through the CLI without falling back to repo-local layout", () => {
+    const audit = {
+      schema: 1 as const,
+      generatedAt: "2026-07-22T00:00:00.000Z",
+      selectedWorkspaceId: "ws-alpha",
+      records: [{
+        path: "/workspaces/alpha/issues/US-A/primary",
+        branch: "refs/heads/roll/ws-alpha/US-A",
+        head: HEAD,
+        owner: "workspace" as const,
+        workspaceId: "ws-alpha",
+        storyId: "US-A",
+        repoId: "repo-shared",
+        repositoryAlias: "primary",
+        cachePath: "/roll-home/repos/repo-shared.git",
+        deliveryProof: "delivered" as const,
+        ownershipState: "verified" as const,
+        dirtyTracked: false as const,
+        dirtyUntracked: false as const,
+        ahead: 0,
+        mergeEvidence: { kind: "ancestor" as const },
+        active: false,
+        disposition: "disposable_candidate" as const,
+        reason: "delivered",
+      }],
+      ephemeralBranches: [],
+      repositories: [{ repoId: "repo-shared", cachePath: "/roll-home/repos/repo-shared.git", integrationBranch: "main" }],
+      summary: { worktrees: 1, active: 0, disposableCandidates: 1, preserved: 0, ephemeralBranches: 0, canaryTotal: 1 },
+    };
+    const result = captureStdout(() => workspaceWorktreeAuditCommand(["--workspace", "ws-alpha", "--json"], {
+      resolveTarget: () => ({
+        ok: true,
+        workspaceId: "ws-alpha",
+        workspaceRoot: "/workspaces/alpha",
+        canonicalRoot: "/workspaces/alpha",
+        backlogPath: "/workspaces/alpha/backlog/index.md",
+        storyRoot: "/workspaces/alpha/backlog",
+        runtimeRoot: "/workspaces/alpha/runtime",
+        configPath: "/workspaces/alpha/runtime/backlog-sync.yaml",
+      }),
+      rollHome: () => "/roll-home",
+      auditWorkspace: () => audit,
+    }));
+
+    expect(result).toMatchObject({ status: 0, stderr: "" });
+    expect(JSON.parse(result.stdout)).toEqual(audit);
   });
 });

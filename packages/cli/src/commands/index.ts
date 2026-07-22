@@ -95,6 +95,7 @@ import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 import { worktreeAuditCommand } from "./worktree-audit.js";
 import { worktreeCleanupCommand } from "./worktree-cleanup.js";
+import { workspaceWorktreeAuditCommand } from "./workspace-worktree-lifecycle.js";
 import { workspaceCommand, workspaceUsage } from "./workspace.js";
 
 let registered = false;
@@ -444,7 +445,13 @@ export function registerAll(): void {
   // US-LOOP-093: `worktree audit` — read-only worktree lifecycle audit
   // FIX-1273: `worktree cleanup` — safe, audit-derived recovery for canary pressure
   registerPorted("worktree", (args): number | Promise<number> => {
-    if (args[0] === "audit") return worktreeAuditCommand(args.slice(1));
+    if (args[0] === "audit") {
+      const rest = args.slice(1);
+      if (rest.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "") !== "") {
+        return workspaceWorktreeAuditCommand(rest);
+      }
+      return worktreeAuditCommand(rest);
+    }
     if (args[0] === "cleanup") return worktreeCleanupCommand(args.slice(1));
     process.stderr.write("roll worktree: unknown subcommand. Try 'roll worktree audit' or 'roll worktree cleanup'.\n");
     return 1;

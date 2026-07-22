@@ -154,7 +154,9 @@ describe("US-WS-009 Workspace backlog reads", () => {
     await registerActive(f, "ws-alpha", alpha);
     await registerActive(f, "ws-beta", beta);
 
-    const ambiguous = await runCli(["backlog"], f);
+    // Pin cwd outside any git/.roll tree: from inside the roll repo itself the
+    // cwd probe legitimately answers migration_required before ambiguity.
+    const ambiguous = await runCli(["backlog"], f, { cwd: f.home });
     const conflict = await runCli(["backlog", "--workspace", "ws-alpha"], f, {
       cwd: beta,
       workspaceEnv: "ws-beta",

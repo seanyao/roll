@@ -478,18 +478,33 @@ describe("US-WS-016 Workspace scheduler contract", () => {
       };
     }, (label) => !label.includes("beta"));
     let stdout = "";
+    const previousLang = process.env["ROLL_LANG"];
     const original = process.stdout.write.bind(process.stdout);
     // @ts-expect-error capture-only
     process.stdout.write = (chunk: string | Uint8Array): boolean => (stdout += String(chunk), true);
     try {
+      process.env["ROLL_LANG"] = "en";
       expect(await loopWorkspaceStatusCommand(["--all"], fixture.deps)).toBe(0);
+      expect(stdout).toContain(`ws-alpha  paused  armed  ${alphaPaths.runtimeRoot}  capacity=waiting agent=codex model=gpt retry=2027-01-15T08:00:00.000Z`);
+      expect(stdout).toContain(`ws-beta  active  unarmed  ${betaPaths.runtimeRoot}  capacity=acquired agent=claude model=sonnet`);
+
+      stdout = "";
+      process.env["ROLL_LANG"] = "zh";
+      expect(await loopWorkspaceStatusCommand(["--all"], fixture.deps)).toBe(0);
+      expect(stdout).toContain(`ws-alpha  paused  armed  ${alphaPaths.runtimeRoot}  容量=等待 agent=codex model=gpt retry=2027-01-15T08:00:00.000Z`);
+      expect(stdout).toContain(`ws-beta  active  unarmed  ${betaPaths.runtimeRoot}  容量=已获取 agent=claude model=sonnet`);
     } finally {
       process.stdout.write = original;
+      if (previousLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = previousLang;
     }
 
-    expect(stdout).toContain(`ws-alpha  paused  armed  ${alphaPaths.runtimeRoot}  capacity=waiting agent=codex model=gpt retry=2027-01-15T08:00:00.000Z`);
-    expect(stdout).toContain(`ws-beta  active  unarmed  ${betaPaths.runtimeRoot}  capacity=acquired agent=claude model=sonnet`);
-    expect(fixture.calls).toEqual(["isArmed com.roll.loop.ws-alpha", "isArmed com.roll.loop.ws-beta"]);
+    expect(fixture.calls).toEqual([
+      "isArmed com.roll.loop.ws-alpha",
+      "isArmed com.roll.loop.ws-beta",
+      "isArmed com.roll.loop.ws-alpha",
+      "isArmed com.roll.loop.ws-beta",
+    ]);
   });
 
   it("binds loop go and its tmux worker to the selected Workspace runtime and backlog", async () => {

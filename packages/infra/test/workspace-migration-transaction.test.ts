@@ -16,9 +16,11 @@ import { planHistoricalWorkspaceMigration } from "@roll/core";
 import type { HistoricalMigrationPlan } from "@roll/spec";
 import {
   applyHistoricalWorkspaceMigration,
+  acquireLock,
   collectHistoricalMigrationFacts,
   historicalWorkspaceMigrationJournalPath,
   rollbackHistoricalWorkspaceMigration,
+  releaseLock,
   workspaceRegistryPath,
 } from "../src/index.js";
 
@@ -166,6 +168,26 @@ describe("US-WS-019a historical Workspace migration transaction", () => {
     expect(existsSync(historicalWorkspaceMigrationJournalPath(f.rollHome, saved.workspaceId))).toBe(false);
   });
 
+  it("serializes rollback against an in-flight apply transaction", async () => {
+    const f = fixture();
+    const saved = await plan(f);
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }, {
+      afterPhase: (phase) => {
+        if (phase === "content_ready") throw new Error("pause");
+      },
+    })).rejects.toThrow("pause");
+    const lockPath = join(f.rollHome, "locks", "workspace-migration", "ws-demo.lock");
+    const lock = acquireLock(lockPath, process.pid, { cycleId: "test", unparseableIsHeld: true });
+    expect(lock.acquired).toBe(true);
+    try {
+      expect(() => rollbackHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }))
+        .toThrow(expect.objectContaining({ code: "concurrent_migration" }));
+    } finally {
+      releaseLock(lockPath);
+    }
+    expect(rollbackHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }).outcome).toBe("rolled_back");
+  });
+
   it("copies independent roll-meta surface data and leaves its Git repository byte-identical", async () => {
     const f = fixture("independent");
     const saved = await plan(f);
@@ -179,6 +201,36 @@ describe("US-WS-019a historical Workspace migration transaction", () => {
     expect(treeDigest(join(f.source, ".roll"))).toBe(before);
     expect(git(join(f.source, ".roll"), "rev-parse", "HEAD")).toBe(head);
     expect(git(join(f.source, ".roll"), "status", "--porcelain")).toBe("");
+  });
+
+  it("rejects a tampered resume journal without mutating independent roll-meta", async () => {
+    const f = fixture("independent");
+    const saved = await plan(f);
+    const before = treeDigest(join(f.source, ".roll"));
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }, {
+      afterPhase: (phase) => {
+        if (phase === "content_ready") throw new Error("pause");
+      },
+    })).rejects.toThrow("pause");
+    const journalPath = historicalWorkspaceMigrationJournalPath(f.rollHome, saved.workspaceId);
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as Record<string, unknown>;
+    const transfers = journal["transfers"] as Array<Record<string, unknown>>;
+    transfers[0] = { ...transfers[0], mode: "move" };
+    writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, "utf8");
+
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }))
+      .rejects.toMatchObject({ code: "journal_conflict" });
+    expect(treeDigest(join(f.source, ".roll"))).toBe(before);
+  });
+
+  it("refuses reused completion when mapped Workspace bytes drift", async () => {
+    const f = fixture();
+    const saved = await plan(f);
+    await applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved });
+    writeFileSync(join(f.rollHome, "workspaces", "ws-demo", "backlog", "index.md"), "corrupt\n", "utf8");
+
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }))
+      .rejects.toMatchObject({ code: "destination_conflict" });
   });
 
   it("rejects source drift before creating journal, cache, registry or destination state", async () => {

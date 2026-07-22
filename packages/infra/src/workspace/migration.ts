@@ -407,11 +407,18 @@ function readJournal(path: string, input: ApplyHistoricalWorkspaceMigrationInput
   if (!normalizedTransport.ok || normalizedTransport.value !== value["normalizedRemote"] || value["transfers"].length !== plan.mappings.length) {
     throw new HistoricalWorkspaceMigrationError("journal_conflict", "Migration journal remote or transfer count is invalid");
   }
+  const ownership = value["ownership"] as MigrationJournal["ownership"];
+  const phase = value["phase"] as HistoricalWorkspaceMigrationPhase;
+  const contentReady = phases.indexOf(phase) >= phases.indexOf("content_ready");
+  const activated = phases.indexOf(phase) >= phases.indexOf("activated");
   for (const [index, raw] of value["transfers"].entries()) {
     const mapping = plan.mappings[index];
+    const expectedMode = mapping === undefined ? null : transferMode(mapping, ownership);
     if (!isRecord(raw) || !exactKeys(raw, ["source", "destination", "digest", "mode", "state"]) || mapping === undefined ||
       raw["source"] !== mapping.source || raw["destination"] !== mapping.destination || raw["digest"] !== mapping.digest ||
-      !["move", "copy", "discard"].includes(String(raw["mode"])) || !["pending", "staged", "cleaned"].includes(String(raw["state"]))) {
+      !["move", "copy", "discard"].includes(String(raw["mode"])) || !["pending", "staged", "cleaned"].includes(String(raw["state"])) ||
+      (expectedMode === "move" ? raw["mode"] !== "move" && raw["mode"] !== "copy" : raw["mode"] !== expectedMode) ||
+      (contentReady && raw["state"] === "pending") || (!activated && raw["state"] === "cleaned")) {
       throw new HistoricalWorkspaceMigrationError("journal_conflict", "Migration journal transfer is invalid");
     }
   }
@@ -666,9 +673,17 @@ function completedManifest(input: ApplyHistoricalWorkspaceMigrationInput, plan: 
   const path = manifestPath(workspaceRoot);
   if (!existsSync(path)) return null;
   try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as MigrationManifest;
-    return value.schema === MANIFEST_V1 && value.planId === plan.planId && value.sourceRoot === resolve(input.sourceRoot) && value.state === "active"
-      ? value : null;
+    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!isRecord(value) || !exactKeys(value, [
+      "schema", "planId", "sourceRoot", "workspaceId", "repoId", "ownership", "state", "mappings", "manualHandoffRequired",
+    ]) || value["schema"] !== MANIFEST_V1 || value["planId"] !== plan.planId || value["sourceRoot"] !== resolve(input.sourceRoot) ||
+      value["workspaceId"] !== plan.workspaceId || value["repoId"] !== plan.repository.repoId || value["state"] !== "active" ||
+      stable(value["mappings"]) !== stable(plan.mappings)) return null;
+    const workspaceRoot = child(resolve(input.rollHome), plan.workspaceRoot);
+    for (const mapping of plan.mappings) {
+      if (mapping.destination !== null && digestFile(child(workspaceRoot, mapping.destination)) !== mapping.digest) return null;
+    }
+    return value as unknown as MigrationManifest;
   } catch {
     return null;
   }
@@ -678,6 +693,9 @@ function completedMigrationIsActive(input: ApplyHistoricalWorkspaceMigrationInpu
   if (completedManifest(input, plan) === null) return false;
   const workspaceRoot = child(resolve(input.rollHome), plan.workspaceRoot);
   try {
+    const cachePath = child(resolve(input.rollHome), plan.repository.cachePath);
+    const cache = lstatSync(cachePath);
+    if (!cache.isDirectory() || cache.isSymbolicLink()) return false;
     return new WorkspaceRegistry({ rollHome: resolve(input.rollHome) }).inspect().some((entry) =>
       entry.workspaceId === plan.workspaceId && entry.root === workspaceRoot && entry.lifecycle === "active" && entry.consistency === "consistent"
     );
@@ -829,24 +847,32 @@ export function rollbackHistoricalWorkspaceMigration(
   const plan = parseHistoricalWorkspaceMigrationPlan(input.plan);
   const normalized = { ...input, sourceRoot: resolve(input.sourceRoot), rollHome: resolve(input.rollHome), plan };
   const journalPath = historicalWorkspaceMigrationJournalPath(normalized.rollHome, plan.workspaceId);
-  const journal = readJournal(journalPath, normalized, plan);
-  if (journal === null) return { outcome: "absent", workspaceId: plan.workspaceId };
-  if (["registered", "activated", "cleanup_complete"].includes(journal.phase)) {
-    throw new HistoricalWorkspaceMigrationError("rollback_blocked_active", "Registered migration must resume to completion instead of rolling back");
+  if (readJournal(journalPath, normalized, plan) === null) return { outcome: "absent", workspaceId: plan.workspaceId };
+  const lockPath = migrationLockPath(normalized.rollHome, plan.workspaceId);
+  const lock = acquireLock(lockPath, process.pid, { cycleId: `workspace-migration:${plan.workspaceId}`, unparseableIsHeld: true });
+  if (!lock.acquired) throw new HistoricalWorkspaceMigrationError("concurrent_migration", "Workspace migration is already running");
+  try {
+    const journal = readJournal(journalPath, normalized, plan);
+    if (journal === null) return { outcome: "absent", workspaceId: plan.workspaceId };
+    if (["registered", "activated", "cleanup_complete"].includes(journal.phase)) {
+      throw new HistoricalWorkspaceMigrationError("rollback_blocked_active", "Registered migration must resume to completion instead of rolling back");
+    }
+    const contentRoot = journal.phase === "workspace_ready" ? journal.workspaceRoot : journal.stagingRoot;
+    for (const transfer of [...journal.transfers].reverse()) {
+      if (transfer.mode !== "move" || transfer.state === "pending" || transfer.destination === null) continue;
+      const source = child(join(journal.sourceRoot, ".roll"), transfer.source);
+      const destination = child(contentRoot, transfer.destination);
+      if (!existsSync(destination)) continue;
+      if (digestFile(destination) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("source_conflict", "Moved migration content changed and cannot be rolled back safely");
+      mkdirSync(dirname(source), { recursive: true });
+      if (existsSync(source)) throw new HistoricalWorkspaceMigrationError("source_conflict", "Original migration source path was recreated");
+      renameSync(destination, source);
+    }
+    rmSync(journal.stagingRoot, { recursive: true, force: true });
+    rmSync(journal.workspaceRoot, { recursive: true, force: true });
+    rmSync(journalPath, { force: true });
+    return { outcome: "rolled_back", workspaceId: plan.workspaceId };
+  } finally {
+    releaseLock(lockPath);
   }
-  const contentRoot = journal.phase === "workspace_ready" ? journal.workspaceRoot : journal.stagingRoot;
-  for (const transfer of [...journal.transfers].reverse()) {
-    if (transfer.mode !== "move" || transfer.state === "pending" || transfer.destination === null) continue;
-    const source = child(join(journal.sourceRoot, ".roll"), transfer.source);
-    const destination = child(contentRoot, transfer.destination);
-    if (!existsSync(destination)) continue;
-    if (digestFile(destination) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("source_conflict", "Moved migration content changed and cannot be rolled back safely");
-    mkdirSync(dirname(source), { recursive: true });
-    if (existsSync(source)) throw new HistoricalWorkspaceMigrationError("source_conflict", "Original migration source path was recreated");
-    renameSync(destination, source);
-  }
-  rmSync(journal.stagingRoot, { recursive: true, force: true });
-  rmSync(journal.workspaceRoot, { recursive: true, force: true });
-  rmSync(journalPath, { force: true });
-  return { outcome: "rolled_back", workspaceId: plan.workspaceId };
 }

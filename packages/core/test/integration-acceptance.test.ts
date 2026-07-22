@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  IntegrationAcceptanceError,
   runIntegrationAcceptance,
   type IntegrationAcceptanceInput,
 } from "../src/delivery/integration-acceptance.js";
@@ -83,6 +84,18 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
     });
     expect(isReachable).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe integration refs before diagnostics can echo credential-like input", async () => {
+    const secret = "https://token@example.invalid/repository";
+    const isReachable = vi.fn();
+
+    await expect(runIntegrationAcceptance(input({
+      repositories: [{ ...input().repositories[0]!, integrationBranch: secret }],
+    }), { isReachable, execute: vi.fn() })).rejects.toSatisfy((error: unknown) =>
+      error instanceof IntegrationAcceptanceError && !error.message.includes(secret)
+    );
+    expect(isReachable).not.toHaveBeenCalled();
   });
 
   it("records a failed exact-SHA verdict and names the repository mismatch without running the command", async () => {

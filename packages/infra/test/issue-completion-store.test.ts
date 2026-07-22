@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deriveIssueCompletion } from "@roll/core";
-import type { IssueIntegrationAcceptanceEvidence, RepositoryMergeEvidence } from "@roll/spec";
+import {
+  integrationAcceptanceCommandDigest,
+  type IssueIntegrationAcceptanceEvidence,
+  type RepositoryMergeEvidence,
+} from "@roll/spec";
 import {
   appendIssueIntegrationAcceptanceEvidence,
   appendRepositoryMergeEvidence,
@@ -32,6 +36,7 @@ function fixture(): string {
       requiredDelivery: true,
       noChangePolicy: "changes_required",
     }],
+    integrationAcceptance: { command: ["pnpm", "test:integration"] },
   })}\n`, "utf8");
   return issueRoot;
 }
@@ -58,7 +63,7 @@ function acceptance(): IssueIntegrationAcceptanceEvidence {
     workspaceId: WORKSPACE,
     storyId: STORY,
     inputMergeCommits: { [REPO]: MERGE },
-    commandDigest: "c".repeat(64),
+    commandDigest: integrationAcceptanceCommandDigest(["pnpm", "test:integration"]),
     profile: "workspace-integration/v1",
     verdict: "pass",
     artifactPath: "evidence/integration.txt",
@@ -131,6 +136,20 @@ describe("US-WS-013 Issue completion evidence store", () => {
     expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, {
       ...acceptance(),
       artifactPath: "../outside.txt",
+    })).toThrow(IssueCompletionEvidenceError);
+    expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
+  });
+
+  it("binds acceptance to the manifest command and exact required repository set", () => {
+    const issueRoot = fixture();
+
+    expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, {
+      ...acceptance(),
+      commandDigest: "d".repeat(64),
+    })).toThrow(IssueCompletionEvidenceError);
+    expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, {
+      ...acceptance(),
+      inputMergeCommits: { [REPO]: MERGE, "repo-foreign": "f".repeat(40) },
     })).toThrow(IssueCompletionEvidenceError);
     expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
   });

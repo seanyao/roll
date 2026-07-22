@@ -12,6 +12,7 @@ import {
 import {
   REPOSITORY_BINDING_V1,
   WORKSPACE_MANIFEST_V1,
+  integrationAcceptanceCommandDigest,
   repositoryIdFromRemote,
   type RepositoryBinding,
 } from "@roll/spec";
@@ -84,6 +85,7 @@ async function initializeIssue(
   const contract: IssueStoryContract = {
     storyId,
     repositories: [{ alias: "primary", access: "write", requiredDelivery: true }],
+    integrationCommand: ["pnpm", "test:integration"],
   };
   const issueRoot = join(workspaceRoot, "issues", storyId);
   await applyIssueInit({
@@ -154,7 +156,7 @@ describe("US-WS-011a Workspace worktree lifecycle terminal fixture", () => {
       workspaceId: "ws-alpha",
       storyId: "US-A",
       inputMergeCommits: { [binding.repoId]: alphaHead },
-      commandDigest: "c".repeat(64),
+      commandDigest: integrationAcceptanceCommandDigest(["pnpm", "test:integration"]),
       profile: "workspace-integration/v1",
       verdict: "pass",
       artifactPath: "evidence/integration.txt",

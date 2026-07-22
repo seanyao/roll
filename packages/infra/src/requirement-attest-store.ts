@@ -21,6 +21,7 @@ import {
   parseIssueManifest,
   parseRequirementSourceManifest,
   parseWorkspaceManifest,
+  isSafeIssueEvidencePath,
   type IssueIntegrationAcceptanceEvidence,
   type RequirementSourceManifest,
 } from "@roll/spec";
@@ -52,6 +53,10 @@ export interface RequirementAttestStoreResult {
   readonly status: "pass" | "partial" | "blocked";
   readonly path: string;
   readonly content: string;
+}
+
+export interface RequirementAttestStoreDependencies {
+  readonly beforeIssueRevalidation?: () => void;
 }
 
 interface NodeIdentity {
@@ -171,6 +176,9 @@ function scanEvidence(root: string, relativeRoot = "", depth = 0, entries: strin
     left.name < right.name ? -1 : left.name > right.name ? 1 : 0
   )) {
     const relativePath = relativeRoot === "" ? entry.name : `${relativeRoot}/${entry.name}`;
+    if (!isSafeIssueEvidencePath(`evidence/${relativePath}`)) {
+      return fail("unsafe_issue_evidence", "Issue evidence path cannot be represented safely in Requirement attestation");
+    }
     const path = join(root, relativePath);
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
@@ -275,18 +283,32 @@ function atomicWrite(path: string, content: string): void {
   }
 }
 
-export function rebuildRequirementAttest(input: RequirementAttestStoreInput): RequirementAttestStoreResult {
+function storyReadSignature(stories: readonly {
+  readonly story: RequirementAttestStory;
+  readonly evidenceFingerprint?: string;
+}[]): string {
+  return JSON.stringify(stories.map((story) => ({
+    story: story.story,
+    evidenceFingerprint: story.evidenceFingerprint ?? null,
+  })));
+}
+
+export function rebuildRequirementAttest(
+  input: RequirementAttestStoreInput,
+  deps: RequirementAttestStoreDependencies = {},
+): RequirementAttestStoreResult {
   const roots = resolveRoots(input);
   const manifest = readManifest(roots.requirementRoot, input);
   const auditBefore = auditRequirementArchive(input);
   const storyReads = auditBefore.status === "healthy"
     ? manifest.stories.map((storyId) => readStory(roots.workspaceRoot, roots.workspaceId, storyId)).filter((story) => story !== undefined)
     : [];
-  for (const story of storyReads) {
-    if (story.evidenceRoot === undefined || story.evidenceFingerprint === undefined) continue;
-    if (scanEvidence(story.evidenceRoot).fingerprint !== story.evidenceFingerprint) {
-      return fail("concurrent_rebuild", "Issue evidence changed during Requirement attest rebuild");
-    }
+  deps.beforeIssueRevalidation?.();
+  const storyReadsAfter = auditBefore.status === "healthy"
+    ? manifest.stories.map((storyId) => readStory(roots.workspaceRoot, roots.workspaceId, storyId)).filter((story) => story !== undefined)
+    : [];
+  if (storyReadSignature(storyReadsAfter) !== storyReadSignature(storyReads)) {
+    return fail("concurrent_rebuild", "Issue completion or evidence changed during Requirement attest rebuild");
   }
   const auditAfter = auditRequirementArchive(input);
   if (JSON.stringify(auditAfter) !== JSON.stringify(auditBefore)) {
@@ -299,7 +321,7 @@ export function rebuildRequirementAttest(input: RequirementAttestStoreInput): Re
   const projection = renderFinalRequirementAttest({
     manifest,
     archiveAudit: auditAfter,
-    stories: storyReads.map((story) => story.story),
+    stories: storyReadsAfter.map((story) => story.story),
   });
   const path = join(roots.requirementRoot, "attest.md");
   atomicWrite(path, projection.content);

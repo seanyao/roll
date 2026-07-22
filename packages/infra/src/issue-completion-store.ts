@@ -3,7 +3,9 @@ import { join } from "node:path";
 import {
   ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
   REPOSITORY_MERGE_EVIDENCE_RECORDED,
+  integrationAcceptanceCommandDigest,
   isImmutableGitObjectId,
+  isSafeIssueEvidencePath,
   parseIssueManifest,
   type IssueIntegrationAcceptanceEvidence,
   type IssueIntegrationAcceptanceEvidenceRecordedEvent,
@@ -48,6 +50,18 @@ function assertRepositoryIssueIdentity(manifest: IssueManifest, evidence: Reposi
 function assertAcceptanceIssueIdentity(manifest: IssueManifest, evidence: IssueIntegrationAcceptanceEvidence): void {
   if (evidence.workspaceId !== manifest.workspaceId || evidence.storyId !== manifest.storyId) {
     throw new IssueCompletionEvidenceError("integration acceptance evidence does not match the Issue identity");
+  }
+  if (manifest.integrationAcceptance === undefined ||
+    evidence.commandDigest !== integrationAcceptanceCommandDigest(manifest.integrationAcceptance.command)) {
+    throw new IssueCompletionEvidenceError("integration acceptance command identity does not match the Issue manifest");
+  }
+  const expectedRepoIds = manifest.repositories
+    .filter((repository) => repository.requiredDelivery)
+    .map((repository) => repository.repoId)
+    .sort();
+  const actualRepoIds = Object.keys(evidence.inputMergeCommits).sort();
+  if (JSON.stringify(actualRepoIds) !== JSON.stringify(expectedRepoIds)) {
+    throw new IssueCompletionEvidenceError("integration acceptance merge inputs do not match the required repository set");
   }
 }
 
@@ -234,8 +248,7 @@ function validateAcceptanceEvent(raw: unknown): IssueIntegrationAcceptanceEviden
     throw new IssueCompletionEvidenceError("integration acceptance profile is invalid");
   }
   const artifactPath = requireString(value["artifactPath"], "integration acceptance artifactPath");
-  if (!artifactPath.startsWith("evidence/") || artifactPath.includes("\\") ||
-    artifactPath.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
+  if (!isSafeIssueEvidencePath(artifactPath)) {
     throw new IssueCompletionEvidenceError("integration acceptance artifactPath must remain under evidence/");
   }
   return {

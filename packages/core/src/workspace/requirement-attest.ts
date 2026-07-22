@@ -1,7 +1,8 @@
-import type {
-  IssueCompletionState,
-  RequirementArchiveAudit,
-  RequirementSourceManifest,
+import {
+  isSafeIssueEvidencePath,
+  type IssueCompletionState,
+  type RequirementArchiveAudit,
+  type RequirementSourceManifest,
 } from "@roll/spec";
 
 export interface RequirementAttestStory {
@@ -28,17 +29,12 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function safeEvidencePath(path: string): boolean {
-  if (!path.startsWith("evidence/") || path.includes("\\")) return false;
-  return path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
-}
-
 function validateStories(stories: readonly RequirementAttestStory[]): void {
   const seen = new Set<string>();
   for (const story of stories) {
     if (seen.has(story.storyId)) throw new RequirementAttestError(`duplicate Requirement Story ${story.storyId}`);
     seen.add(story.storyId);
-    if (story.evidencePaths.some((path) => !safeEvidencePath(path))) {
+    if (story.evidencePaths.some((path) => !isSafeIssueEvidencePath(path))) {
       throw new RequirementAttestError(`unsafe Issue evidence path for ${story.storyId}`);
     }
   }

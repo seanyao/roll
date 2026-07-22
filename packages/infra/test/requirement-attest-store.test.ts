@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { integrationAcceptanceCommandDigest } from "@roll/spec";
 import {
   appendIssueIntegrationAcceptanceEvidence,
   appendRepositoryMergeEvidence,
@@ -103,7 +104,7 @@ function deliver(workspace: string, storyId: keyof typeof MERGES): string {
     workspaceId: WORKSPACE,
     storyId,
     inputMergeCommits: { [REPO]: MERGES[storyId] },
-    commandDigest: "c".repeat(64),
+    commandDigest: integrationAcceptanceCommandDigest(["pnpm", "test:integration"]),
     profile: "workspace-integration/v1",
     verdict: "pass",
     artifactPath: "evidence/integration/result.txt",
@@ -177,6 +178,19 @@ describe("US-WS-014 Requirement attest store", () => {
     expect(readFileSync(join(f.requirementPath, "attest.md"), "utf8")).toBe(before);
   });
 
+  it("rejects evidence filenames that could escape the generated Markdown link", () => {
+    const f = fixture();
+    const issue = deliver(f.workspace, "US-A");
+    deliver(f.workspace, "US-B");
+    write(join(issue, "evidence", "bad](https:", "payload.txt"), "unsafe\n");
+
+    expect(() => rebuildRequirementAttest({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      requirementId: f.requirementId,
+    })).toThrowError(expect.objectContaining<Partial<RequirementAttestStoreError>>({ code: "unsafe_issue_evidence" }));
+  });
+
   it("rejects a contained Issue whose manifest and events belong to another Workspace", () => {
     const f = fixture();
     const issue = deliver(f.workspace, "US-A");
@@ -197,6 +211,32 @@ describe("US-WS-014 Requirement attest store", () => {
       provider: "jira",
       requirementId: f.requirementId,
     })).toThrowError(expect.objectContaining<Partial<RequirementAttestStoreError>>({ code: "invalid_issue_evidence" }));
+  });
+
+  it("refuses a stale projection when Issue completion truth changes during rebuild", () => {
+    const f = fixture();
+    const issue = deliver(f.workspace, "US-A");
+    deliver(f.workspace, "US-B");
+    const before = readFileSync(join(f.requirementPath, "attest.md"), "utf8");
+
+    expect(() => rebuildRequirementAttest({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      requirementId: f.requirementId,
+    }, {
+      beforeIssueRevalidation: () => appendRepositoryMergeEvidence(issue, {
+        workspaceId: WORKSPACE,
+        storyId: "US-A",
+        repoId: REPO,
+        cycleId: "cycle-US-A-new-merge",
+        authority: "provider",
+        prState: "MERGED",
+        ci: "green",
+        mergeCommit: "d".repeat(40),
+        recordedAt: 3,
+      }),
+    })).toThrowError(expect.objectContaining<Partial<RequirementAttestStoreError>>({ code: "concurrent_rebuild" }));
+    expect(readFileSync(join(f.requirementPath, "attest.md"), "utf8")).toBe(before);
   });
 
   it("refuses final PASS when archive audit is corrupt and names the original blocking finding", () => {

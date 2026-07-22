@@ -1,5 +1,10 @@
-import { createHash } from "node:crypto";
-import { isImmutableGitObjectId, type IssueIntegrationAcceptanceEvidence } from "@roll/spec";
+import {
+  integrationAcceptanceCommandDigest,
+  isImmutableGitObjectId,
+  isSafeGitRef,
+  isSafeIssueEvidencePath,
+  type IssueIntegrationAcceptanceEvidence,
+} from "@roll/spec";
 
 export interface IntegrationAcceptanceRepository {
   readonly repoId: string;
@@ -54,11 +59,6 @@ function safeLabel(value: string): boolean {
   return value !== "" && value === value.trim() && !/[\x00-\x1f\x7f]/u.test(value);
 }
 
-function safeArtifactPath(value: string): boolean {
-  if (!value.startsWith("evidence/") || value.includes("\\")) return false;
-  return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
-}
-
 function validateInput(input: IntegrationAcceptanceInput): void {
   if (!safeLabel(input.workspaceId) || !safeLabel(input.storyId)) {
     throw new IntegrationAcceptanceError("integration acceptance identity is invalid");
@@ -70,7 +70,7 @@ function validateInput(input: IntegrationAcceptanceInput): void {
     throw new IntegrationAcceptanceError("integration acceptance command is invalid");
   }
   if (!safeLabel(input.profile)) throw new IntegrationAcceptanceError("integration acceptance profile is invalid");
-  if (!safeArtifactPath(input.artifactPath)) {
+  if (!isSafeIssueEvidencePath(input.artifactPath)) {
     throw new IntegrationAcceptanceError("integration acceptance artifact path must remain under evidence/");
   }
   if (!Number.isFinite(input.recordedAt)) {
@@ -78,7 +78,7 @@ function validateInput(input: IntegrationAcceptanceInput): void {
   }
   const repoIds = new Set<string>();
   for (const repository of input.repositories) {
-    if (!safeLabel(repository.repoId) || !safeLabel(repository.integrationBranch)) {
+    if (!/^[a-z][a-z0-9-]*$/u.test(repository.repoId) || !isSafeGitRef(repository.integrationBranch)) {
       throw new IntegrationAcceptanceError("integration acceptance repository identity is invalid");
     }
     if (repoIds.has(repository.repoId)) {
@@ -86,10 +86,6 @@ function validateInput(input: IntegrationAcceptanceInput): void {
     }
     repoIds.add(repository.repoId);
   }
-}
-
-function commandDigest(command: readonly string[]): string {
-  return createHash("sha256").update(JSON.stringify(command)).digest("hex");
 }
 
 function exactMergeMap(repositories: readonly IntegrationAcceptanceRepository[]): Readonly<Record<string, string>> {
@@ -109,7 +105,7 @@ function evidence(
     workspaceId: input.workspaceId,
     storyId: input.storyId,
     inputMergeCommits,
-    commandDigest: commandDigest(input.command),
+    commandDigest: integrationAcceptanceCommandDigest(input.command),
     profile: input.profile,
     verdict,
     artifactPath: input.artifactPath,

@@ -9,7 +9,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { deltaCommand } from "../src/commands/delta.js";
+import { deltaCommand, injectValidator } from "../src/commands/delta.js";
 import { renderState } from "../src/render.js";
 
 // ── Temp project fixture ─────────────────────────────────────────────────────
@@ -328,6 +328,28 @@ describe("US-DELTA-003 — crash marker and recovery", () => {
     expect(result.uncommittedFrames[0].delegationId).toBe(delegationId);
   });
 
+  it("prepare then status --story shows zero uncommittedFrames (BLOCK-1: no false orphans)", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPHAN3", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ORPHAN3", "local-preset");
+
+    // Normal prepare: marker + events both written
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-ORPHAN3",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+
+    // status --story must NOT show any uncommittedFrames because delegation is committed
+    const r2 = tsRunCwd(["status", "--story", "US-DELTA-ORPHAN3", "--json"], dir);
+    expect(r2.code).toBe(0);
+    const result = JSON.parse(r2.stdout);
+    // Either no uncommittedFrames key or an empty array — commited delegations are not orphans
+    const uf = result.uncommittedFrames;
+    expect(uf === undefined || (Array.isArray(uf) && uf.length === 0)).toBe(true);
+  });
+
   it("prepare never adopts an orphan frame", () => {
     const dir = setupMinimalProject("US-DELTA-ORPHAN2", "delta-team");
 
@@ -430,6 +452,130 @@ describe("US-DELTA-003 — validate plumbing", () => {
     expect(r.code).toBe(1);
     const err = JSON.parse(r.stderr);
     expect(err.error).toBe("missing_required");
+  });
+
+  it("validate block appends delta:blocked event and retains lease (BLOCK-3)", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL3", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL3", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-VAL3",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Count events before validate
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    // Validate without creating the stage artifact — should block
+    const r2 = tsRunCwd([
+      "validate", "--delegation", delegationId,
+      "--stage", "designer", "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+
+    // Verify delta:blocked event was appended
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+
+    const lastEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+    expect(lastEvent.type).toBe("delta:blocked");
+    expect(lastEvent.delegationId).toBe(delegationId);
+    expect(lastEvent.reason).toBe("artifact_invalid");
+    expect(lastEvent.role).toBe("designer");
+
+    // Lease must be retained (not released by validate)
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-VAL3.json");
+    expect(existsSync(leasePath)).toBe(true);
+  });
+
+  it("validate allow appends delta:artifact_published event (BLOCK-3)", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL4", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL4", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-VAL4",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const parsed = JSON.parse(r1.stdout);
+    const delegationId = parsed.delegationId;
+
+    // Create the stage artifact directory so validation passes
+    const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-VAL4",
+      `delta-${delegationId}`, "role-artifacts", "designer");
+    mkdirSync(stageDir, { recursive: true });
+
+    // Count events before validate
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    // Validate should pass
+    const r2 = tsRunCwd([
+      "validate", "--delegation", delegationId,
+      "--stage", "designer", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+    const result = JSON.parse(r2.stdout);
+    expect(result.verdict).toBe("allow");
+
+    // Verify delta:artifact_published event was appended
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+
+    const lastEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+    expect(lastEvent.type).toBe("delta:artifact_published");
+    expect(lastEvent.delegationId).toBe(delegationId);
+    expect(lastEvent.role).toBe("designer");
+    expect(lastEvent.identityProvenance).toBe("host-attested");
+  });
+
+  it("validate invokes injected validator seam (BLOCK-3)", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL5", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL5", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-VAL5",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Inject a validator that always blocks with a custom reason
+    let calledWithDelegationId = "";
+    let calledWithStage = "";
+    injectValidator((did: string, s: string, _fd: string) => {
+      calledWithDelegationId = did;
+      calledWithStage = s;
+      return { ok: false, reason: "host_supervisor_required", detail: "test injected block", role: s };
+    });
+
+    try {
+      const r2 = tsRunCwd([
+        "validate", "--delegation", delegationId,
+        "--stage", "builder", "--json",
+      ], dir);
+      expect(r2.code).toBe(1);
+      expect(calledWithDelegationId).toBe(delegationId);
+      expect(calledWithStage).toBe("builder");
+
+      // Verify custom block event was appended
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      const events = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+      const lastEvent = JSON.parse(events[events.length - 1]!);
+      expect(lastEvent.type).toBe("delta:blocked");
+      expect(lastEvent.reason).toBe("host_supervisor_required");
+    } finally {
+      injectValidator(null);
+    }
   });
 });
 

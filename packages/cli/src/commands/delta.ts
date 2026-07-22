@@ -48,13 +48,11 @@ function T(key: string, ...args: Array<string | number>): string {
 type ParsedArgs = {
   positional: string[];
   flags: Record<string, string | true>;
-  unknownFlags: string[];
 };
 
 function parseArgs(args: string[]): ParsedArgs {
   const positional: string[] = [];
   const flags: Record<string, string | true> = {};
-  const unknownFlags: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
@@ -80,7 +78,7 @@ function parseArgs(args: string[]): ParsedArgs {
     }
   }
 
-  return { positional, flags, unknownFlags };
+  return { positional, flags };
 }
 
 // ── Enum validation ──────────────────────────────────────────────────────────
@@ -309,6 +307,43 @@ function prepareCommand(args: string[]): number {
   }
 }
 
+// ── Validator seam ────────────────────────────────────────────────────────────
+
+/** Result from the thin protocol-validator boundary. */
+export interface ValidatorResult {
+  ok: boolean;
+  reason?: string;
+  detail?: string;
+  role?: string;
+}
+
+/** Narrow validator interface — tests inject, production uses the default stub. */
+export type DeltaProtocolValidator = (
+  delegationId: string,
+  stage: string,
+  frameDir: string,
+) => ValidatorResult;
+
+let _injectedValidator: DeltaProtocolValidator | null = null;
+
+/** Inject a validator for testing. Call with null to reset to default. */
+export function injectValidator(v: DeltaProtocolValidator | null): void {
+  _injectedValidator = v;
+}
+
+function defaultValidator(_delegationId: string, _stage: string, frameDir: string): ValidatorResult {
+  const stageArtifactPath = join(frameDir, "role-artifacts", _stage);
+  if (!existsSync(stageArtifactPath)) {
+    return {
+      ok: false,
+      reason: "artifact_invalid",
+      detail: `Stage artifact not found for role '${_stage}' at ${stageArtifactPath}`,
+      role: _stage,
+    };
+  }
+  return { ok: true };
+}
+
 // ── Validate ─────────────────────────────────────────────────────────────────
 
 function validateCommand(args: string[]): number {
@@ -416,27 +451,55 @@ function validateCommand(args: string[]): number {
     return 1;
   }
 
-  // Stage artifact at prescribed path (host writes it before validate)
-  const stageArtifactPath = join(frameDir, "role-artifacts", stage);
-  if (!existsSync(stageArtifactPath)) {
-    const msg = `Stage artifact not found for role '${stage}' at ${stageArtifactPath}`;
+  // Invoke the validator (injectable for testing, default is thin artifact-existence check)
+  const validator = _injectedValidator ?? defaultValidator;
+  const result = validator(delegationId, stage, frameDir);
+  const now = Date.now();
+
+  if (!result.ok) {
+    // Block: append delta:blocked event, return non-zero
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      role: stage,
+      reason: result.reason as import("@roll/spec").DeltaBlockReason,
+      detail: result.detail ?? "",
+      ts: now,
+    });
+
     if (json) {
       process.stderr.write(JSON.stringify({
         ok: false,
-        error: "artifact_invalid",
-        detail: msg,
+        error: result.reason ?? "blocked",
+        detail: result.detail,
         role: stage,
       }) + "\n");
     } else {
-      process.stderr.write(`${msg}\n`);
+      process.stderr.write(`${result.detail ?? result.reason}\n`);
     }
     return 1;
   }
 
-  // Thin validator interface — allow for US-003 (deep rules are US-004)
-  // In a full implementation, this would invoke the injected validator.
-  // For US-003, admission check passes if the stage artifact exists.
-  const now = Date.now();
+  // Allow: append lifecycle event (delta:artifact_published for US-003 thin validator)
+  // Find the matching role_resolved event for hostId/modelId/roleInstanceId
+  const roleResolved = delegationEvents.find(
+    (e) => e.type === "delta:role_resolved" && (e as Record<string, unknown>).role === stage,
+  ) as Record<string, unknown> | undefined;
+
+  bus.appendEvent(eventsPath, {
+    type: "delta:artifact_published",
+    delegationId,
+    storyId,
+    role: stage,
+    path: join(frameDir, "role-artifacts", stage),
+    sha256: "", // US-004 will compute real digest
+    manifestPath: "", // US-004 will populate manifest
+    sessionId: "host-native",
+    roleInstanceId: (roleResolved?.roleInstanceId as string) ?? "",
+    identityProvenance: "host-attested" as const,
+    ts: now,
+  });
 
   if (json) {
     process.stdout.write(JSON.stringify({
@@ -599,20 +662,20 @@ function statusCommand(args: string[]): number {
   const bus = new EventBus();
   const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
 
-  // Detect orphan frames
+  // Read events for projection
+  const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
+
+  // Detect orphan frames (folds events to avoid false positives)
   const orphans: Array<{ delegationId: string; frameDir: string }> = [];
 
   if (storyId && typeof storyId === "string") {
     // Check for orphan frames for this story
     const cardDir = resolveExistingUniqueCardArchiveDir(cwd, storyId);
     if (cardDir) {
-      const detected = detectOrphanFrames(cardDir);
+      const detected = detectOrphanFrames(cardDir, events);
       orphans.push(...detected);
     }
   }
-
-  // Read events for projection
-  const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
 
   // If we have a delegationId, project it
   let statusView: ReturnType<typeof projectDelegationStatus> | null = null;

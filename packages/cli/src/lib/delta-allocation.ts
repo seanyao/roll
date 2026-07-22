@@ -388,10 +388,19 @@ export interface OrphanFrameInfo {
 }
 
 /**
- * Detect uncommitted delegation frames (marker with no matching event).
+ * Detect uncommitted delegation frames (marker with no matching `delta:prepared` event).
+ * Supply the event stream so committed delegations are not falsely reported.
  */
-export function detectOrphanFrames(cardDir: string): OrphanFrameInfo[] {
+export function detectOrphanFrames(cardDir: string, events: readonly { type: string; delegationId?: string }[]): OrphanFrameInfo[] {
   if (!existsSync(cardDir)) return [];
+
+  // Build the set of delegationIds that have a matching `delta:prepared` event
+  const committedIds = new Set<string>();
+  for (const ev of events) {
+    if (ev.type === "delta:prepared" && ev.delegationId) {
+      committedIds.add(ev.delegationId);
+    }
+  }
 
   const orphans: OrphanFrameInfo[] = [];
 
@@ -402,7 +411,8 @@ export function detectOrphanFrames(cardDir: string): OrphanFrameInfo[] {
       const frameDir = join(cardDir, entry.name);
       const markerPath = join(frameDir, "delegation-open.json");
 
-      if (existsSync(markerPath)) {
+      // Only report if marker exists AND no matching `delta:prepared` event
+      if (existsSync(markerPath) && !committedIds.has(delegationId)) {
         orphans.push({ delegationId, frameDir, markerPath });
       }
     }

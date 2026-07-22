@@ -220,16 +220,6 @@ export interface GitExecutionOptions {
   readonly timeoutMs?: number;
 }
 
-/** Full-length hex object ids this build of Roll treats as immutable Git
- *  object ids — SHA-1 (40 hex) or SHA-256 (64 hex), lowercase only. Every
- *  repository cache this code creates is initialized by THIS code (`git init
- *  --bare`) using the machine's git default (SHA-1 unless
- *  `init.defaultObjectFormat=sha256` is set), but the existing repository
- *  cache contract (see repository-cache.ts's baseSha resolution) already
- *  accepts both lengths, so this shared gate matches that established
- *  contract rather than narrowing it. */
-const GIT_OBJECT_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
-
 /** True only for a full, lowercase-hex Git object id — NEVER a ref name, a
  *  short/abbreviated SHA, or any other rev-parse-able expression. This is the
  *  ONE shared gate for every "immutable baseSha" this codebase persists or
@@ -242,9 +232,7 @@ const GIT_OBJECT_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
  *  under an Issue every time that ref moves, defeating the entire pinning
  *  contract. Checking the STRING shape first, independent of and prior to any
  *  git call, is what actually enforces immutability. */
-export function isImmutableGitObjectId(value: string): boolean {
-  return GIT_OBJECT_ID_RE.test(value);
-}
+export { isImmutableGitObjectId } from "@roll/spec";
 
 /**
  * Run `git <args>` in `cwd`. Never throws on non-zero exit — returns the code

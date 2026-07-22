@@ -129,6 +129,21 @@ describe("US-WS-013 Issue completion state matrix", () => {
       }],
     }))).toMatchObject({ state: "integration_pending" });
   });
+
+  it("rejects a ref-like provider merge value even when acceptance repeats the same mutable value", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [provider(API, "MERGED", { mergeCommit: "main" })],
+      integrationAcceptances: [{
+        workspaceId: WS,
+        storyId: STORY,
+        inputMergeCommits: { [API]: "main" },
+        verdict: "pass",
+        artifactPath: "evidence/invalid-ref.txt",
+        recordedAt: 2,
+      }],
+    }))).toMatchObject({ state: "blocked", conflicts: [{ repoId: API, code: "invalid_merge_evidence" }] });
+  });
 });
 
 describe("US-WS-013 repository fact authority and rebuild", () => {

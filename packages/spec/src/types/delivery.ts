@@ -163,6 +163,12 @@ export type RepositoryMergeAuthority = "provider" | "integration_branch" | "proj
 export type RepositoryProviderPrState = "OPEN" | "MERGED" | "CLOSED" | "UNKNOWN";
 export type RepositoryProviderCiState = "green" | "red" | "pending" | "unknown";
 
+const IMMUTABLE_GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+
+export function isImmutableGitObjectId(value: string): boolean {
+  return IMMUTABLE_GIT_OBJECT_ID.test(value);
+}
+
 interface RepositoryMergeEvidenceIdentity {
   readonly workspaceId: string;
   readonly storyId: string;

@@ -1,9 +1,10 @@
-import type {
-  IssueCompletionConflict,
-  IssueCompletionProjection,
-  IssueIntegrationAcceptanceEvidence,
-  IssueRepositoryCompletion,
-  RepositoryMergeEvidence,
+import {
+  isImmutableGitObjectId,
+  type IssueCompletionConflict,
+  type IssueCompletionProjection,
+  type IssueIntegrationAcceptanceEvidence,
+  type IssueRepositoryCompletion,
+  type RepositoryMergeEvidence,
 } from "@roll/spec";
 
 export interface IssueCompletionRepositoryTarget {
@@ -56,13 +57,13 @@ function resolveRepository(repoId: string, facts: readonly RepositoryMergeEviden
 
   const providerMerges = providers.filter((fact) => fact.prState === "MERGED");
   const mergeCommits = new Set(providerMerges.map((fact) => fact.mergeCommit).filter((sha): sha is string => sha !== undefined && sha !== ""));
-  if (providerMerges.some((fact) => fact.mergeCommit === undefined || fact.mergeCommit === "")) {
+  if (providerMerges.some((fact) => fact.mergeCommit === undefined || !isImmutableGitObjectId(fact.mergeCommit))) {
     conflicts.push(conflict(repoId, "invalid_merge_evidence"));
   }
   if (mergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));
   const reachableBranches = branches.filter((fact) => fact.reachable);
   const branchMergeCommits = new Set(reachableBranches.map((fact) => fact.mergeCommit).filter((sha): sha is string => sha !== undefined && sha !== ""));
-  if (reachableBranches.some((fact) => fact.mergeCommit === undefined || fact.mergeCommit === "")) {
+  if (reachableBranches.some((fact) => fact.mergeCommit === undefined || !isImmutableGitObjectId(fact.mergeCommit))) {
     conflicts.push(conflict(repoId, "invalid_merge_evidence"));
   }
   if (branchMergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));

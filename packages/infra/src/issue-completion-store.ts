@@ -3,12 +3,12 @@ import { join } from "node:path";
 import {
   ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
   REPOSITORY_MERGE_EVIDENCE_RECORDED,
+  isImmutableGitObjectId,
   type IssueIntegrationAcceptanceEvidence,
   type IssueIntegrationAcceptanceEvidenceRecordedEvent,
   type RepositoryMergeEvidence,
   type RepositoryMergeEvidenceRecordedEvent,
 } from "@roll/spec";
-import { isImmutableGitObjectId } from "./git.js";
 import { appendIssueEventAtomically } from "./issue-worktrees.js";
 
 export interface IssueCompletionEvidenceCollection {

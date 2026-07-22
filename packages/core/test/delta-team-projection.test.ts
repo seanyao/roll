@@ -132,7 +132,7 @@ describe("US-DELTA-001 AC9 — Deterministic status projection", () => {
         role: "builder",
         roleInstanceId: "ri-b1",
         hostId: "pi",
-        modelId: "sonnet",
+        modelId: "model-host-1",
         source: "preset-preference",
         reasons: ["coding"],
         inventorySha256: "def",
@@ -146,7 +146,7 @@ describe("US-DELTA-001 AC9 — Deterministic status projection", () => {
       role: "builder",
       status: "resolved",
       hostId: "pi",
-      modelId: "sonnet",
+      modelId: "model-host-1",
       cost: HOST_UNOBSERVABLE_COST,
     });
   });
@@ -173,7 +173,7 @@ describe("US-DELTA-001 AC9 — Deterministic status projection", () => {
         role: "designer",
         roleInstanceId: "ri-d1",
         hostId: "pi",
-        modelId: "opus",
+        modelId: "model-host-2",
         source: "preset-preference",
         reasons: ["reasoning"],
         inventorySha256: "def",
@@ -187,7 +187,7 @@ describe("US-DELTA-001 AC9 — Deterministic status projection", () => {
         sessionId: "s1",
         roleInstanceId: "ri-d1",
         hostId: "pi",
-        modelId: "opus",
+        modelId: "model-host-2",
         identityProvenance: "host-attested",
         worktreeAccess: "read-only",
         ts: 3,
@@ -225,7 +225,7 @@ describe("US-DELTA-001 AC9 — Deterministic status projection", () => {
         role: "builder",
         roleInstanceId: "ri-b1",
         hostId: "pi",
-        modelId: "sonnet",
+        modelId: "model-host-3",
         source: "preset-preference",
         reasons: ["coding"],
         inventorySha256: "def",
@@ -467,6 +467,32 @@ describe("US-DELTA-001 AC9 — Status fixtures cover all modes", () => {
     for (const scenario of scenarios) {
       const f = buildStatusFixture(scenario);
       for (const role of f.roles) {
+        expect(role.modelId).not.toMatch(realModelPatterns);
+      }
+    }
+  });
+
+  it("direct event fixture projections use opaque model IDs", () => {
+    const realModelPatterns = /^(claude|sonnet|opus|gpt-4|gpt-3\.5|gemini|llama|mistral|openai|anthropic|google|meta|deepseek|command|nova|titan|inflection)/i;
+    const paths: RollEvent[][] = [
+      [
+        { type: "delta:prepared", delegationId: "d-a1", runId: "delta-a1", storyId: "US-TEST-1", trigger: "host-guided", topology: "solo", qualityProfile: "standard", presetId: "p1", presetSha256: "abc", hostId: "pi", ts: 1 },
+        { type: "delta:role_resolved", delegationId: "d-a1", storyId: "US-TEST-1", role: "builder", roleInstanceId: "ri-b1", hostId: "pi", modelId: "model-host-1", source: "preset-preference", reasons: ["coding"], inventorySha256: "def", ts: 2 },
+      ],
+      [
+        { type: "delta:prepared", delegationId: "d-a2", runId: "delta-a2", storyId: "US-TEST-2", trigger: "host-guided", topology: "delta-team", qualityProfile: "verified", presetId: "p1", presetSha256: "abc", hostId: "pi", ts: 1 },
+        { type: "delta:role_resolved", delegationId: "d-a2", storyId: "US-TEST-2", role: "designer", roleInstanceId: "ri-d1", hostId: "pi", modelId: "model-host-2", source: "preset-preference", reasons: ["reasoning"], inventorySha256: "def", ts: 2 },
+        { type: "delta:role_started", delegationId: "d-a2", storyId: "US-TEST-2", role: "designer", sessionId: "s1", roleInstanceId: "ri-d1", hostId: "pi", modelId: "model-host-2", identityProvenance: "host-attested", worktreeAccess: "read-only", ts: 3 },
+      ],
+      [
+        { type: "delta:prepared", delegationId: "d-a3", runId: "delta-a3", storyId: "US-TEST-3", trigger: "host-guided", topology: "solo", qualityProfile: "standard", presetId: "p1", presetSha256: "abc", hostId: "pi", ts: 1 },
+        { type: "delta:role_resolved", delegationId: "d-a3", storyId: "US-TEST-3", role: "builder", roleInstanceId: "ri-b1", hostId: "pi", modelId: "model-host-3", source: "preset-preference", reasons: ["coding"], inventorySha256: "def", ts: 2 },
+        { type: "delta:artifact_published", delegationId: "d-a3", storyId: "US-TEST-3", role: "builder", path: "execute-evidence.md", sha256: "ghi", manifestPath: "artifact-manifest.json", sessionId: "s1", roleInstanceId: "ri-b1", identityProvenance: "host-attested", ts: 3 },
+      ],
+    ];
+    for (const events of paths) {
+      const view = projectDelegationStatus(events[0].delegationId, events);
+      for (const role of view.roles) {
         expect(role.modelId).not.toMatch(realModelPatterns);
       }
     }

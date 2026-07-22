@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### 新功能
+- Workspace 多仓 Story 的集成验收现在绑定每个 required repository 的 exact merge SHA，并先验证该 SHA 可从配置的 integration branch 到达；Requirement `attest.md` 只从安全包含的 Issue evidence 重建，旧 SHA、缺失证据、符号链接逃逸或损坏/不可信的 Requirement archive 都不能产生最终通过（US-WS-014）[core+infra]
+
 ### 稳定性
 - 临时 Git 不再污染主检出（FIX-1473）[loop]
   <!-- evidence: .roll/features/loop-engine/FIX-1473/latest/FIX-1473-report.html -->

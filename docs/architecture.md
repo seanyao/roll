@@ -214,6 +214,23 @@ building ──attest earned──► publishable ──push+PR──► awaitin
 
 合并入 main 才算交付。PR 已开、CI 已绿、agent 声称完成都不算——事后对账，只认 main 上真实的 merge commit。main 是唯一交付真相；reconcile 只把真相投影回 cycle 行。
 
+#### Workspace 多仓 Issue 与 Requirement 证明
+
+Workspace 中一个 Story 可以要求多个 repository 独立交付，但这些 repository 不形成新的
+Delivery Set 实体；它们仍是同一个 Issue 的交付事实。每条 required repository leg 先产生
+provider 或 integration-branch 强 merge evidence，Issue 只有在全部 leg 已合并、每个 exact
+merge SHA 都能从该 repository 配置的 integration branch 到达，并且同一组 SHA 上的
+Integration Acceptance 通过后才派生为 `delivered`。验收 evidence 同时记录 command digest、
+profile、artifact path 与时间；branch label、pre-merge HEAD、旧 Story 同名证据和 generated
+projection 都不能替代 exact-SHA 证明。任一 merge SHA 变化会使旧验收立即失效。
+
+Requirement `attest.md` 是可删除、可重建的只读 projection，不是 Issue authority。重建阶段才会
+读取 `issues/<story>/evidence`：路径必须保持在对应 Issue 的真实 `evidence/` 目录内，任何 symlink、
+special file、foreign Workspace identity 或并发变化都会 fail-loud，原 evidence 不被复制、移动或
+嵌入。缺失 Issue/evidence 必须以 pending 呈现，不能静默省略 Story；Requirement archive audit
+只要报告 `corrupt` 或 `untrusted`，最终 attestation 就保持 blocked 并原样列出 finding。重建或删除
+`attest.md` 永远不写 Issue manifest/events，因此不能改变 Story completion truth。
+
 ### BC5 · 演化
 
 追踪一个 Story 的完整生长过程。每一次 TCR 微提交、每一次回退都可追溯。支持对比不同 agent 对同一 Story 的实现，支持回退到任意历史节点。

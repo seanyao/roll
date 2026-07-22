@@ -188,6 +188,16 @@ export function projectDelegationStatus(
   }
 
   view.roles = [...roleMap.values()];
+
+  // Compute totalCost dynamically: host-guided always unobservable;
+  // adapter-observed roles reflect usage_authority_unavailable.
+  const hasAdapterObserved = view.roles.some(
+    (r) => r.identityProvenance === "adapter-observed",
+  );
+  view.totalCost = hasAdapterObserved
+    ? "? (usage_authority_unavailable)"
+    : HOST_UNOBSERVABLE_COST;
+
   return view as DelegationStatusView;
 }
 
@@ -221,7 +231,7 @@ export function buildStatusFixture(
         topology: "solo",
         qualityProfile: "standard",
         roles: [
-          { role: "builder", status: "artifact_published", hostId: "adapter", modelId: "claude-sonnet", identityProvenance: "adapter-observed", cost: "? (usage_authority_unavailable)" },
+          { role: "builder", status: "artifact_published", hostId: "adapter", modelId: "model-adapter-1", identityProvenance: "adapter-observed", cost: "? (usage_authority_unavailable)" },
         ],
         totalCost: "? (usage_authority_unavailable)",
       };
@@ -237,9 +247,9 @@ export function buildStatusFixture(
         terminalBinding: "handoff_only",
         deliveryDisposition: "owner_continue",
         roles: [
-          { role: "designer", status: "artifact_published", hostId: "host-1", modelId: "opus", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
-          { role: "builder", status: "artifact_published", hostId: "host-2", modelId: "sonnet", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
-          { role: "evaluator", status: "artifact_published", hostId: "host-3", modelId: "terra", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "designer", status: "artifact_published", hostId: "host-1", modelId: "model-host-1", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "builder", status: "artifact_published", hostId: "host-2", modelId: "model-host-2", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "evaluator", status: "artifact_published", hostId: "host-3", modelId: "model-host-3", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
         ],
         totalCost: "? (host_unobservable)",
       };
@@ -253,9 +263,9 @@ export function buildStatusFixture(
         topology: "delta-team",
         qualityProfile: "verified",
         roles: [
-          { role: "designer", status: "artifact_published", hostId: "pi", modelId: "opus", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
-          { role: "builder", status: "started", hostId: "pi", modelId: "sonnet", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
-          { role: "evaluator", status: "resolved", hostId: "pi", modelId: "terra", cost: "? (host_unobservable)" },
+          { role: "designer", status: "artifact_published", hostId: "pi", modelId: "model-host-1", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "builder", status: "started", hostId: "pi", modelId: "model-host-2", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "evaluator", status: "resolved", hostId: "pi", modelId: "model-host-3", cost: "? (host_unobservable)" },
         ],
         totalCost: "? (host_unobservable)",
       };
@@ -271,7 +281,7 @@ export function buildStatusFixture(
         terminalBinding: "handoff_only",
         deliveryDisposition: "owner_continue",
         roles: [
-          { role: "builder", status: "artifact_published", hostId: "pi", modelId: "sonnet", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
+          { role: "builder", status: "artifact_published", hostId: "pi", modelId: "model-host-2", identityProvenance: "host-attested", cost: "? (host_unobservable)" },
         ],
         totalCost: "? (host_unobservable)",
       };
@@ -287,7 +297,7 @@ export function buildStatusFixture(
         blockReason: "host_attestation_invalid",
         blockDetail: "host attestation missing or malformed for role builder",
         roles: [
-          { role: "builder", status: "resolved", hostId: "pi", modelId: "sonnet", cost: "? (host_unobservable)" },
+          { role: "builder", status: "resolved", hostId: "pi", modelId: "model-host-2", cost: "? (host_unobservable)" },
         ],
         totalCost: "? (host_unobservable)",
       };

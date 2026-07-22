@@ -460,4 +460,353 @@ describe("US-DELTA-001 AC9 — Status fixtures cover all modes", () => {
     const distinctKeys = fixtures.map((f) => `${f.status}:${f.visibleMode}`);
     expect(new Set(distinctKeys).size).toBe(fixtures.length);
   });
+
+  it("all fixtures use opaque model IDs, no real provider/model names", () => {
+    const scenarios = ["autonomous-loop", "full-delta-team", "delta-team", "solo-skill", "blocked"] as const;
+    const realModelPatterns = /^(claude|sonnet|opus|gpt-4|gpt-3\.5|gemini|llama|mistral|openai|anthropic|google|meta|deepseek|command|nova|titan|inflection)/i;
+    for (const scenario of scenarios) {
+      const f = buildStatusFixture(scenario);
+      for (const role of f.roles) {
+        expect(role.modelId).not.toMatch(realModelPatterns);
+      }
+    }
+  });
+});
+
+// ── Idempotent replay ─────────────────────────────────────────────────────────
+
+describe("US-DELTA-001 — Idempotent replay of projectDelegationStatus", () => {
+  const fullSequence: RollEvent[] = [
+    {
+      type: "delta:prepared",
+      delegationId: "d1",
+      runId: "delta-d1",
+      storyId: "US-REPLAY-1",
+      trigger: "host-guided",
+      topology: "full-delta-team",
+      qualityProfile: "designed",
+      presetId: "p1",
+      presetSha256: "abc",
+      hostId: "pi",
+      ts: 1,
+    },
+    {
+      type: "delta:role_resolved",
+      delegationId: "d1",
+      storyId: "US-REPLAY-1",
+      role: "designer",
+      roleInstanceId: "ri-d1",
+      hostId: "pi",
+      modelId: "model-host-1",
+      source: "preset-preference",
+      reasons: ["reasoning"],
+      inventorySha256: "def",
+      ts: 2,
+    },
+    {
+      type: "delta:role_started",
+      delegationId: "d1",
+      storyId: "US-REPLAY-1",
+      role: "designer",
+      sessionId: "s1",
+      roleInstanceId: "ri-d1",
+      hostId: "pi",
+      modelId: "model-host-1",
+      identityProvenance: "host-attested",
+      worktreeAccess: "read-only",
+      ts: 3,
+    },
+    {
+      type: "delta:artifact_published",
+      delegationId: "d1",
+      storyId: "US-REPLAY-1",
+      role: "designer",
+      path: "design.md",
+      sha256: "ghi",
+      manifestPath: "artifact-manifest.json",
+      sessionId: "s1",
+      roleInstanceId: "ri-d1",
+      identityProvenance: "host-attested",
+      ts: 4,
+    },
+    {
+      type: "delta:terminal",
+      delegationId: "d1",
+      storyId: "US-REPLAY-1",
+      outcome: "handoff_ready",
+      terminalBinding: "handoff_only",
+      deliveryDisposition: "owner_continue",
+      ts: 5,
+    },
+  ];
+
+  it("JSON serialization is stable across replays", () => {
+    const view1 = projectDelegationStatus("d1", fullSequence);
+    const view2 = projectDelegationStatus("d1", fullSequence);
+    expect(JSON.stringify(view1)).toBe(JSON.stringify(view2));
+  });
+
+  it("repeating identical input does not change status, roles, or cost", () => {
+    const view1 = projectDelegationStatus("d1", fullSequence);
+    const view2 = projectDelegationStatus("d1", fullSequence);
+    // Per-field assertions (not just structural deep-equal)
+    expect(view2.status).toBe(view1.status);
+    expect(view2.roles).toEqual(view1.roles);
+    expect(view2.totalCost).toBe(view1.totalCost);
+    // Full structural equality as final gate
+    expect(view2).toEqual(view1);
+  });
+
+  it("doubled event sequence yields identical projection as single run", () => {
+    const single = projectDelegationStatus("d1", fullSequence);
+    const doubled = projectDelegationStatus("d1", [
+      ...fullSequence,
+      ...fullSequence,
+    ]);
+    expect(doubled.status).toBe(single.status);
+    expect(doubled.roles).toEqual(single.roles);
+    expect(doubled.totalCost).toBe(single.totalCost);
+    expect(doubled).toEqual(single);
+  });
+
+  it("adapter-observed replay preserves usage_authority_unavailable cost label", () => {
+    const adapterSequence: RollEvent[] = [
+      {
+        type: "delta:prepared",
+        delegationId: "d2",
+        runId: "delta-d2",
+        storyId: "US-LOOP-1",
+        trigger: "loop-autonomous",
+        topology: "solo",
+        qualityProfile: "standard",
+        presetId: "p1",
+        presetSha256: "abc",
+        hostId: "adapter",
+        ts: 1,
+      },
+      {
+        type: "delta:role_resolved",
+        delegationId: "d2",
+        storyId: "US-LOOP-1",
+        role: "builder",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        source: "preset-preference",
+        reasons: ["coding"],
+        inventorySha256: "def",
+        ts: 2,
+      },
+      {
+        type: "delta:role_started",
+        delegationId: "d2",
+        storyId: "US-LOOP-1",
+        role: "builder",
+        sessionId: "s1",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        identityProvenance: "adapter-observed",
+        worktreeAccess: "read-only",
+        ts: 3,
+      },
+    ];
+    const v1 = projectDelegationStatus("d2", adapterSequence);
+    const v2 = projectDelegationStatus("d2", adapterSequence);
+    expect(v2.totalCost).toBe(v1.totalCost);
+    expect(v2.totalCost).toBe("? (usage_authority_unavailable)");
+    expect(v2).toEqual(v1);
+  });
+});
+
+// ── Cost label consistency ────────────────────────────────────────────────────
+
+describe("US-DELTA-001 — Cost label consistency", () => {
+  it("host-guided event sequence totalCost is always ? (host_unobservable)", () => {
+    const events: RollEvent[] = [
+      {
+        type: "delta:prepared",
+        delegationId: "d1",
+        runId: "delta-d1",
+        storyId: "US-COST-1",
+        trigger: "host-guided",
+        topology: "full-delta-team",
+        qualityProfile: "designed",
+        presetId: "p1",
+        presetSha256: "abc",
+        hostId: "pi",
+        ts: 1,
+      },
+      {
+        type: "delta:role_resolved",
+        delegationId: "d1",
+        storyId: "US-COST-1",
+        role: "designer",
+        roleInstanceId: "ri-d1",
+        hostId: "pi",
+        modelId: "model-host-1",
+        source: "preset-preference",
+        reasons: ["reasoning"],
+        inventorySha256: "def",
+        ts: 2,
+      },
+      {
+        type: "delta:role_started",
+        delegationId: "d1",
+        storyId: "US-COST-1",
+        role: "designer",
+        sessionId: "s1",
+        roleInstanceId: "ri-d1",
+        hostId: "pi",
+        modelId: "model-host-1",
+        identityProvenance: "host-attested",
+        worktreeAccess: "read-only",
+        ts: 3,
+      },
+      {
+        type: "delta:terminal",
+        delegationId: "d1",
+        storyId: "US-COST-1",
+        outcome: "handoff_ready",
+        terminalBinding: "handoff_only",
+        deliveryDisposition: "owner_continue",
+        ts: 4,
+      },
+    ];
+    const view = projectDelegationStatus("d1", events);
+    // totalCost must be host_unobservable
+    expect(view.totalCost).toBe("? (host_unobservable)");
+    // Every host-attested role must also be host_unobservable
+    for (const role of view.roles) {
+      expect(role.cost).toBe("? (host_unobservable)");
+    }
+  });
+
+  it("adapter-observed role cost is always ? (usage_authority_unavailable)", () => {
+    const events: RollEvent[] = [
+      {
+        type: "delta:prepared",
+        delegationId: "d2",
+        runId: "delta-d2",
+        storyId: "US-COST-2",
+        trigger: "loop-autonomous",
+        topology: "solo",
+        qualityProfile: "standard",
+        presetId: "p1",
+        presetSha256: "abc",
+        hostId: "adapter",
+        ts: 1,
+      },
+      {
+        type: "delta:role_resolved",
+        delegationId: "d2",
+        storyId: "US-COST-2",
+        role: "builder",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        source: "preset-preference",
+        reasons: ["coding"],
+        inventorySha256: "def",
+        ts: 2,
+      },
+      {
+        type: "delta:role_started",
+        delegationId: "d2",
+        storyId: "US-COST-2",
+        role: "builder",
+        sessionId: "s1",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        identityProvenance: "adapter-observed",
+        worktreeAccess: "read-only",
+        ts: 3,
+      },
+    ];
+    const view = projectDelegationStatus("d2", events);
+    // Each adapter-observed role must show usage_authority_unavailable
+    for (const role of view.roles) {
+      expect(role.cost).toBe("? (usage_authority_unavailable)");
+    }
+    // totalCost must reflect adapter-observed roles
+    expect(view.totalCost).toBe("? (usage_authority_unavailable)");
+  });
+
+  it("mixed host-attested + adapter-observed roles → totalCost is usage_authority_unavailable", () => {
+    const events: RollEvent[] = [
+      {
+        type: "delta:prepared",
+        delegationId: "d3",
+        runId: "delta-d3",
+        storyId: "US-COST-3",
+        trigger: "loop-autonomous",
+        topology: "full-delta-team",
+        qualityProfile: "designed",
+        presetId: "p1",
+        presetSha256: "abc",
+        hostId: "adapter",
+        ts: 1,
+      },
+      {
+        type: "delta:role_resolved",
+        delegationId: "d3",
+        storyId: "US-COST-3",
+        role: "designer",
+        roleInstanceId: "ri-d1",
+        hostId: "pi",
+        modelId: "model-host-1",
+        source: "preset-preference",
+        reasons: ["reasoning"],
+        inventorySha256: "def",
+        ts: 2,
+      },
+      {
+        type: "delta:role_started",
+        delegationId: "d3",
+        storyId: "US-COST-3",
+        role: "designer",
+        sessionId: "s1",
+        roleInstanceId: "ri-d1",
+        hostId: "pi",
+        modelId: "model-host-1",
+        identityProvenance: "host-attested",
+        worktreeAccess: "read-only",
+        ts: 3,
+      },
+      {
+        type: "delta:role_resolved",
+        delegationId: "d3",
+        storyId: "US-COST-3",
+        role: "builder",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        source: "preset-preference",
+        reasons: ["coding"],
+        inventorySha256: "ghi",
+        ts: 4,
+      },
+      {
+        type: "delta:role_started",
+        delegationId: "d3",
+        storyId: "US-COST-3",
+        role: "builder",
+        sessionId: "s2",
+        roleInstanceId: "ri-b1",
+        hostId: "adapter",
+        modelId: "model-adapter-1",
+        identityProvenance: "adapter-observed",
+        worktreeAccess: "read-only",
+        ts: 5,
+      },
+    ];
+    const view = projectDelegationStatus("d3", events);
+    // Host-attested role cost
+    expect(view.roles[0].cost).toBe("? (host_unobservable)");
+    // Adapter-observed role cost
+    expect(view.roles[1].cost).toBe("? (usage_authority_unavailable)");
+    // totalCost: any adapter-observed → usage_authority_unavailable
+    expect(view.totalCost).toBe("? (usage_authority_unavailable)");
+  });
 });

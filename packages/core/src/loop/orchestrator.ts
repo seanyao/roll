@@ -1072,6 +1072,7 @@ export type CycleEvent =
       storyId: string;
       repositoryExecution?: CycleRepositoryExecutionContext;
     }
+  | { type: "repository_setup_failed"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
@@ -1103,6 +1104,7 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
   worktree_created: ["worktree"],
   worktree_failed: ["worktree"],
   story_picked: ["pick"],
+  repository_setup_failed: ["pick"],
   no_story: ["pick"],
   route_resolved: ["route"],
   route_pending: ["route"],
@@ -1226,7 +1228,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
     // Disambiguate the two `pick`-phase events: `preflight_done` only PRE-worktree,
     // `story_picked`/`no_story` only POST-worktree (the pick runs inside it).
     if (event.type === "preflight_done" && state.worktreeReady === true) return { state, commands: [] };
-    if ((event.type === "story_picked" || event.type === "no_story") && state.worktreeReady !== true) {
+    if ((event.type === "story_picked" || event.type === "repository_setup_failed" || event.type === "no_story") && state.worktreeReady !== true) {
       return { state, commands: [] };
     }
   }
@@ -1296,6 +1298,16 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           { kind: "resolve_route", storyId: event.storyId },
         ],
       };
+
+    case "repository_setup_failed":
+      return terminate({
+        ...state,
+        phase: "worktree",
+        ctx: { ...state.ctx, storyId: event.storyId },
+      }, "failed", [
+        { kind: "cleanup_environment" },
+        { kind: "cleanup_worktree", branch: state.ctx.branch },
+      ]);
 
     case "route_resolved": {
       // The cost/budget gate is REMOVED — the loop no longer stops on a dollar

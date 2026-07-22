@@ -893,6 +893,26 @@ describe("failure branches", () => {
     expect(kinds.slice(-5)).toEqual(["emit_event", "append_run", "release_lock", "cleanup_environment", "cleanup_worktree"]);
   });
 
+  it("repository setup fail → failed before routing and releases cycle-owned resources", () => {
+    const { state, commands } = walk([
+      { type: "start", ctx: CTX },
+      { type: "preflight_done" },
+      { type: "worktree_created" },
+      { type: "repository_setup_failed", storyId: "US-WS-011" },
+    ]);
+
+    expect(state.terminal).toBe("failed");
+    expect(state.ctx.storyId).toBe("US-WS-011");
+    expect(commands.map((command) => command.kind).slice(-5)).toEqual([
+      "emit_event",
+      "append_run",
+      "release_lock",
+      "cleanup_environment",
+      "cleanup_worktree",
+    ]);
+    expect(commands.some((command) => command.kind === "resolve_route" || command.kind === "spawn_agent")).toBe(false);
+  });
+
   it("agent fail after retry budget → failed + ALERT (I6, no agent-swap)", () => {
     let state = initialCycleState(CTX);
     const drive = (ev: CycleEvent): CycleCommand[] => {

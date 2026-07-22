@@ -249,6 +249,16 @@ function createWorkspaceRepositoryPorts(
 ): RepositoryPorts {
   return {
     async prepare(request) {
+      // A previously materialized Issue is the resumable source of truth.  Do
+      // not refetch remotes or require the original backlog contract merely to
+      // resume its already validated manifest and worktrees.
+      const existingIssueRoot = join(workspaceRoot, "issues", request.storyId);
+      const existing = existsSync(existingIssueRoot)
+        ? await resolveRepositoryExecutionContext(workspaceRoot, request.storyId)
+        : undefined;
+      if (existing !== undefined) {
+        return { kind: "prepared", outcome: "reused" };
+      }
       const workspace = readWorkspace(workspaceRoot);
       const contract = resolveWorkspaceBacklogStoryContract(workspaceRoot, request.storyId);
       if (!contract.ok) {

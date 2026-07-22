@@ -14,6 +14,7 @@ import {
   projectDeliveryLeases,
   readLeases,
   reconcileBranchName,
+  removeLease,
   runRowHasPublishedPr,
   setLease,
   type BacklogItem,
@@ -25,7 +26,7 @@ import {
   type PickOptions,
 } from "@roll/core";
 import { classifyStatus, parseEventLine, STATUS_MARKER, type LoopType, type RollEvent } from "@roll/spec";
-import { isScreenLocked, resolveIntegrationBranch } from "@roll/infra";
+import { isScreenLocked, readWorkspace, resolveIntegrationBranch } from "@roll/infra";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { storySpecPath } from "./attest-gate.js";
@@ -552,11 +553,6 @@ export async function executeSetupCommand(
       // 🔨 we are about to write. Best-effort: an absent status leaves it unset
       // (no revert target — the terminal then leaves the row untouched).
       const preCycleStatus = (story as { status?: string }).status;
-      // Claim immediately on the MAIN backlog: 🔨 In Progress is the
-      // anti-duplicate-pick signal and must be visible to `roll backlog`/brief
-      // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
-      // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
-      ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
       // FIX-1211: stamp a live cycle lease so another loop instance (or a later
       // preflight after a crash) can tell this claim is owned by a running cycle
       // and not reclaim it until the cycle ends or the PID is proven dead.
@@ -570,6 +566,38 @@ export async function executeSetupCommand(
       } catch {
         /* lease is observability-only; a write failure must not block the pick */
       }
+      let repositoryExecution;
+      if (ports.repositories !== undefined) {
+        const prepared = await ports.repositories.prepare({ storyId: story.id, cycleId: ctx.cycleId });
+        if (prepared.kind === "failed") {
+          const workspaceId = readWorkspace(ports.repoCwd).workspaceId;
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "workspace:issue_init_failed",
+            workspaceId,
+            storyId: story.id,
+            cycleId: ctx.cycleId,
+            code: prepared.code,
+            repairJournal: prepared.repairJournal,
+            ts: eventTs(ports),
+          });
+          ports.backlog.markStatus?.(ports.repoCwd, story.id, preCycleStatus ?? STATUS_MARKER.todo);
+          try {
+            removeLease(storyLeasePath, story.id, "cycle");
+          } catch {
+            /* the terminal path retries lease cleanup */
+          }
+          return {
+            event: { type: "repository_setup_failed", storyId: story.id },
+            ctxPatch: {
+              ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
+            },
+          };
+        }
+        repositoryExecution = await ports.repositories.resolve(story.id);
+      }
+      // The visible claim follows successful Workspace preparation. Legacy
+      // projects retain the same pick-time status transition.
+      ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
       const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
       ports.events.appendEvent(ports.paths.eventsPath, {
         type: "evidence:frame-opened",
@@ -583,7 +611,6 @@ export async function executeSetupCommand(
         ? await createSubmoduleWorktreeIfDeclared(ports, ctx, story)
         : { failed: false };
       if (sub.failed) return { event: { type: "worktree_failed" } };
-      const repositoryExecution = await ports.repositories?.resolve(story.id);
       return {
         event: {
           type: "story_picked",

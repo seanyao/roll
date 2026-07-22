@@ -20,6 +20,8 @@ repositories:
     depends_on_repo: sot1
   - alias: sot3
     access: read
+integration_acceptance:
+  command: ./verify-sot-contract.sh
 ---
 
 # US-XX1 body mentions repositories: should never be parsed
@@ -155,6 +157,7 @@ describe("parseIssueStoryContract", () => {
           { alias: "sot2", access: "write", requiredDelivery: true, dependsOnRepo: "sot1" },
           { alias: "sot3", access: "read", requiredDelivery: false },
         ],
+        integrationCommand: ["./verify-sot-contract.sh"],
       },
     });
   });
@@ -194,6 +197,7 @@ describe("resolveIssueInitPlan", () => {
             { repoId: "repo-sot2", alias: "sot2", access: "write", dependsOnRepo: "sot1" },
             { repoId: "repo-sot3", alias: "sot3", access: "read" },
           ],
+          integrationAcceptance: { command: ["./verify-sot-contract.sh"] },
         },
         outcome: "created",
         targets: [

@@ -456,6 +456,14 @@ describe("IssueManifest repository targets", () => {
     expect(parsed).toEqual({ ok: true, value: issue() });
   });
 
+  it("round-trips the persisted cross-repository integration command", () => {
+    const manifest = {
+      ...issue(),
+      integrationAcceptance: { command: ["./verify-sot-contract.sh"] },
+    };
+    expect(parseIssueManifest(manifest, {})).toEqual({ ok: true, value: manifest });
+  });
+
   it.each([
     ["read delivery", { repositories: [{ ...issue().repositories[1], requiredDelivery: true }] }, "repositories[0].requiredDelivery"],
     ["write policy", { repositories: [{ ...issue().repositories[0], noChangePolicy: undefined }] }, "repositories[0].noChangePolicy"],

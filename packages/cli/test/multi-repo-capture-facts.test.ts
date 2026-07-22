@@ -1,0 +1,365 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import type { CycleContext, RouteDeps } from "@roll/core";
+import type { RepositoryExecutionContext } from "@roll/spec";
+import { executeCaptureFactsCommand } from "../src/runner/capture-facts-handler.js";
+import { createRepositoryPorts, nodePorts } from "../src/runner/node-ports.js";
+import type { AgentSpawn } from "../src/runner/agent-spawn.js";
+import type { RepositoryPortAdapters, RunnerPaths } from "../src/runner/ports.js";
+
+const routeDeps: RouteDeps = {
+  readSlot: () => ({ agent: "claude" }),
+  firstInstalled: () => "claude",
+};
+
+function fakeSpawn(): AgentSpawn {
+  const spawn: AgentSpawn = vi.fn(async () => ({
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    timedOut: false,
+  }));
+  spawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
+  return spawn;
+}
+
+function repository(
+  root: string,
+  repoId: string,
+  alias: string,
+  options: {
+    readonly integration?: readonly string[];
+    readonly dependsOnRepo?: string;
+    readonly test?: readonly string[];
+  } = {},
+): RepositoryExecutionContext {
+  const worktreePath = join(root, alias);
+  mkdirSync(worktreePath, { recursive: true });
+  return {
+    repoId,
+    alias,
+    access: "write",
+    requiredDelivery: true,
+    noChangePolicy: "changes_required",
+    ...(options.dependsOnRepo === undefined ? {} : { dependsOnRepo: options.dependsOnRepo }),
+    worktreePath,
+    baseSha: `${alias}-base`,
+    headSha: `${alias}-setup-head`,
+    commands: {
+      test: options.test ?? ["npm", "test"],
+      integration: options.integration ?? [],
+    },
+  };
+}
+
+function fixture(options: {
+  readonly integration?: readonly string[];
+  readonly secondTestExit?: number;
+  readonly secondNoTests?: boolean;
+  readonly single?: boolean;
+  readonly backstopToolchains?: boolean;
+  readonly firstCommitsAhead?: number;
+  readonly ownerExemptsFirst?: boolean;
+  readonly secondCommandThrows?: boolean;
+  readonly integrationThrows?: boolean;
+  readonly secondHeadThrows?: boolean;
+}) {
+  const root = mkdtempSync(join(tmpdir(), "roll-us-ws-012-capture-"));
+  const issueRoot = join(root, "issues", "US-WS-012");
+  const runtimeRoot = join(root, "runtime");
+  mkdirSync(issueRoot, { recursive: true });
+  mkdirSync(runtimeRoot, { recursive: true });
+  const first = repository(issueRoot, "repo-aaaaaaaaaaaa", "api", {
+    integration: options.integration,
+    ...(options.backstopToolchains ? { test: [] } : {}),
+  });
+  const second = repository(issueRoot, "repo-bbbbbbbbbbbb", "web", {
+    integration: options.integration,
+    dependsOnRepo: first.alias,
+    ...(options.backstopToolchains ? { test: [] } : {}),
+  });
+  if (options.backstopToolchains) {
+    writeFileSync(join(first.worktreePath, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    mkdirSync(join(first.worktreePath, "node_modules", "vitest"), { recursive: true });
+    writeFileSync(join(first.worktreePath, "node_modules", "vitest", "package.json"), JSON.stringify({ version: "3.2.7" }));
+    writeFileSync(join(second.worktreePath, "package.json"), JSON.stringify({ scripts: { test: "jest --ci" } }));
+  }
+  const repositories = options.single ? { [first.repoId]: first } : {
+    [first.repoId]: first,
+    [second.repoId]: second,
+  };
+  const ctx: CycleContext = {
+    cycleId: "cycle-us-ws-012",
+    branch: "roll/ws-1/US-WS-012",
+    loop: "ci",
+    storyId: "US-WS-012",
+    agent: "claude",
+    repositoryExecution: {
+      workspaceId: "ws-1",
+      issueRoot,
+      repositories,
+    },
+  };
+  if (options.ownerExemptsFirst) {
+    writeFileSync(join(issueRoot, "events.jsonl"), `${JSON.stringify({
+      type: "issue:repository_no_change_exempted",
+      workspaceId: "ws-1",
+      storyId: "US-WS-012",
+      cycleId: "cycle-us-ws-012",
+      repoId: first.repoId,
+      approved: true,
+      ts: 1,
+    })}\n`);
+  }
+  const testRuns: Array<{ repoId: string; command: readonly string[] }> = [];
+  const integrationRuns: Array<{
+    command: readonly string[];
+    env: Readonly<Record<string, string>>;
+  }> = [];
+  const adapters: RepositoryPortAdapters = {
+    git: {
+      commitsAhead: vi.fn(async (repo) => repo.repoId === first.repoId ? (options.firstCommitsAhead ?? 1) : 1),
+      tcrCount: vi.fn(async () => 1),
+      recentCommits: vi.fn(async () => []),
+      dirty: vi.fn(async () => false),
+      headSha: vi.fn(async (repo) => {
+        if (repo.repoId === second.repoId && options.secondHeadThrows) throw new Error("head unavailable");
+        return repo.repoId === first.repoId ? "a".repeat(40) : "b".repeat(40);
+      }),
+      push: vi.fn(async () => ({ code: 0 })),
+    },
+    verification: {
+      runRepository: vi.fn(async (repo, command) => {
+        testRuns.push({ repoId: repo.repoId, command });
+        if (repo.repoId === second.repoId && options.secondCommandThrows) throw new Error("spawn ENOENT");
+        return {
+          exitCode: repo.repoId === second.repoId ? (options.secondTestExit ?? 0) : 0,
+          stdout: repo.repoId === second.repoId && options.secondNoTests
+            ? "No test files found, exiting with code 0"
+            : "Test Files 1 passed (1)",
+          stderr: "",
+        };
+      }),
+      runIntegration: vi.fn(async (_execution, command, env) => {
+        integrationRuns.push({ command, env });
+        if (options.integrationThrows) throw new Error("spawn integration ENOENT");
+        return { exitCode: 0, stdout: "integration passed", stderr: "" };
+      }),
+    },
+    provider: {
+      repoSlug: vi.fn(async () => undefined),
+      prState: vi.fn(async () => "UNKNOWN"),
+      prMergeInfo: vi.fn(async () => undefined),
+    },
+  };
+  const paths: RunnerPaths = {
+    eventsPath: join(runtimeRoot, "events.ndjson"),
+    runsPath: join(runtimeRoot, "runs.jsonl"),
+    alertsPath: join(runtimeRoot, "alerts.log"),
+    lockPath: join(runtimeRoot, "lock"),
+    heartbeatPath: join(runtimeRoot, "heartbeat"),
+    worktreePath: join(root, "legacy-worktree"),
+  };
+  const base = nodePorts({
+    repoCwd: root,
+    paths,
+    skillBody: "BUILD STORY",
+    routeDeps,
+    agentSpawn: fakeSpawn(),
+    clock: () => 123,
+  });
+  const bound = createRepositoryPorts(ctx, adapters);
+  return {
+    ctx,
+    ports: {
+      ...base,
+      repositories: { resolve: async () => ctx.repositoryExecution, bind: () => bound },
+    },
+    issueRoot,
+    first,
+    second,
+    testRuns,
+    integrationRuns,
+  };
+}
+
+function issueEvents(issueRoot: string): Array<Record<string, unknown>> {
+  return readFileSync(join(issueRoot, "events.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+describe("US-WS-012 repository capture verification", () => {
+  it("verifies each changed repository, pins integration to current heads, and records dependency-ordered publish plans", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"] });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ commitsAhead: 2 }),
+    });
+    expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("repositoryVerificationPending");
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryPublishPending: true }),
+    });
+    expect(result.ctxPatch).toEqual({ tcrCount: 2 });
+    expect(f.testRuns).toEqual([
+      { repoId: f.first.repoId, command: ["npm", "test"] },
+      { repoId: f.second.repoId, command: ["npm", "test"] },
+    ]);
+    expect(f.integrationRuns).toEqual([{
+      command: ["./verify-sot-contract.sh"],
+      env: {
+        ROLL_INTEGRATION_INPUTS: JSON.stringify({
+          [f.first.repoId]: "a".repeat(40),
+          [f.second.repoId]: "b".repeat(40),
+        }),
+      },
+    }]);
+    const events = issueEvents(f.issueRoot);
+    expect(events.filter((event) => event["type"] === "repository:verification")).toEqual([
+      expect.objectContaining({ repoId: f.first.repoId, status: "pass", headSha: "a".repeat(40) }),
+      expect.objectContaining({ repoId: f.second.repoId, status: "pass", headSha: "b".repeat(40) }),
+    ]);
+    expect(events.find((event) => event["type"] === "issue:integration_acceptance_recorded")).toEqual(
+      expect.objectContaining({
+        status: "pass",
+        inputHeads: {
+          [f.first.repoId]: "a".repeat(40),
+          [f.second.repoId]: "b".repeat(40),
+        },
+      }),
+    );
+    expect(events.filter((event) => event["type"] === "repository:publish_planned")).toEqual([
+      expect.objectContaining({ repoId: f.first.repoId, dependsOn: [] }),
+      expect.objectContaining({ repoId: f.second.repoId, dependsOn: [f.first.repoId] }),
+    ]);
+  });
+
+  it("blocks the Story when one repository test fails and preserves the failing leg evidence", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], secondTestExit: 1 });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({
+        commitsAhead: 2,
+        repositoryVerificationPending: true,
+      }),
+    });
+    expect(result.ctxPatch).toMatchObject({
+      tcrCount: 2,
+      failureClass: "harness",
+      rootCauseKey: "harness:repository_verification_failed",
+    });
+    const events = issueEvents(f.issueRoot);
+    expect(events.find((event) => event["type"] === "repository:verification" && event["repoId"] === f.second.repoId)).toEqual(
+      expect.objectContaining({ status: "fail", exitCode: 1 }),
+    );
+    expect(events.filter((event) => event["type"] === "repository:publish_planned")).toHaveLength(0);
+  });
+
+  it("preserves the one-repository projection without requiring a cross-repo command", async () => {
+    const f = fixture({ single: true });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("repositoryVerificationPending");
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryPublishPending: true }),
+    });
+    expect(f.testRuns).toEqual([{ repoId: f.first.repoId, command: ["npm", "test"] }]);
+    expect(f.integrationRuns).toEqual([]);
+    expect(issueEvents(f.issueRoot).filter((event) => event["type"] === "repository:publish_planned")).toHaveLength(1);
+  });
+
+  it("resolves each repository test gate from its own toolchain and uses a conservative full suite when needed", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], backstopToolchains: true });
+
+    await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(f.testRuns).toEqual([
+      { repoId: f.first.repoId, command: ["npm", "test", "--", "--changed"] },
+      { repoId: f.second.repoId, command: ["npm", "test"] },
+    ]);
+  });
+
+  it("does not mint a green repository verdict from a zero-test exit 0", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], secondNoTests: true });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryVerificationPending: true }),
+    });
+    expect(issueEvents(f.issueRoot).find(
+      (event) => event["type"] === "repository:verification" && event["repoId"] === f.second.repoId,
+    )).toEqual(expect.objectContaining({ status: "fail", diagnostic: "zero_tests" }));
+  });
+
+  it("accepts an unchanged repository only when the current Issue Cycle records an explicit owner exemption", async () => {
+    const f = fixture({
+      integration: ["./verify-sot-contract.sh"],
+      firstCommitsAhead: 0,
+      ownerExemptsFirst: true,
+    });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("repositoryVerificationPending");
+    expect(issueEvents(f.issueRoot).filter((event) => event["type"] === "repository:publish_planned")).toEqual([
+      expect.objectContaining({ repoId: f.second.repoId }),
+    ]);
+  });
+
+  it("records command launch failures as blocked leg evidence instead of aborting capture", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], secondCommandThrows: true });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryVerificationPending: true }),
+    });
+    expect(issueEvents(f.issueRoot).find(
+      (event) => event["type"] === "repository:verification" && event["repoId"] === f.second.repoId,
+    )).toEqual(expect.objectContaining({ status: "fail", diagnostic: "command_execution_failed" }));
+  });
+
+  it("records integration launch failures against the pinned input map and blocks publish planning", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], integrationThrows: true });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryVerificationPending: true }),
+    });
+    expect(issueEvents(f.issueRoot).find((event) => event["type"] === "issue:integration_acceptance_recorded")).toEqual(
+      expect.objectContaining({ status: "fail", diagnostic: "command_execution_failed" }),
+    );
+  });
+
+  it("fails loud with per-leg evidence when an exact repository head cannot be observed", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"], secondHeadThrows: true });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryVerificationPending: true }),
+    });
+    expect(issueEvents(f.issueRoot).find(
+      (event) => event["type"] === "repository:verification" && event["repoId"] === f.second.repoId,
+    )).toEqual(expect.objectContaining({ status: "fail", diagnostic: "head_observation_failed" }));
+    expect(f.integrationRuns).toEqual([]);
+  });
+});

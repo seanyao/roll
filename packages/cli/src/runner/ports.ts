@@ -4,6 +4,8 @@ import type {
   RepositoryExecutionContext,
   RepositoryExecutionEvent,
   RepositoryExecutionEventPayload,
+  IssueExecutionEvent,
+  IssueExecutionEventPayload,
   RollEvent,
   WorkspaceIssueInitFailureCode,
 } from "@roll/spec";
@@ -147,7 +149,20 @@ export interface RepositoryPortAdapters {
     tcrCount(repository: RepositoryExecutionContext): Promise<number>;
     recentCommits(repository: RepositoryExecutionContext): Promise<ObservedCommit[]>;
     dirty(repository: RepositoryExecutionContext): Promise<boolean>;
+    headSha?(repository: RepositoryExecutionContext): Promise<string>;
     push(repository: RepositoryExecutionContext, branch: string): Promise<{ code: number }>;
+  };
+  readonly verification?: {
+    runRepository(
+      repository: RepositoryExecutionContext,
+      command: readonly string[],
+      env: Readonly<Record<string, string>>,
+    ): Promise<RepositoryCommandResult>;
+    runIntegration(
+      execution: CycleRepositoryExecutionContext,
+      command: readonly string[],
+      env: Readonly<Record<string, string>>,
+    ): Promise<RepositoryCommandResult>;
   };
   readonly provider: {
     repoSlug(repository: RepositoryExecutionContext): Promise<string | undefined>;
@@ -159,6 +174,12 @@ export interface RepositoryPortAdapters {
   };
 }
 
+export interface RepositoryCommandResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
 export interface BoundRepositoryPorts {
   readonly context: (repoId: string) => RepositoryExecutionContext;
   readonly git: {
@@ -166,7 +187,19 @@ export interface BoundRepositoryPorts {
     tcrCount(repoId: string): Promise<number>;
     recentCommits(repoId: string): Promise<ObservedCommit[]>;
     dirty(repoId: string): Promise<boolean>;
+    headSha(repoId: string): Promise<string>;
     push(repoId: string, branch: string): Promise<{ code: number }>;
+  };
+  readonly verification: {
+    runRepository(
+      repoId: string,
+      command: readonly string[],
+      env?: Readonly<Record<string, string>>,
+    ): Promise<RepositoryCommandResult>;
+    runIntegration(
+      command: readonly string[],
+      env?: Readonly<Record<string, string>>,
+    ): Promise<RepositoryCommandResult>;
   };
   readonly provider: {
     repoSlug(repoId: string): Promise<string | undefined>;
@@ -178,6 +211,7 @@ export interface BoundRepositoryPorts {
   };
   readonly events: {
     append(repoId: string, payload: RepositoryExecutionEventPayload): RepositoryExecutionEvent;
+    appendIssue(payload: IssueExecutionEventPayload): IssueExecutionEvent;
   };
 }
 

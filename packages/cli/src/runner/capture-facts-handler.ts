@@ -36,6 +36,7 @@ import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-boot
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import { observeWritableRepositories } from "./repository-observation.js";
+import { verifyRepositoryCapture } from "./repository-verification.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -54,11 +55,16 @@ async function executeRepositoryCaptureFactsCommand(ports: Ports, ctx: CycleCont
       ts: eventTs(ports),
     });
   }
-  const repositoryVerificationPending = observed.commitsAhead > 0 || observed.worktreeDirty;
-  if (repositoryVerificationPending) {
+  const verification = await verifyRepositoryCapture(ctx, repositories, observed, () => eventTs(ports));
+  if (verification.blocked) {
     ports.events.appendAlert(
       ports.paths.alertsPath,
-      `repository_verification_pending: Workspace cycle ${ctx.cycleId ?? "?"} captured ${observed.commitsAhead} commit(s) across ${observed.legs.length} writable repositories; US-WS-012 must verify and publish them`,
+      `repository_verification_failed: Workspace cycle ${ctx.cycleId ?? "?"} failed repository-scoped verification (${verification.reason ?? "unknown"}); per-leg evidence is preserved in the Issue event stream`,
+    );
+  } else if (verification.publishPending === true) {
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `repository_publish_pending: Workspace cycle ${ctx.cycleId ?? "?"} passed repository verification and recorded per-repository publish plans; provider delivery remains pending`,
     );
   }
   const facts: CapturedFacts = {
@@ -68,15 +74,16 @@ async function executeRepositoryCaptureFactsCommand(ports: Ports, ctx: CycleCont
     timedOut: false,
     commitsAhead: observed.commitsAhead,
     ...(observed.worktreeDirty ? { worktreeDirty: true } : {}),
-    ...(repositoryVerificationPending ? { repositoryVerificationPending: true } : {}),
+    ...(verification.blocked ? { repositoryVerificationPending: true } : {}),
+    ...(verification.publishPending === true ? { repositoryPublishPending: true } : {}),
     ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
   };
   return {
     event: { type: "facts_captured", facts },
     ctxPatch: {
       tcrCount: observed.tcrCount,
-      ...(repositoryVerificationPending
-        ? { failureClass: "harness" as const, rootCauseKey: "harness:repository_verification_pending" }
+      ...(verification.blocked
+        ? { failureClass: "harness" as const, rootCauseKey: "harness:repository_verification_failed" }
         : {}),
     },
   };

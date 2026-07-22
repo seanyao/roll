@@ -11,6 +11,8 @@ import { repositoryEventIdentity, type CycleContext } from "@roll/core";
 import {
   parseIssueManifest,
   type CycleRepositoryExecutionContext,
+  type IssueExecutionEvent,
+  type IssueExecutionEventPayload,
   type RepositoryExecutionContext,
   type RepositoryExecutionEvent,
   type RepositoryExecutionEventPayload,
@@ -89,12 +91,14 @@ export async function resolveRepositoryExecutionContext(
       alias: target.alias,
       access: target.access,
       requiredDelivery: target.requiredDelivery,
+      ...(target.access === "write" ? { noChangePolicy: target.noChangePolicy } : {}),
+      ...(target.dependsOnRepo === undefined ? {} : { dependsOnRepo: target.dependsOnRepo }),
       worktreePath: canonicalWorktree,
       baseSha: fact.baseSha,
       headSha: await worktreeHead(canonicalWorktree),
       // US-WS-012 owns toolchain command resolution. Do not infer commands from
       // package files, CI check names or cwd shape here.
-      commands: { test: [], integration: [] },
+      commands: { test: [], integration: manifest.integrationAcceptance?.command ?? [] },
     };
   }
   if (Object.keys(repositories).length === 0) {
@@ -118,6 +122,25 @@ export function appendRepositoryExecutionEvent(
   const execution = ctx.repositoryExecution;
   if (execution === undefined) throw new Error("missing_repository_context");
   const event: RepositoryExecutionEvent = { ...payload, ...identified.identity };
+  appendIssueEventAtomically(execution.issueRoot, event);
+  return event;
+}
+
+/** The only Issue event writer for Story-level facts spanning repository legs. */
+export function appendIssueExecutionEvent(
+  ctx: CycleContext,
+  payload: IssueExecutionEventPayload,
+): IssueExecutionEvent {
+  const execution = ctx.repositoryExecution;
+  const storyId = ctx.storyId ?? "";
+  if (execution === undefined) throw new Error("missing_repository_context");
+  if (storyId === "" || ctx.cycleId === "") throw new Error("missing_issue_cycle_identity");
+  const event: IssueExecutionEvent = {
+    ...payload,
+    workspaceId: execution.workspaceId,
+    storyId,
+    cycleId: ctx.cycleId,
+  };
   appendIssueEventAtomically(execution.issueRoot, event);
   return event;
 }

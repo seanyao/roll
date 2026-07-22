@@ -20,6 +20,7 @@ export interface IssueStoryContractTarget {
 export interface IssueStoryContract {
   readonly storyId: string;
   readonly repositories: readonly IssueStoryContractTarget[];
+  readonly integrationCommand?: readonly string[];
 }
 
 export interface IssueStoryContractError {
@@ -102,7 +103,7 @@ function assignPair(target: Record<string, unknown>, text: string): void {
 /** Parse the closed Story Contract frontmatter shape (id + repositories: block list). */
 function parseFrontmatterDocument(text: string): Record<string, unknown> {
   const root: Record<string, unknown> = {};
-  let section: "repositories" | null = null;
+  let section: "repositories" | "integration_acceptance" | null = null;
   let item: Record<string, unknown> | null = null;
   for (const raw of text.split(/\r?\n/u)) {
     if (raw.trim() === "") continue;
@@ -117,6 +118,9 @@ function parseFrontmatterDocument(text: string): Record<string, unknown> {
       if (key === "repositories") {
         root[key] = [];
         section = "repositories";
+      } else if (key === "integration_acceptance") {
+        root[key] = {};
+        section = "integration_acceptance";
       } else {
         section = null;
         root[key] = value === "" ? undefined : parseScalar(value);
@@ -124,6 +128,12 @@ function parseFrontmatterDocument(text: string): Record<string, unknown> {
       continue;
     }
     if (section === null || indent < 2) continue;
+    if (section === "integration_acceptance") {
+      const integration = root[section];
+      if (!isRecord(integration)) throw new Error("invalid integration acceptance state");
+      assignPair(integration, body);
+      continue;
+    }
     const list = root[section];
     if (!Array.isArray(list)) throw new Error("invalid YAML list state");
     if (body.startsWith("- ")) {
@@ -208,8 +218,31 @@ export function parseIssueStoryContract(
     }
     aliases.add(repository.alias);
   }
+  let integrationCommand: readonly string[] | undefined;
+  const rawIntegration = raw["integration_acceptance"];
+  if (rawIntegration !== undefined) {
+    if (!isRecord(rawIntegration)) {
+      errors.push({ code: "invalid_type", path: "integration_acceptance", message: "integration acceptance must be an object" });
+    } else {
+      const unknown = exactKeys(rawIntegration, ["command"]);
+      if (unknown.length > 0) {
+        errors.push({ code: "unknown_field", path: `integration_acceptance.${unknown[0]}`, message: "unknown integration acceptance field" });
+      } else if (!nonEmptyString(rawIntegration["command"])) {
+        errors.push({ code: "invalid_value", path: "integration_acceptance.command", message: "integration command is required" });
+      } else {
+        integrationCommand = [rawIntegration["command"]];
+      }
+    }
+  }
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, value: { storyId: options.storyId, repositories } };
+  return {
+    ok: true,
+    value: {
+      storyId: options.storyId,
+      repositories,
+      ...(integrationCommand === undefined ? {} : { integrationCommand }),
+    },
+  };
 }
 
 export type IssueTargetProbeState = "absent" | "compatible" | "repairable" | "conflict";
@@ -357,6 +390,9 @@ export function resolveIssueInitPlan(
     storyId: input.contract.storyId,
     requirements,
     repositories,
+    ...(input.contract.integrationCommand === undefined
+      ? {}
+      : { integrationAcceptance: { command: input.contract.integrationCommand } }),
   };
   const rollbackOrder = targets
     .filter((target) => target.action === "created")

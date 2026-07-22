@@ -1,6 +1,7 @@
 /** Cycle contracts (BC2/BC8, I11/I12). */
 import type { ToolCost } from "./tool.js";
 import type {
+  IssueIdentity,
   RepositoryExecutionMap,
   RepositoryIssueIdentity,
   WorkspaceIdentity,
@@ -64,3 +65,16 @@ export interface RepositoryExecutionEventPayload {
 }
 
 export type RepositoryExecutionEvent = RepositoryCycleIdentity & RepositoryExecutionEventPayload;
+
+/** Story-level Issue event envelope for facts that span repository legs. */
+export interface IssueCycleIdentity extends IssueIdentity {
+  readonly cycleId: string;
+}
+
+export interface IssueExecutionEventPayload {
+  readonly type: string;
+  readonly ts: number;
+  readonly [key: string]: unknown;
+}
+
+export type IssueExecutionEvent = IssueCycleIdentity & IssueExecutionEventPayload;

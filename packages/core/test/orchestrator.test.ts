@@ -276,6 +276,17 @@ describe("US-WS-010 — one Story Cycle carries a repository execution map", () 
     })).toBe("blocked");
   });
 
+  it("blocks verified Workspace work at the repository publish handoff", () => {
+    expect(classifyCaptured({
+      usedWorktree: true,
+      agentExecuted: true,
+      agentExit: 0,
+      timedOut: false,
+      commitsAhead: 2,
+      repositoryPublishPending: true,
+    })).toBe("blocked");
+  });
+
   it.each([
     { label: "dirty with commits", commitsAhead: 2 },
     { label: "dirty only", commitsAhead: 0 },

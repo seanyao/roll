@@ -78,6 +78,7 @@ import type {
   RunnerPaths,
 } from "./ports.js";
 import {
+  appendIssueExecutionEvent,
   appendRepositoryExecutionEvent,
   resolveRepositoryExecutionContext,
 } from "./repository-context.js";
@@ -171,6 +172,51 @@ async function repositoryDirty(repository: RepositoryExecutionContext): Promise<
   return result.stdout.trim() !== "";
 }
 
+async function repositoryHeadSha(repository: RepositoryExecutionContext): Promise<string> {
+  const result = await execFileAsync("git", ["rev-parse", "HEAD"], {
+    cwd: repository.worktreePath,
+    encoding: "utf8",
+  });
+  const head = result.stdout.trim();
+  if (!/^[0-9a-f]{40,64}$/u.test(head)) throw new Error("invalid repository head");
+  return head;
+}
+
+function commandFailure(error: unknown): { readonly exitCode: number; readonly stdout: string; readonly stderr: string } | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as Record<string, unknown>;
+  if (typeof record["code"] !== "number") return undefined;
+  return {
+    exitCode: record["code"],
+    stdout: typeof record["stdout"] === "string" ? record["stdout"] : "",
+    stderr: typeof record["stderr"] === "string" ? record["stderr"] : "",
+  };
+}
+
+async function runRepositoryCommand(
+  cwd: string,
+  command: readonly string[],
+  env: Readonly<Record<string, string>>,
+) {
+  const [executable, ...args] = command;
+  if (executable === undefined || executable.trim() === "") {
+    throw new Error("empty_repository_verification_command");
+  }
+  try {
+    const result = await execFileAsync(executable, args, {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+  } catch (error) {
+    const failure = commandFailure(error);
+    if (failure !== undefined) return failure;
+    throw error;
+  }
+}
+
 function defaultRepositoryAdapters(): RepositoryPortAdapters {
   return {
     git: {
@@ -178,7 +224,12 @@ function defaultRepositoryAdapters(): RepositoryPortAdapters {
       tcrCount: repositoryTcrCount,
       recentCommits: repositoryRecentCommits,
       dirty: repositoryDirty,
+      headSha: repositoryHeadSha,
       push: (repository, branch) => gitPush(repository.worktreePath, branch),
+    },
+    verification: {
+      runRepository: (repository, command, env) => runRepositoryCommand(repository.worktreePath, command, env),
+      runIntegration: (execution, command, env) => runRepositoryCommand(execution.issueRoot, command, env),
     },
     provider: {
       async repoSlug(repository) {
@@ -211,12 +262,13 @@ export function createRepositoryPorts(
     aliases.add(repository.alias);
   }
   if (entries.length === 0) throw new Error("invalid_repository_map: at least one repository is required");
+  const defaults = defaultRepositoryAdapters();
   const context = (repoId: string): RepositoryExecutionContext => {
     const repository = execution.repositories[repoId];
     if (repository === undefined) throw new Error(`unknown_repository: ${repoId}`);
     return repository;
   };
-  const writable = (repoId: string, operation: "publish"): RepositoryExecutionContext => {
+  const writable = (repoId: string, operation: "publish" | "verify"): RepositoryExecutionContext => {
     const repository = context(repoId);
     if (repository.access === "read") {
       throw new Error(`read_only_repository: ${repoId} cannot ${operation}`);
@@ -230,7 +282,16 @@ export function createRepositoryPorts(
       tcrCount: async (repoId) => adapters.git.tcrCount(context(repoId)),
       recentCommits: async (repoId) => adapters.git.recentCommits(context(repoId)),
       dirty: async (repoId) => adapters.git.dirty(context(repoId)),
+      headSha: async (repoId) => (adapters.git.headSha ?? defaults.git.headSha ?? repositoryHeadSha)(context(repoId)),
       push: async (repoId, branch) => adapters.git.push(writable(repoId, "publish"), branch),
+    },
+    verification: {
+      runRepository: async (repoId, command, env = {}) =>
+        (adapters.verification ?? defaults.verification)?.runRepository(writable(repoId, "verify"), command, env)
+          ?? Promise.reject(new Error("missing_repository_verification_adapter")),
+      runIntegration: async (command, env = {}) =>
+        (adapters.verification ?? defaults.verification)?.runIntegration(execution, command, env)
+          ?? Promise.reject(new Error("missing_repository_verification_adapter")),
     },
     provider: {
       repoSlug: async (repoId) => adapters.provider.repoSlug(context(repoId)),
@@ -239,6 +300,7 @@ export function createRepositoryPorts(
     },
     events: {
       append: (repoId, payload) => appendRepositoryExecutionEvent(ctx, repoId, payload),
+      appendIssue: (payload) => appendIssueExecutionEvent(ctx, payload),
     },
   };
 }

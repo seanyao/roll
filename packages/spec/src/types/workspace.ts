@@ -194,6 +194,8 @@ export interface RepositoryExecutionContext {
   readonly alias: string;
   readonly access: RepositoryAccess;
   readonly requiredDelivery: boolean;
+  readonly noChangePolicy?: NoChangePolicy;
+  readonly dependsOnRepo?: string;
   readonly worktreePath: string;
   readonly baseSha: string;
   readonly headSha: string;
@@ -210,6 +212,9 @@ export interface IssueManifest {
   readonly storyId: string;
   readonly requirements: readonly RequirementSourceReference[];
   readonly repositories: readonly IssueRepositoryTarget[];
+  readonly integrationAcceptance?: {
+    readonly command: readonly string[];
+  };
 }
 
 export interface IssueManifestExpectations {
@@ -293,8 +298,12 @@ export const issueManifestV1Schema: JsonSchema = objectSchema(
     storyId: stringSchema,
     requirements: { type: "array", items: requirementSourceSchema },
     repositories: { type: "array", items: issueRepositoryTargetSchema, minItems: 1 },
+    integrationAcceptance: objectSchema(
+      { command: { type: "array", items: stringSchema, minItems: 1 } },
+      ["command"],
+    ),
   },
-  ["schema", "workspaceId", "storyId", "requirements", "repositories"],
+    ["schema", "workspaceId", "storyId", "requirements", "repositories"],
 );
 
 const requirementEvidenceSchema = objectSchema(
@@ -1056,7 +1065,7 @@ export function parseIssueManifest(
   if (!isRecord(value)) return fail("invalid_type", "issue", "Issue manifest must be an object");
   const errors = unknownFieldErrors(
     value,
-    ["schema", "workspaceId", "storyId", "requirements", "repositories"],
+    ["schema", "workspaceId", "storyId", "requirements", "repositories", "integrationAcceptance"],
     "",
   );
   if (value["schema"] !== ISSUE_MANIFEST_V1) {
@@ -1101,6 +1110,23 @@ export function parseIssueManifest(
     }
   }
   errors.push(...dependencyCycleErrors(targets, targetIndexes));
+  let integrationAcceptance: IssueManifest["integrationAcceptance"];
+  const rawIntegration = value["integrationAcceptance"];
+  if (rawIntegration !== undefined) {
+    if (!isRecord(rawIntegration)) {
+      errors.push({ code: "invalid_type", path: "integrationAcceptance", message: "integration acceptance must be an object" });
+    } else {
+      errors.push(...unknownFieldErrors(rawIntegration, ["command"], "integrationAcceptance"));
+      const command = parseStringArray(rawIntegration["command"], "integrationAcceptance.command", errors);
+      if (command !== undefined) {
+        if (command.length === 0) {
+          errors.push({ code: "invalid_value", path: "integrationAcceptance.command", message: "integration command must not be empty" });
+        } else {
+          integrationAcceptance = { command };
+        }
+      }
+    }
+  }
 
   if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
     errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });
@@ -1119,6 +1145,13 @@ export function parseIssueManifest(
   }
   return {
     ok: true,
-    value: { schema: ISSUE_MANIFEST_V1, workspaceId, storyId, requirements, repositories: targets },
+    value: {
+      schema: ISSUE_MANIFEST_V1,
+      workspaceId,
+      storyId,
+      requirements,
+      repositories: targets,
+      ...(integrationAcceptance === undefined ? {} : { integrationAcceptance }),
+    },
   };
 }

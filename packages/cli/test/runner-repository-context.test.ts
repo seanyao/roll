@@ -259,6 +259,34 @@ describe("US-WS-010 repository Builder context", () => {
     expect(stepped.state.ctx.repositoryExecution).toEqual(resolved);
   });
 
+  it("reuses the persisted Story integration command when resolving a later Cycle", async () => {
+    const fixture = productionWorkspaceFixture();
+    const manifestPath = join(fixture.root, "issues", fixture.storyId, "manifest.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(manifestPath, `${JSON.stringify({
+      ...manifest,
+      integrationAcceptance: { command: ["./verify-sot-contract.sh"] },
+    }, null, 2)}\n`);
+    const ports = nodePorts({
+      repoCwd: fixture.root,
+      paths: {
+        eventsPath: join(fixture.root, "runtime", "events.ndjson"),
+        runsPath: join(fixture.root, "runtime", "runs.jsonl"),
+        alertsPath: join(fixture.root, "runtime", "alerts.log"),
+        lockPath: join(fixture.root, "runtime", "lock"),
+        heartbeatPath: join(fixture.root, "runtime", "heartbeat"),
+        worktreePath: join(fixture.root, "legacy-worktree"),
+      },
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+
+    const resolved = await ports.repositories?.resolve(fixture.storyId);
+
+    expect(resolved?.repositories[fixture.repoId]?.commands.integration).toEqual(["./verify-sot-contract.sh"]);
+  });
+
   it("renders one bounded prompt map with access, worktree and verification commands", () => {
     const rendered = buildRepositoryContextMap(execution);
 
@@ -368,7 +396,12 @@ describe("US-WS-010 repository Builder context", () => {
         tcrCount: vi.fn(async () => 1),
         recentCommits: vi.fn(async () => []),
         dirty: vi.fn(async (repo) => repo.repoId === secondary.repoId),
+        headSha: vi.fn(async (repo) => repo.repoId === writable.repoId ? "a".repeat(40) : "b".repeat(40)),
         push: vi.fn(async () => ({ code: 0 })),
+      },
+      verification: {
+        runRepository: vi.fn(async () => ({ exitCode: 0, stdout: "1 passed", stderr: "" })),
+        runIntegration: vi.fn(async () => ({ exitCode: 0, stdout: "integration passed", stderr: "" })),
       },
       provider: {
         repoSlug: vi.fn(async () => undefined),
@@ -552,7 +585,12 @@ describe("US-WS-010 repository Builder context", () => {
         tcrCount: vi.fn(async () => 1),
         recentCommits: vi.fn(async () => []),
         dirty: vi.fn(async (repo) => repo.repoId === secondary.repoId),
+        headSha: vi.fn(async (repo) => repo.repoId === writable.repoId ? "a".repeat(40) : "b".repeat(40)),
         push: vi.fn(async () => ({ code: 0 })),
+      },
+      verification: {
+        runRepository: vi.fn(async () => ({ exitCode: 0, stdout: "1 passed", stderr: "" })),
+        runIntegration: vi.fn(async () => ({ exitCode: 0, stdout: "integration passed", stderr: "" })),
       },
       provider: {
         repoSlug: vi.fn(async () => undefined),
@@ -594,7 +632,7 @@ describe("US-WS-010 repository Builder context", () => {
     expect(result.ctxPatch).toMatchObject({
       tcrCount: 2,
       failureClass: "harness",
-      rootCauseKey: "harness:repository_verification_pending",
+      rootCauseKey: "harness:repository_verification_failed",
     });
     expect(adapters.git.commitsAhead).not.toHaveBeenCalledWith(readonly);
     const issueEvents = readFileSync(join(issueRoot, "events.jsonl"), "utf8")
@@ -603,6 +641,7 @@ describe("US-WS-010 repository Builder context", () => {
       expect.objectContaining({ repoId: writable.repoId, commitsAhead: 1, tcrCount: 1, worktreeDirty: false }),
       expect.objectContaining({ repoId: secondary.repoId, commitsAhead: 2, tcrCount: 1, worktreeDirty: true }),
     ]);
+    expect(issueEvents.filter((event) => event["type"] === "repository:verification")).toHaveLength(2);
     expect(existsSync(join(issueRoot, ".git"))).toBe(false);
   });
 

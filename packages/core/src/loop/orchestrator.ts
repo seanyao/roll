@@ -282,6 +282,9 @@ export interface CapturedFacts {
    * verification/publish is intentionally deferred to US-WS-012. This explicit
    * seam blocks before legacy single-repository gates can consume the aggregate. */
   repositoryVerificationPending?: boolean;
+  /** Repository-scoped verification passed and typed publish plans exist, but
+   * provider delivery is owned by the next Workspace delivery phase. */
+  repositoryPublishPending?: boolean;
   /** FIX-252: commits on local main that are not on origin/main. */
   mainAhead?: number;
   /** FIX-1037: main checkout has uncommitted/untracked product-code dirt. */
@@ -337,6 +340,7 @@ export function classifyCaptured(facts: CapturedFacts): V2CycleStatus {
   if (facts.timedOut) return "blocked";
   if (!facts.usedWorktree) return "failed";
   if (facts.repositoryVerificationPending === true) return "blocked";
+  if (facts.repositoryPublishPending === true) return "blocked";
   // FIX-1037: main checkout pollution is a sandbox/runner boundary breach. It
   // must fail before any "agent did real work" or "existing PR" branch can
   // publish, otherwise an escaped builder can both dirty main and still ship.

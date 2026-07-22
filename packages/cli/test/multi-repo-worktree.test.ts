@@ -233,6 +233,53 @@ describe("US-WS-011 Workspace repository preparation", () => {
     }
   });
 
+  it("fails typed and releases the Story lease when a resumed Issue's durable repository facts drift", async () => {
+    const f = fixture();
+    const previousRollHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = f.rollHome;
+    try {
+      const ports = nodePorts({
+        repoCwd: f.workspace,
+        paths: f.paths,
+        skillBody: "BUILD STORY",
+        routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      });
+      await ports.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-prime" });
+      const issueRoot = join(f.workspace, "issues", f.storyId);
+      const manifestPath = join(issueRoot, "manifest.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+        repositories: Array<{ repoId: string }>;
+      };
+      const first = manifest.repositories[0];
+      if (first === undefined) throw new Error("fixture manifest must include a repository");
+      first.repoId = "ffffffffffff";
+      writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+      const result = await executeSetupCommand({ kind: "pick_story" }, ports, {
+        cycleId: "cycle-drift",
+        branch: "loop/cycle-drift",
+        loop: "main",
+      });
+
+      expect(result.event).toEqual({ type: "repository_setup_failed", storyId: f.storyId });
+      expect(readFileSync(join(f.workspace, "backlog", "index.md"), "utf8")).toContain("📋 Todo");
+      expect(existsSync(f.paths.storyLeasePath!)).toBe(false);
+      expect(existsSync(join(issueRoot, "sot"))).toBe(true);
+      const event = readFileSync(f.paths.eventsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)).at(-1);
+      expect(event).toMatchObject({
+        type: "workspace:issue_init_failed",
+        workspaceId: "ws-alpha",
+        storyId: f.storyId,
+        cycleId: "cycle-drift",
+        code: "unexpected",
+        repairJournal: null,
+      });
+    } finally {
+      if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = previousRollHome;
+    }
+  });
+
   it("claims the Story lease, prepares every leg, then marks In Progress and returns the resolved map", async () => {
     const f = fixture();
     const previousRollHome = process.env["ROLL_HOME"];

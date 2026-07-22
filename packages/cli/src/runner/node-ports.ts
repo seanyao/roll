@@ -249,31 +249,32 @@ function createWorkspaceRepositoryPorts(
 ): RepositoryPorts {
   return {
     async prepare(request) {
-      // A previously materialized Issue is the resumable source of truth.  Do
-      // not refetch remotes or require the original backlog contract merely to
-      // resume its already validated manifest and worktrees.
-      const existingIssueRoot = join(workspaceRoot, "issues", request.storyId);
-      const existing = existsSync(existingIssueRoot)
-        ? await resolveRepositoryExecutionContext(workspaceRoot, request.storyId)
-        : undefined;
-      if (existing !== undefined) {
-        return { kind: "prepared", outcome: "reused" };
-      }
-      const workspace = readWorkspace(workspaceRoot);
-      const contract = resolveWorkspaceBacklogStoryContract(workspaceRoot, request.storyId);
-      if (!contract.ok) {
-        return {
-          kind: "failed",
-          code: contract.code === "symlink_escape" ? "symlink_escape" : "rejected",
-          repairJournal: null,
-        };
-      }
       const issueRoot = join(workspaceRoot, "issues", request.storyId);
       const journalPath = join(issueRoot, "issue-init.pending.json");
       const repairJournal = (): string | null => existsSync(journalPath)
         ? relative(workspaceRoot, journalPath)
         : null;
       try {
+        // A previously materialized Issue is the resumable source of truth. Do
+        // not refetch remotes or require the original backlog contract merely
+        // to resume its already validated manifest and worktrees. Any drift in
+        // those durable facts is still a typed setup failure so the caller can
+        // release the Story lease instead of leaking it through a thrown error.
+        const existing = existsSync(issueRoot)
+          ? await resolveRepositoryExecutionContext(workspaceRoot, request.storyId)
+          : undefined;
+        if (existing !== undefined) {
+          return { kind: "prepared", outcome: "reused" };
+        }
+        const workspace = readWorkspace(workspaceRoot);
+        const contract = resolveWorkspaceBacklogStoryContract(workspaceRoot, request.storyId);
+        if (!contract.ok) {
+          return {
+            kind: "failed",
+            code: contract.code === "symlink_escape" ? "symlink_escape" : "rejected",
+            repairJournal: null,
+          };
+        }
         const result = await applyIssueInit({
           workspaceId: workspace.workspaceId,
           rollHome: process.env["ROLL_HOME"] ?? resolve(homedir(), ".roll"),

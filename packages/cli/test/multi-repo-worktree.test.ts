@@ -144,7 +144,16 @@ repositories:
     };
     return { workspaceId, workspace, paths };
   };
-  return { rollHome, storyId, alpha: buildWorkspace("ws-alpha"), beta: buildWorkspace("ws-beta") };
+  return {
+    rollHome,
+    storyId,
+    alpha: buildWorkspace("ws-alpha"),
+    beta: buildWorkspace("ws-beta"),
+    // Mint any number of extra Workspaces that all share the SAME remote cache,
+    // so a test can drive N-way concurrent preparation (a stronger regression
+    // tripwire for the repoId serialization lock than a single 2-way race).
+    build: buildWorkspace,
+  };
 }
 
 describe("US-WS-011 Workspace repository preparation", () => {
@@ -350,7 +359,7 @@ describe("US-WS-011 Workspace repository preparation", () => {
     }
   });
 
-  it("gives two concurrent Workspaces on one shared cache isolated worktrees and non-shared governed branches", async () => {
+  it("gives many concurrent Workspaces on one shared cache isolated worktrees and non-shared governed branches", async () => {
     const f = sharedCacheFixture();
     const previousRollHome = process.env["ROLL_HOME"];
     process.env["ROLL_HOME"] = f.rollHome;
@@ -361,39 +370,46 @@ describe("US-WS-011 Workspace repository preparation", () => {
         skillBody: "BUILD STORY",
         routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
       });
-      const alphaPorts = portsFor(f.alpha);
-      const betaPorts = portsFor(f.beta);
-      // Both Workspaces prepare the SAME story against the SAME remote cache
-      // CONCURRENTLY (recovery gate): the two preparations race on the shared
-      // repoId, so only a real per-repoId machine lock serializing the cache
-      // add/branch mutations lets both resolve to isolated worktrees. Sequential
-      // setup would not exercise (and so could not prove) that serialization.
-      await Promise.all([
-        alphaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-alpha" }),
-        betaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-beta" }),
-      ]);
-      const alpha = await alphaPorts.repositories?.resolve(f.storyId);
-      const beta = await betaPorts.repositories?.resolve(f.storyId);
-      if (alpha === undefined || beta === undefined) throw new Error("both Workspaces must resolve");
-
-      const alphaLeg = Object.values(alpha.repositories)[0];
-      const betaLeg = Object.values(beta.repositories)[0];
-      if (alphaLeg === undefined || betaLeg === undefined) throw new Error("each Workspace must expose the sot leg");
-      // Same remote → same repoId (the shared cache), but distinct worktree paths.
-      expect(alphaLeg.repoId).toBe(betaLeg.repoId);
-      expect(realpathSync(alphaLeg.worktreePath)).not.toBe(realpathSync(betaLeg.worktreePath));
+      // Six Workspaces all sharing ONE remote cache (same repoId) prepare the
+      // SAME story CONCURRENTLY. Six racers on one shared bare cache make the
+      // `git worktree prune`/`add` interleaving highly likely on every run, so
+      // this is a DETERMINISTIC regression tripwire for the per-repoId machine
+      // lock — not a single 2-way race that could pass by luck if the lock were
+      // removed. Only real serialization of the cache add/branch mutations lets
+      // every Workspace resolve to its own isolated worktree + governed branch.
+      const workspaces = [f.alpha, f.beta, ...["ws-gamma", "ws-delta", "ws-epsilon", "ws-zeta"].map(f.build)];
+      await Promise.all(workspaces.map((ws) =>
+        portsFor(ws).repositories?.prepare({ storyId: f.storyId, cycleId: `cycle-${ws.workspaceId}` }),
+      ));
 
       const branchOf = (worktreePath: string): string => execFileSync(
         "git",
         ["-C", worktreePath, "rev-parse", "--abbrev-ref", "HEAD"],
         { encoding: "utf8" },
       ).trim();
-      const alphaBranch = branchOf(alphaLeg.worktreePath);
-      const betaBranch = branchOf(betaLeg.worktreePath);
-      // Governed branches encode the workspace id, so they never collide.
-      expect(alphaBranch).toBe("roll/ws-alpha/US-WS-011/sot");
-      expect(betaBranch).toBe("roll/ws-beta/US-WS-011/sot");
-      expect(alphaBranch).not.toBe(betaBranch);
+      const legs = await Promise.all(workspaces.map(async (ws) => {
+        const resolved = await portsFor(ws).repositories?.resolve(f.storyId);
+        const leg = resolved === undefined ? undefined : Object.values(resolved.repositories)[0];
+        if (leg === undefined) throw new Error(`${ws.workspaceId} must resolve its sot leg`);
+        return { workspaceId: ws.workspaceId, leg, branch: branchOf(leg.worktreePath) };
+      }));
+
+      // Every leg targets the SAME shared cache (same repoId) — guards against
+      // the fixture accidentally handing out separate caches (which would make
+      // isolation trivially true).
+      const repoIds = new Set(legs.map((l) => l.leg.repoId));
+      expect(repoIds.size).toBe(1);
+      // …yet every worktree path and every governed branch is unique. A single
+      // cross-Workspace collision (the pre-lock race) collapses one of these
+      // Set sizes below the Workspace count.
+      const worktreePaths = new Set(legs.map((l) => realpathSync(l.leg.worktreePath)));
+      const branches = new Set(legs.map((l) => l.branch));
+      expect(worktreePaths.size).toBe(workspaces.length);
+      expect(branches.size).toBe(workspaces.length);
+      // …and each branch is exactly its own Workspace-scoped governed name.
+      for (const l of legs) {
+        expect(l.branch).toBe(`roll/${l.workspaceId}/US-WS-011/sot`);
+      }
     } finally {
       if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = previousRollHome;

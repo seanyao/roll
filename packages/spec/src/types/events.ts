@@ -62,6 +62,49 @@ export type RollEvent =
   | { type: "loop:dormant_failed"; loop: LoopType; ts: number; reason: string; error: string }
   // Cycle (BC2) — cycle:end anchors reconcile + cost accounting
   | { type: "cycle:start"; cycleId: string; storyId: string; agent: AgentId; model: string; ts: number }
+  | {
+      type: "workspace:waiting_capacity";
+      workspaceId: string;
+      storyId: string;
+      cycleId: string;
+      spawnId: string;
+      agent: AgentId;
+      model: string;
+      retryAt: number;
+      contenders: readonly AgentId[];
+      suspect: boolean;
+      ts: number;
+    }
+  | {
+      type: "workspace:capacity_acquired";
+      workspaceId: string;
+      storyId: string;
+      cycleId: string;
+      spawnId: string;
+      agent: AgentId;
+      model: string;
+      ts: number;
+    }
+  | {
+      type: "workspace:capacity_heartbeat";
+      workspaceId: string;
+      storyId: string;
+      cycleId: string;
+      spawnId: string;
+      agent: AgentId;
+      model: string;
+      ts: number;
+    }
+  | {
+      type: "workspace:capacity_released";
+      workspaceId: string;
+      storyId: string;
+      cycleId: string;
+      spawnId: string;
+      agent: AgentId;
+      model: string;
+      ts: number;
+    }
   // US-V4-004: the selected Story execution profile, recorded once per cycle at
   // route-resolve (before execute). standard = builder only (current behavior).
   | { type: "execution:profile"; cycleId: string; storyId: string; profile: ExecutionProfile; reason: string; ts: number }

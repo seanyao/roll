@@ -1,10 +1,12 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   BacklogStore,
+  AGENT_REGISTRY_NAMES,
   EventBus,
   classifyComplexity,
   configuredModelForAgent,
@@ -12,6 +14,8 @@ import {
   nodeDeliveryStore,
   nodeExecPort,
   normalizeAgentConfig,
+  normalizeAgentCapacityPolicy,
+  normalizeAgentScopeConfig,
   parseBacklog,
   queryStoryDelivery,
   resolveRoute,
@@ -28,8 +32,11 @@ import {
   present,
   type CycleRepositoryExecutionContext,
   type RepositoryExecutionContext,
+  type AgentName,
+  type NormalizedAgentCapacityPolicy,
 } from "@roll/spec";
 import {
+  NodeAgentCapacityBroker,
   acquireLock,
   branchCleanlyRebasesOntoMain,
   branchMergedIntoMain,
@@ -414,6 +421,46 @@ function scopedStoryExecuteRoute(
   return null;
 }
 
+function readMachineCapacityPolicy(machineHome: string): NormalizedAgentCapacityPolicy {
+  const path = join(machineHome, "agents.yaml");
+  if (existsSync(path)) {
+    const text = readFileSync(path, "utf8");
+    if (text.includes("roll-agents/v1")) {
+      const parsed = normalizeAgentScopeConfig(text);
+      if (parsed.config === null || parsed.config.scope !== "machine" || parsed.errors.length > 0) {
+        throw new Error(`invalid machine agent capacity config: ${parsed.errors.join("; ") || "expected machine scope"}`);
+      }
+      return normalizeAgentCapacityPolicy(parsed.config);
+    }
+  }
+  const perAgent: Partial<Record<AgentName, number>> = {};
+  for (const agent of AGENT_REGISTRY_NAMES as readonly AgentName[]) perAgent[agent] = 1;
+  return {
+    global: Object.keys(perAgent).length,
+    perAgent,
+    heartbeatSeconds: 30,
+    staleAfterSeconds: 120,
+  };
+}
+
+function processIdentity(pid: number): { alive: boolean; startedAtMs?: number } {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+    return code === "EPERM" ? { alive: true } : { alive: false };
+  }
+  try {
+    const raw = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    const parsed = Date.parse(raw);
+    return Number.isFinite(parsed) ? { alive: true, startedAtMs: parsed } : { alive: true };
+  } catch {
+    return { alive: true };
+  }
+}
+
 /**
  * Build the real Node-backed {@link Ports} bundle. The agent spawn defaults to
  * {@link realAgentSpawn} (claude argv); tests override `agentSpawn` (+ the github
@@ -428,6 +475,7 @@ export function nodePorts(opts: {
   agentSpawn?: AgentSpawn;
   clock?: ProcessClock;
   repositoryAdapters?: RepositoryPortAdapters;
+  capacityRoot?: string;
 }): Ports {
   const bus = new EventBus();
   const clock = opts.clock ?? systemClock;
@@ -440,6 +488,22 @@ export function nodePorts(opts: {
       ? join(opts.repoCwd, ".roll", "backlog.md")
       : join(opts.repoCwd, "backlog", "index.md")
   );
+  const machineHome = process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const capacityPolicy = readMachineCapacityPolicy(machineHome);
+  const capacityRoot = opts.capacityRoot ?? (
+    process.env["VITEST"] === "true"
+      ? join(dirname(opts.paths.eventsPath), "capacity")
+      : join(machineHome, "locks", "capacity")
+  );
+  const controllerStartedAtMs = Date.now() - process.uptime() * 1_000;
+  const capacityBroker = new NodeAgentCapacityBroker({
+    root: capacityRoot,
+    policy: capacityPolicy,
+    clockMs: () => clock() * 1_000,
+    host: hostname(),
+    processIdentity: processIdentity,
+  });
+  let currentCapacityLease: import("@roll/spec").AgentCapacityLease | undefined;
 
   // FIX-906: the unified delivery-truth predicate. The structured projection
   // (`ensureDeliveriesFresh`, FIX-904/905) rebuilds deliveries.jsonl from BOTH
@@ -509,6 +573,48 @@ export function nodePorts(opts: {
     ...(repositories === undefined ? {} : { repositories }),
     clock,
     agentSpawn: spawn,
+    capacity: {
+      heartbeatIntervalMs: Math.max(1_000, capacityPolicy.heartbeatSeconds * 1_000),
+      acquire(pending, ctx) {
+        const result = capacityBroker.acquire({
+          key: pending.key,
+          owner: {
+            leaseId: randomUUID(),
+            ownerToken: randomUUID(),
+            workspaceId: ctx.repositoryExecution?.workspaceId ?? process.env["ROLL_WORKSPACE"] ?? "legacy-project",
+            storyId: ctx.storyId ?? "",
+            cycleId: ctx.cycleId,
+            spawnId: pending.spawnId,
+            host: hostname(),
+            pid: process.pid,
+            processStartedAtMs: controllerStartedAtMs,
+          },
+        });
+        if (result.kind === "acquired") currentCapacityLease = result.lease;
+        return result;
+      },
+      heartbeat(leaseId, ownerToken) {
+        return capacityBroker.heartbeat(leaseId, ownerToken);
+      },
+      release(leaseId, ownerToken) {
+        const result = capacityBroker.release(leaseId, ownerToken);
+        if (result.kind === "released" || result.kind === "already_released") {
+          if (currentCapacityLease?.owner.leaseId === leaseId) currentCapacityLease = undefined;
+        }
+        return result;
+      },
+      releaseCurrent(cycleId) {
+        if (currentCapacityLease === undefined || currentCapacityLease.owner.cycleId !== cycleId) {
+          return { kind: "already_released" };
+        }
+        const result = capacityBroker.release(
+          currentCapacityLease.owner.leaseId,
+          currentCapacityLease.owner.ownerToken,
+        );
+        if (result.kind === "released" || result.kind === "already_released") currentCapacityLease = undefined;
+        return result;
+      },
+    },
     // FIX-906: unified delivery-truth predicate (structured projection over
     // runs + git merges on origin/main — recognizes external/manual merges).
     mergedDelivery,

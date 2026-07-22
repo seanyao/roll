@@ -37,6 +37,7 @@ import {
   watchdogVerdict,
 } from "@roll/core";
 import { CYCLE_TIMEOUT_SEC } from "@roll/core";
+import { AGENT_CAPACITY_LEASE_SCHEMA } from "@roll/spec";
 import { type Ports, type ProcessClock, executeCommand, buildRunRow, revertPrematureDone } from "./executor.js";
 import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 import { classifyCycleFailure, readCycleEvents } from "./failure-attribution.js";
@@ -92,6 +93,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   let state: CycleState = initialCycleState(ctx);
   let lockReleased = false;
   let terminalEmitted = false;
+  let liveCapacity: import("@roll/spec").AgentCapacityLease | undefined;
   // Stamp the cycle start onto the live context so the attest gate (FIX-207) in
   // capture_facts can tell a report written THIS cycle from a stale one.
   let liveCtx: CycleContext = { ...ctx, startSec };
@@ -141,9 +143,64 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
       // the next `pending`. Commands are 1:1 with infra calls (executeCommand).
       let nextEvent: CycleEvent | undefined;
       for (const cmd of commands) {
-        const res = await executeCommand(cmd, ports, liveCtx);
+        if ((cmd.kind === "spawn_agent" || cmd.kind === "spawn_role") && liveCapacity !== undefined) {
+          const heartbeat = ports.capacity.heartbeat(
+            liveCapacity.owner.leaseId,
+            liveCapacity.owner.ownerToken,
+          );
+          if (heartbeat.kind === "ownership_lost") {
+            throw new Error(`agent_capacity_ownership_lost:${heartbeat.reason}`);
+          }
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "workspace:capacity_heartbeat",
+            workspaceId: liveCapacity.owner.workspaceId,
+            storyId: liveCapacity.owner.storyId,
+            cycleId: liveCapacity.owner.cycleId,
+            spawnId: liveCapacity.owner.spawnId,
+            agent: liveCapacity.key.agent,
+            model: liveCapacity.key.model,
+            ts: ports.clock() * 1_000,
+          });
+        }
+        let ownershipLostReason: string | undefined;
+        const heartbeatTimer = (cmd.kind === "spawn_agent" || cmd.kind === "spawn_role") && liveCapacity !== undefined
+          ? setInterval(() => {
+              if (liveCapacity === undefined || ownershipLostReason !== undefined) return;
+              const heartbeat = ports.capacity.heartbeat(
+                liveCapacity.owner.leaseId,
+                liveCapacity.owner.ownerToken,
+              );
+              if (heartbeat.kind === "ownership_lost") {
+                ownershipLostReason = heartbeat.reason;
+                return;
+              }
+              ports.events.appendEvent(ports.paths.eventsPath, {
+                type: "workspace:capacity_heartbeat",
+                workspaceId: liveCapacity.owner.workspaceId,
+                storyId: liveCapacity.owner.storyId,
+                cycleId: liveCapacity.owner.cycleId,
+                spawnId: liveCapacity.owner.spawnId,
+                agent: liveCapacity.key.agent,
+                model: liveCapacity.key.model,
+                ts: ports.clock() * 1_000,
+              });
+            }, ports.capacity.heartbeatIntervalMs)
+          : undefined;
+        let res;
+        try {
+          res = await executeCommand(cmd, ports, liveCtx);
+        } finally {
+          if (heartbeatTimer !== undefined) clearInterval(heartbeatTimer);
+        }
+        if (ownershipLostReason !== undefined) {
+          throw new Error(`agent_capacity_ownership_lost:${ownershipLostReason}`);
+        }
         if (res.lockReleased === true) lockReleased = true;
-        if (res.event !== undefined) nextEvent = res.event;
+        if (res.event !== undefined) {
+          nextEvent = res.event;
+          if (res.event.type === "capacity_acquired") liveCapacity = res.event.lease;
+        }
+        if (res.capacityReleased === true) liveCapacity = undefined;
         // FIX-208: fold executor-captured truth (real tcr count, parsed cost)
         // into the live context so the later append_run / cycle:end commands —
         // which read liveCtx — carry it. The orchestrator never owns these (it
@@ -159,6 +216,23 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
       }
     }
   } finally {
+    if (liveCapacity !== undefined) {
+      const released = ports.capacity.release(
+        liveCapacity.owner.leaseId,
+        liveCapacity.owner.ownerToken,
+      );
+      if (released.kind === "ownership_lost") {
+        try {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `cycle ${liveCtx.cycleId}: residual agent capacity ownership lost (${released.reason})`,
+          );
+        } catch {
+          /* terminal fallback below remains best-effort */
+        }
+      }
+      liveCapacity = undefined;
+    }
     // I8: a terminal cycle:end + runs row MUST exist on every exit path. If the
     // walk threw / bailed before the orchestrator emitted one, write a fallback
     // `aborted` terminal directly (idempotent — the bus upsert dedupes the row).
@@ -315,6 +389,32 @@ export function dryRunPlan(ctx: CycleContext): string[] {
     const { state: next, commands } = cycleStep(state, ev);
     state = next;
     for (const cmd of commands) out.push(describeCommand(cmd));
+    if (commands.some((command) => command.kind === "acquire_capacity") && state.pendingSpawn !== undefined) {
+      const pending = state.pendingSpawn;
+      const acquired = cycleStep(state, {
+        type: "capacity_acquired",
+        spawnId: pending.spawnId,
+        lease: {
+          schema: AGENT_CAPACITY_LEASE_SCHEMA,
+          key: pending.key,
+          owner: {
+            leaseId: `dry:${pending.spawnId}`,
+            ownerToken: "dry-run",
+            workspaceId: state.ctx.repositoryExecution?.workspaceId ?? "dry-run",
+            storyId: state.ctx.storyId ?? "",
+            cycleId: state.ctx.cycleId,
+            spawnId: pending.spawnId,
+            host: "dry-run",
+            pid: 0,
+            processStartedAtMs: 0,
+          },
+          acquiredAtMs: 0,
+          heartbeatAtMs: 0,
+        },
+      });
+      state = acquired.state;
+      for (const cmd of acquired.commands) out.push(describeCommand(cmd));
+    }
     if (state.done) break;
   }
   return out;
@@ -333,10 +433,14 @@ function describeCommand(cmd: CycleCommand): string {
       return `resume_worktree      → resolveResumeBase(${cmd.storyId}) + git.resetWorktreeHard`;
     case "resolve_route":
       return `resolve_route        → router.resolveRoute(${cmd.storyId})`;
+    case "acquire_capacity":
+      return `acquire_capacity     → machine broker (${cmd.pending.key.agent}/${cmd.pending.key.model})`;
     case "spawn_agent":
       return `spawn_agent          → agentSpawn(${cmd.agent}, attempt ${cmd.attempt})`;
     case "spawn_role":
       return `spawn_role           → agentSpawn(${cmd.agent} as ${cmd.role}, round ${cmd.round})`;
+    case "release_capacity":
+      return `release_capacity     → machine broker (${cmd.leaseId})`;
     case "kill_agent":
       return `kill_agent           → SIGKILL (grace ${cmd.graceSec}s)`;
     case "sleep_backoff":

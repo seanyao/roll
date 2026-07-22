@@ -455,8 +455,18 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     const alpha = workspaceRoot("alpha-status");
     const beta = workspaceRoot("beta-status");
     const alphaPaths = workspaceSchedulerPaths({ workspaceId: "ws-alpha", workspaceRoot: alpha });
+    const betaPaths = workspaceSchedulerPaths({ workspaceId: "ws-beta", workspaceRoot: beta });
     mkdirSync(alphaPaths.runtimeRoot, { recursive: true });
+    mkdirSync(betaPaths.runtimeRoot, { recursive: true });
     writeFileSync(alphaPaths.pauseMarkerPath, "paused\n", { flag: "a" });
+    writeFileSync(
+      join(alphaPaths.runtimeRoot, "events.ndjson"),
+      `${JSON.stringify({ type: "workspace:waiting_capacity", workspaceId: "ws-alpha", storyId: "US-A", cycleId: "cycle-a", spawnId: "spawn-a", agent: "codex", model: "gpt", retryAt: 1_800_000_000_000, contenders: ["codex"], suspect: false, ts: 1 })}\n`,
+    );
+    writeFileSync(
+      join(betaPaths.runtimeRoot, "events.ndjson"),
+      `${JSON.stringify({ type: "workspace:capacity_acquired", workspaceId: "ws-beta", storyId: "US-B", cycleId: "cycle-b", spawnId: "spawn-b", agent: "claude", model: "sonnet", ts: 1 })}\n`,
+    );
     const fixture = schedulerDeps({ "ws-alpha": alpha, "ws-beta": beta }, (_args, operation) => {
       expect(operation).toBe("read");
       return {
@@ -477,8 +487,8 @@ describe("US-WS-016 Workspace scheduler contract", () => {
       process.stdout.write = original;
     }
 
-    expect(stdout).toContain(`ws-alpha  paused  armed  ${alphaPaths.runtimeRoot}`);
-    expect(stdout).toContain(`ws-beta  active  unarmed  ${join(beta, "runtime")}`);
+    expect(stdout).toContain(`ws-alpha  paused  armed  ${alphaPaths.runtimeRoot}  capacity=waiting agent=codex model=gpt retry=2027-01-15T08:00:00.000Z`);
+    expect(stdout).toContain(`ws-beta  active  unarmed  ${betaPaths.runtimeRoot}  capacity=acquired agent=claude model=sonnet`);
     expect(fixture.calls).toEqual(["isArmed com.roll.loop.ws-alpha", "isArmed com.roll.loop.ws-beta"]);
   });
 

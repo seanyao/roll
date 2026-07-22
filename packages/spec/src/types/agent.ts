@@ -343,7 +343,7 @@ export interface NormalizedAgentCapacityPolicy {
 export const AGENT_CAPACITY_LEASE_SCHEMA = "roll-agent-capacity-lease/v1" as const;
 
 export interface AgentCapacityKey {
-  readonly agent: AgentName;
+  readonly agent: AgentId;
   readonly model: ModelId;
   /** Opaque account/profile identity; never rendered in diagnostics. */
   readonly contextKey: string;
@@ -379,7 +379,7 @@ export type AgentCapacityAcquireResult =
   | {
       readonly kind: "waiting";
       readonly retryAtMs: number;
-      readonly contenders: readonly { readonly agent: AgentName; readonly cycleId: string }[];
+      readonly contenders: readonly { readonly agent: AgentId; readonly cycleId: string }[];
       readonly suspect: boolean;
     };
 

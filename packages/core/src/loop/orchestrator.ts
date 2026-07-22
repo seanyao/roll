@@ -103,6 +103,8 @@
  */
 import type {
   AgentId,
+  AgentCapacityKey,
+  AgentCapacityLease,
   BuilderFinalizationFacts,
   CycleCost,
   CyclePhase,
@@ -155,6 +157,7 @@ export type V2CycleStatus =
   | "local"
   | "needs_review"
   | "pending_rig_recovery"
+  | "waiting_capacity"
   | "failed"
   | "aborted"
   | "blocked"
@@ -219,6 +222,8 @@ export function mapV2Status(status: V2CycleStatus): TerminalOutcome {
       return "needs_review";
     case "pending_rig_recovery":
       return "idle_no_work";
+    case "waiting_capacity":
+      return "waiting_capacity";
     case "failed":
       return "failed";
     case "aborted":
@@ -819,6 +824,8 @@ export type AdversarialRoleName = "test_author" | "implementer" | "attacker";
 export interface AdversarialPlan {
   testAuthor: AgentId;
   implementer: AgentId;
+  testAuthorModel?: ModelId;
+  implementerModel?: ModelId;
   maxRounds: number;
   dryRoundsToStop: number;
   totalTimeoutSec: number;
@@ -845,6 +852,21 @@ export interface AdversarialRuntime {
   implementedInitial: boolean;
 }
 
+export type PendingSpawnProcess =
+  | { readonly kind: "agent"; readonly agent: AgentId; readonly attempt: number }
+  | {
+      readonly kind: "role";
+      readonly role: AdversarialRoleName;
+      readonly agent: AgentId;
+      readonly round: number;
+    };
+
+export interface PendingCapacitySpawn {
+  readonly spawnId: string;
+  readonly key: AgentCapacityKey;
+  readonly process: PendingSpawnProcess;
+}
+
 // ── Cycle commands (the language the stepper emits) ───────────────────────────
 
 /**
@@ -859,8 +881,10 @@ export type CycleCommand =
   | { kind: "pick_story" } // backlog/picker pickStory.
   | { kind: "resume_worktree"; storyId: string } // RESUME-PRIOR-WORK re-point (post-pick).
   | { kind: "resolve_route"; storyId: string } // agent/router resolveRoute+Fallback.
+  | { kind: "acquire_capacity"; pending: PendingCapacitySpawn }
   | { kind: "spawn_agent"; agent: AgentId; attempt: number } // execute (TCR inside).
   | { kind: "spawn_role"; role: AdversarialRoleName; agent: AgentId; round: number } // US-LOOP-102 adversarial execute (verified/designed).
+  | { kind: "release_capacity"; leaseId: string; ownerToken: string }
   | { kind: "kill_agent"; graceSec: number } // watchdog teardown.
   | { kind: "sleep_backoff"; seconds: number } // retry backoff (adapter sleeps).
   | { kind: "capture_facts" } // git rev-list/log count (bin/roll:9127-9157).
@@ -1114,6 +1138,10 @@ export interface CycleState {
    *  only for verified/designed cycles whose route_resolved carried a plan; a
    *  standard cycle leaves it undefined and follows the single-spawn path. */
   adversarial?: AdversarialRuntime;
+  /** Process selected by routing but forbidden to start until capacity is acquired. */
+  pendingSpawn?: PendingCapacitySpawn;
+  /** Exact machine lease currently authorizing one running agent process. */
+  activeCapacity?: AgentCapacityLease;
   /** Captured post-agent facts (set entering reconcile). */
   captured?: CapturedFacts;
   /** Terminal status once decided. */
@@ -1140,6 +1168,14 @@ export type CycleEvent =
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
+  | { type: "capacity_acquired"; spawnId: string; lease: AgentCapacityLease }
+  | {
+      type: "waiting_capacity";
+      spawnId: string;
+      retryAtMs: number;
+      contenders: readonly { readonly agent: AgentId; readonly cycleId: string }[];
+      suspect: boolean;
+    }
   | { type: "agent_exited"; exit: number; timedOut: boolean; lost?: boolean }
   // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
   // exited. `newHole`/`attackTest` are meaningful only for attacker rounds;
@@ -1172,6 +1208,8 @@ const EVENT_VALID_PHASES: Record<Exclude<CycleEvent["type"], "start">, CyclePhas
   no_story: ["pick"],
   route_resolved: ["route"],
   route_pending: ["route"],
+  capacity_acquired: ["execute"],
+  waiting_capacity: ["execute"],
   agent_exited: ["execute"],
   role_exited: ["execute"],
   facts_captured: ["reconcile"],
@@ -1259,6 +1297,67 @@ function terminate(
     state: { ...state, phase: "cleanup", terminal: status, done: true },
     commands,
   };
+}
+
+function pendingSpawn(
+  state: CycleState,
+  process: PendingSpawnProcess,
+  model: ModelId,
+): PendingCapacitySpawn {
+  const suffix = process.kind === "agent"
+    ? `agent:${process.attempt}`
+    : `role:${process.role}:${process.round}`;
+  return {
+    spawnId: `${state.ctx.cycleId}:${suffix}`,
+    key: {
+      agent: process.agent,
+      model,
+      contextKey: `${process.agent}:default`,
+    },
+    process,
+  };
+}
+
+function acquirePending(
+  state: CycleState,
+  process: PendingSpawnProcess,
+  model: ModelId,
+  before: CycleCommand[] = [],
+): StepResult {
+  const pending = pendingSpawn(state, process, model);
+  return {
+    state: { ...state, pendingSpawn: pending, activeCapacity: undefined },
+    commands: [...before, { kind: "acquire_capacity", pending }],
+  };
+}
+
+function releaseActiveCapacity(state: CycleState): { state: CycleState; commands: CycleCommand[] } {
+  const lease = state.activeCapacity;
+  if (lease === undefined) return { state, commands: [] };
+  return {
+    state: { ...state, activeCapacity: undefined },
+    commands: [{
+      kind: "release_capacity",
+      leaseId: lease.owner.leaseId,
+      ownerToken: lease.owner.ownerToken,
+    }, {
+      kind: "emit_event",
+      event: {
+        type: "workspace:capacity_released",
+        workspaceId: lease.owner.workspaceId,
+        storyId: lease.owner.storyId,
+        cycleId: lease.owner.cycleId,
+        spawnId: lease.owner.spawnId,
+        agent: lease.key.agent,
+        model: lease.key.model,
+        ts: 0,
+      },
+    }],
+  };
+}
+
+function capacityEventMatches(state: CycleState, spawnId: string): boolean {
+  return state.pendingSpawn !== undefined && state.pendingSpawn.spawnId === spawnId;
 }
 
 /**
@@ -1388,8 +1487,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // spawn_agent path below — ZERO behaviour change.
       if (event.adversarial !== undefined) {
         const plan = event.adversarial;
-        return {
-          state: {
+        const nextState: CycleState = {
             ...state,
             phase: "execute",
             attempt: 1,
@@ -1403,9 +1501,13 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
               inFlight: "test_author",
               implementedInitial: false,
             },
-          },
-          commands: [startCmd, { kind: "spawn_role", role: "test_author", agent: plan.testAuthor, round: 0 }],
         };
+        return acquirePending(
+          nextState,
+          { kind: "role", role: "test_author", agent: plan.testAuthor, round: 0 },
+          plan.testAuthorModel ?? "",
+          [startCmd],
+        );
       }
       // US-LOOP-106: a verified/designed cycle whose executor could NOT form a
       // heterogeneous test_author≠implementer pair degrades to standard — but NOT
@@ -1415,15 +1517,18 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         event.adversarialDegraded !== undefined
           ? [adversarialDegradedCmd(execCtx.cycleId, execCtx.storyId ?? "", event.adversarialDegraded.cause, event.adversarialDegraded.from ?? "adversarial")]
           : [];
-      return {
-        state: {
+      const nextState: CycleState = {
           ...state,
           phase: "execute",
           attempt: 1,
           ctx: execCtx,
-        },
-        commands: [startCmd, ...degradeCmds, { kind: "spawn_agent", agent: event.agent, attempt: 1 }],
       };
+      return acquirePending(
+        nextState,
+        { kind: "agent", agent: event.agent, attempt: 1 },
+        event.model,
+        [startCmd, ...degradeCmds],
+      );
     }
 
     case "route_pending":
@@ -1431,7 +1536,95 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         { kind: "cleanup_environment" }, { kind: "cleanup_worktree", branch: state.ctx.branch },
       ]);
 
+    case "capacity_acquired": {
+      if (!capacityEventMatches(state, event.spawnId)) {
+        return terminate(state, "failed", [{
+          kind: "append_alert",
+          message: `cycle ${state.ctx.cycleId}: capacity acquisition correlation mismatch`,
+        }]);
+      }
+      const pending = state.pendingSpawn as PendingCapacitySpawn;
+      const lease = event.lease;
+      const exact = lease.owner.cycleId === state.ctx.cycleId &&
+        lease.owner.spawnId === pending.spawnId &&
+        lease.key.agent === pending.key.agent &&
+        lease.key.model === pending.key.model &&
+        lease.key.contextKey === pending.key.contextKey;
+      if (!exact) {
+        return terminate(state, "failed", [{
+          kind: "append_alert",
+          message: `cycle ${state.ctx.cycleId}: capacity lease ownership mismatch`,
+        }]);
+      }
+      const process = pending.process;
+      const command: CycleCommand = process.kind === "agent"
+        ? { kind: "spawn_agent", agent: process.agent, attempt: process.attempt }
+        : { kind: "spawn_role", role: process.role, agent: process.agent, round: process.round };
+      const workspaceId = state.ctx.repositoryExecution?.workspaceId ?? "";
+      return {
+        state: { ...state, pendingSpawn: undefined, activeCapacity: lease },
+        commands: [
+          {
+            kind: "emit_event",
+            event: {
+              type: "workspace:capacity_acquired",
+              workspaceId,
+              storyId: state.ctx.storyId ?? "",
+              cycleId: state.ctx.cycleId,
+              spawnId: pending.spawnId,
+              agent: pending.key.agent,
+              model: pending.key.model,
+              ts: 0,
+            },
+          },
+          command,
+        ],
+      };
+    }
+
+    case "waiting_capacity": {
+      if (!capacityEventMatches(state, event.spawnId)) {
+        return terminate(state, "failed", [{
+          kind: "append_alert",
+          message: `cycle ${state.ctx.cycleId}: capacity waiting correlation mismatch`,
+        }]);
+      }
+      const pending = state.pendingSpawn as PendingCapacitySpawn;
+      return terminate(
+        { ...state, pendingSpawn: undefined },
+        "waiting_capacity",
+        [
+          {
+            kind: "emit_event",
+            event: {
+              type: "workspace:waiting_capacity",
+              workspaceId: state.ctx.repositoryExecution?.workspaceId ?? "",
+              storyId: state.ctx.storyId ?? "",
+              cycleId: state.ctx.cycleId,
+              spawnId: pending.spawnId,
+              agent: pending.key.agent,
+              model: pending.key.model,
+              retryAt: event.retryAtMs,
+              contenders: [...new Set(event.contenders.map((contender) => contender.agent))].sort(),
+              suspect: event.suspect,
+              ts: 0,
+            },
+          },
+          { kind: "cleanup_environment" },
+          { kind: "cleanup_worktree", branch: state.ctx.branch },
+        ],
+        "waiting_capacity",
+      );
+    }
+
     case "agent_exited": {
+      if (state.activeCapacity === undefined) {
+        return terminate(state, "failed", [{
+          kind: "append_alert",
+          message: `cycle ${state.ctx.cycleId}: agent exited without active capacity ownership`,
+        }]);
+      }
+      const released = releaseActiveCapacity(state);
       // FIX-1474 — a LOST builder child (killed out-of-band; detected by the
       // runner's liveness probe, surfaced via cycle:agent_lost) converges to
       // the explicit `aborted` terminal: no retry (the death is environmental,
@@ -1439,30 +1632,30 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // over the retry plan.
       if (event.lost === true) {
         return {
-          state: { ...state, phase: "execute", terminal: "aborted", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
-          commands: abortedTeardownCommands(terminalCtx(state)),
+          state: { ...released.state, phase: "execute", terminal: "aborted", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
+          commands: [...released.commands, ...abortedTeardownCommands(terminalCtx(state))],
         };
       }
       const plan = retryPlan({ attempt: state.attempt, exit: event.exit, timedOut: event.timedOut });
       if (plan.action === "abort_timeout") {
         // Watchdog breach → clean teardown (worktree PRESERVED, bin/roll:9122).
         return {
-          state: { ...state, phase: "execute", terminal: "blocked", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
-          commands: timeoutTeardownCommands(terminalCtx(state)),
+          state: { ...released.state, phase: "execute", terminal: "blocked", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
+          commands: [...released.commands, ...timeoutTeardownCommands(terminalCtx(state))],
         };
       }
       if (plan.action === "retry") {
-        return {
-          state: { ...state, phase: "execute", attempt: plan.nextAttempt },
-          commands: [
-            { kind: "sleep_backoff", seconds: plan.backoffSec },
-            { kind: "spawn_agent", agent: state.ctx.agent ?? "", attempt: plan.nextAttempt },
-          ],
-        };
+        const nextState = { ...released.state, phase: "execute" as const, attempt: plan.nextAttempt };
+        return acquirePending(
+          nextState,
+          { kind: "agent", agent: state.ctx.agent ?? "", attempt: plan.nextAttempt },
+          state.ctx.model ?? "",
+          [...released.commands, { kind: "sleep_backoff", seconds: plan.backoffSec }],
+        );
       }
       if (plan.action === "exhausted") {
         // Retry budget spent → failed (NEVER agent-swap, I6).
-        return terminate({ ...state, phase: "execute", ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } }, "failed", [
+        return terminate({ ...released.state, phase: "execute", ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } }, "failed", [...released.commands,
           { kind: "append_alert", message: `cycle ${state.ctx.cycleId}: agent exited ${event.exit} after retries; worktree preserved` },
         ]);
       }
@@ -1471,15 +1664,22 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       // and failure-attribution can detect zero-output vendor stalls (FIX-1213).
       return {
         state: {
-          ...state,
+          ...released.state,
           phase: "reconcile",
           ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut },
         },
-        commands: [{ kind: "capture_facts" }],
+        commands: [...released.commands, { kind: "capture_facts" }],
       };
     }
 
     case "role_exited": {
+      if (state.activeCapacity === undefined) {
+        return terminate(state, "failed", [{
+          kind: "append_alert",
+          message: `cycle ${state.ctx.cycleId}: role exited without active capacity ownership`,
+        }]);
+      }
+      const released = releaseActiveCapacity(state);
       // US-LOOP-102 — the adversarial subsequence stepper. Purely sequences the
       // roles; the DECISION to keep attacking / fix / stop is delegated to the
       // pure {@link adversarialNextStep} (US-LOOP-100), so "never hangs" is a
@@ -1489,7 +1689,7 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         // A role event with no adversarial runtime is a stale/replayed adapter
         // event — ignore it (state unchanged, no command). The phase guard
         // already blocks it outside execute.
-        return { state, commands: [] };
+        return { state: released.state, commands: released.commands };
       }
       const cid = state.ctx.cycleId;
       const sid = state.ctx.storyId ?? "";
@@ -1509,19 +1709,21 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
           : { kind: "agent_unavailable", role: adv.inFlight };
         const decision = adversarialDegradeDecision(failure);
         const routedAgent = state.ctx.agent ?? adv.plan.implementer;
-        return {
-          state: {
-            ...state,
+        const nextState: CycleState = {
+            ...released.state,
             phase: "execute",
             attempt: 1,
             adversarial: undefined,
             ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut },
-          },
-          commands: [
-            adversarialDegradedCmd(cid, sid, decision.cause),
-            { kind: "spawn_agent", agent: routedAgent, attempt: 1 },
-          ],
         };
+        return acquirePending(
+          nextState,
+          { kind: "agent", agent: routedAgent, attempt: 1 },
+          state.ctx.model ?? "",
+          [...released.commands,
+            adversarialDegradedCmd(cid, sid, decision.cause),
+          ],
+        );
       }
       const cfg = {
         maxRounds: adv.plan.maxRounds,
@@ -1536,13 +1738,15 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
 
       if (adv.inFlight === "test_author") {
         // Red tests written → hand to the (heterogeneous) implementer, round 0.
-        return {
-          state: { ...state, adversarial: { ...adv, inFlight: "implementer" } },
-          commands: [
+        const nextState = { ...released.state, adversarial: { ...adv, inFlight: "implementer" as const } };
+        return acquirePending(
+          nextState,
+          { kind: "role", role: "implementer", agent: adv.plan.implementer, round: adv.round },
+          adv.plan.implementerModel ?? state.ctx.model ?? "",
+          [...released.commands,
             { kind: "emit_event", event: { type: "adversarial:test-authored", cycleId: cid, storyId: sid, agent: adv.plan.testAuthor, ts: 0 } },
-            { kind: "spawn_role", role: "implementer", agent: adv.plan.implementer, round: adv.round },
           ],
-        };
+        );
       }
 
       if (adv.inFlight === "implementer") {
@@ -1562,11 +1766,18 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
         if (step.kind === "stop") {
           cmds.push(terminatedCmd(step.reason, adv.round, adv.holesFound));
           cmds.push({ kind: "capture_facts" });
-          return { state: { ...state, phase: "reconcile", adversarial: { ...adv, implementedInitial: true } }, commands: cmds };
+          return {
+            state: { ...released.state, phase: "reconcile", adversarial: { ...adv, implementedInitial: true } },
+            commands: [...released.commands, ...cmds],
+          };
         }
         const nextRound = adv.round + 1;
-        cmds.push({ kind: "spawn_role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound });
-        return { state: { ...state, adversarial: { ...adv, round: nextRound, inFlight: "attacker", implementedInitial: true } }, commands: cmds };
+        return acquirePending(
+          { ...released.state, adversarial: { ...adv, round: nextRound, inFlight: "attacker", implementedInitial: true } },
+          { kind: "role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound },
+          adv.plan.testAuthorModel ?? "",
+          [...released.commands, ...cmds],
+        );
       }
 
       // inFlight === "attacker": a breaking test was added. newHole ⇒ a real
@@ -1586,22 +1797,26 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       };
       const step = adversarialNextStep({ round: adv.round, dryStreak: adv.dryStreak }, { newHole }, cfg);
       if (step.kind === "fix") {
-        return {
-          state: { ...state, adversarial: { ...adv, dryStreak: 0, holesFound, attackTests, inFlight: "implementer" } },
-          commands: [attackEvent, { kind: "spawn_role", role: "implementer", agent: adv.plan.implementer, round: adv.round }],
-        };
+        return acquirePending(
+          { ...released.state, adversarial: { ...adv, dryStreak: 0, holesFound, attackTests, inFlight: "implementer" } },
+          { kind: "role", role: "implementer", agent: adv.plan.implementer, round: adv.round },
+          adv.plan.implementerModel ?? state.ctx.model ?? "",
+          [...released.commands, attackEvent],
+        );
       }
       if (step.kind === "attack") {
         const nextRound = adv.round + 1;
-        return {
-          state: { ...state, adversarial: { ...adv, round: nextRound, dryStreak: reportedDryStreak, holesFound, attackTests, inFlight: "attacker" } },
-          commands: [attackEvent, { kind: "spawn_role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound }],
-        };
+        return acquirePending(
+          { ...released.state, adversarial: { ...adv, round: nextRound, dryStreak: reportedDryStreak, holesFound, attackTests, inFlight: "attacker" } },
+          { kind: "role", role: "attacker", agent: adv.plan.testAuthor, round: nextRound },
+          adv.plan.testAuthorModel ?? "",
+          [...released.commands, attackEvent],
+        );
       }
       // stop (dry / max_rounds / timeout) — deliver the accumulated green state.
       return {
-        state: { ...state, phase: "reconcile", adversarial: { ...adv, dryStreak: reportedDryStreak, holesFound, attackTests } },
-        commands: [attackEvent, terminatedCmd(step.reason, adv.round, holesFound), { kind: "capture_facts" }],
+        state: { ...released.state, phase: "reconcile", adversarial: { ...adv, dryStreak: reportedDryStreak, holesFound, attackTests } },
+        commands: [...released.commands, attackEvent, terminatedCmd(step.reason, adv.round, holesFound), { kind: "capture_facts" }],
       };
     }
 

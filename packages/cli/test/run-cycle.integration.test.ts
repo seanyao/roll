@@ -294,6 +294,90 @@ function fixedClock(start: number): { clock: () => number; set: (v: number) => v
 }
 
 describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
+  it("US-WS-017b capacity exhaustion emits a neutral zero-spawn terminal and restores Todo", async () => {
+    const { repo } = makeFixture("capacity-wait");
+    const rt = tmp("capacity-wait-rt");
+    const cycleId = "20260722-230000-1701";
+    const p = paths(rt, cycleId);
+    let spawnCount = 0;
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-wait-broker"),
+    });
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        spawnCount += 1;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      },
+      capacity: {
+        ...base.capacity,
+        acquire: () => ({
+          kind: "waiting",
+          retryAtMs: 1_800_000_000,
+          contenders: [{ agent: "claude", cycleId: "private-contender-cycle" }],
+          suspect: false,
+        }),
+      },
+    };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("waiting_capacity");
+    expect(spawnCount).toBe(0);
+    expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("| US-RUN-001 | Runner adapter smoke story est_min:5 | 📋 Todo |");
+    const events = readFileSync(p.eventsPath, "utf8");
+    expect(events).toContain('"type":"workspace:waiting_capacity"');
+    expect(events).toContain('"contenders":["claude"]');
+    expect(events).not.toContain("private-contender-cycle");
+    const row = JSON.parse(readFileSync(p.runsPath, "utf8").trim()) as Record<string, unknown>;
+    expect(row).toMatchObject({ status: "waiting_capacity", outcome: "waiting_capacity" });
+  });
+
+  it("US-WS-017b unexpected agent throw releases the residual exact-owned capacity lease", async () => {
+    const { repo } = makeFixture("capacity-throw");
+    const rt = tmp("capacity-throw-rt");
+    const cycleId = "20260722-230000-1702";
+    const p = paths(rt, cycleId);
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-throw-broker"),
+    });
+    let releases = 0;
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        throw new Error("fixture agent exploded");
+      },
+      capacity: {
+        ...base.capacity,
+        release(leaseId, ownerToken) {
+          releases += 1;
+          return base.capacity.release(leaseId, ownerToken);
+        },
+      },
+    };
+
+    await expect(runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    })).rejects.toThrow("fixture agent exploded");
+
+    expect(releases).toBe(1);
+    expect(readFileSync(p.eventsPath, "utf8")).toContain('"outcome":"aborted_no_delivery"');
+  });
+
   it("US-LOOP-098 proves detached cycle branch governance against real git refs", async () => {
     const { repo, remote } = makeGitignoredFixture("branch-gov");
     // CI runners carry no global git identity; the cycle's own commits (worktree

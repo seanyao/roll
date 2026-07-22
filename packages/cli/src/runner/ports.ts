@@ -1,5 +1,7 @@
-import type { CycleContext, CycleEvent, IssueInitOutcome, ObservedCommit, OpenPrReferenceInput, RouteDeps, RunKey } from "@roll/core";
+import type { CycleContext, CycleEvent, IssueInitOutcome, ObservedCommit, OpenPrReferenceInput, PendingCapacitySpawn, RouteDeps, RunKey } from "@roll/core";
 import type {
+  AgentCapacityAcquireResult,
+  AgentCapacityOwnershipResult,
   CycleRepositoryExecutionContext,
   RepositoryExecutionContext,
   RepositoryExecutionEvent,
@@ -332,6 +334,14 @@ export interface AttestPort {
   render(projectCwd: string, storyId: string, runDir: string): Promise<number>;
 }
 
+export interface AgentCapacityPort {
+  readonly heartbeatIntervalMs: number;
+  acquire(pending: PendingCapacitySpawn, ctx: CycleContext): AgentCapacityAcquireResult;
+  heartbeat(leaseId: string, ownerToken: string): AgentCapacityOwnershipResult;
+  release(leaseId: string, ownerToken: string): AgentCapacityOwnershipResult;
+  releaseCurrent(cycleId: string): AgentCapacityOwnershipResult;
+}
+
 export type DepsExec = (
   cmd: string,
   args: string[],
@@ -350,6 +360,7 @@ export interface Ports {
    * pre-Workspace runner construction; never synthesized from repoCwd. */
   repositories?: RepositoryPorts;
   process: ProcessPort;
+  capacity: AgentCapacityPort;
   events: EventsPort;
   backlog: BacklogPort;
   /** FIX-306: the runner-owned `.roll` metadata commit (never the sandboxed agent). */
@@ -437,4 +448,6 @@ export interface ExecuteResult {
    *  and clock/spawn-free) — real tcr count + parsed cost. The driver folds
    *  this into liveCtx so the later append_run / cycle:end carry truthful data. */
   ctxPatch?: Partial<CycleContext>;
+  /** Exact capacity release completed; the driver can drop its residual lease. */
+  capacityReleased?: boolean;
 }

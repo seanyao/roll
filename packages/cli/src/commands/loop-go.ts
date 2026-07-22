@@ -1127,6 +1127,7 @@ function updateProgressFromRows(
   let accountableRows = 0;
   const lockedCycleIds = screenLockedCycleIds(eventsPath(projectPath));
   for (const row of rows) {
+    if (row["status"] === "waiting_capacity" || row["outcome"] === "waiting_capacity") continue;
     const cycleId = typeof row["cycle_id"] === "string" ? row["cycle_id"] : typeof row["cycleId"] === "string" ? row["cycleId"] : undefined;
     // FIX-1268b: a lock-screen wait is an externally imposed pause, not a
     // failed attempt. Its event is durable and cycle-bound, so only that exact
@@ -2237,6 +2238,10 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // count survives this session ending (resume-safe global backstop).
       goal = goalWithProgress(goal, progress);
       writeGoal(gPath, goal);
+      if (appendedRows.some((row) => row["status"] === "waiting_capacity" || row["outcome"] === "waiting_capacity")) {
+        stopReason = "waiting_capacity";
+        break;
+      }
       // Hook 2 (post-cycle): the dead-loop breaker now occupies the slot the
       // budget gate vacated. K consecutive whole-goal no-progress cycles STOP.
       const progressGate = applyProgressGate(id.path, bus, sid, id.slug, goal, progress, deps);
@@ -2303,7 +2308,11 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
 
     const finalReason = stopReason ?? "stop_requested";
-    const finalGoal = goal.status === "complete" || goal.status === "paused" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
+    const finalGoal = finalReason === "waiting_capacity"
+      ? goal
+      : goal.status === "complete" || goal.status === "paused"
+        ? goal
+        : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
     bus.appendEvent(evPath, {
       type: "goal:session_end",
       sessionId: sid,

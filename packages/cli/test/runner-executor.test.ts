@@ -1057,6 +1057,32 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       releaseLock: vi.fn(rec("releaseLock")),
       writeHeartbeat: vi.fn(rec("heartbeat")),
     },
+    capacity: {
+      heartbeatIntervalMs: 10_000,
+      acquire: vi.fn((pending, ctx) => ({
+        kind: "acquired" as const,
+        lease: {
+          schema: "roll-agent-capacity-lease/v1" as const,
+          key: pending.key,
+          owner: {
+            leaseId: `lease:${pending.spawnId}`,
+            ownerToken: `token:${pending.spawnId}`,
+            workspaceId: ctx.repositoryExecution?.workspaceId ?? "test-workspace",
+            storyId: ctx.storyId ?? "",
+            cycleId: ctx.cycleId,
+            spawnId: pending.spawnId,
+            host: "test-host",
+            pid: 123,
+            processStartedAtMs: 1,
+          },
+          acquiredAtMs: 1,
+          heartbeatAtMs: 1,
+        },
+      })),
+      heartbeat: vi.fn(() => ({ kind: "updated" as const })),
+      release: vi.fn(() => ({ kind: "released" as const })),
+      releaseCurrent: vi.fn(() => ({ kind: "already_released" as const })),
+    },
     events: {
       ensureEventFiles: vi.fn(rec("ensure")),
       appendEvent: vi.fn(rec("event")),
@@ -1116,6 +1142,73 @@ function checkMainDirtyList(repo: string): string[] {
 }
 
 describe("executeCommand — command → executor mapping", () => {
+  it("maps capacity acquire and exact release through the broker port", async () => {
+    const { ports } = fakePorts();
+    const pending = {
+      spawnId: "cycle:agent:1",
+      key: { agent: "codex", model: "gpt", contextKey: "codex:default" },
+      process: { kind: "agent" as const, agent: "codex", attempt: 1 },
+    };
+    const acquired = await executeCommand({ kind: "acquire_capacity", pending }, ports, CTX);
+    expect(acquired.event).toMatchObject({
+      type: "capacity_acquired",
+      spawnId: pending.spawnId,
+      lease: { key: pending.key },
+    });
+    const lease = acquired.event?.type === "capacity_acquired" ? acquired.event.lease : undefined;
+    expect(lease).toBeDefined();
+    const released = await executeCommand({
+      kind: "release_capacity",
+      leaseId: lease!.owner.leaseId,
+      ownerToken: lease!.owner.ownerToken,
+    }, ports, CTX);
+    expect(released.capacityReleased).toBe(true);
+  });
+
+  it("maps exhausted capacity to waiting with zero process spawn", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      capacity: {
+        ...base.ports.capacity,
+        acquire: vi.fn(() => ({
+          kind: "waiting" as const,
+          retryAtMs: 9_000,
+          contenders: [{ agent: "codex", cycleId: "redacted-upstream" }],
+          suspect: false,
+        })),
+      },
+    });
+    const pending = {
+      spawnId: "cycle:agent:1",
+      key: { agent: "codex", model: "gpt", contextKey: "codex:default" },
+      process: { kind: "agent" as const, agent: "codex", attempt: 1 },
+    };
+    const result = await executeCommand({ kind: "acquire_capacity", pending }, ports, CTX);
+    expect(result.event).toEqual({
+      type: "waiting_capacity",
+      spawnId: pending.spawnId,
+      retryAtMs: 9_000,
+      contenders: [{ agent: "codex", cycleId: "redacted-upstream" }],
+      suspect: false,
+    });
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+  });
+
+  it("fails loud when exact capacity ownership is lost", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      capacity: {
+        ...base.ports.capacity,
+        release: vi.fn(() => ({ kind: "ownership_lost" as const, reason: "owner_token_mismatch" })),
+      },
+    });
+    await expect(executeCommand({
+      kind: "release_capacity",
+      leaseId: "lease",
+      ownerToken: "wrong",
+    }, ports, CTX)).rejects.toThrow("agent_capacity_ownership_lost:owner_token_mismatch");
+  });
+
   it("US-LOOP-091: all suspended rigs make route pending instead of spawning a builder", async () => {
     const rt = mkdtempSync(join(tmpdir(), "roll-rig-pending-"));
     execDirs.push(rt);
@@ -7105,7 +7198,7 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
       let next: CycleEvent | undefined;
       for (const c of commands) {
         if (c.kind === "spawn_role") roles.push(`${c.role}@${c.round}`);
-        if (c.kind === "emit_event") emitted.push(c.event.type);
+        if (c.kind === "emit_event" && !c.event.type.startsWith("workspace:capacity_")) emitted.push(c.event.type);
         if (c.kind === "capture_facts") continue; // hermetic: don't run the heavy capture path
         const res = await executeCommand(c, ports, CTX);
         if (res.event !== undefined) next = res.event;

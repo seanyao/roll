@@ -603,6 +603,7 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
     let exitCode = -1;
     let killed = 0;
+    let capacityReleased = 0;
     cycleSignalTeardown(p, "20260606-040000-9001", "loop/cycle-20260606-040000-9001", "SIGTERM", {
       killAgents: () => {
         killed += 1;
@@ -612,9 +613,15 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
         exitCode = c;
       },
       now: () => 1780680123,
+      releaseCapacity: (cycleId) => {
+        expect(cycleId).toBe("20260606-040000-9001");
+        capacityReleased += 1;
+        return { kind: "released" };
+      },
     });
     expect(exitCode).toBe(143);
     expect(killed).toBe(1);
+    expect(capacityReleased).toBe(1);
     const { readFileSync: rf, existsSync: ex } = await import("node:fs");
     const events = rf(p.eventsPath, "utf8");
     expect(events).toContain('"cycle:end"');

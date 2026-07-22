@@ -17,6 +17,7 @@ import {
   type AgentCapacityAcquireResult,
   type AgentCapacityLease,
   type AgentCapacityOwnershipResult,
+  type AgentName,
   type NormalizedAgentCapacityPolicy,
 } from "@roll/spec";
 
@@ -96,7 +97,7 @@ export class NodeAgentCapacityBroker {
       const reads = this.#readAndPrune(now);
       const suspect = reads.some((read) => read.suspect);
       const active = reads.flatMap((read) => read.lease === undefined ? [] : [read.lease]);
-      const perAgentLimit = this.#policy.perAgent[request.key.agent] ?? 0;
+      const perAgentLimit = this.#policy.perAgent[request.key.agent as AgentName] ?? 0;
       const agentActive = active.filter((lease) => lease.key.agent === request.key.agent).length;
       const exhausted = suspect || active.length >= this.#policy.global || agentActive >= perAgentLimit;
       if (exhausted) {

@@ -1395,6 +1395,59 @@ export async function loopStatusCommand(
   return 0;
 }
 
+type WorkspaceCapacityReadout =
+  | { state: "acquired"; agent: string; model: string }
+  | { state: "waiting"; agent: string; model: string; retryAt: number; suspect: boolean };
+
+function workspaceCapacityReadout(runtimeRoot: string): WorkspaceCapacityReadout | null {
+  const path = join(runtimeRoot, "events.ndjson");
+  if (!existsSync(path)) return null;
+  try {
+    const rows = readFileSync(path, "utf8").trimEnd().split("\n").reverse();
+    for (const row of rows) {
+      if (row.trim() === "") continue;
+      const event = JSON.parse(row) as Record<string, unknown>;
+      const type = event["type"];
+      if (type === "workspace:capacity_released") return null;
+      if (type === "workspace:capacity_acquired" || type === "workspace:capacity_heartbeat") {
+        return {
+          state: "acquired",
+          agent: String(event["agent"] ?? ""),
+          model: String(event["model"] ?? ""),
+        };
+      }
+      if (type === "workspace:waiting_capacity") {
+        return {
+          state: "waiting",
+          agent: String(event["agent"] ?? ""),
+          model: String(event["model"] ?? ""),
+          retryAt: Number(event["retryAt"] ?? 0),
+          suspect: event["suspect"] === true,
+        };
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function renderWorkspaceCapacity(readout: WorkspaceCapacityReadout | null, lang: "en" | "zh"): string {
+  if (readout === null) return "";
+  const model = readout.model === "" ? "default" : readout.model;
+  if (readout.state === "acquired") {
+    return lang === "zh"
+      ? `  容量=已获取 agent=${readout.agent} model=${model}`
+      : `  capacity=acquired agent=${readout.agent} model=${model}`;
+  }
+  const retry = Number.isFinite(readout.retryAt) && readout.retryAt > 0
+    ? new Date(readout.retryAt).toISOString()
+    : "unknown";
+  return lang === "zh"
+    ? `  容量=等待 agent=${readout.agent} model=${model} retry=${retry}${readout.suspect ? " suspect=true" : ""}`
+    : `  capacity=waiting agent=${readout.agent} model=${model} retry=${retry}${readout.suspect ? " suspect=true" : ""}`;
+}
+
 /** Workspace-aware scheduler status. Bare legacy `roll loop status` remains the dashboard. */
 export async function loopWorkspaceStatusCommand(
   args: string[],
@@ -1407,6 +1460,7 @@ export async function loopWorkspaceStatusCommand(
     ? decision.aggregate
     : [decision];
   const rows: string[] = [];
+  const lang = fbLang();
   for (const target of targets) {
     const paths = workspaceSchedulerPaths({ workspaceId: target.workspaceId, workspaceRoot: target.workspaceRoot });
     const armed = await deps.scheduler.isArmed(launchdLabel("loop", target.workspaceId));
@@ -1415,7 +1469,8 @@ export async function loopWorkspaceStatusCommand(
       : existsSync(paths.dormantMarkerPath)
         ? "dormant"
         : "active";
-    rows.push(`${target.workspaceId}  ${state}  ${armed ? "armed" : "unarmed"}  ${paths.runtimeRoot}`);
+    const capacity = renderWorkspaceCapacity(workspaceCapacityReadout(paths.runtimeRoot), lang);
+    rows.push(`${target.workspaceId}  ${state}  ${armed ? "armed" : "unarmed"}  ${paths.runtimeRoot}${capacity}`);
   }
   process.stdout.write(rows.join("\n") + (rows.length === 0 ? "" : "\n"));
   return 0;

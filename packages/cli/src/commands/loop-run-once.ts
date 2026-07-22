@@ -110,6 +110,7 @@ export interface SignalTeardownDeps {
   now?: () => number;
   repoCwd?: string;
   runtimeDir?: string;
+  releaseCapacity?: (cycleId: string) => import("@roll/spec").AgentCapacityOwnershipResult;
 }
 
 const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
@@ -144,6 +145,15 @@ export function cycleSignalTeardown(
     kill("SIGKILL");
   } catch {
     /* no agent in flight */
+  }
+
+  try {
+    const released = deps.releaseCapacity?.(cycleId);
+    if (released?.kind === "ownership_lost") {
+      process.stderr.write(`loop run-once: capacity ownership lost during ${sig}: ${released.reason}\n`);
+    }
+  } catch {
+    /* terminal/lock cleanup still proceeds */
   }
 
   let owned = false;
@@ -264,6 +274,7 @@ export function installCycleSignalTeardown(
   branch: string,
   repoCwd?: string,
   runtimeDirPath?: string,
+  releaseCapacity?: (cycleId: string) => import("@roll/spec").AgentCapacityOwnershipResult,
 ): () => void {
   const sigs: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
   const handlers = new Map<NodeJS.Signals, () => void>();
@@ -271,6 +282,7 @@ export function installCycleSignalTeardown(
     const h = (): void => cycleSignalTeardown(paths, cycleId, branch, sig, {
       ...(repoCwd !== undefined ? { repoCwd } : {}),
       ...(runtimeDirPath !== undefined ? { runtimeDir: runtimeDirPath } : {}),
+      ...(releaseCapacity !== undefined ? { releaseCapacity } : {}),
     });
     handlers.set(sig, h);
     process.on(sig, h);
@@ -1231,7 +1243,14 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
 
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
-  const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch, id.path, rt);
+  const disposeSignals = installCycleSignalTeardown(
+    paths,
+    cycleId,
+    branch,
+    id.path,
+    rt,
+    (ownedCycleId) => ports.capacity.releaseCurrent(ownedCycleId),
+  );
   let result;
   try {
     result = await runCycleOnce({ ports, ctx });
@@ -1245,6 +1264,14 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
     return 0;
   }
   process.stdout.write(`loop run-once: cycle ${cycleId} → ${result.terminal ?? "unknown"}\n`);
+
+  if (result.terminal === "waiting_capacity") {
+    process.stdout.write(
+      "loop run-once: machine agent capacity is busy — Story returned to Todo for a later tick\n" +
+        "loop run-once: 机器 agent 容量正忙——Story 已回到 Todo，等待后续 tick\n",
+    );
+    return 0;
+  }
 
   // US-AGENT-041: reviewer-triggered re-split. If THIS cycle's independent
   // reviewer flagged the SCOPE as too large (a resize signal on a low score),

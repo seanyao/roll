@@ -590,6 +590,12 @@ export async function executeTerminalCommand(
           // (decideClaimReconcile) flips it once the PR actually merges.
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
         }
+      } else if (cmd.status === "waiting_capacity" && terminalStoryId !== "") {
+        // US-WS-017b: capacity pressure is a neutral scheduler wait. Release the
+        // claim back to Todo without recording a failed/abandoned delivery.
+        if (!isParkedAtHold(ports, terminalStoryId)) {
+          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
+        }
       } else if ((cmd.status === "idle" || cmd.status === "gave_up" || cmd.status === "local") && terminalStoryId !== "") {
         // idle / gave_up / local never merged → the row goes back to 📋 Todo
         // (re-pickable) — UNLESS this cycle deliberately parked it at 🚫 Hold

@@ -258,6 +258,13 @@ function prepareCommand(args: string[]): number {
   try {
     const result = prepareDelegation(process.cwd(), input);
 
+    // ── Test seam: crash point between file write and event append ──────────
+    // At this point marker, resolution, preparation, and lease are all on disk.
+    // If the process crashes here (before events), the frame is a real orphan.
+    if (_prepareInterruptAfterWrite) {
+      _prepareInterruptAfterWrite();
+    }
+
     // Append events
     const bus = new EventBus();
     const now = Date.now();
@@ -352,6 +359,16 @@ let _injectedValidator: DeltaProtocolValidator | null = null;
 /** Inject a validator for testing. Call with null to reset to default. */
 export function injectValidator(v: DeltaProtocolValidator | null): void {
   _injectedValidator = v;
+}
+
+// ── Prepare interruption seam (test-only) ────────────────────────────────────
+
+/** Seam: called after prepareDelegation writes all files but before events are appended. */
+let _prepareInterruptAfterWrite: (() => void) | null = null;
+
+/** Inject a prepare interruption hook for crash testing. Call with null to reset. */
+export function injectPrepareInterrupt(fn: (() => void) | null): void {
+  _prepareInterruptAfterWrite = fn;
 }
 
 function defaultValidator(_delegationId: string, _stage: string, frameDir: string): ValidatorResult {

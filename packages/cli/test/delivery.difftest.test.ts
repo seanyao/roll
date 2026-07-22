@@ -344,4 +344,32 @@ describe("US-WS-015 roll delivery surface", () => {
     expect(JSON.parse(missing.stderr).error.code).toBe("story_not_found");
     expect({ all: JSON.parse(all.stdout), ambiguous, mutationAll, missing }).toMatchSnapshot();
   });
+
+  it("rejects missing values and duplicate flags before target resolution", async () => {
+    const f = fixture();
+    const workspace = createWorkspace(f, "ws-alpha");
+    createPartialIssue(workspace, "US-PARTIAL");
+
+    const malformed = [
+      await runCli(["delivery", "list", "--workspace", "--json"], f),
+      await runCli([
+        "delivery", "show", "US-PARTIAL",
+        "--workspace", "ws-alpha",
+        "--workspace", "ws-alpha",
+        "--json",
+      ], f),
+      await runCli([
+        "delivery", "reconcile", "US-PARTIAL",
+        "--workspace", "ws-alpha",
+        "--json", "--json",
+      ], f),
+    ];
+
+    expect(malformed.map((result) => result.status)).toEqual([1, 1, 1]);
+    expect(malformed.map((result) => JSON.parse(result.stderr).error.code)).toEqual([
+      "invalid_arguments",
+      "invalid_arguments",
+      "invalid_arguments",
+    ]);
+  });
 });

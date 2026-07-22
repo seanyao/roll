@@ -420,15 +420,22 @@ function flagValue(args: readonly string[], flag: string): string | undefined {
 
 function positionalArgs(args: readonly string[], allowedFlags: ReadonlySet<string>): string[] | undefined {
   const positional: string[] = [];
+  const seenFlags = new Set<string>();
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--workspace") {
-      if (!allowedFlags.has(arg) || args[index + 1] === undefined) return undefined;
+      const value = args[index + 1];
+      if (
+        !allowedFlags.has(arg) || seenFlags.has(arg) ||
+        value === undefined || value.startsWith("--")
+      ) return undefined;
+      seenFlags.add(arg);
       index += 1;
       continue;
     }
     if (arg?.startsWith("--")) {
-      if (!allowedFlags.has(arg)) return undefined;
+      if (!allowedFlags.has(arg) || seenFlags.has(arg)) return undefined;
+      seenFlags.add(arg);
       continue;
     }
     if (arg !== undefined) positional.push(arg);

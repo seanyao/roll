@@ -91,23 +91,23 @@ exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific he
   \`init <id> --config <file> [--check] [--json]\`
   \`issue init <story-id> --workspace <id> [--check] [--json]\`
   \`requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]\`
-  \`doctor <id> [--json]\`
+  \`doctor <id> [--json] [--repair <typed-action>] [--path <absolute-path>]\`
   \`list [--json] [--all]\`
   \`show <id|path> [--json]\`
   \`register <id> <path> [--json]\`
   \`activate|pause|archive <id|path> [--json]\`
-  Init/issue --check and doctor are read-only; lifecycle mutations require one explicit target; --all is read-only.
+  Init/issue --check and doctor diagnosis are read-only; typed doctor repairs and lifecycle mutations require one explicit target; --all is read-only.
 ",
   "zh": "用法：roll workspace <init|issue|requirement|doctor|list|show|register|activate|pause|archive> [选项]
   \`init <ID> --config <文件> [--check] [--json]\`
   \`issue init <Story ID> --workspace <ID> [--check] [--json]\`
   \`requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]\`
-  \`doctor <ID> [--json]\`
+  \`doctor <ID> [--json] [--repair <类型化动作>] [--path <绝对路径>]\`
   \`list [--json] [--all]\`
   \`show <ID|路径> [--json]\`
   \`register <ID> <路径> [--json]\`
   \`activate|pause|archive <ID|路径> [--json]\`
-  init/issue --check 和 doctor 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。
+  init/issue --check 和 doctor 诊断只读；doctor 类型化修复和生命周期变更必须显式指定一个目标；--all 仅限只读。
 ",
 }
 `;

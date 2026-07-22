@@ -170,7 +170,10 @@ function actionToken(action: WorkspaceDoctorRepairAction): string {
 function renderNextAction(report: WorkspaceDoctorReport): string {
   if (report.nextAction.kind === "none") return msg("workspace.doctor.next.none");
   if (report.nextAction.kind === "repair") {
-    return `roll workspace doctor ${report.workspaceId} --repair ${actionToken(report.nextAction.action)}`;
+    const path = report.nextAction.action.kind === "update_registry_path"
+      ? " --path <absolute-new-workspace-path>"
+      : "";
+    return `roll workspace doctor ${report.workspaceId} --repair ${actionToken(report.nextAction.action)}${path}`;
   }
   return msg("workspace.doctor.next.owner", report.nextAction.code);
 }

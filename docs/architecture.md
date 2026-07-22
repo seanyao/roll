@@ -238,6 +238,21 @@ required repository 的 PR/CI/merge facts、缺失 gate 与 exact-SHA Integratio
 `roll loop reconcile` 仅保留为同一 Workspace-scoped reconcile 的 alias；旧的单仓 cycle
 reconciler 只供 runner 内部推进 PR/merge 事实，不能再从公共命令面恢复 repository-local 模式。
 
+#### Workspace doctor 与有界修复
+
+`roll workspace doctor <id>` 是 Workspace Coordination 的只读 guardrail：统一检查 registry/manifest、
+共享 repository cache、Requirement 当前投影与不可变 archive、Issue init journal/worktree、Workspace
+runtime locks 以及 machine capacity leases。所有 finding 使用闭合状态
+`healthy | repairable | blocked | data_loss_risk`，只输出相对 evidence path 和一个明确下一步；remote、
+host、PID、owner token、model/context credential 不进入终端或 JSON。
+
+修复不是通用 `--fix`。只有最新诊断明确给出的 typed action 才能执行：registry path 必须由 owner
+提供精确绝对路径；cache rebuild 在任何已登记或 Git-admin linked worktree 存在时拒绝；Requirement
+projection 只能从 archive audit 为 `healthy` 的当前不可变 revision 重建；Issue repair 复用严格 journal
+和 pinned base，遇到 dirty/unpushed/conflicting target 即停止；capacity lease 只清理同机、已超时且进程
+可证明死亡的精确 lease。registry/cache/Requirement/Issue 使用各自 write-ahead journal，重复或中断后
+重跑向同一健康结果收敛，同时绝不写 immutable revisions、Issue completion evidence 或 remote identity。
+
 ### BC5 · 演化
 
 追踪一个 Story 的完整生长过程。每一次 TCR 微提交、每一次回退都可追溯。支持对比不同 agent 对同一 Story 的实现，支持回退到任意历史节点。

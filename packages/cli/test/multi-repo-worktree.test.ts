@@ -363,9 +363,15 @@ describe("US-WS-011 Workspace repository preparation", () => {
       });
       const alphaPorts = portsFor(f.alpha);
       const betaPorts = portsFor(f.beta);
-      // Both Workspaces prepare the SAME story against the SAME remote cache.
-      await alphaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-alpha" });
-      await betaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-beta" });
+      // Both Workspaces prepare the SAME story against the SAME remote cache
+      // CONCURRENTLY (recovery gate): the two preparations race on the shared
+      // repoId, so only a real per-repoId machine lock serializing the cache
+      // add/branch mutations lets both resolve to isolated worktrees. Sequential
+      // setup would not exercise (and so could not prove) that serialization.
+      await Promise.all([
+        alphaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-alpha" }),
+        betaPorts.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-beta" }),
+      ]);
       const alpha = await alphaPorts.repositories?.resolve(f.storyId);
       const beta = await betaPorts.repositories?.resolve(f.storyId);
       if (alpha === undefined || beta === undefined) throw new Error("both Workspaces must resolve");

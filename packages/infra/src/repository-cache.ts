@@ -572,3 +572,36 @@ export async function ensureRepositoryCache(
     releaseRepositoryLock(identity, lease);
   }
 }
+
+/** Run `fn` while holding the machine-shared per-`repoId` lock — the SAME lock
+ *  {@link ensureRepositoryCache} takes. Worktree add/remove/branch mutations on
+ *  the shared bare cache are not atomic across concurrent `git worktree`
+ *  invocations (each rewrites the cache's `worktrees/` admin, HEAD and prune
+ *  state), so two Workspaces preparing the same repoId concurrently can
+ *  interleave and cross-bind a worktree path to the wrong governed branch.
+ *  Serializing every mutation of one repoId behind its owning lock is what makes
+ *  concurrent Workspace preparation isolated (US-WS-011 recovery gate). */
+export async function withRepositoryCacheLock<T>(
+  input: ResolveRepositoryCacheIdentityInput & {
+    readonly lockTimeoutMs?: number;
+    readonly lockRetryMs?: number;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const identity = resolveRepositoryCacheIdentity(input);
+  const lockTimeoutMs = input.lockTimeoutMs ?? 300_000;
+  const lockRetryMs = input.lockRetryMs ?? 25;
+  if (!Number.isFinite(lockTimeoutMs) || lockTimeoutMs < 0 || !Number.isFinite(lockRetryMs) || lockRetryMs <= 0) {
+    throw new RepositoryCacheError(
+      "invalid_lock_options",
+      "Repository cache lock timeout must be non-negative and retry delay must be positive",
+    );
+  }
+  prepareMachineRoots(identity, resolve(input.rollHome));
+  const lease = await takeRepositoryLock(identity, lockTimeoutMs, lockRetryMs);
+  try {
+    return await fn();
+  } finally {
+    releaseRepositoryLock(identity, lease);
+  }
+}

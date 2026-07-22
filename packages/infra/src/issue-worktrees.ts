@@ -30,6 +30,7 @@ import {
   ensureRepositoryCache,
   inspectRepositoryCache,
   resolveRepositoryCacheIdentity,
+  withRepositoryCacheLock,
   type RepositoryCacheProbeState,
 } from "./repository-cache.js";
 import {
@@ -774,6 +775,11 @@ interface ResolvedTargetCache {
   readonly alias: string;
   readonly repoId: string;
   readonly cachePath: string;
+  /** The rollHome + binding this target resolved against — carried so every
+   *  worktree add/remove mutation (create loop and rollback alike) can be
+   *  serialized behind the SAME per-`repoId` machine lock as the cache. */
+  readonly rollHome: string;
+  readonly binding: RepositoryBinding;
   readonly baseSha: string;
   /** True whenever ANY journal/event fact already exists for this alias
    *  (see {@link resolveExpectedTargetFacts}'s own `isPinned`) — the ONLY
@@ -849,24 +855,29 @@ async function rollbackCreatedTargets(
     if (cache === undefined) continue;
     const identity = await issueWorktreeIdentity(target.path, cache.cachePath);
     if (identity.state !== "compatible" || identity.dirty) continue; // preserve: conflict or dirty
+    // The worktree remove and the governed-branch delete both mutate the same
+    // shared cache admin — take the owning repoId lock once so a concurrent
+    // Workspace's add cannot interleave with either half of this rollback.
     try {
-      await issueWorktreeRemove(cache.cachePath, target.path, { readOnly: target.access === "read" });
+      await withRepositoryCacheLock({ rollHome: cache.rollHome, binding: cache.binding }, async () => {
+        await issueWorktreeRemove(cache.cachePath, target.path, { readOnly: target.access === "read" });
+        // The worktree is gone; also delete the governed branch, but ONLY when
+        // THIS run actually created it — so a repair retry can `worktree add
+        // -b` the same branch name again without "a branch named ... already
+        // exists". A branch this run merely RECOVERED (orphan reuse) is left
+        // completely alone: it may already carry later real Story commits made
+        // before whatever earlier interruption orphaned it, and this run never
+        // owned its lifecycle.
+        if (target.workBranch !== null && target.branchCreatedThisRun) {
+          await git(["branch", "-D", target.workBranch], cache.cachePath);
+        }
+      });
     } catch {
       // A target that refuses removal (e.g. went dirty between the identity
       // check and now) is preserved — never forced. issueWorktreeRemove
       // already re-protected it if it was a read target, so the preserved
       // checkout stays non-writable rather than silently ending up exposed.
       continue;
-    }
-    // The worktree is gone; also delete the governed branch, but ONLY when
-    // THIS run actually created it — so a repair retry can `worktree add -b`
-    // the same branch name again without "a branch named ... already
-    // exists". A branch this run merely RECOVERED (orphan reuse) is left
-    // completely alone: it may already carry later real Story commits made
-    // before whatever earlier interruption orphaned it, and this run never
-    // owned its lifecycle.
-    if (target.workBranch !== null && target.branchCreatedThisRun) {
-      await git(["branch", "-D", target.workBranch], cache.cachePath);
     }
   }
 }
@@ -981,6 +992,8 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
         alias: declared.alias,
         repoId: binding.repoId,
         cachePath: cache.cachePath,
+        rollHome: input.rollHome,
+        binding,
         baseSha,
         isPinned: pinned !== undefined,
         expected: { access: declared.access, workBranch, baseSha },
@@ -1071,13 +1084,21 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
         );
       }
 
-      const added = await issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
-        // Orphan governed-branch recovery is only ever permitted for a
-        // target that already carries a valid Issue-local pin — a
-        // brand-new, never-pinned target must never silently adopt a
-        // pre-existing branch of the same name.
-        allowOrphanRecovery: cache.isPinned,
-      });
+      // Serialize the shared-cache mutation (`git worktree prune` + `add -b`)
+      // behind the owning repoId machine lock. Two Workspaces preparing the
+      // same repoId concurrently otherwise interleave these non-atomic admin
+      // rewrites and can cross-bind a worktree path to the wrong governed
+      // branch (US-WS-011 concurrent-isolation gate).
+      const added = await withRepositoryCacheLock(
+        { rollHome: cache.rollHome, binding: cache.binding },
+        () => issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
+          // Orphan governed-branch recovery is only ever permitted for a
+          // target that already carries a valid Issue-local pin — a
+          // brand-new, never-pinned target must never silently adopt a
+          // pre-existing branch of the same name.
+          allowOrphanRecovery: cache.isPinned,
+        }),
+      );
       // Journal the creation BEFORE protecting: if protection throws, rollback
       // must still know this worktree was created THIS run so it gets cleaned
       // up rather than left behind ungoverned.

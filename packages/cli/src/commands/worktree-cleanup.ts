@@ -45,6 +45,10 @@ export interface CleanupCandidate {
   path: string;
   cycleId?: string;
   branch?: string;
+  workspaceId?: string;
+  repoId?: string;
+  repositoryAlias?: string;
+  cachePath?: string;
   /** HEAD the audit observed; `--apply` refuses if the fresh head differs. */
   expectedHead: string;
   reason: "disposable_candidate" | "orphan_reclaimable";
@@ -113,6 +117,10 @@ export interface CleanupRemoval {
   expectedHead: string;
   branch?: string;
   cycleId?: string;
+  workspaceId?: string;
+  repoId?: string;
+  repositoryAlias?: string;
+  cachePath?: string;
   /** FIX-1460: how the path was reclaimed (git worktree remove vs bounded rm). */
   reclaim?: "git_worktree" | "rm_dir";
 }
@@ -148,6 +156,21 @@ const MERGED_KINDS = new Set(["ancestor", "patch_equivalent", "final_tree"]);
 
 /** True iff `rec` satisfies EVERY safe-removal invariant on a fresh audit. */
 export function isSafelyDisposable(rec: WorktreeAuditRecord): boolean {
+  if (rec.owner === "workspace") {
+    return (
+      rec.active === false &&
+      rec.dirtyTracked === false &&
+      rec.dirtyUntracked === false &&
+      rec.disposition === "disposable_candidate" &&
+      rec.ownershipState === "verified" &&
+      (rec.deliveryProof === "delivered" || rec.deliveryProof === "abandoned") &&
+      typeof rec.workspaceId === "string" && rec.workspaceId !== "" &&
+      typeof rec.repoId === "string" && rec.repoId !== "" &&
+      typeof rec.repositoryAlias === "string" && rec.repositoryAlias !== "" &&
+      typeof rec.cachePath === "string" && rec.cachePath !== "" &&
+      typeof rec.head === "string" && rec.head.length > 0
+    );
+  }
   return (
     rec.owner === "loop" &&
     rec.active === false &&
@@ -248,16 +271,24 @@ export function planWorktreeCleanup(
   audit: WorktreeAuditOutput,
   threshold: number,
   standaloneMergedBranches: readonly CleanupBranchCandidate[] = [],
+  scope?: { readonly workspaceId: string },
 ): WorktreeCleanupPlan {
-  const loopWorktrees = audit.records.filter((r) => r.owner === "loop");
-  const canaryTotal = audit.ephemeralBranches.length + loopWorktrees.length;
+  const managedWorktrees = scope === undefined
+    ? audit.records.filter((record) => record.owner === "loop")
+    : audit.records.filter((record) => record.owner === "workspace");
+  const canaryTotal = audit.ephemeralBranches.length + managedWorktrees.length;
   const excess = canaryTotal - threshold;
 
   // The removable pool: audit-proven safe candidates, deterministically ordered.
   // FIX-1460: includes reclaimable ORPHAN dirs (deregistered from git) alongside
   // disposable registered worktrees — each removal drops the canary total by one.
   const pool = audit.records
-    .filter((r) => isSafelyDisposable(r) || isReclaimableOrphan(r))
+    .filter((record) => {
+      if (scope !== undefined) {
+        return record.owner === "workspace" && record.workspaceId === scope.workspaceId && isSafelyDisposable(record);
+      }
+      return isSafelyDisposable(record) || isReclaimableOrphan(record);
+    })
     .sort((a, b) => a.path.localeCompare(b.path));
 
   const branchPool = [...standaloneMergedBranches].sort((a, b) => a.branch.localeCompare(b.branch));
@@ -278,6 +309,10 @@ export function planWorktreeCleanup(
       path: r.path,
       ...(r.cycleId ? { cycleId: r.cycleId } : {}),
       ...(r.branch ? { branch: r.branch } : {}),
+      ...(r.workspaceId ? { workspaceId: r.workspaceId } : {}),
+      ...(r.repoId ? { repoId: r.repoId } : {}),
+      ...(r.repositoryAlias ? { repositoryAlias: r.repositoryAlias } : {}),
+      ...(r.cachePath ? { cachePath: r.cachePath } : {}),
       // An orphan has no registered HEAD; apply skips the head check for rm_dir.
       expectedHead: orphan ? "" : (r.head as string),
       reason: orphan ? ("orphan_reclaimable" as const) : ("disposable_candidate" as const),
@@ -291,7 +326,7 @@ export function planWorktreeCleanup(
     .filter((r) => !chosenPaths.has(r.path))
     .map((r) => ({ path: r.path, disposition: r.disposition, reason: r.reason }));
 
-  const countedWorktrees = loopWorktrees.map((r) => ({
+  const countedWorktrees = managedWorktrees.map((r) => ({
     path: r.path,
     disposition: r.disposition,
   }));
@@ -493,6 +528,21 @@ export async function applyWorktreeCleanup(
       continue;
     }
 
+    if (
+      candidate.workspaceId !== undefined &&
+      (
+        rec.owner !== "workspace" ||
+        rec.workspaceId !== candidate.workspaceId ||
+        rec.repoId !== candidate.repoId ||
+        rec.repositoryAlias !== candidate.repositoryAlias ||
+        rec.cachePath !== candidate.cachePath ||
+        rec.ownershipState !== "verified"
+      )
+    ) {
+      refuse("identity: fresh audit no longer matches the planned Workspace/repository ownership");
+      continue;
+    }
+
     // FIX-1460 (#1468): ORPHAN reclaim path. A deregistered dir has no git
     // metadata, so head/dirty checks do not apply — safety is the fresh audit
     // STILL classifying it `orphan_reclaimable` (owning cycle provably delivered).
@@ -552,6 +602,10 @@ export async function applyWorktreeCleanup(
       reclaim: "git_worktree",
       ...(rec.branch ? { branch: rec.branch } : {}),
       ...(rec.cycleId ? { cycleId: rec.cycleId } : {}),
+      ...(rec.workspaceId ? { workspaceId: rec.workspaceId } : {}),
+      ...(rec.repoId ? { repoId: rec.repoId } : {}),
+      ...(rec.repositoryAlias ? { repositoryAlias: rec.repositoryAlias } : {}),
+      ...(rec.cachePath ? { cachePath: rec.cachePath } : {}),
     };
 
     if (options.dryRun) {

@@ -523,3 +523,90 @@ describe("US-DELTA-003 — conclude", () => {
     expect(err.error).toBe("delegation_not_found");
   });
 });
+
+// ── Snapshot tests ──────────────────────────────────────────────────────────
+
+describe("US-DELTA-003 — CLI snapshots", () => {
+  it("prepare --json output is scrubbed and snapshotted", () => {
+    const dir = setupMinimalProject("US-DELTA-SNAP-1", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-SNAP-1", "local-preset");
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-SNAP-1",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(0);
+
+    const scrubbed = scrubPaths(scrubId(r.stdout), dir);
+    expect(scrubbed).toMatchSnapshot();
+  });
+
+  it("status --json after prepare is scrubbed and snapshotted", () => {
+    const dir = setupMinimalProject("US-DELTA-SNAP-2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-SNAP-2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-SNAP-2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
+    expect(r2.code).toBe(0);
+
+    const scrubbed = scrubPaths(scrubId(r2.stdout), dir);
+    expect(scrubbed).toMatchSnapshot();
+  });
+
+  it("validate block on missing artifact is scrubbed and snapshotted", () => {
+    const dir = setupMinimalProject("US-DELTA-SNAP-3", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-SNAP-3", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-SNAP-3",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Validate without creating the stage artifact
+    const r2 = tsRunCwd([
+      "validate", "--delegation", delegationId,
+      "--stage", "designer", "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+
+    const scrubbed = scrubPaths(scrubId(r2.stderr), dir);
+    expect(scrubbed).toMatchSnapshot();
+  });
+
+  it("conclude --json output is scrubbed and snapshotted", () => {
+    const dir = setupMinimalProject("US-DELTA-SNAP-4", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-SNAP-4", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-SNAP-4",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r2.code).toBe(0);
+
+    const scrubbed = scrubPaths(scrubId(r2.stdout), dir);
+    expect(scrubbed).toMatchSnapshot();
+  });
+});

@@ -171,3 +171,40 @@ describe("US-DELTA-003 — delta CLI parser and help", () => {
     }
   });
 });
+
+// ── Architectural negative guard ────────────────────────────────────────────
+
+describe("US-DELTA-003 — import audit", () => {
+  it("delta CLI files do not import agentSpawn, Pi host API, cycle allocator, or runs.jsonl writer", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+
+    const deltaDir = path.resolve(__dirname, "..", "src", "commands");
+    const libDir = path.resolve(__dirname, "..", "src", "lib");
+
+    const filesToCheck = [
+      path.join(deltaDir, "delta.ts"),
+      path.join(libDir, "delta-allocation.ts"),
+      path.join(libDir, "delta-artifacts.ts"),
+    ];
+
+    const forbidden = [
+      "agentSpawn",
+      "@anthropic",
+      "openai",
+      "cycleAllocator",
+      "allocCycle",
+      "runs.jsonl",
+      "createPR",
+      "DeliveryRecord",
+    ];
+
+    for (const file of filesToCheck) {
+      if (!fs.existsSync(file)) continue;
+      const content = fs.readFileSync(file, "utf8");
+      for (const pattern of forbidden) {
+        expect(content).not.toContain(pattern);
+      }
+    }
+  });
+});

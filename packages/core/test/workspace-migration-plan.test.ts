@@ -68,9 +68,10 @@ function replace(raw: Record<string, unknown>, key: string, value: unknown): Rec
 
 describe("US-WS-019 deterministic historical Workspace migration planner", () => {
   it("freezes every ordinary inventory mapping and portable repository default", () => {
-    const plan = planHistoricalWorkspaceMigration(facts());
+    const input = facts();
+    const plan = planHistoricalWorkspaceMigration(input);
 
-    expect(plan).toMatchSnapshot("complete-facts-plan");
+    expect({ facts: input, plan }).toMatchSnapshot("complete-facts-plan");
     expect(plan).toMatchObject({
       verdict: "ready",
       workspaceId: "ws-ab12cd34ef56",
@@ -127,7 +128,9 @@ describe("US-WS-019 deterministic historical Workspace migration planner", () =>
     ["dirty", "none", { kind: "verified", normalizedRemote: "ssh://git.example.test/team/product", defaultBranch: "main", defaultTip: "1".repeat(40), headReachable: true, defaultTipPresentLocally: true }, "product_dirty"],
     ["in_flight", "rebase", { kind: "verified", normalizedRemote: "ssh://git.example.test/team/product", defaultBranch: "main", defaultTip: "1".repeat(40), headReachable: true, defaultTipPresentLocally: true }, "product_operation_in_flight"],
     ["clean", "none", { kind: "blocked", code: "head_unpushed", normalizedRemote: "ssh://git.example.test/team/product", defaultBranch: "main" }, "head_unpushed"],
+    ["clean", "none", { kind: "blocked", code: "remote_missing" }, "remote_missing"],
     ["clean", "none", { kind: "blocked", code: "remote_default_ambiguous", normalizedRemote: "ssh://git.example.test/team/product" }, "remote_default_ambiguous"],
+    ["clean", "none", { kind: "blocked", code: "remote_truth_unverifiable", normalizedRemote: "ssh://git.example.test/team/product", defaultBranch: "main" }, "remote_truth_unverifiable"],
   ] as const)("maps product safety state %s to %s", (state, operation, remote, code) => {
     const raw = rawFacts();
     const plan = planHistoricalWorkspaceMigration(facts({
@@ -204,6 +207,19 @@ describe("US-WS-019 deterministic historical Workspace migration planner", () =>
         ],
       },
     });
+  });
+
+  it("never mixes unrelated dirty product work into the ownership cutover", () => {
+    const raw = rawFacts();
+    const plan = planHistoricalWorkspaceMigration(facts({
+      ...raw,
+      git: { ...(raw["git"] as Record<string, unknown>), state: "dirty", dirtyPaths: ["src/wip.ts"] },
+      rollOwnership: { kind: "product_tracked", trackedPaths: ["backlog.md"] },
+    }));
+
+    expect(plan.verdict).toBe("migration_blocked");
+    expect("repositoryCutover" in plan).toBe(false);
+    expect(plan.findings).toContainEqual({ severity: "error", code: "product_dirty", path: "src/wip.ts" });
   });
 
   it("reports independent roll-meta identity as manual handoff and copies surface mappings", () => {
@@ -293,5 +309,28 @@ describe("US-WS-019 deterministic historical Workspace migration planner", () =>
     }));
 
     expect(parsed).toMatchObject({ ok: false, errors: [{ code: "invalid_value", path: "rollOwnership.trackedPaths[0]" }] });
+  });
+
+  it("rejects independent roll-meta object database entries from the surface inventory", () => {
+    const raw = rawFacts();
+    const parsed = parseHistoricalMigrationFacts({
+      ...raw,
+      rollOwnership: {
+        kind: "independent_git",
+        gitdirToken: "gitdir-a",
+        topLevelToken: "top-a",
+        state: "clean",
+        head: "4".repeat(40),
+        branch: "main",
+        upstream: "origin/main",
+        normalizedRemote: "ssh://git.example.test/team/roll-meta",
+      },
+      rollInventory: [
+        ...(raw["rollInventory"] as unknown[]),
+        { kind: "file", path: ".git/objects/aa/object", digest: "9".repeat(64), bytes: 12, sourceClass: "unknown" },
+      ],
+    });
+
+    expect(parsed).toMatchObject({ ok: false, errors: [{ code: "invalid_value", path: "rollInventory[9].path" }] });
   });
 });

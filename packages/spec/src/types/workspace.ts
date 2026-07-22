@@ -1836,6 +1836,17 @@ export function parseHistoricalMigrationFacts(value: unknown): ContractResult<Hi
       }
     });
   }
+  if (rollOwnership?.kind === "independent_git" && rollInventory !== undefined) {
+    rollInventory.forEach((entry, index) => {
+      if (entry.path === ".git" || entry.path.startsWith(".git/")) {
+        errors.push({
+          code: "invalid_value",
+          path: `rollInventory[${index}].path`,
+          message: "independent roll-meta object database is not surface inventory",
+        });
+      }
+    });
+  }
   if (
     errors.length > 0 || value["schema"] !== WORKSPACE_MIGRATION_FACTS_V1 || sourceRoot === undefined ||
     repoId === undefined || git === undefined || linkedWorktrees === undefined || submodules === undefined ||

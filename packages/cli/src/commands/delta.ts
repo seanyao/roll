@@ -20,10 +20,13 @@ import {
 import {
   prepareDelegation,
   PrepareError,
+  resolveExistingUniqueCardArchiveDir,
+  detectOrphanFrames,
   type PrepareInput,
 } from "../lib/delta-allocation.js";
-import { EventBus } from "@roll/core";
+import { EventBus, projectDelegationStatus } from "@roll/core";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // ── Locale resolution ────────────────────────────────────────────────────────
 
@@ -439,12 +442,123 @@ function statusCommand(args: string[]): number {
     }
   }
 
-  // TODO: full implementation with event projection
-  const msg2 = "TODO: status not yet implemented";
-  if (json) {
-    process.stderr.write(JSON.stringify({ ok: false, error: "not_implemented", detail: msg2 }) + "\n");
-  } else {
-    process.stderr.write(`${msg2}\n`);
+  const cwd = process.cwd();
+  const bus = new EventBus();
+  const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
+
+  // Detect orphan frames
+  const orphans: Array<{ delegationId: string; frameDir: string }> = [];
+
+  if (storyId && typeof storyId === "string") {
+    // Check for orphan frames for this story
+    const cardDir = resolveExistingUniqueCardArchiveDir(cwd, storyId);
+    if (cardDir) {
+      const detected = detectOrphanFrames(cardDir);
+      orphans.push(...detected);
+    }
   }
-  return 1;
+
+  // Read events for projection
+  const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
+
+  // If we have a delegationId, project it
+  let statusView: ReturnType<typeof projectDelegationStatus> | null = null;
+  if (delegationId && typeof delegationId === "string") {
+    statusView = projectDelegationStatus(delegationId, events);
+  }
+
+  // If we have a storyId but no delegation, project ALL delegations for that story
+  const delegationViews: Array<ReturnType<typeof projectDelegationStatus>> = [];
+  if (storyId && typeof storyId === "string" && !delegationId) {
+    for (const ev of events) {
+      if (ev.type === "delta:prepared" && ev.storyId === storyId) {
+        const view = projectDelegationStatus(ev.delegationId, events);
+        delegationViews.push(view);
+      }
+    }
+  }
+
+  // Build output
+  const output: Record<string, unknown> = {};
+
+  if (json) {
+    // JSON output
+    if (statusView) {
+      Object.assign(output, {
+        ok: true,
+        delegationId: statusView.delegationId,
+        storyId: statusView.storyId,
+        status: statusView.status,
+        visibleMode: statusView.visibleMode,
+        trigger: statusView.trigger,
+        topology: statusView.topology,
+        qualityProfile: statusView.qualityProfile,
+        blockReason: statusView.blockReason,
+        blockDetail: statusView.blockDetail,
+        terminalBinding: statusView.terminalBinding,
+        deliveryDisposition: statusView.deliveryDisposition,
+        roles: statusView.roles,
+        totalCost: statusView.totalCost,
+      });
+    }
+    if (delegationViews.length > 0) {
+      output.delegations = delegationViews.map((v) => ({
+        delegationId: v.delegationId,
+        status: v.status,
+        visibleMode: v.visibleMode,
+        roles: v.roles,
+        totalCost: v.totalCost,
+      }));
+    }
+    if (orphans.length > 0) {
+      output.uncommittedFrames = orphans.map((o) => ({
+        delegationId: o.delegationId,
+        frameDir: o.frameDir,
+        status: "unknown: uncommitted_delegation_frame",
+      }));
+    }
+    if (!statusView && delegationViews.length === 0 && orphans.length === 0) {
+      output.ok = true;
+      output.note = "no delegation found for this story";
+    }
+    process.stdout.write(JSON.stringify(output) + "\n");
+  } else {
+    // Human output
+    if (statusView) {
+      process.stdout.write(`Delegation: ${statusView.delegationId}\n`);
+      process.stdout.write(`  Story: ${statusView.storyId}\n`);
+      process.stdout.write(`  Status: ${statusView.status}\n`);
+      if (statusView.visibleMode) process.stdout.write(`  Mode: ${statusView.visibleMode}\n`);
+      if (statusView.trigger) process.stdout.write(`  Trigger: ${statusView.trigger}\n`);
+      if (statusView.topology) process.stdout.write(`  Topology: ${statusView.topology}\n`);
+      if (statusView.qualityProfile) process.stdout.write(`  Profile: ${statusView.qualityProfile}\n`);
+      process.stdout.write(`  Cost: ${statusView.totalCost}\n`);
+      if (statusView.blockReason) process.stdout.write(`  Block: ${statusView.blockReason} — ${statusView.blockDetail ?? ""}\n`);
+      if (statusView.terminalBinding) process.stdout.write(`  Terminal: ${statusView.terminalBinding} (${statusView.deliveryDisposition ?? ""})\n`);
+      if (statusView.roles.length > 0) {
+        process.stdout.write(`  Roles:\n`);
+        for (const role of statusView.roles) {
+          const prov = role.identityProvenance ? ` (${role.identityProvenance})` : "";
+          process.stdout.write(`    ${role.role}: ${role.status} [${role.hostId ?? "?"}/${role.modelId ?? "?"}]${prov} cost=${role.cost}\n`);
+        }
+      }
+    }
+    if (delegationViews.length > 0 && !statusView) {
+      for (const v of delegationViews) {
+        process.stdout.write(`Delegation: ${v.delegationId} — ${v.status} (${v.visibleMode ?? "?"})\n`);
+      }
+    }
+    if (orphans.length > 0) {
+      process.stdout.write(`Uncommitted frames:\n`);
+      for (const o of orphans) {
+        process.stdout.write(`  ${o.delegationId}: unknown: uncommitted_delegation_frame\n`);
+        process.stdout.write(`    frame: ${o.frameDir}\n`);
+      }
+    }
+    if (!statusView && delegationViews.length === 0 && orphans.length === 0) {
+      process.stdout.write("No delegation found.\n");
+    }
+  }
+
+  return 0;
 }

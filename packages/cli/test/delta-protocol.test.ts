@@ -295,3 +295,120 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(r.stderr).toBeTruthy();
   });
 });
+
+// ── Crash / recovery / status ──────────────────────────────────────────────
+
+describe("US-DELTA-003 — crash marker and recovery", () => {
+  it("orphan marker (delegation-open.json without events) is detected by status", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPHAN", "delta-team");
+
+    // Manually create an orphan frame: marker exists but no events
+    const delegationId = randomUUID();
+    const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPHAN", `delta-${delegationId}`);
+    mkdirSync(frameDir, { recursive: true });
+    writeFileSync(
+      join(frameDir, "delegation-open.json"),
+      JSON.stringify({
+        schema: "roll-delta-delegation-open/v1",
+        delegationId,
+        storyId: "US-DELTA-ORPHAN",
+        createdAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    // status should report uncommitted
+    const r = tsRunCwd(["status", "--story", "US-DELTA-ORPHAN", "--json"], dir);
+    // Status should detect orphan
+    expect(r.code).toBe(0);
+    const result = JSON.parse(r.stdout);
+    // Should show unknown or uncommitted state
+    expect(result.uncommittedFrames).toBeDefined();
+    expect(result.uncommittedFrames.length).toBeGreaterThan(0);
+    expect(result.uncommittedFrames[0].delegationId).toBe(delegationId);
+  });
+
+  it("prepare never adopts an orphan frame", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPHAN2", "delta-team");
+
+    // Create an orphan frame manually
+    const oldDelegationId = randomUUID();
+    const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPHAN2", `delta-${oldDelegationId}`);
+    mkdirSync(frameDir, { recursive: true });
+    writeFileSync(
+      join(frameDir, "delegation-open.json"),
+      JSON.stringify({
+        schema: "roll-delta-delegation-open/v1",
+        delegationId: oldDelegationId,
+        storyId: "US-DELTA-ORPHAN2",
+        createdAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    // Now prepare — should create a new frame, not adopt the orphan
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-ORPHAN2", "local-preset");
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-ORPHAN2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    // New delegation ID should be different
+    expect(parsed.delegationId).not.toBe(oldDelegationId);
+    // Orphan frame still exists
+    expect(existsSync(frameDir)).toBe(true);
+  });
+
+  it("status --json shows host-unobservable cost", () => {
+    const dir = setupMinimalProject("US-DELTA-STATUS", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-STATUS", "local-preset");
+
+    // Prepare first
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-STATUS",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Status by delegation
+    const r2 = tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
+    expect(r2.code).toBe(0);
+    const status = JSON.parse(r2.stdout);
+
+    // Verify projection
+    expect(status.delegationId).toBe(delegationId);
+    expect(status.storyId).toBe("US-DELTA-STATUS");
+    expect(status.status).toBe("in_progress");
+    expect(status.visibleMode).toBe("delta-team");
+    expect(status.totalCost).toBe("? (host_unobservable)");
+    expect(status.roles).toBeDefined();
+    expect(status.roles.length).toBeGreaterThan(0);
+  });
+
+  it("status human output contains expected fields", () => {
+    const dir = setupMinimalProject("US-DELTA-STATUS2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-STATUS2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-STATUS2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const r2 = tsRunCwd(["status", "--delegation", delegationId], dir);
+    expect(r2.code).toBe(0);
+    // Human output
+    expect(r2.stdout).toContain("US-DELTA-STATUS2");
+    expect(r2.stdout).toContain("in_progress");
+    expect(r2.stdout).toContain("host_unobservable");
+  });
+});

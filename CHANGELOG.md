@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### 新功能
+- 新增 Workspace-scoped `roll delivery list|show|reconcile`：统一展示 Issue 各 required repository 的 PR/CI/merge facts、缺失 gate 与 exact-SHA Integration Acceptance；`list --all` 只读，`roll loop reconcile` 复用同一对账路径，backlog Markdown 不参与完成判定（US-WS-015）[cli]
 - Workspace 多仓 Story 的集成验收现在绑定每个 required repository 的 exact merge SHA，并先验证该 SHA 可从配置的 integration branch 到达；Requirement `attest.md` 只从安全包含的 Issue evidence 重建，旧 SHA、缺失证据、符号链接逃逸或损坏/不可信的 Requirement archive 都不能产生最终通过（US-WS-014）[core+infra]
 
 ### 稳定性

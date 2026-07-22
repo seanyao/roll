@@ -18,6 +18,7 @@ window.RollData = (function () {
     "roll agent",
     "roll backlog",
     "roll config",
+    "roll delivery",
     "roll design",
     "roll doctor",
     "roll help",

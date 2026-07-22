@@ -20,7 +20,7 @@ import { registerAll } from "../src/index.js";
 
 /** AC2: the approved public top-level command set, in display order. */
 const APPROVED_PUBLIC = [
-  "agent", "backlog", "config", "design", "doctor", "help", "idea",
+  "agent", "backlog", "config", "delivery", "design", "doctor", "help", "idea",
   "init", "loop", "next", "north", "release", "setup", "status", "test", "workspace", "update",
 ];
 

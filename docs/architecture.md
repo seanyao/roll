@@ -202,9 +202,9 @@ building ──attest earned──► publishable ──push+PR──► awaitin
 
 #### Delivery Reconciler
 
-纯判定 + 薄 IO，在任意 `roll` 调用 / cycle 边界 / `roll loop reconcile` 时机会性运行：
+纯判定 + 薄 IO，在任意 `roll` 调用 / cycle 边界的 runner 内部时机会性运行：
 
-- **触发点**：(a) 每次 `roll loop` cycle 边界；(b) 任意 `roll` 命令的前置机会性 reconcile；(c) 显式 `roll loop reconcile [--json]`；(d) CI 里可选一步
+- **触发点**：(a) 每次 `roll loop` cycle 边界；(b) 任意 `roll` 命令的前置机会性 reconcile；(c) runner/CI 内部显式 tick
 - **自驱合并**：CI 绿且未合 → `gh pr merge --squash`，不依赖仓库 auto-merge 开关、不依赖 launchd
 - **外部合并反查**：supervisor / 人手动合并被 patch-id / PR-state 自动回填为 `delivered_external`——手动合并是一等支持路径，不是泄漏
 - **幂等 & 崩溃可续**：reconcile 反复跑永远安全，向真相收敛
@@ -230,6 +230,13 @@ special file、foreign Workspace identity 或并发变化都会 fail-loud，原 
 嵌入。缺失 Issue/evidence 必须以 pending 呈现，不能静默省略 Story；Requirement archive audit
 只要报告 `corrupt` 或 `untrusted`，最终 attestation 就保持 blocked 并原样列出 finding。重建或删除
 `attest.md` 永远不写 Issue manifest/events，因此不能改变 Story completion truth。
+
+`roll delivery list|show|reconcile` 是这组 Issue 事实的唯一公共交付视图：`show` 展开每个
+required repository 的 PR/CI/merge facts、缺失 gate 与 exact-SHA Integration Acceptance；
+`list --all` 只做跨 Workspace 聚合。`roll delivery reconcile` 重新折叠同一份 Issue events，
+不读取 backlog Markdown、不创建 Delivery Set/store，也不把单仓 leg 描述为 Story Done。
+`roll loop reconcile` 仅保留为同一 Workspace-scoped reconcile 的 alias；旧的单仓 cycle
+reconciler 只供 runner 内部推进 PR/merge 事实，不能再从公共命令面恢复 repository-local 模式。
 
 ### BC5 · 演化
 

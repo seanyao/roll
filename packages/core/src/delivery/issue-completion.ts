@@ -49,7 +49,7 @@ function resolveRepository(repoId: string, facts: readonly RepositoryMergeEviden
   const providers = scoped.filter((fact) => fact.authority === "provider");
   const branches = scoped.filter((fact) => fact.authority === "integration_branch");
   const projections = scoped.filter((fact) => fact.authority === "projection");
-  const provider = latest(providers);
+  const provider = latest(providers.filter((fact) => fact.prState !== "UNKNOWN")) ?? latest(providers);
   const branch = latest(branches);
   const projection = latest(projections);
   const conflicts: IssueCompletionConflict[] = [];
@@ -60,8 +60,15 @@ function resolveRepository(repoId: string, facts: readonly RepositoryMergeEviden
     conflicts.push(conflict(repoId, "invalid_merge_evidence"));
   }
   if (mergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));
-  const branchMergeCommits = new Set(branches.filter((fact) => fact.reachable).map((fact) => fact.mergeCommit).filter((sha): sha is string => sha !== undefined && sha !== ""));
+  const reachableBranches = branches.filter((fact) => fact.reachable);
+  const branchMergeCommits = new Set(reachableBranches.map((fact) => fact.mergeCommit).filter((sha): sha is string => sha !== undefined && sha !== ""));
+  if (reachableBranches.some((fact) => fact.mergeCommit === undefined || fact.mergeCommit === "")) {
+    conflicts.push(conflict(repoId, "invalid_merge_evidence"));
+  }
   if (branchMergeCommits.size > 1) conflicts.push(conflict(repoId, "conflicting_merge_commit"));
+  if (branch?.reachable === false && reachableBranches.some((fact) => fact.recordedAt <= branch.recordedAt)) {
+    conflicts.push(conflict(repoId, "strong_fact_conflict"));
+  }
   if (provider?.prState !== "MERGED" && providerMerges.some((fact) => fact.recordedAt <= (provider?.recordedAt ?? 0))) {
     conflicts.push(conflict(repoId, "strong_fact_conflict"));
   }

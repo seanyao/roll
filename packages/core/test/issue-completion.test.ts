@@ -166,6 +166,38 @@ describe("US-WS-013 repository fact authority and rebuild", () => {
     }))).toMatchObject({ state: "integration_pending", repositories: [{ authority: "integration_branch" }] });
   });
 
+  it("keeps an immutable provider merge authoritative when a later poll is UNKNOWN", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [
+        provider(API, "MERGED", { mergeCommit: API_MERGE, at: 1 }),
+        provider(API, "UNKNOWN", { at: 2 }),
+      ],
+    }))).toMatchObject({
+      state: "integration_pending",
+      repositories: [{ status: "merged", authority: "provider", mergeCommit: API_MERGE }],
+    });
+  });
+
+  it("fails loud when reachable integration-branch evidence omits the immutable merge commit", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c1", authority: "integration_branch", reachable: true, recordedAt: 1 },
+      ],
+    }))).toMatchObject({ state: "blocked", conflicts: [{ repoId: API, code: "invalid_merge_evidence" }] });
+  });
+
+  it("fails loud when a later integration-branch observation retracts prior reachability", () => {
+    expect(deriveIssueCompletion(input({
+      repositories: [{ repoId: API, required: true }],
+      repositoryFacts: [
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c1", authority: "integration_branch", reachable: true, mergeCommit: API_MERGE, recordedAt: 1 },
+        { workspaceId: WS, storyId: STORY, repoId: API, cycleId: "c2", authority: "integration_branch", reachable: false, recordedAt: 2 },
+      ],
+    }))).toMatchObject({ state: "blocked", conflicts: [{ repoId: API, code: "strong_fact_conflict" }] });
+  });
+
   it("fails loud when integration-branch facts disagree on the immutable merge commit", () => {
     expect(deriveIssueCompletion(input({
       repositories: [{ repoId: API, required: true }],

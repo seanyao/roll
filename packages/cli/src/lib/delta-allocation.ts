@@ -276,6 +276,9 @@ export interface PrepareResult {
  * Throws PrepareError on card resolution failure, lease conflict, or I/O issues.
  * Caller must append events after this returns successfully.
  */
+/** Maximum retries for frame directory collision before failing. */
+const MAX_COLLISION_RETRIES = 3;
+
 export function prepareDelegation(
   projectPath: string,
   input: PrepareInput,
@@ -293,90 +296,108 @@ export function prepareDelegation(
   const loopDir = join(projectPath, ".roll", "loop");
   if (!existsSync(loopDir)) mkdirSync(loopDir, { recursive: true });
 
-  // 2. Generate unique delegation ID
-  const delegationId = generateDelegationId();
-  const runId = runIdFromDelegationId(delegationId);
+  // 2–4. Bounded retry loop for ID generation + lease claim + frame creation.
+  // Frame directory collision (statistically impossible with v4 UUIDs but
+  // required by AC2) retries with a fresh CSPRNG ID and only own-lease cleanup.
+  // A real other-owner lease conflict (claimHostDelegationLease returns "exists")
+  // is fail-loud immediately — no retry across another owner.
+  let lastError: PrepareError | null = null;
 
-  // 3. Attempt lease claim
-  const leaseResult = claimHostDelegationLease(projectPath, {
-    storyId: input.storyId,
-    state: "in_flight",
-    ownerKind: "host-delegation",
-    delegationId,
-    runId,
-    claimedAt: Date.now(),
-  });
+  for (let attempt = 0; attempt < MAX_COLLISION_RETRIES; attempt++) {
+    const delegationId = generateDelegationId();
+    const runId = runIdFromDelegationId(delegationId);
 
-  if (leaseResult !== "claimed") {
-    throw new PrepareError(
-      "builder_lease_conflict",
-      `Story ${input.storyId}: host-delegation lease conflict (${leaseResult})`,
-    );
-  }
-
-  // 4. Create frame directory
-  const frameDir = join(cardDir, `delta-${delegationId}`);
-  try {
-    mkdirSync(frameDir);
-  } catch {
-    releaseHostDelegationLease(projectPath, input.storyId, delegationId);
-    throw new PrepareError(
-      "builder_lease_conflict",
-      `Frame directory collision for ${delegationId}`,
-    );
-  }
-
-  try {
-    // 5. Write recovery marker (delegation-open.json)
-    const markerPath = join(frameDir, "delegation-open.json");
-    atomicWriteJson(markerPath, {
-      schema: "roll-delta-delegation-open/v1",
-      delegationId,
+    // 3. Attempt lease claim
+    const leaseResult = claimHostDelegationLease(projectPath, {
       storyId: input.storyId,
-      createdAt: new Date().toISOString(),
-    });
-
-    // 6. Bind delegation ID into resolution and persist
-    const resolutionPath = join(frameDir, "role-artifacts", "delegation", "delegation-resolution.json");
-    const boundResolution = {
-      ...input.resolutionTemplate,
-      delegationId,
-    };
-    atomicWriteJson(resolutionPath, boundResolution);
-
-    // 7. Write minimal preparation metadata
-    const preparationPath = join(frameDir, "preparation.json");
-    atomicWriteJson(preparationPath, {
-      schema: "roll-delta-preparation/v1",
+      state: "in_flight",
+      ownerKind: "host-delegation",
       delegationId,
       runId,
-      storyId: input.storyId,
-      trigger: input.trigger,
-      topology: input.topology,
-      qualityProfile: input.qualityProfile,
-      presetId: input.presetId,
-      presetSha256: input.presetSha256,
-      createdAt: new Date().toISOString(),
+      claimedAt: Date.now(),
     });
 
-    const eventsPath = join(loopDir, "events.ndjson");
+    if (leaseResult !== "claimed") {
+      // Other-owner lease exists — fail-loud, no retry
+      throw new PrepareError(
+        "builder_lease_conflict",
+        `Story ${input.storyId}: host-delegation lease conflict (${leaseResult})`,
+      );
+    }
 
-    return {
-      delegationId,
-      runId,
-      frameDir,
-      resolutionPath,
-      markerPath,
-      preparationPath,
-      eventsPath,
-      leasePath: leaseFilePath(projectPath, input.storyId),
-    };
-  } catch (err) {
-    // Cleanup on failure
-    releaseHostDelegationLease(projectPath, input.storyId, delegationId);
-    try { rmSync(frameDir, { recursive: true, force: true }); } catch { /* best-effort */ }
-    throw err;
+    // 4. Create frame directory
+    const frameDir = join(cardDir, `delta-${delegationId}`);
+    try {
+      mkdirSync(frameDir);
+    } catch {
+      // Own-lease collision only — release our lease and retry with new ID
+      releaseHostDelegationLease(projectPath, input.storyId, delegationId);
+      lastError = new PrepareError(
+        "builder_lease_conflict",
+        `Frame directory collision for ${delegationId} (attempt ${attempt + 1}/${MAX_COLLISION_RETRIES})`,
+      );
+      continue;
+    }
+
+    // 5–7. Write artifacts within claimed frame (no further retry on write failure)
+    try {
+      // 5. Write recovery marker (delegation-open.json)
+      const markerPath = join(frameDir, "delegation-open.json");
+      atomicWriteJson(markerPath, {
+        schema: "roll-delta-delegation-open/v1",
+        delegationId,
+        storyId: input.storyId,
+        createdAt: new Date().toISOString(),
+      });
+
+      // 6. Bind delegation ID into resolution and persist
+      const resolutionPath = join(frameDir, "role-artifacts", "delegation", "delegation-resolution.json");
+      const boundResolution = {
+        ...input.resolutionTemplate,
+        delegationId,
+      };
+      atomicWriteJson(resolutionPath, boundResolution);
+
+      // 7. Write minimal preparation metadata
+      const preparationPath = join(frameDir, "preparation.json");
+      atomicWriteJson(preparationPath, {
+        schema: "roll-delta-preparation/v1",
+        delegationId,
+        runId,
+        storyId: input.storyId,
+        trigger: input.trigger,
+        topology: input.topology,
+        qualityProfile: input.qualityProfile,
+        presetId: input.presetId,
+        presetSha256: input.presetSha256,
+        createdAt: new Date().toISOString(),
+      });
+
+      const eventsPath = join(loopDir, "events.ndjson");
+
+      return {
+        delegationId,
+        runId,
+        frameDir,
+        resolutionPath,
+        markerPath,
+        preparationPath,
+        eventsPath,
+        leasePath: leaseFilePath(projectPath, input.storyId),
+      };
+    } catch (err) {
+      // Cleanup on write failure
+      releaseHostDelegationLease(projectPath, input.storyId, delegationId);
+      try { rmSync(frameDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      throw err;
+    }
   }
+
+  // All retries exhausted — throw the last error
+  throw lastError ?? new PrepareError(
+    "builder_lease_conflict",
+    `Story ${input.storyId}: frame directory collision after ${MAX_COLLISION_RETRIES} retries`,
+  );
 }
 
 // ── Recovery marker detection ─────────────────────────────────────────────────

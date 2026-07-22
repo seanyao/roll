@@ -7,6 +7,224 @@ export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
 export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
 export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" as const;
+export const WORKSPACE_MIGRATION_FACTS_V1 = "roll.workspace-migration-facts/v1" as const;
+export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as const;
+
+export type Sha256Digest = string;
+
+export type HistoricalRemoteTruth =
+  | {
+      readonly kind: "verified";
+      readonly normalizedRemote: string;
+      readonly defaultBranch: string;
+      readonly defaultTip: string;
+      readonly headReachable: true;
+      readonly defaultTipPresentLocally: true;
+    }
+  | {
+      readonly kind: "blocked";
+      readonly code: "remote_missing" | "remote_default_ambiguous" | "remote_truth_unverifiable" | "head_unpushed";
+      readonly normalizedRemote?: string;
+      readonly defaultBranch?: string;
+      readonly defaultTip?: string;
+    };
+
+export interface ProductGitSafetyFacts {
+  readonly head: string;
+  readonly state: "clean" | "dirty" | "in_flight";
+  readonly dirtyPaths: readonly string[];
+  readonly operation: "none" | "merge" | "rebase" | "cherry_pick" | "bisect";
+  readonly remote: HistoricalRemoteTruth;
+}
+
+export interface LinkedWorktreeSafetyFacts {
+  readonly pathToken: string;
+  readonly head: string;
+  readonly state: "clean" | "dirty" | "missing" | "prunable";
+}
+
+export interface SubmoduleSafetyFacts {
+  readonly path: string;
+  readonly head: string | null;
+  readonly state: "clean" | "dirty" | "uninitialized" | "conflicted" | "missing";
+  readonly remote: HistoricalRemoteTruth | null;
+}
+
+export interface HistoricalRuntimeFacts {
+  readonly activeCycleIds: readonly string[];
+  readonly activeStoryLeases: readonly string[];
+}
+
+export type HistoricalRollOwnership =
+  | { readonly kind: "ordinary" }
+  | { readonly kind: "product_tracked"; readonly trackedPaths: readonly string[] }
+  | {
+      readonly kind: "independent_git";
+      readonly gitdirToken: string;
+      readonly topLevelToken: string;
+      readonly state: "clean" | "dirty" | "in_flight";
+      readonly head: string;
+      readonly branch: string | null;
+      readonly upstream: string | null;
+      readonly normalizedRemote: string | null;
+    };
+
+export type HistoricalRollSourceClass =
+  | "backlog"
+  | "story_contract"
+  | "story_evidence"
+  | "design"
+  | "requirement"
+  | "runtime"
+  | "projection"
+  | "unknown"
+  | "rebuildable";
+
+interface HistoricalRollFileBase {
+  readonly kind: "file";
+  readonly path: string;
+  readonly digest: Sha256Digest;
+  readonly bytes: number;
+}
+
+export type HistoricalRollEntry =
+  | (HistoricalRollFileBase & {
+      readonly sourceClass: "story_contract" | "story_evidence";
+      readonly storyId: string;
+    })
+  | (HistoricalRollFileBase & {
+      readonly sourceClass: Exclude<HistoricalRollSourceClass, "story_contract" | "story_evidence">;
+      readonly storyId?: never;
+    })
+  | {
+      readonly kind: "symlink";
+      readonly path: string;
+      readonly target: string;
+    };
+
+export interface RepositoryCacheFacts {
+  readonly status: "absent" | "matching" | "conflict";
+  readonly repoId: string;
+  readonly cachePath: string;
+}
+
+export interface WorkspaceRegistryFacts {
+  readonly status: "available" | "same_workspace" | "id_conflict" | "repo_conflict";
+  readonly workspaceId: string;
+}
+
+export interface HistoricalMigrationFacts {
+  readonly schema: typeof WORKSPACE_MIGRATION_FACTS_V1;
+  readonly sourceRoot: string;
+  readonly repoId: string;
+  readonly requestedWorkspaceId?: string;
+  readonly git: ProductGitSafetyFacts;
+  readonly linkedWorktrees: readonly LinkedWorktreeSafetyFacts[];
+  readonly submodules: readonly SubmoduleSafetyFacts[];
+  readonly runtime: HistoricalRuntimeFacts;
+  readonly rollOwnership: HistoricalRollOwnership;
+  readonly rollInventory: readonly HistoricalRollEntry[];
+  readonly cache: RepositoryCacheFacts;
+  readonly registry: WorkspaceRegistryFacts;
+}
+
+export type HistoricalMigrationMapping =
+  | {
+      readonly action: "move_preserve" | "copy_preserve" | "import_inactive" | "archive_regenerate" | "quarantine_unclassified";
+      readonly source: string;
+      readonly destination: string;
+      readonly digest: Sha256Digest;
+      readonly reason: string;
+    }
+  | {
+      readonly action: "discard_rebuildable";
+      readonly source: string;
+      readonly destination: null;
+      readonly digest: Sha256Digest;
+      readonly reason: string;
+    };
+
+export type HistoricalMigrationInfoFinding = {
+  readonly severity: "info";
+  readonly code: "workspace_id_defaulted" | "cache_create_planned";
+  readonly path?: string;
+};
+
+export type HistoricalMigrationErrorFinding = {
+  readonly severity: "error";
+  readonly code:
+    | "product_dirty"
+    | "product_operation_in_flight"
+    | "head_unpushed"
+    | "remote_missing"
+    | "remote_default_ambiguous"
+    | "remote_truth_unverifiable"
+    | "linked_worktree_unsafe"
+    | "submodule_unsafe"
+    | "active_runtime"
+    | "roll_symlink_unsupported"
+    | "cache_conflict"
+    | "workspace_conflict";
+  readonly path?: string;
+};
+
+export type HistoricalMigrationFinding = HistoricalMigrationInfoFinding | HistoricalMigrationErrorFinding;
+
+export interface RollMetaHandoffFacts {
+  readonly gitdirToken: string;
+  readonly topLevelToken: string;
+  readonly state: "clean" | "dirty" | "in_flight";
+  readonly head: string;
+  readonly branch: string | null;
+  readonly upstream: string | null;
+  readonly normalizedRemote: string | null;
+}
+
+export interface RepositoryCutoverEntry {
+  readonly path: string;
+  readonly digest: Sha256Digest;
+}
+
+export interface RepositoryCutoverPlan {
+  readonly sourceHead: string;
+  readonly trackedEntries: readonly RepositoryCutoverEntry[];
+  readonly requiredAction: "remove_product_tracking_through_existing_tcr_pr_push_flow";
+}
+
+interface HistoricalMigrationPlanBase {
+  readonly schema: typeof WORKSPACE_MIGRATION_PLAN_V1;
+  readonly planId: string;
+  readonly workspaceId: string;
+  readonly workspaceRoot: string;
+  readonly repository: {
+    readonly alias: "primary";
+    readonly repoId: string;
+    readonly integrationBranch?: string;
+    readonly cachePath: string;
+  };
+  readonly mappings: readonly HistoricalMigrationMapping[];
+  readonly findings: readonly HistoricalMigrationFinding[];
+}
+
+export type HistoricalMigrationPlan =
+  | (HistoricalMigrationPlanBase & {
+      readonly verdict: "ready";
+      readonly repository: HistoricalMigrationPlanBase["repository"] & { readonly integrationBranch: string };
+    })
+  | (HistoricalMigrationPlanBase & {
+      readonly verdict: "migration_blocked";
+      readonly findings: readonly [HistoricalMigrationErrorFinding, ...HistoricalMigrationFinding[]];
+    })
+  | (HistoricalMigrationPlanBase & {
+      readonly verdict: "repository_cutover_required";
+      readonly repository: HistoricalMigrationPlanBase["repository"] & { readonly integrationBranch: string };
+      readonly repositoryCutover: RepositoryCutoverPlan;
+    })
+  | (HistoricalMigrationPlanBase & {
+      readonly verdict: "manual_metadata_handoff";
+      readonly repository: HistoricalMigrationPlanBase["repository"] & { readonly integrationBranch: string };
+      readonly manualHandoff: RollMetaHandoffFacts;
+    });
 
 export type ContractErrorCode =
   | "invalid_type"
@@ -1152,6 +1370,494 @@ export function parseIssueManifest(
       requirements,
       repositories: targets,
       ...(integrationAcceptance === undefined ? {} : { integrationAcceptance }),
+    },
+  };
+}
+
+const MIGRATION_SHA_PATTERN = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u;
+const MIGRATION_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+
+function migrationRecord(
+  value: unknown,
+  path: string,
+  allowed: readonly string[],
+  errors: ContractError[],
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    errors.push({ code: "invalid_type", path, message: "field must be an object" });
+    return undefined;
+  }
+  errors.push(...unknownFieldErrors(value, allowed, path));
+  return value;
+}
+
+function migrationString(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): string | undefined {
+  const candidate = value[key];
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    errors.push({ code: "invalid_type", path: `${path}.${key}`, message: "field must be a non-empty string" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function migrationNullableString(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): string | null | undefined {
+  const candidate = value[key];
+  if (candidate === null) return null;
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    errors.push({ code: "invalid_type", path: `${path}.${key}`, message: "field must be null or a non-empty string" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function migrationOptionalString(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  errors: ContractError[],
+): string | undefined {
+  const candidate = value[key];
+  if (candidate === undefined) return undefined;
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    errors.push({ code: "invalid_type", path: `${path}.${key}`, message: "field must be a non-empty string when present" });
+    return undefined;
+  }
+  return candidate;
+}
+
+function migrationEnum<T extends string>(
+  value: Record<string, unknown>,
+  key: string,
+  path: string,
+  allowed: readonly T[],
+  errors: ContractError[],
+): T | undefined {
+  const candidate = value[key];
+  if (typeof candidate !== "string" || !allowed.includes(candidate as T)) {
+    errors.push({ code: "invalid_value", path: `${path}.${key}`, message: `expected one of: ${allowed.join(", ")}` });
+    return undefined;
+  }
+  return candidate as T;
+}
+
+function migrationStringArray(
+  value: unknown,
+  path: string,
+  errors: ContractError[],
+): readonly string[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path, message: "field must be an array" });
+    return undefined;
+  }
+  const entries: string[] = [];
+  for (const [index, candidate] of value.entries()) {
+    if (typeof candidate !== "string" || candidate.trim() === "") {
+      errors.push({ code: "invalid_type", path: `${path}[${index}]`, message: "entry must be a non-empty string" });
+      continue;
+    }
+    entries.push(candidate);
+  }
+  return entries.length === value.length ? entries : undefined;
+}
+
+function migrationSafeRelative(value: string, path: string, errors: ContractError[]): boolean {
+  if (isSafeRelativeTargetPath(value)) return true;
+  errors.push({ code: "invalid_value", path, message: "path must be safe and relative" });
+  return false;
+}
+
+function migrationSha(value: string | null, path: string, errors: ContractError[]): boolean {
+  if (value === null || MIGRATION_SHA_PATTERN.test(value)) return true;
+  errors.push({ code: "invalid_value", path, message: "Git object id must be lowercase hexadecimal" });
+  return false;
+}
+
+function migrationNormalizedRemote(value: string, path: string, errors: ContractError[]): boolean {
+  if (
+    value === value.trim() && !/[\x00-\x20\x7f@?#%]/u.test(value) &&
+    (/^(?:https|ssh):\/\/(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])\/[A-Za-z0-9._~/-]+$/u.test(value) || /^file:\/\/\/[A-Za-z0-9._~/-]+$/u.test(value))
+  ) {
+    return true;
+  }
+  errors.push({ code: "unsafe_remote", path, message: "remote must be normalized and credential-free" });
+  return false;
+}
+
+function parseHistoricalRemoteTruth(
+  value: unknown,
+  path: string,
+  errors: ContractError[],
+): HistoricalRemoteTruth | undefined {
+  const record = migrationRecord(
+    value,
+    path,
+    ["kind", "code", "normalizedRemote", "defaultBranch", "defaultTip", "headReachable", "defaultTipPresentLocally"],
+    errors,
+  );
+  if (record === undefined) return undefined;
+  const kind = migrationEnum(record, "kind", path, ["verified", "blocked"] as const, errors);
+  if (kind === "verified") {
+    const normalizedRemote = migrationString(record, "normalizedRemote", path, errors);
+    const defaultBranch = migrationString(record, "defaultBranch", path, errors);
+    const defaultTip = migrationString(record, "defaultTip", path, errors);
+    if (record["code"] !== undefined) {
+      errors.push({ code: "unknown_field", path: `${path}.code`, message: "verified remote cannot contain a blocked code" });
+    }
+    if (record["headReachable"] !== true) {
+      errors.push({ code: "invalid_value", path: `${path}.headReachable`, message: "verified remote must prove HEAD reachability" });
+    }
+    if (record["defaultTipPresentLocally"] !== true) {
+      errors.push({ code: "invalid_value", path: `${path}.defaultTipPresentLocally`, message: "verified remote tip must be present locally" });
+    }
+    if (defaultBranch !== undefined && !isSafeGitRef(defaultBranch)) {
+      errors.push({ code: "invalid_value", path: `${path}.defaultBranch`, message: "default branch is not a safe Git ref" });
+    }
+    if (normalizedRemote !== undefined) migrationNormalizedRemote(normalizedRemote, `${path}.normalizedRemote`, errors);
+    if (defaultTip !== undefined) migrationSha(defaultTip, `${path}.defaultTip`, errors);
+    return normalizedRemote !== undefined && defaultBranch !== undefined && defaultTip !== undefined &&
+        record["headReachable"] === true && record["defaultTipPresentLocally"] === true
+      ? { kind, normalizedRemote, defaultBranch, defaultTip, headReachable: true, defaultTipPresentLocally: true }
+      : undefined;
+  }
+  if (kind === "blocked") {
+    const code = migrationEnum(
+      record,
+      "code",
+      path,
+      ["remote_missing", "remote_default_ambiguous", "remote_truth_unverifiable", "head_unpushed"] as const,
+      errors,
+    );
+    const normalizedRemote = migrationOptionalString(record, "normalizedRemote", path, errors);
+    const defaultBranch = migrationOptionalString(record, "defaultBranch", path, errors);
+    const defaultTip = migrationOptionalString(record, "defaultTip", path, errors);
+    if (record["headReachable"] !== undefined) {
+      errors.push({ code: "unknown_field", path: `${path}.headReachable`, message: "blocked remote cannot claim reachability" });
+    }
+    if (record["defaultTipPresentLocally"] !== undefined) {
+      errors.push({ code: "unknown_field", path: `${path}.defaultTipPresentLocally`, message: "blocked remote cannot claim a local tip" });
+    }
+    if (defaultBranch !== undefined && !isSafeGitRef(defaultBranch)) {
+      errors.push({ code: "invalid_value", path: `${path}.defaultBranch`, message: "default branch is not a safe Git ref" });
+    }
+    if (normalizedRemote !== undefined) migrationNormalizedRemote(normalizedRemote, `${path}.normalizedRemote`, errors);
+    if (defaultTip !== undefined) migrationSha(defaultTip, `${path}.defaultTip`, errors);
+    return code === undefined ? undefined : {
+      kind,
+      code,
+      ...(normalizedRemote === undefined ? {} : { normalizedRemote }),
+      ...(defaultBranch === undefined ? {} : { defaultBranch }),
+      ...(defaultTip === undefined ? {} : { defaultTip }),
+    };
+  }
+  return undefined;
+}
+
+function parseProductGitFacts(value: unknown, errors: ContractError[]): ProductGitSafetyFacts | undefined {
+  const path = "git";
+  const record = migrationRecord(value, path, ["head", "state", "dirtyPaths", "operation", "remote"], errors);
+  if (record === undefined) return undefined;
+  const head = migrationString(record, "head", path, errors);
+  const state = migrationEnum(record, "state", path, ["clean", "dirty", "in_flight"] as const, errors);
+  const dirtyPaths = migrationStringArray(record["dirtyPaths"], `${path}.dirtyPaths`, errors);
+  const operation = migrationEnum(record, "operation", path, ["none", "merge", "rebase", "cherry_pick", "bisect"] as const, errors);
+  const remote = parseHistoricalRemoteTruth(record["remote"], `${path}.remote`, errors);
+  if (head !== undefined) migrationSha(head, `${path}.head`, errors);
+  if (dirtyPaths !== undefined) {
+    dirtyPaths.forEach((entry, index) => migrationSafeRelative(entry, `${path}.dirtyPaths[${index}]`, errors));
+  }
+  return head === undefined || state === undefined || dirtyPaths === undefined || operation === undefined || remote === undefined
+    ? undefined
+    : { head, state, dirtyPaths, operation, remote };
+}
+
+function parseLinkedWorktrees(value: unknown, errors: ContractError[]): readonly LinkedWorktreeSafetyFacts[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path: "linkedWorktrees", message: "field must be an array" });
+    return undefined;
+  }
+  const entries: LinkedWorktreeSafetyFacts[] = [];
+  for (const [index, raw] of value.entries()) {
+    const path = `linkedWorktrees[${index}]`;
+    const record = migrationRecord(raw, path, ["pathToken", "head", "state"], errors);
+    if (record === undefined) continue;
+    const pathToken = migrationString(record, "pathToken", path, errors);
+    const head = migrationString(record, "head", path, errors);
+    const state = migrationEnum(record, "state", path, ["clean", "dirty", "missing", "prunable"] as const, errors);
+    if (head !== undefined) migrationSha(head, `${path}.head`, errors);
+    if (pathToken !== undefined && (pathToken.includes("..") || /[\x00-\x1f\x7f]/u.test(pathToken))) {
+      errors.push({ code: "invalid_value", path: `${path}.pathToken`, message: "worktree token is unsafe" });
+    }
+    if (pathToken !== undefined && head !== undefined && state !== undefined) entries.push({ pathToken, head, state });
+  }
+  return entries.length === value.length ? entries : undefined;
+}
+
+function parseSubmodules(value: unknown, errors: ContractError[]): readonly SubmoduleSafetyFacts[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path: "submodules", message: "field must be an array" });
+    return undefined;
+  }
+  const entries: SubmoduleSafetyFacts[] = [];
+  for (const [index, raw] of value.entries()) {
+    const path = `submodules[${index}]`;
+    const record = migrationRecord(raw, path, ["path", "head", "state", "remote"], errors);
+    if (record === undefined) continue;
+    const modulePath = migrationString(record, "path", path, errors);
+    const rawHead = record["head"];
+    const head = rawHead === null ? null : migrationString(record, "head", path, errors);
+    const state = migrationEnum(record, "state", path, ["clean", "dirty", "uninitialized", "conflicted", "missing"] as const, errors);
+    const remote = record["remote"] === null ? null : parseHistoricalRemoteTruth(record["remote"], `${path}.remote`, errors);
+    if (modulePath !== undefined) migrationSafeRelative(modulePath, `${path}.path`, errors);
+    if (head !== undefined) migrationSha(head, `${path}.head`, errors);
+    if (modulePath !== undefined && head !== undefined && state !== undefined && remote !== undefined) {
+      entries.push({ path: modulePath, head, state, remote });
+    }
+  }
+  return entries.length === value.length ? entries : undefined;
+}
+
+function parseHistoricalRuntime(value: unknown, errors: ContractError[]): HistoricalRuntimeFacts | undefined {
+  const path = "runtime";
+  const record = migrationRecord(value, path, ["activeCycleIds", "activeStoryLeases"], errors);
+  if (record === undefined) return undefined;
+  const activeCycleIds = migrationStringArray(record["activeCycleIds"], `${path}.activeCycleIds`, errors);
+  const activeStoryLeases = migrationStringArray(record["activeStoryLeases"], `${path}.activeStoryLeases`, errors);
+  if (activeCycleIds !== undefined) {
+    activeCycleIds.forEach((id, index) => {
+      if (!isSafeIdentifier(id)) errors.push({ code: "invalid_value", path: `${path}.activeCycleIds[${index}]`, message: "Cycle ID is unsafe" });
+    });
+  }
+  if (activeStoryLeases !== undefined) {
+    activeStoryLeases.forEach((id, index) => {
+      if (!isSafeIdentifier(id)) errors.push({ code: "invalid_value", path: `${path}.activeStoryLeases[${index}]`, message: "Story ID is unsafe" });
+    });
+  }
+  return activeCycleIds === undefined || activeStoryLeases === undefined ? undefined : { activeCycleIds, activeStoryLeases };
+}
+
+function parseHistoricalRollOwnership(value: unknown, errors: ContractError[]): HistoricalRollOwnership | undefined {
+  const path = "rollOwnership";
+  const record = migrationRecord(
+    value,
+    path,
+    ["kind", "trackedPaths", "gitdirToken", "topLevelToken", "state", "head", "branch", "upstream", "normalizedRemote"],
+    errors,
+  );
+  if (record === undefined) return undefined;
+  const kind = migrationEnum(record, "kind", path, ["ordinary", "product_tracked", "independent_git"] as const, errors);
+  const allowedByKind: Readonly<Record<NonNullable<typeof kind>, readonly string[]>> = {
+    ordinary: ["kind"],
+    product_tracked: ["kind", "trackedPaths"],
+    independent_git: ["kind", "gitdirToken", "topLevelToken", "state", "head", "branch", "upstream", "normalizedRemote"],
+  };
+  if (kind !== undefined) errors.push(...unknownFieldErrors(record, allowedByKind[kind], path));
+  if (kind === "ordinary") return { kind };
+  if (kind === "product_tracked") {
+    const trackedPaths = migrationStringArray(record["trackedPaths"], `${path}.trackedPaths`, errors);
+    if (trackedPaths !== undefined) {
+      trackedPaths.forEach((entry, index) => migrationSafeRelative(entry, `${path}.trackedPaths[${index}]`, errors));
+      if (new Set(trackedPaths).size !== trackedPaths.length) {
+        errors.push({ code: "duplicate_identity", path: `${path}.trackedPaths`, message: "tracked paths must be unique" });
+      }
+    }
+    return trackedPaths === undefined ? undefined : { kind, trackedPaths };
+  }
+  if (kind === "independent_git") {
+    const gitdirToken = migrationString(record, "gitdirToken", path, errors);
+    const topLevelToken = migrationString(record, "topLevelToken", path, errors);
+    const state = migrationEnum(record, "state", path, ["clean", "dirty", "in_flight"] as const, errors);
+    const head = migrationString(record, "head", path, errors);
+    const branch = migrationNullableString(record, "branch", path, errors);
+    const upstream = migrationNullableString(record, "upstream", path, errors);
+    const normalizedRemote = migrationNullableString(record, "normalizedRemote", path, errors);
+    if (head !== undefined) migrationSha(head, `${path}.head`, errors);
+    if (branch !== undefined && branch !== null && !isSafeGitRef(branch)) {
+      errors.push({ code: "invalid_value", path: `${path}.branch`, message: "branch is not a safe Git ref" });
+    }
+    if (upstream !== undefined && upstream !== null && !isSafeGitRef(upstream)) {
+      errors.push({ code: "invalid_value", path: `${path}.upstream`, message: "upstream is not a safe Git ref" });
+    }
+    if (normalizedRemote !== undefined && normalizedRemote !== null) {
+      migrationNormalizedRemote(normalizedRemote, `${path}.normalizedRemote`, errors);
+    }
+    return gitdirToken === undefined || topLevelToken === undefined || state === undefined || head === undefined ||
+        branch === undefined || upstream === undefined || normalizedRemote === undefined
+      ? undefined
+      : { kind, gitdirToken, topLevelToken, state, head, branch, upstream, normalizedRemote };
+  }
+  return undefined;
+}
+
+function parseHistoricalRollInventory(value: unknown, errors: ContractError[]): readonly HistoricalRollEntry[] | undefined {
+  if (!Array.isArray(value)) {
+    errors.push({ code: "invalid_type", path: "rollInventory", message: "field must be an array" });
+    return undefined;
+  }
+  const entries: HistoricalRollEntry[] = [];
+  for (const [index, raw] of value.entries()) {
+    const path = `rollInventory[${index}]`;
+    const record = migrationRecord(raw, path, ["kind", "path", "digest", "bytes", "sourceClass", "storyId", "target"], errors);
+    if (record === undefined) continue;
+    const kind = migrationEnum(record, "kind", path, ["file", "symlink"] as const, errors);
+    const entryPath = migrationString(record, "path", path, errors);
+    if (entryPath !== undefined) migrationSafeRelative(entryPath, `${path}.path`, errors);
+    if (kind === "symlink") {
+      errors.push(...unknownFieldErrors(record, ["kind", "path", "target"], path));
+      const target = migrationString(record, "target", path, errors);
+      if (entryPath !== undefined && target !== undefined) entries.push({ kind, path: entryPath, target });
+      continue;
+    }
+    if (kind === "file") {
+      errors.push(...unknownFieldErrors(record, ["kind", "path", "digest", "bytes", "sourceClass", "storyId"], path));
+      const digest = migrationString(record, "digest", path, errors);
+      const bytes = record["bytes"];
+      const sourceClass = migrationEnum(
+        record,
+        "sourceClass",
+        path,
+        ["backlog", "story_contract", "story_evidence", "design", "requirement", "runtime", "projection", "unknown", "rebuildable"] as const,
+        errors,
+      );
+      const storyId = migrationOptionalString(record, "storyId", path, errors);
+      if (digest !== undefined && !MIGRATION_DIGEST_PATTERN.test(digest)) {
+        errors.push({ code: "invalid_value", path: `${path}.digest`, message: "digest must be lowercase SHA-256" });
+      }
+      if (!Number.isSafeInteger(bytes) || (bytes as number) < 0) {
+        errors.push({ code: "invalid_value", path: `${path}.bytes`, message: "bytes must be a non-negative safe integer" });
+      }
+      const storyClass = sourceClass === "story_contract" || sourceClass === "story_evidence";
+      if (storyClass && (storyId === undefined || !isSafeIdentifier(storyId))) {
+        errors.push({ code: "invalid_value", path: `${path}.storyId`, message: "Story inventory entries require a safe Story ID" });
+      }
+      if (!storyClass && storyId !== undefined) {
+        errors.push({ code: "invalid_value", path: `${path}.storyId`, message: "only Story inventory entries may declare a Story ID" });
+      }
+      if (entryPath !== undefined && digest !== undefined && Number.isSafeInteger(bytes) && (bytes as number) >= 0) {
+        if ((sourceClass === "story_contract" || sourceClass === "story_evidence") && storyId !== undefined) {
+          entries.push({ kind, path: entryPath, digest, bytes: bytes as number, sourceClass, storyId });
+        } else if (
+          sourceClass !== undefined && sourceClass !== "story_contract" && sourceClass !== "story_evidence" &&
+          storyId === undefined
+        ) {
+          entries.push({ kind, path: entryPath, digest, bytes: bytes as number, sourceClass });
+        }
+      }
+    }
+  }
+  const paths = entries.map((entry) => entry.path);
+  if (new Set(paths).size !== paths.length) {
+    errors.push({ code: "duplicate_identity", path: "rollInventory", message: "inventory paths must be unique" });
+  }
+  return entries.length === value.length ? entries : undefined;
+}
+
+function parseRepositoryCacheFacts(value: unknown, errors: ContractError[]): RepositoryCacheFacts | undefined {
+  const path = "cache";
+  const record = migrationRecord(value, path, ["status", "repoId", "cachePath"], errors);
+  if (record === undefined) return undefined;
+  const status = migrationEnum(record, "status", path, ["absent", "matching", "conflict"] as const, errors);
+  const repoId = migrationString(record, "repoId", path, errors);
+  const cachePath = migrationString(record, "cachePath", path, errors);
+  if (repoId !== undefined && !/^repo-[0-9a-f]{12}$/u.test(repoId)) {
+    errors.push({ code: "invalid_value", path: `${path}.repoId`, message: "repository ID is invalid" });
+  }
+  if (cachePath !== undefined) migrationSafeRelative(cachePath, `${path}.cachePath`, errors);
+  return status === undefined || repoId === undefined || cachePath === undefined ? undefined : { status, repoId, cachePath };
+}
+
+function parseWorkspaceRegistryFacts(value: unknown, errors: ContractError[]): WorkspaceRegistryFacts | undefined {
+  const path = "registry";
+  const record = migrationRecord(value, path, ["status", "workspaceId"], errors);
+  if (record === undefined) return undefined;
+  const status = migrationEnum(record, "status", path, ["available", "same_workspace", "id_conflict", "repo_conflict"] as const, errors);
+  const workspaceId = migrationString(record, "workspaceId", path, errors);
+  if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
+    errors.push({ code: "invalid_value", path: `${path}.workspaceId`, message: "Workspace ID is unsafe" });
+  }
+  return status === undefined || workspaceId === undefined ? undefined : { status, workspaceId };
+}
+
+/** Parse the complete read-only adapter output before the pure migration planner runs. */
+export function parseHistoricalMigrationFacts(value: unknown): ContractResult<HistoricalMigrationFacts> {
+  if (!isRecord(value)) return fail("invalid_type", "migration", "historical migration facts must be an object");
+  const errors = unknownFieldErrors(value, [
+    "schema",
+    "sourceRoot",
+    "repoId",
+    "requestedWorkspaceId",
+    "git",
+    "linkedWorktrees",
+    "submodules",
+    "runtime",
+    "rollOwnership",
+    "rollInventory",
+    "cache",
+    "registry",
+  ], "");
+  if (value["schema"] !== WORKSPACE_MIGRATION_FACTS_V1) {
+    errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_MIGRATION_FACTS_V1}` });
+  }
+  const sourceRoot = migrationString(value, "sourceRoot", "migration", errors);
+  const repoId = migrationString(value, "repoId", "migration", errors);
+  const requestedWorkspaceId = migrationOptionalString(value, "requestedWorkspaceId", "migration", errors);
+  if (repoId !== undefined && !/^repo-[0-9a-f]{12}$/u.test(repoId)) {
+    errors.push({ code: "invalid_value", path: "repoId", message: "repository ID is invalid" });
+  }
+  if (requestedWorkspaceId !== undefined && !isSafeIdentifier(requestedWorkspaceId)) {
+    errors.push({ code: "invalid_value", path: "requestedWorkspaceId", message: "Workspace ID is unsafe" });
+  }
+  const git = parseProductGitFacts(value["git"], errors);
+  const linkedWorktrees = parseLinkedWorktrees(value["linkedWorktrees"], errors);
+  const submodules = parseSubmodules(value["submodules"], errors);
+  const runtime = parseHistoricalRuntime(value["runtime"], errors);
+  const rollOwnership = parseHistoricalRollOwnership(value["rollOwnership"], errors);
+  const rollInventory = parseHistoricalRollInventory(value["rollInventory"], errors);
+  const cache = parseRepositoryCacheFacts(value["cache"], errors);
+  const registry = parseWorkspaceRegistryFacts(value["registry"], errors);
+  if (rollOwnership?.kind === "product_tracked" && rollInventory !== undefined) {
+    const files = new Set(rollInventory.filter((entry) => entry.kind === "file").map((entry) => entry.path));
+    rollOwnership.trackedPaths.forEach((path, index) => {
+      if (!files.has(path)) {
+        errors.push({
+          code: "invalid_value",
+          path: `rollOwnership.trackedPaths[${index}]`,
+          message: "tracked ownership path must name a digest-backed inventory file",
+        });
+      }
+    });
+  }
+  if (
+    errors.length > 0 || value["schema"] !== WORKSPACE_MIGRATION_FACTS_V1 || sourceRoot === undefined ||
+    repoId === undefined || git === undefined || linkedWorktrees === undefined || submodules === undefined ||
+    runtime === undefined || rollOwnership === undefined || rollInventory === undefined || cache === undefined || registry === undefined
+  ) {
+    return { ok: false, errors };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: WORKSPACE_MIGRATION_FACTS_V1,
+      sourceRoot,
+      repoId,
+      ...(requestedWorkspaceId === undefined ? {} : { requestedWorkspaceId }),
+      git,
+      linkedWorktrees,
+      submodules,
+      runtime,
+      rollOwnership,
+      rollInventory,
+      cache,
+      registry,
     },
   };
 }

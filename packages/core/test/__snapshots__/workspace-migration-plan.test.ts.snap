@@ -1,0 +1,93 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-WS-019 deterministic historical Workspace migration planner > freezes every ordinary inventory mapping and portable repository default > complete-facts-plan 1`] = `
+{
+  "findings": [
+    {
+      "code": "workspace_id_defaulted",
+      "severity": "info",
+    },
+    {
+      "code": "cache_create_planned",
+      "path": "repos/repo-ab12cd34ef56.git",
+      "severity": "info",
+    },
+  ],
+  "mappings": [
+    {
+      "action": "move_preserve",
+      "destination": "backlog/index.md",
+      "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "reason": "backlog_authority",
+      "source": "backlog.md",
+    },
+    {
+      "action": "move_preserve",
+      "destination": "requirements/legacy/context/jira.md",
+      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "requirement_with_digest",
+      "source": "context/jira.md",
+    },
+    {
+      "action": "quarantine_unclassified",
+      "destination": "runtime/legacy-import/unclassified/custom.txt",
+      "digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "reason": "unknown_surface",
+      "source": "custom.txt",
+    },
+    {
+      "action": "move_preserve",
+      "destination": "design/legacy/domain/context-map.md",
+      "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "reason": "design_with_provenance",
+      "source": "domain/context-map.md",
+    },
+    {
+      "action": "archive_regenerate",
+      "destination": "runtime/legacy-import/archive/dossier/index.html",
+      "digest": "2222222222222222222222222222222222222222222222222222222222222222",
+      "reason": "generated_projection",
+      "source": "dossier/index.html",
+    },
+    {
+      "action": "move_preserve",
+      "destination": "issues/US-1/evidence/legacy/evidence.json",
+      "digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "reason": "story_evidence",
+      "source": "features/US-1/evidence.json",
+    },
+    {
+      "action": "move_preserve",
+      "destination": "backlog/legacy/US-1/spec.md",
+      "digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "reason": "story_contract",
+      "source": "features/US-1/spec.md",
+    },
+    {
+      "action": "import_inactive",
+      "destination": "runtime/legacy-import/loop/runs.jsonl",
+      "digest": "1111111111111111111111111111111111111111111111111111111111111111",
+      "reason": "runtime_never_reactivated",
+      "source": "loop/runs.jsonl",
+    },
+    {
+      "action": "discard_rebuildable",
+      "destination": null,
+      "digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "reason": "explicit_rebuildable_cache",
+      "source": "tmp/cache.bin",
+    },
+  ],
+  "planId": "53d0fbc78be0ef76ed4cd97722e6fc6145f4ff4b43fcefef30b672024a2bead3",
+  "repository": {
+    "alias": "primary",
+    "cachePath": "repos/repo-ab12cd34ef56.git",
+    "integrationBranch": "main",
+    "repoId": "repo-ab12cd34ef56",
+  },
+  "schema": "roll.workspace-migration-plan/v1",
+  "verdict": "ready",
+  "workspaceId": "ws-ab12cd34ef56",
+  "workspaceRoot": "workspaces/ws-ab12cd34ef56",
+}
+`;

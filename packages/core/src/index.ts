@@ -18,6 +18,7 @@ export * from "./workspace/requirement-archive-integrity.js";
 export * from "./workspace/requirement-attest.js";
 export * from "./workspace/issue-init-plan.js";
 export * from "./workspace/doctor.js";
+export * from "./workspace/migration.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

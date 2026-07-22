@@ -3,6 +3,14 @@ import {
   auditWorktrees,
   type WorkspaceWorktreeOwnership,
 } from "../src/commands/worktree-audit.js";
+import { auditWorkspaceWorktrees } from "../src/commands/workspace-worktree-lifecycle.js";
+import {
+  ISSUE_MANIFEST_V1,
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_MANIFEST_V1,
+  type IssueManifest,
+  type WorkspaceManifest,
+} from "@roll/spec";
 
 const HEAD = "a".repeat(40);
 
@@ -58,5 +66,160 @@ describe("US-WS-011a Workspace worktree audit", () => {
       }),
     ]);
     expect(output.ephemeralBranches).toEqual(["loop/cycle-shared"]);
+  });
+
+  it("discovers two Workspaces through one shared cache without double counting cache branches or unrelated worktrees", () => {
+    const cachePath = "/roll-home/repos/repo-shared.git";
+    const binding = {
+      schema: REPOSITORY_BINDING_V1,
+      repoId: "repo-shared",
+      alias: "primary",
+      remote: "https://example.test/shared.git",
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    } as const;
+    const workspaces = new Map<string, WorkspaceManifest>([
+      ["/workspaces/alpha", {
+        schema: WORKSPACE_MANIFEST_V1,
+        workspaceId: "ws-alpha",
+        displayName: "Alpha",
+        requirements: [],
+        repositories: [binding],
+      }],
+      ["/workspaces/beta", {
+        schema: WORKSPACE_MANIFEST_V1,
+        workspaceId: "ws-beta",
+        displayName: "Beta",
+        requirements: [],
+        repositories: [binding],
+      }],
+    ]);
+    const issues = new Map<string, IssueManifest>([
+      ["/workspaces/alpha/issues/US-A/manifest.json", {
+        schema: ISSUE_MANIFEST_V1,
+        workspaceId: "ws-alpha",
+        storyId: "US-A",
+        requirements: [],
+        repositories: [{
+          repoId: "repo-shared",
+          alias: "primary",
+          access: "write",
+          requiredDelivery: true,
+          noChangePolicy: "changes_required",
+        }],
+      }],
+      ["/workspaces/beta/issues/US-B/manifest.json", {
+        schema: ISSUE_MANIFEST_V1,
+        workspaceId: "ws-beta",
+        storyId: "US-B",
+        requirements: [],
+        repositories: [{
+          repoId: "repo-shared",
+          alias: "primary",
+          access: "write",
+          requiredDelivery: true,
+          noChangePolicy: "changes_required",
+        }],
+      }],
+    ]);
+    const alphaPath = "/workspaces/alpha/issues/US-A/primary";
+    const betaPath = "/workspaces/beta/issues/US-B/primary";
+    let cacheAudits = 0;
+
+    const output = auditWorkspaceWorktrees({
+      selectedWorkspaceId: "ws-alpha",
+      selectedWorkspaceRoot: "/workspaces/alpha",
+      rollHome: "/roll-home",
+    }, {
+      inspectWorkspaces: () => [
+        { workspaceId: "ws-alpha", root: "/workspaces/alpha", canonicalRoot: "/workspaces/alpha", consistency: "consistent" },
+        { workspaceId: "ws-beta", root: "/workspaces/beta", canonicalRoot: "/workspaces/beta", consistency: "consistent" },
+      ],
+      readWorkspace: (root) => workspaces.get(root) as WorkspaceManifest,
+      listIssueIds: (root) => root.endsWith("alpha") ? ["US-A"] : ["US-B"],
+      readIssueManifest: (issueRoot) => issues.get(`${issueRoot}/manifest.json`) as IssueManifest,
+      readRepositoryBoundFacts: (issueRoot) => new Map([["primary", {
+        workspaceId: issueRoot.includes("alpha") ? "ws-alpha" : "ws-beta",
+        storyId: issueRoot.includes("alpha") ? "US-A" : "US-B",
+        repoId: "repo-shared",
+        baseSha: HEAD,
+        access: "write",
+        path: issueRoot.includes("alpha") ? alphaPath : betaPath,
+        workBranch: issueRoot.includes("alpha") ? "roll/ws-alpha/US-A" : "roll/ws-beta/US-B",
+      }]]),
+      readIssueCompletionEvidence: (issueRoot) => issueRoot.includes("alpha") ? {
+        repositoryFacts: [{
+          authority: "provider",
+          workspaceId: "ws-alpha",
+          storyId: "US-A",
+          repoId: "repo-shared",
+          cycleId: "cycle-a",
+          recordedAt: 1,
+          prState: "MERGED",
+          ci: "green",
+          mergeCommit: HEAD,
+        }],
+        integrationAcceptances: [{
+          workspaceId: "ws-alpha",
+          storyId: "US-A",
+          inputMergeCommits: { "repo-shared": HEAD },
+          verdict: "pass",
+          artifactPath: "evidence/integration.txt",
+          recordedAt: 2,
+        }],
+      } : { repositoryFacts: [], integrationAcceptances: [] },
+      storyActive: () => false,
+      resolveCache: () => ({ repoId: "repo-shared", cachePath, integrationBranch: "main" }),
+      auditRepository: (deps) => {
+        cacheAudits += 1;
+        return auditWorktrees({
+          ...deps,
+          readDir: () => [],
+          git: (args, cwd) => {
+            const command = args.join(" ");
+            if (command === "worktree list --porcelain") {
+              return [
+                `worktree ${cachePath}`,
+                `HEAD ${HEAD}`,
+                "bare",
+                "",
+                `worktree ${alphaPath}`,
+                `HEAD ${HEAD}`,
+                "branch refs/heads/roll/ws-alpha/US-A",
+                "",
+                `worktree ${betaPath}`,
+                `HEAD ${HEAD}`,
+                "branch refs/heads/roll/ws-beta/US-B",
+                "",
+                "worktree /tmp/unrelated-worktree",
+                `HEAD ${HEAD}`,
+                "branch refs/heads/manual/unrelated",
+                "",
+              ].join("\n");
+            }
+            if (command.startsWith("status --porcelain")) return cwd === betaPath ? "?? scratch.txt" : "";
+            if (command === "rev-parse HEAD" || command === "merge-base HEAD origin/main") return HEAD;
+            if (command === "branch --format=%(refname:short)") return "loop/cycle-shared\nmain";
+            if (command === "branch --merged origin/main") return "main";
+            return "";
+          },
+        });
+      },
+      nowISO: () => "2026-07-22T00:00:00.000Z",
+    });
+
+    expect(cacheAudits).toBe(1);
+    expect(output.records).toHaveLength(2);
+    expect(output.records.map((record) => [record.workspaceId, record.deliveryProof, record.disposition])).toEqual([
+      ["ws-alpha", "delivered", "disposable_candidate"],
+      ["ws-beta", "incomplete", "preserved_dirty_no_tcr"],
+    ]);
+    expect(output.ephemeralBranches).toEqual([{
+      repoId: "repo-shared",
+      cachePath,
+      branch: "loop/cycle-shared",
+    }]);
+    expect(output.summary).toMatchObject({ worktrees: 2, ephemeralBranches: 1, canaryTotal: 3 });
   });
 });

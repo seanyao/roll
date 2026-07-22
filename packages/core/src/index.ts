@@ -109,5 +109,7 @@ export * from "./truth/adapter.js";
 export * from "./truth/dossier-collect.js";
 export * from "./truth/dossier-ladder.js";
 export * from "./truth/collect-dossier-state.js";
+export * from "./delta-team/admission.js";
+export * from "./delta-team/projection.js";
 export * from "./tools/index.js";
 export * from "./browser-operations/index.js";

@@ -85,3 +85,56 @@ describe("US-TRUTH-006 AC3/AC6 — the guard reds loudly on an unregistered fiel
     expect(unregisteredFields("runs", ["project", "result_eval"])).toEqual([]);
   });
 });
+
+describe("US-DELTA-001 AC10 — registry guard for Delta event/manifest keys", () => {
+  it("all delta:prepared fields are registered", () => {
+    const keys = ["type", "ts", "delegationId", "storyId", "runId", "cycleId",
+      "trigger", "topology", "qualityProfile", "presetId", "presetSha256", "hostId"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all delta:role_resolved fields are registered", () => {
+    const keys = ["role", "roleInstanceId", "hostId", "modelId", "source", "reasons", "inventorySha256"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all delta:role_started fields are registered", () => {
+    const keys = ["sessionId", "identityProvenance", "worktreeAccess"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all delta:artifact_published fields are registered", () => {
+    const keys = ["path", "sha256", "manifestPath"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all delta:terminal fields are registered", () => {
+    const keys = ["outcome", "terminalBinding", "deliveryDisposition"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all delta:blocked fields are registered", () => {
+    const keys = ["reason", "detail"];
+    const missing = unregisteredFields("event:delta", keys);
+    expect(missing, registrationHint("event:delta", missing)).toEqual([]);
+  });
+
+  it("all artifact:delta v2 manifest fields are registered", () => {
+    const keys = ["schemaVersion", "executionIdentity", "hostAttestation", "createdAt"];
+    const missing = unregisteredFields("artifact:delta", keys);
+    expect(missing, registrationHint("artifact:delta", missing)).toEqual([]);
+  });
+
+  it("unregistered delta event key fails the guard", () => {
+    const sneaky = ["delegationId", "unregistered_sneaky_field"];
+    const missing = unregisteredFields("event:delta", sneaky);
+    expect(missing).toEqual(["unregistered_sneaky_field"]);
+    const hint = registrationHint("event:delta", missing);
+    expect(hint).toContain("truth-registry.ts");
+  });
+});

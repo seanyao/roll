@@ -10,7 +10,8 @@
  * Data contract: {@link WorktreeAuditRecord}, {@link WorktreeAuditOutput}
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync, realpathSync, type Dirent } from "node:fs";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readdirSync, realpathSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { isEphemeralBranch } from "@roll/core";
@@ -91,8 +92,16 @@ export interface WorktreeAuditRecord {
     state: "OPEN" | "MERGED" | "CLOSED" | "UNKNOWN";
   };
   active: boolean;
+  orphanRecoveryProof?: OrphanRecoveryProof;
   disposition: WorktreeDisposition;
   reason: string;
+}
+
+export interface OrphanRecoveryProof {
+  state: "empty" | "trusted_generated" | "linked_metadata" | "untrusted_material" | "ambiguous";
+  fingerprint: string | null;
+  entries: readonly string[];
+  detail: string;
 }
 
 export interface WorktreeAuditOutput {
@@ -136,6 +145,8 @@ export interface WorktreeAuditDeps {
    * Injectable in tests. Must NOT throw — returns [] when the path is absent.
    */
   readDir?: (p: string) => string[];
+  /** Inspect one unregistered direct child for path-specific recovery proof. */
+  inspectOrphanDir?: (repoRoot: string, path: string, name: string) => OrphanRecoveryProof;
   /** Current timestamp as ISO-8601 string. */
   nowISO?: () => string;
   /** Current UTC seconds. */
@@ -243,6 +254,8 @@ function extractCycleId(dirName: string): string | undefined {
  * plus `merged` (reconcile treats status==="merged" as delivered).
  */
 const ORPHAN_DELIVERED_OUTCOMES = new Set(["delivered", "merged"]);
+const TRUSTED_ORPHAN_GENERATED_ROOTS = new Set([".next"]);
+const MAX_ORPHAN_PROOF_ENTRIES = 100_000;
 
 /** Resolve symlinks for path comparison; returns the input unchanged if it can't. */
 function realpathSafe(p: string): string {
@@ -262,6 +275,142 @@ function defaultReadDirNames(dir: string): string[] {
   } catch {
     return [];
   }
+}
+
+function ambiguousOrphanProof(entries: readonly string[], detail: string): OrphanRecoveryProof {
+  return { state: "ambiguous", fingerprint: null, entries, detail };
+}
+
+function inspectTrustedOrphanTree(path: string, entries: readonly string[]): OrphanRecoveryProof {
+  const hash = createHash("sha256");
+  const pending = [...entries].sort().reverse();
+  let seen = 0;
+
+  while (pending.length > 0) {
+    const relativePath = pending.pop();
+    if (relativePath === undefined) break;
+    seen += 1;
+    if (seen > MAX_ORPHAN_PROOF_ENTRIES) {
+      return ambiguousOrphanProof(entries, `recovery material exceeds ${MAX_ORPHAN_PROOF_ENTRIES} entries`);
+    }
+
+    const absolutePath = join(path, relativePath);
+    let stat;
+    try {
+      stat = lstatSync(absolutePath);
+    } catch {
+      return ambiguousOrphanProof(entries, `could not inspect '${relativePath}'`);
+    }
+    if (stat.isSymbolicLink()) {
+      return ambiguousOrphanProof(entries, `symbolic link '${relativePath}' is untrusted recovery material`);
+    }
+    if (stat.isDirectory()) {
+      hash.update(`${relativePath}\0directory\0${stat.mode}\0${stat.mtimeMs}\0${stat.ctimeMs}\n`);
+      let children: string[];
+      try {
+        children = readdirSync(absolutePath).sort();
+      } catch {
+        return ambiguousOrphanProof(entries, `could not enumerate '${relativePath}'`);
+      }
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push(join(relativePath, children[index] as string));
+      }
+      continue;
+    }
+    if (!stat.isFile()) {
+      return ambiguousOrphanProof(entries, `unsupported entry '${relativePath}' is untrusted recovery material`);
+    }
+    hash.update(
+      `${relativePath}\0file\0${stat.mode}\0${stat.size}\0${stat.mtimeMs}\0${stat.ctimeMs}\0${stat.ino}\n`,
+    );
+  }
+
+  return {
+    state: entries.length === 0 ? "empty" : "trusted_generated",
+    fingerprint: hash.digest("hex"),
+    entries,
+    detail: entries.length === 0 ? "empty orphan directory" : `trusted generated roots: ${entries.join(", ")}`,
+  };
+}
+
+function defaultInspectOrphanDir(repoRoot: string, path: string, name: string): OrphanRecoveryProof {
+  let rootStat;
+  try {
+    rootStat = lstatSync(path);
+  } catch {
+    return ambiguousOrphanProof([], "orphan directory disappeared during audit");
+  }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    return ambiguousOrphanProof([], "orphan path is not a stable directory");
+  }
+
+  let entries: string[];
+  try {
+    entries = readdirSync(path).sort();
+  } catch {
+    return ambiguousOrphanProof([], "orphan directory could not be enumerated");
+  }
+
+  if (entries.includes(".git")) {
+    return {
+      state: "linked_metadata",
+      fingerprint: null,
+      entries,
+      detail: "orphan directory still contains .git ownership metadata",
+    };
+  }
+
+  const g = git;
+  const commonOutput = g(["rev-parse", "--path-format=absolute", "--git-common-dir"], repoRoot).trim();
+  if (!commonOutput) {
+    return ambiguousOrphanProof(entries, "Git common directory could not be resolved");
+  }
+  const commonDir = resolve(repoRoot, commonOutput);
+  try {
+    const adminRoot = join(commonDir, "worktrees");
+    const adminNames = readdirSync(adminRoot, { withFileTypes: true })
+      .filter((entry: Dirent) => entry.isDirectory())
+      .map((entry: Dirent) => entry.name);
+    if (adminNames.includes(name)) {
+      return {
+        state: "linked_metadata",
+        fingerprint: null,
+        entries,
+        detail: `Git linked-worktree admin metadata still exists for '${name}'`,
+      };
+    }
+    for (const adminName of adminNames) {
+      const gitdir = readFileSafe(join(adminRoot, adminName, "gitdir"));
+      if (gitdir === null) {
+        return ambiguousOrphanProof(entries, `Git worktree metadata '${adminName}' could not be verified`);
+      }
+      const linkedPath = dirname(resolve(commonDir, gitdir.trim()));
+      if (realpathSafe(linkedPath) === realpathSafe(path)) {
+        return {
+          state: "linked_metadata",
+          fingerprint: null,
+          entries,
+          detail: `Git linked-worktree admin metadata '${adminName}' still owns this path`,
+        };
+      }
+    }
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code !== "ENOENT") {
+      return ambiguousOrphanProof(entries, "Git linked-worktree metadata could not be enumerated");
+    }
+  }
+
+  const untrusted = entries.filter((entry) => !TRUSTED_ORPHAN_GENERATED_ROOTS.has(entry));
+  if (untrusted.length > 0) {
+    return {
+      state: "untrusted_material",
+      fingerprint: null,
+      entries,
+      detail: `untrusted material may contain tracked or unpublished work: ${untrusted.join(", ")}`,
+    };
+  }
+  return inspectTrustedOrphanTree(path, entries);
 }
 
 /**
@@ -286,12 +435,16 @@ function scanOrphanLoopWorktrees(
   const names = deps.readDir ? deps.readDir(worktreesDir) : defaultReadDirNames(worktreesDir);
   const out: WorktreeAuditRecord[] = [];
   for (const name of [...names].sort()) {
+    if (basename(name) !== name || name === "." || name === "..") continue;
     const absPath = resolve(join(worktreesDir, name));
     if (registeredPaths.has(realpathSafe(absPath))) continue; // a registered worktree — already recorded above
     const cycleId = extractCycleId(name);
     const ce = cycleId ? cycles.get(cycleId) : undefined;
     const outcome = ce?.outcome;
     const active = isActiveCycle(cycleId, repoRoot, deps);
+    const recoveryProof = deps.inspectOrphanDir
+      ? deps.inspectOrphanDir(repoRoot, absPath, name)
+      : defaultInspectOrphanDir(repoRoot, absPath, name);
 
     const rec: WorktreeAuditRecord = {
       path: absPath,
@@ -304,15 +457,22 @@ function scanOrphanLoopWorktrees(
       ahead: null,
       mergeEvidence: { kind: "none" },
       active,
+      orphanRecoveryProof: recoveryProof,
       disposition: "preserved_orphan",
       reason: "",
     };
 
     if (active) {
       rec.reason = "orphan loop dir with an active cycle lock; never reclaimed";
+    } else if (recoveryProof.state === "linked_metadata") {
+      rec.reason = `orphan loop dir has linked or external Git ownership metadata (${recoveryProof.detail}); preserved`;
+    } else if (recoveryProof.state === "untrusted_material") {
+      rec.reason = `orphan loop dir contains untrusted recovery material (${recoveryProof.detail}); preserved`;
+    } else if (recoveryProof.state === "ambiguous") {
+      rec.reason = `orphan loop dir recovery proof is ambiguous (${recoveryProof.detail}); preserved`;
     } else if (outcome && ORPHAN_DELIVERED_OUTCOMES.has(outcome)) {
       rec.disposition = "orphan_reclaimable";
-      rec.reason = `orphan loop dir (deregistered from git); owning cycle outcome '${outcome}' is delivered — bounded reclaim`;
+      rec.reason = `orphan loop dir (deregistered from git); owning cycle outcome '${outcome}' is delivered and material is ${recoveryProof.state} — bounded reclaim`;
     } else {
       rec.reason = `orphan loop dir (deregistered from git); delivery not provable (cycle outcome '${outcome ?? "unknown"}') — preserved, reclaim manually after review`;
     }

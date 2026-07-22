@@ -6,6 +6,10 @@
  * dirt split, merge evidence variants, disposition classification, and
  * the hard read-only constraint (no mutation).
  */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   auditWorktrees,
@@ -952,6 +956,12 @@ describe("FIX-1460 (#1468) orphan loop worktree dirs", () => {
               { cycleId: "cycle-20260718-000000-2", outcome: "gave_up" },
             ])
           : null, // inner.lock etc. → not active
+      inspectOrphanDir: () => ({
+        state: "trusted_generated",
+        fingerprint: "fixture-proof",
+        entries: [".next"],
+        detail: "trusted generated roots: .next",
+      }),
       ...over,
     });
   }
@@ -1007,5 +1017,84 @@ describe("FIX-1460 (#1468) orphan loop worktree dirs", () => {
     const out = auditWorktrees(orphanDeps({ readDir: () => [] }));
     expect(out.records.filter((r) => r.disposition === "orphan_reclaimable")).toHaveLength(0);
     expect(out.records.filter((r) => r.disposition === "preserved_orphan")).toHaveLength(0);
+  });
+});
+
+// ─── FIX-1459: orphan recovery proof must fail closed ──────────────────────
+
+describe("FIX-1459 orphan recovery proof", () => {
+  const cycleId = "cycle-20260723-120000-1";
+
+  function fixture(): { repo: string; orphan: string } {
+    const repo = mkdtempSync(join(tmpdir(), "roll-orphan-proof-"));
+    const cleanEnv = { ...process.env };
+    delete cleanEnv["GIT_DIR"];
+    delete cleanEnv["GIT_WORK_TREE"];
+    delete cleanEnv["GIT_INDEX_FILE"];
+    const runGit = (args: string[]): void => {
+      execFileSync("git", ["-C", repo, ...args], {
+        env: cleanEnv,
+        stdio: "ignore",
+      });
+    };
+    runGit(["init", "-b", "main"]);
+    runGit(["config", "user.name", "Roll Test"]);
+    runGit(["config", "user.email", "roll-test@example.invalid"]);
+    writeFileSync(join(repo, "README.md"), "fixture\n", "utf8");
+    runGit(["add", "README.md"]);
+    runGit(["commit", "-m", "fixture"]);
+
+    const orphan = join(repo, ".roll", "loop", "worktrees", cycleId);
+    mkdirSync(orphan, { recursive: true });
+    const events = join(repo, ".roll", "loop", "events.ndjson");
+    mkdirSync(join(repo, ".roll", "loop"), { recursive: true });
+    writeFileSync(events, JSON.stringify({ cycleId, outcome: "delivered" }) + "\n", "utf8");
+    return { repo, orphan };
+  }
+
+  function audit(repo: string): WorktreeAuditRecord {
+    const out = auditWorktrees({ repoRoot: repo, home: tmpdir(), integrationBranch: "HEAD" });
+    const record = out.records.find((candidate) => candidate.cycleId === cycleId);
+    expect(record).toBeDefined();
+    return record as WorktreeAuditRecord;
+  }
+
+  it("preserves delivered orphan residue that may contain tracked or unpublished work", () => {
+    const { repo, orphan } = fixture();
+    try {
+      mkdirSync(join(orphan, "src"), { recursive: true });
+      writeFileSync(join(orphan, "src", "changed.ts"), "export const unpublished = true;\n", "utf8");
+      const record = audit(repo);
+      expect(record.disposition).toBe("preserved_orphan");
+      expect(record.reason).toMatch(/unpublished|untrusted|ambiguous/i);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves delivered orphan residue with linked or external Git ownership metadata", () => {
+    const { repo, orphan } = fixture();
+    try {
+      mkdirSync(join(orphan, ".git"), { recursive: true });
+      writeFileSync(join(orphan, ".git", "config"), "[core]\n\tbare = false\n", "utf8");
+      const record = audit(repo);
+      expect(record.disposition).toBe("preserved_orphan");
+      expect(record.reason).toMatch(/git|linked|external/i);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves delivered generated residue when its material is ambiguous", () => {
+    const { repo, orphan } = fixture();
+    try {
+      mkdirSync(join(orphan, ".next"), { recursive: true });
+      symlinkSync(repo, join(orphan, ".next", "external-link"));
+      const record = audit(repo);
+      expect(record.disposition).toBe("preserved_orphan");
+      expect(record.reason).toMatch(/ambiguous|symlink|untrusted/i);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

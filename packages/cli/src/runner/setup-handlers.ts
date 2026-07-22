@@ -120,7 +120,7 @@ function decideInProgressReclaim(
     }
     return { action: "reclaim", reason: `cycle lease for ${storyId} is dead (pid ${entry.pid})` };
   }
-  if (entry.source === "human" || entry.source === "supervisor") {
+  if (entry.source === "human" || entry.source === "supervisor" || entry.source === "host-delegation") {
     if (isHumanSoftLeaseActive(entry, nowMs)) {
       return { action: "keep", reason: `${entry.source} lease for ${storyId} is within 24h soft window` };
     }

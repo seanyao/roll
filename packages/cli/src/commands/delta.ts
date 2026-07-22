@@ -293,6 +293,7 @@ function prepareCommand(args: string[]): number {
           source: r.source as "user-pin" | "preset-preference" | "availability-fallback",
           reasons: r.reasons as string[],
           inventorySha256: hostInventorySha256 ?? "",
+          inventoryObservedAt: hostInventoryObservedAt ?? "",
           ts: now,
         });
       }

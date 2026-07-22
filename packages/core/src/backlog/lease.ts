@@ -21,7 +21,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 export const HUMAN_SOFT_LEASE_HOURS = 24;
 
 /** Recognised claim sources. */
-export type LeaseSource = "cycle" | "human" | "supervisor";
+export type LeaseSource = "cycle" | "human" | "supervisor" | "host-delegation";
 
 /** A lease entry — who claimed a story and when. */
 export interface LeaseEntry {

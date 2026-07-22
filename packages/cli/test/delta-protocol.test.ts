@@ -201,7 +201,7 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(existsSync(storyLeasesPath)).toBe(true);
     const storyLeases = JSON.parse(readFileSync(storyLeasesPath, "utf8"));
     expect(storyLeases["US-DELTA-TEST"]).toBeDefined();
-    expect(storyLeases["US-DELTA-TEST"].source).toBe("human");
+    expect(storyLeases["US-DELTA-TEST"].source).toBe("host-delegation");
     expect(storyLeases["US-DELTA-TEST"].pid).toBeDefined();
 
     // No latest, no runs.jsonl, no cycle
@@ -1140,9 +1140,9 @@ describe("US-DELTA-003 — hardlink lease concurrency protocol", () => {
     expect(existsSync(leasesPath)).toBe(true);
     const leases = JSON.parse(readFileSync(leasesPath, "utf8"));
     expect(leases["US-DELTA-BIDI2"]).toBeDefined();
-    expect(leases["US-DELTA-BIDI2"].source).toBe("human");
+    expect(leases["US-DELTA-BIDI2"].source).toBe("host-delegation");
 
-    // The cycle's reclaim check treats "human" source as active soft-lease → skips it.
+    // The cycle's reclaim check treats "host-delegation" source as active claim → skips it.
     // This proves that the host-delegation stamp is seen by the cycle machinery.
 
     // Cleanup

@@ -96,18 +96,7 @@ export interface HostDelegationLease {
   claimedAt: number;
 }
 
-/** Extended lease entry stored under `_hostDelegation` key in the lease map. */
-interface ExtendedLeaseEntry {
-  pid?: number;
-  claimedAt: number;
-  source: "human";
-  _hostDelegation: {
-    state: "in_flight";
-    ownerKind: "host-delegation";
-    delegationId: string;
-    runId: string;
-  };
-}
+
 
 /** Lease file path under the project's .roll/loop/host-delegation-leases/. */
 export function leaseFilePath(projectPath: string, storyId: string): string {
@@ -132,8 +121,14 @@ export function hasLiveCycleLease(projectPath: string, storyId: string): boolean
   try {
     const raw = JSON.parse(readFileSync(leasePath, "utf8"));
     const entry = raw[storyId];
-    if (entry && typeof entry.source === "string" && entry.source === "cycle") {
-      return true;
+    if (!entry || typeof entry.source !== "string") return false;
+    // cycle claims are authoritative — always block
+    if (entry.source === "cycle") return true;
+    // host-delegation claims must cross-check the per-story lease file:
+    // if the per-story file is gone, the story-leases.json entry is stale and should not block
+    if (entry.source === "host-delegation") {
+      const hdLeasePath = leaseFilePath(projectPath, storyId);
+      return existsSync(hdLeasePath);
     }
   } catch {
     // best-effort
@@ -206,20 +201,16 @@ export function claimHostDelegationLease(
   // Remove temp
   try { unlinkSync(tmpPath); } catch { /* best-effort */ }
 
-  // Also stamp the shared story-leases.json so cycle readers automatically
+  // Stamp the shared story-leases.json so cycle readers automatically
   // reject this story (bidirectional mutual exclusion, plan §6.1 step 2).
-  // Uses source: "human" with _hostDelegation marker so the existing
-  // cycle reclaim logic treats it as an active soft-lease and skips it.
-  try {
-    const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
-    setLease(storyLeasesPath, lease.storyId, {
-      pid: process.pid,
-      source: "human",
-      claimedAt: lease.claimedAt,
-    });
-  } catch {
-    // story-leases.json stamp is best-effort — host-delegation lease file is the authority
-  }
+  // Uses source: "host-delegation" — a distinct, mutually-recognized claim type
+  // that the cycle machinery respects as an active claim (fail-loud, not best-effort).
+  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
+  setLease(storyLeasesPath, lease.storyId, {
+    pid: process.pid,
+    source: "host-delegation",
+    claimedAt: lease.claimedAt,
+  });
 
   return "claimed";
 }
@@ -245,17 +236,10 @@ export function releaseHostDelegationLease(
 
   try { unlinkSync(leasePath); } catch { return false; }
 
-  // Clean up the shared story-leases.json entry (best-effort).
-  // We remove only entries that match this story — the removeLease
-  // with onlySource: "human" is safe because the host-delegation
-  // prepare always stamps "human" source; a real human claim would
-  // have its own non-host-delegation origin and survives this cleanup.
-  try {
-    const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
-    removeLease(storyLeasesPath, storyId, "human");
-  } catch {
-    // best-effort
-  }
+  // Clean up the shared story-leases.json entry (fail-loud — same atomicity as claim).
+  // Scoped to source: "host-delegation" so it never touches human/supervisor claims.
+  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
+  removeLease(storyLeasesPath, storyId, "host-delegation");
 
   return true;
 }

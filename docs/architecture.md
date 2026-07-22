@@ -60,7 +60,36 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 
 ## 领域模型
 
-系统分为 8 个 Bounded Context。每个上下文内部一致，上下文之间通过共享 artifact 和事件流协作——没有中央调度器。
+系统定义 10 个 Bounded Context：Workspace Coordination、Planning、Execution、
+Delivery、Evidence、Economics、Release、Truth & Consistency、Presentation 与 Browser
+Operations。每个上下文内部一致，上下文之间通过共享 artifact、Published Language 和
+事件流协作——没有中央调度器。下方历史 `BC1..BC9` 章节按运行闭环展开实现视角；Policy、
+Evolution、运行模式和执行剖面是横切视图，不会额外增加 context 数量。权威关系图见
+roll-meta 中的 `.roll/domain/context-map.md`。
+
+| Bounded Context | Owns | Does not own |
+|---|---|---|
+| Workspace Coordination | Workspace identity/registry/lifecycle、Requirement bindings、Repository bindings、command target resolution、Workspace/Issue init plan | Git merge truth、agent capability、backlog business status |
+| Planning | Workspace-scoped backlog 与 Story contract | Issue completion truth |
+| Execution | Cycle、repo execution legs、TCR 与 scheduler runtime | provider merge verdict |
+| Delivery | per-repository PR/CI/merge facts 与 exact-SHA Integration Acceptance 的 Issue fold | 第二个 Delivery Set/entity |
+| Evidence | AC map、attest 与交付证据 | provider/main 权威事实 |
+| Economics | usage/cost facts 与预算投影 | agent capability |
+| Release | release delta、tag 与 consistency gate | Story 实现 |
+| Truth & Consistency | anchors、selectors、audit、reconcile 与 drift verdict | 独立业务写模型 |
+| Presentation | CLI、Charter/site、dashboard、dossier 等 projection | 持久真相 |
+| Browser Operations | typed browser operation/capture facts | Story 视觉验收结论 |
+
+### Workspace Coordination（supporting context）
+
+Workspace Coordination 把 stable `workspaceId` 解析到 canonical root，并拥有 registry、
+lifecycle events、Requirement/Repository binding 与确定性 init/migration/Issue plan。多个
+Workspace 可以同时 active；每个 mutation 必须解析一个精确目标，`--all` 只用于明确的
+read-only aggregate。
+
+Workspace 不保存常驻 product checkout。实际代码只存在于
+`issues/<storyId>/<repoAlias>/` worktree；机器级 `~/.roll/repos/<repoId>.git` 可被多个
+Workspace 复用。Repository Cache 是可重建 projection，不是 Story/Issue completion truth。
 
 ### BC1 · Backlog
 
@@ -151,7 +180,10 @@ cycle 写 `loop:pending`，只做恢复探测，不启动 Builder、不把卡记
 
 ### BC4 · 交付（Delivery Reconciler）
 
-每次交付是一个 Pull Request。一个 Story 至多同时有一个 open PR。
+一个 Issue 可以包含多个 required repository target；每个 target 至多有一个 governed open
+PR，并独立产生 CI 与 merge 事实。Story/Issue 是唯一统一交付单元：全部 required target
+merge 后，还必须针对精确 merged SHA 通过 Integration Acceptance。不存在额外的 Delivery
+Set，也不承诺跨 provider PR 的物理原子 merge。
 
 **最后一公里 = 一个 reconcile 闭环，无独立守护进程。**
 
@@ -233,8 +265,10 @@ special file、foreign Workspace identity 或并发变化都会 fail-loud，原 
 
 `roll delivery list|show|reconcile` 是这组 Issue 事实的唯一公共交付视图：`show` 展开每个
 required repository 的 PR/CI/merge facts、缺失 gate 与 exact-SHA Integration Acceptance；
-`list --all` 只做跨 Workspace 聚合。`roll delivery reconcile` 重新折叠同一份 Issue events，
-不读取 backlog Markdown、不创建 Delivery Set/store，也不把单仓 leg 描述为 Story Done。
+`list --all` 只做跨 Workspace 聚合。`roll delivery reconcile` 重新折叠同一份 Issue events
+与 provider/main facts，先重建 Requirement attest projection，再把 backlog Done/Todo 更新为
+派生投影；它可以读取旧投影以进行安全、幂等更新，但绝不把 backlog Markdown 当成完成真相。
+它不创建 Delivery Set/store，也不把单仓 leg 描述为 Story Done。
 `roll loop reconcile` 仅保留为同一 Workspace-scoped reconcile 的 alias；旧的单仓 cycle
 reconciler 只供 runner 内部推进 PR/merge 事实，不能再从公共命令面恢复 repository-local 模式。
 
@@ -434,36 +468,32 @@ This taxonomy cleanup is breaking by design. No alias, fallback, or dual-write p
 ### 上下文协作
 
 ```
-人（写故事 / 定策略）
-    │                          ┌──────────────┐
-    ▼                          │ BC6 策略      │
-┌──────────┐   Backlog         │ 规则          │
-│ BC1      │◄──────────────────│               │
-│ 意图管理  │                    └──┬───┬───────┘
-└────┬─────┘                      │   │
-     │ Todo                       ▼   ▼
-     ▼                      ┌──────────────────┐
-┌──────────┐  Route 请求     │ BC2 编排          │
-│ BC3 路由  │◄───────────────│ pick→TCR→PR→对账 │──cycle:*/heartbeat──┐
-└──────────┘──route:resolve─►│                  │                     │
-                             └──┬───┬───────────┘                     │
-                                │   │ git/PR                          ▼
-                          cost  │   ▼                    ┌──────────────────┐
-                                ▼  ┌──────────────────┐  │ BC4 交付          │
-                           ┌──────────┐               │  │ PR → CI → merge  │
-                           │ BC8 成本  │               │  └──────┬───────────┘
-                           │ 记录 + 闸 │               │         │ merged
-                           └──────────┘               │         ▼
-                                                      │     main (真相)
-                                                      │         │
-  全部事件 append ────────────────────────────────────────────► ┌──────────────────┐
-                                                                │ BC7 可观测        │
-  ALERT ← loop 写 ← alert loop 推 → 人                           │ 事件流 (唯一源)   │
-                                                                │ → BC5 + UI       │
-                                                                └──────────────────┘
+Machine registry ──workspaceId/path/lifecycle──► Workspace Coordination
+                                                   │
+                       requirement/repo bindings    │ scoped target
+                                                   ▼
+Owner intent ──► Planning ──Story/Issue contract──► Execution
+                     ▲                                 │
+                     │ derived projection              ├── per-attempt evidence ─► Evidence
+                     │                                 ├── usage facts ─────────► Economics
+                     │                                 └── repo facts ──────────► Delivery
+                     │                                                            │
+                     │                   provider/main merge facts + exact-SHA     │
+                     │                   Integration Acceptance                    ▼
+                     └──────────────── Truth & Consistency ◄───────────────────────┘
+                                          │                 │
+                                          ▼                 ▼
+                                    Presentation          Release
+                               CLI / Charter / site    gate / tag / ship
+
+Browser Operations ──typed operation/capture facts──► Truth & Consistency / Evidence
 ```
 
-**协作模式**：策略被下游遵从（Conformist）、Backlog 和 git/PR 是共享真相（Shared Kernel）、路由结果写事件（Customer/Supplier）、对账层过滤假交付（Anti-Corruption）、事件追加（Published Language）。loops coordinate via shared artifacts——多 loop 独立、event-driven，互不直接调用。
+**协作模式**：Workspace Coordination 向 Planning/Execution 发布稳定 identity 与 binding；
+Planning 是愿望，Issue events、provider facts、required repository main 与 exact-SHA acceptance
+才进入交付真相链。策略被下游遵从（Conformist）、typed manifest/event 是 Published Language、
+对账层过滤假交付（Anti-Corruption）。loops coordinate via shared artifacts——多 loop 独立、
+event-driven，互不直接调用；machine cache 只是可重建基础设施，不进入 truth fold。
 
 ## 行为合同
 
@@ -473,16 +503,16 @@ This taxonomy cleanup is breaking by design. No alias, fallback, or dual-write p
 |---|--------|
 | I1 | 在跑 Cycle 每 ≤60s 写心跳。超 watchdog 阈值必回收并落终态。进程活性 ⟂ 业务健康。 |
 | I2 | 任意时刻进程被 SIGKILL，下次重入检测孤儿态并安全接管。不依赖优雅退出。 |
-| I3 | 同一 Story 至多一个 open PR。开 PR 前先查去重。 |
-| I4 | Backlog 是愿望，main 是真相。每 Cycle 末对账——标了完成但未合并的自动退回。退出码 0 ≠ 已交付，CI 绿 ≠ 已交付。 |
+| I3 | 同一 Issue 的每个 repository target 至多一个 governed open PR；一个多仓 Story 可以有多个独立 PR，开 PR 前按 repo target 去重。 |
+| I4 | Backlog 是愿望；required repository 的 provider/main merge facts 与 exact-SHA Integration Acceptance 是 Story 完成真相。对账会修正过早 Done。退出码 0、单仓 CI 绿或单个 PR merge 都不等于统一交付。 |
 | I5 | 一个坏 Story 不冻结其他工作。连败 N 次 → 永久暂缓。不靠手动干预无限重试。 |
 | I6 | 连续失败 → 暂停 + 告警 + 通知，人决策。不自动跨 agent fallback。 |
-| I7 | 路径即身份。所有运行态数据放在 `<project>/.roll/loop/`。不同项目并行互不污染，无共享可变状态。 |
+| I7 | Workspace ID 是身份，registry path 是可更新位置。Workspace runtime/Issue state 按 ID 隔离；只有显式 machine broker/cache 允许跨 Workspace 共享，并且 cache 不进入交付真相。 |
 | I8 | 状态从不可变事件流重建，无独立缓存。追加原子（tmp→rename）。退出无条件写终态。 |
 | I9 | 多写并发用乐观锁。标记 Story 精确匹配，不用子串。 |
 | I10 | 按可预测规则路由（任务层级/类型）。spawn 前秒级探活。同输入路由恒定。 |
 | I11 | 每 Cycle 记录 `(agent, model, token, cost, 回退次数, 有效成本)`。逼近预算上限 → 降级或暂停并通知。有效成本含回退。 |
-| I12 | 一 Cycle 一个 Story，全新上下文，TCR 每步 green-or-revert。0 个 TCR 提交 → 判定失败并告警。 |
+| I12 | 一 Cycle 一个 Story/Issue，可包含多个独立 repo execution leg；每条可写 leg 都执行 TCR green-or-revert。0 个 TCR 提交且无合法 no-change 证明 → 判定失败并告警。 |
 
 ## 事实来源(US-TRUTH 系列)
 

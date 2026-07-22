@@ -217,6 +217,11 @@ the non-active staging Workspace. Ordinary/product-tracked metadata is relocated
 and leaves `.roll/RELOCATED.json`; an independent roll-meta repository is copied
 without any link, commit, or push and keeps a manual handoff.
 
+The complete Workspace-first path — deterministic creation, explicit target
+resolution, multiple active Workspaces, Requirement/Issue layout, shared
+machine cache, multi-repository Story execution and exact-SHA delivery — is in
+the [Workspace guide](guide/en/workspaces.md).
+
 For open role casting, `strategy: health-aware` keeps the installed pool visible
 and ranks candidates by capability, recent health, successful deliveries, recent
 use, and cost band. Inspect a cast with
@@ -274,6 +279,10 @@ The loop will fail fast with an alert if the repository is missing or
 unreachable, so it never burns agent tokens against a broken push target.  If
 you need to stop the loop, `roll loop pause` persists a pause marker; resume
 with `roll loop resume` when ready.
+
+Exception: a campaign explicitly configured with `publish_mode: local` stays on
+its local integration branch and does not push or open a PR until the owner
+opens the remote publication gate after local acceptance.
 
 ## Commands
 
@@ -400,12 +409,12 @@ Published as a single npm package `@seanyao/roll`: `dist/` (the CLI bundled to o
 
 | | |
 |---|---|
-| **Start here** | [Getting started](guide/en/getting-started.md) · [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
-| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Tools & policy](guide/en/tools.md) · [Browser operations (managed + interactive lanes; optional diagnostics are opt-in only)](guide/en/browser-operations.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
+| **Start here** | [Getting started](guide/en/getting-started.md) · [Workspace-first delivery](guide/en/workspaces.md) · [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
+| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Workspace doctor](guide/en/workspace-doctor.md) · [Tools & policy](guide/en/tools.md) · [Browser operations (managed + interactive lanes; optional diagnostics are opt-in only)](guide/en/browser-operations.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
 | **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Peer review](guide/en/peer.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
 
-Full guide index: [guide/en/](guide/en/) — agents, peer review, feedback, backlog sync, adoption patterns, and more.
+Full guide index: [guide/en/README.md](guide/en/README.md) — agents, peer review, feedback, backlog sync, adoption patterns, and more.
 
 ## Contributing
 

@@ -376,6 +376,10 @@ export const v3Catalog: Catalog = {
     en: "'%s' is no longer supported. Use one of: claude, kimi, codex, pi, agy, reasonix, cursor",
     zh: "'%s' 已不再支持。请使用：claude, kimi, codex, pi, agy, reasonix, cursor",
   },
+  "agent.usage": {
+    en: "Usage: roll agent [--workspace <id|path>|migrate [--dry-run]|list|readiness|cast]\n  Inspect machine Agent Scope, readiness and role casting; --workspace resolves one read-only Workspace casting trace.\n",
+    zh: "用法：roll agent [--workspace <ID|路径>|migrate [--dry-run]|list|readiness|cast]\n  查看机器 Agent Scope、就绪状态与角色分工；--workspace 只读解析一个工作区的 casting trace。\n",
+  },
 
   // `agent.*` — v4 default-agent vs project route-profile separation (US-V4-002).
   "agent.default_usage": {

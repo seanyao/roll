@@ -1,5 +1,5 @@
 /** Ported-command registry — one line per migrated subcommand. */
-import { resolveLang } from "@roll/spec";
+import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
@@ -126,6 +126,10 @@ function backlogUsage(): string {
     : "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
         "       roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
         "  Read or manage one resolved Workspace backlog; --all is read-only and mutations are rejected.\n";
+}
+
+function agentUsage(): string {
+  return t(v3Catalog, currentHelpLang(), "agent.usage");
 }
 
 const DOCTOR_TOOLS_USAGE =
@@ -279,7 +283,7 @@ export function registerAll(): void {
   registerPorted("agent", (args) => {
     if (args[0] === "cast") return castCommand(args.slice(1));
     return agentCommand(args);
-  }, { help: "Usage: roll agent [migrate [--dry-run]|list|cast]\n  View Agent Scope roles, migrate legacy config, list installed agents, or print role casting.\n查看 Agent Scope 角色、迁移旧配置、列出 installed agent，或打印角色分工。" });
+  }, { help: agentUsage });
   registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback

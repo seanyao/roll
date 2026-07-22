@@ -578,7 +578,39 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       firstInstalled: () => "claude-stream",
     };
     const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps: claudeStreamRoute });
-    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shim,
+      github: fakeGithub(0),
+      capacity: {
+        ...base.capacity,
+        acquire(pending, ctx) {
+          return {
+            kind: "acquired",
+            lease: {
+              schema: "roll-agent-capacity-lease/v1",
+              key: pending.key,
+              owner: {
+                leaseId: `lease:${pending.spawnId}`,
+                ownerToken: `token:${pending.spawnId}`,
+                workspaceId: "legacy-cost-fixture",
+                storyId: ctx.storyId ?? "",
+                cycleId: ctx.cycleId,
+                spawnId: pending.spawnId,
+                host: "fixture",
+                pid: process.pid,
+                processStartedAtMs: 1,
+              },
+              acquiredAtMs: 1,
+              heartbeatAtMs: 1,
+            },
+          };
+        },
+        heartbeat: () => ({ kind: "updated" }),
+        release: () => ({ kind: "released" }),
+        releaseCurrent: () => ({ kind: "already_released" }),
+      },
+    };
 
     const result = await runCycleOnce({
       ports,

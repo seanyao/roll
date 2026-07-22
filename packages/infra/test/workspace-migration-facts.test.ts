@@ -164,12 +164,16 @@ describe("historical Workspace migration fact collection", () => {
   it("blocks when the authoritative remote tip is not present in the local object database", async () => {
     const root = sandbox();
     const { repo, remote, author } = seedRepository(root);
+    const rollHome = join(root, "roll-home");
+    mkdirSync(rollHome, { recursive: true });
     writeFileSync(join(author, "README.md"), "remote-only\n", "utf8");
     git(author, ["add", "README.md"]);
     git(author, ["commit", "-q", "-m", "remote only"]);
     git(author, ["push", "-q", remote, "HEAD:refs/heads/main"]);
 
-    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome: join(root, "roll-home") });
+    const beforeSource = digestTree(repo);
+    const beforeHome = digestTree(rollHome);
+    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome });
 
     expect(facts.git.remote).toMatchObject({
       kind: "blocked",
@@ -177,20 +181,57 @@ describe("historical Workspace migration fact collection", () => {
       defaultBranch: "main",
       defaultTip: git(author, ["rev-parse", "HEAD"]),
     });
+    expect(digestTree(repo)).toBe(beforeSource);
+    expect(digestTree(rollHome)).toBe(beforeHome);
   });
 
   it("inventories symlinks with lstat without following or hashing target content", async () => {
     const root = sandbox();
     const { repo } = seedRepository(root);
     const secret = join(root, "secret.txt");
+    const rollHome = join(root, "roll-home");
     mkdirSync(join(repo, ".roll"), { recursive: true });
+    mkdirSync(rollHome, { recursive: true });
     writeFileSync(secret, "must-not-be-read\n", "utf8");
     symlinkSync(secret, join(repo, ".roll", "external"));
+    const beforeSource = digestTree(repo);
+    const beforeHome = digestTree(rollHome);
 
-    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome: join(root, "roll-home") });
+    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome });
 
     expect(facts.rollInventory).toEqual([{ kind: "symlink", path: "external", target: secret }]);
     expect(JSON.stringify(facts.rollInventory)).not.toContain(createHash("sha256").update("must-not-be-read\n").digest("hex"));
+    expect(digestTree(repo)).toBe(beforeSource);
+    expect(digestTree(rollHome)).toBe(beforeHome);
+  });
+
+  it("does not traverse a symlink used as the .roll root", async () => {
+    const root = sandbox();
+    const { repo } = seedRepository(root);
+    const rollHome = join(root, "roll-home");
+    const external = join(root, "external-roll");
+    mkdirSync(join(external, ".git"), { recursive: true });
+    mkdirSync(join(external, "loop", "locks"), { recursive: true });
+    writeFileSync(join(external, "secret.txt"), "must-not-be-hashed\n", "utf8");
+    writeFileSync(join(external, "loop", "inner.lock"), "cycle-secret owner\n", "utf8");
+    writeFileSync(join(external, "loop", "locks", "story-leases.json"), `${JSON.stringify({
+      "US-SECRET": { source: "cycle", pid: process.pid, claimedAt: 1 },
+    })}\n`, "utf8");
+    mkdirSync(rollHome, { recursive: true });
+    symlinkSync(external, join(repo, ".roll"));
+    const beforeSource = digestTree(repo);
+    const beforeHome = digestTree(rollHome);
+
+    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome });
+
+    expect(facts.rollOwnership).toEqual({ kind: "ordinary" });
+    expect(facts.rollInventory).toEqual([{ kind: "symlink", path: ".", target: external }]);
+    expect(facts.runtime).toEqual({ activeCycleIds: [], activeStoryLeases: [] });
+    expect(JSON.stringify(facts)).not.toContain("cycle-secret");
+    expect(JSON.stringify(facts)).not.toContain("US-SECRET");
+    expect(JSON.stringify(facts)).not.toContain(createHash("sha256").update("must-not-be-hashed\n").digest("hex"));
+    expect(digestTree(repo)).toBe(beforeSource);
+    expect(digestTree(rollHome)).toBe(beforeHome);
   });
 
   it("distinguishes product-tracked metadata from an independent roll-meta repository", async () => {
@@ -204,14 +245,22 @@ describe("historical Workspace migration fact collection", () => {
     writeFileSync(join(independent.repo, ".roll", "backlog.md"), "# Backlog\n", "utf8");
     git(join(independent.repo, ".roll"), ["add", "backlog.md"]);
     git(join(independent.repo, ".roll"), ["commit", "-q", "-m", "meta"]);
+    const trackedHome = join(root, "roll-home-tracked");
+    const independentHome = join(root, "roll-home-independent");
+    mkdirSync(trackedHome, { recursive: true });
+    mkdirSync(independentHome, { recursive: true });
+    const beforeTracked = digestTree(tracked.repo);
+    const beforeIndependent = digestTree(independent.repo);
+    const beforeTrackedHome = digestTree(trackedHome);
+    const beforeIndependentHome = digestTree(independentHome);
 
     const trackedFacts = await collectHistoricalMigrationFacts({
       sourceRoot: tracked.repo,
-      rollHome: join(root, "roll-home-tracked"),
+      rollHome: trackedHome,
     });
     const independentFacts = await collectHistoricalMigrationFacts({
       sourceRoot: independent.repo,
-      rollHome: join(root, "roll-home-independent"),
+      rollHome: independentHome,
     });
 
     expect(trackedFacts.rollOwnership).toEqual({ kind: "product_tracked", trackedPaths: ["backlog.md"] });
@@ -224,6 +273,10 @@ describe("historical Workspace migration fact collection", () => {
     });
     expect(independentFacts.rollInventory.map((entry) => entry.path)).toEqual(["backlog.md"]);
     expect(independentFacts.rollInventory.some((entry) => entry.path.startsWith(".git"))).toBe(false);
+    expect(digestTree(tracked.repo)).toBe(beforeTracked);
+    expect(digestTree(independent.repo)).toBe(beforeIndependent);
+    expect(digestTree(trackedHome)).toBe(beforeTrackedHome);
+    expect(digestTree(independentHome)).toBe(beforeIndependentHome);
   });
 
   it("collects linked worktree, recursive submodule, active runtime, cache and registry facts", async () => {
@@ -293,6 +346,8 @@ describe("historical Workspace migration fact collection", () => {
         pathState: "valid",
       }],
     }), "utf8");
+    const beforeSource = digestTree(repo);
+    const beforeHome = digestTree(rollHome);
 
     const facts = await collectHistoricalMigrationFacts({
       sourceRoot: repo,
@@ -314,5 +369,7 @@ describe("historical Workspace migration fact collection", () => {
     expect(facts.runtime).toEqual({ activeCycleIds: ["cycle-live"], activeStoryLeases: ["US-LIVE"] });
     expect(facts.cache).toEqual({ status: "matching", repoId: repositoryId.value, cachePath: `repos/${repositoryId.value}.git` });
     expect(facts.registry).toEqual({ status: "same_workspace", workspaceId: "ws-existing" });
+    expect(digestTree(repo)).toBe(beforeSource);
+    expect(digestTree(rollHome)).toBe(beforeHome);
   });
 });

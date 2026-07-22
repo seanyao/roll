@@ -270,10 +270,28 @@ function alive(pid: number): boolean {
   }
 }
 
+function safeFile(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  if (rel === "" || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) return false;
+  let cursor = root;
+  try {
+    const rootStat = lstatSync(cursor);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return false;
+    for (const part of rel.split(sep)) {
+      cursor = join(cursor, part);
+      const stat = lstatSync(cursor);
+      if (stat.isSymbolicLink()) return false;
+    }
+    return lstatSync(cursor).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function activeCycles(rollRoot: string): readonly string[] {
   const ids = new Set<string>();
   for (const path of [join(rollRoot, "loop", "inner.lock"), join(rollRoot, "loop", "cycle.lock"), join(rollRoot, "loop", "locks", "cycle.lock")]) {
-    if (!existsSync(path)) continue;
+    if (!safeFile(rollRoot, path)) continue;
     let text = "";
     try {
       text = readFileSync(path, "utf8");
@@ -296,7 +314,7 @@ function activeCycles(rollRoot: string): readonly string[] {
 function activeStoryLeases(rollRoot: string, now: number): readonly string[] {
   const ids = new Set<string>();
   for (const path of [join(rollRoot, "loop", "story-leases.json"), join(rollRoot, "loop", "locks", "story-leases.json")]) {
-    if (!existsSync(path)) continue;
+    if (!safeFile(rollRoot, path)) continue;
     let value: unknown;
     try {
       value = JSON.parse(readFileSync(path, "utf8"));
@@ -382,7 +400,13 @@ async function rollOwnership(
   const trackedPaths = tracked.split("\0").filter((path) => path !== "")
     .map((path) => posix(path.replace(/^\.roll\//u, ""))).sort(compareText);
   if (trackedPaths.length > 0) return { kind: "product_tracked", trackedPaths };
-  if (!existsSync(join(rollRoot, ".git"))) return { kind: "ordinary" };
+  try {
+    const rootStat = lstatSync(rollRoot);
+    const gitStat = lstatSync(join(rollRoot, ".git"));
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory() || gitStat.isSymbolicLink()) return { kind: "ordinary" };
+  } catch {
+    return { kind: "ordinary" };
+  }
   const topLevel = await requiredGit(runGit, rollRoot, ["rev-parse", "--show-toplevel"], "roll_toplevel");
   if (realpathSync(topLevel) !== realpathSync(rollRoot)) return { kind: "ordinary" };
   const gitdir = gitPath(rollRoot, await requiredGit(runGit, rollRoot, ["rev-parse", "--git-dir"], "roll_gitdir"));

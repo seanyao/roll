@@ -487,6 +487,9 @@ describe("AC6: CLI help + guidance", () => {
     expect(CLEANUP_USAGE).toContain("roll loop resume");
     expect(CLEANUP_USAGE).toContain("--apply");
     expect(CLEANUP_USAGE).toContain("SOLE authority");
+    expect(CLEANUP_USAGE).toContain("Workspace Issue worktrees");
+    expect(CLEANUP_USAGE).toContain("machine repository lock");
+    expect(CLEANUP_USAGE).toContain("legacy --repo mode only");
   });
 
   it("--help prints usage and exits 0 without side effects", async () => {

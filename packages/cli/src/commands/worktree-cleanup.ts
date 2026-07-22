@@ -748,14 +748,20 @@ function rel(p: string): string {
   return p;
 }
 
-export function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "apply"): string {
+export function renderPlanHuman(
+  plan: WorktreeCleanupPlan,
+  mode: "dry-run" | "apply",
+  scope: "loop" | "workspace" = "loop",
+): string {
   const lines: string[] = [];
+  const worktreeLabel = scope === "workspace" ? "Workspace Issue worktree(s)" : "loop worktree(s)";
+  const worktreeHeading = scope === "workspace" ? "counted Workspace Issue worktrees" : "counted loop worktrees";
   lines.push(`Worktree cleanup (${mode})`);
   lines.push("");
   lines.push(`  canary count: ${plan.canaryTotal} (threshold ${plan.threshold})`);
   lines.push(
     `  counted: ${plan.countedBranches.length} ephemeral branch(es) + ` +
-      `${plan.countedWorktrees.length} loop worktree(s)`,
+      `${plan.countedWorktrees.length} ${worktreeLabel}`,
   );
   lines.push("");
 
@@ -764,7 +770,7 @@ export function renderPlanHuman(plan: WorktreeCleanupPlan, mode: "dry-run" | "ap
   for (const b of plan.countedBranches) lines.push(`  ${b}`);
   lines.push("");
 
-  lines.push("counted loop worktrees");
+  lines.push(worktreeHeading);
   if (plan.countedWorktrees.length === 0) lines.push("  (none)");
   for (const w of plan.countedWorktrees) lines.push(`  ${rel(w.path)}  [${w.disposition}]`);
   lines.push("");
@@ -851,8 +857,8 @@ export function renderResultHuman(result: WorktreeCleanupResult): string {
 export const CLEANUP_USAGE =
   "Usage: roll worktree cleanup [--dry-run | --apply] [--json] [--workspace <id|path> | --repo <path>]\n" +
   "  Safely recover from branch/worktree canary pressure using the worktree\n" +
-  "  audit as the SOLE authority. Removes ONLY inactive, merged, clean\n" +
-  "  `disposable_candidate` loop worktrees, plus (FIX-1454) standalone ephemeral\n" +
+  "  audit as the SOLE authority. Removes ONLY revalidated `disposable_candidate`\n" +
+  "  legacy loop or Workspace Issue worktrees, plus standalone ephemeral\n" +
   "  branches that are verifiably delivered and attached to no worktree. Delivery\n" +
   "  is PROVEN by one of: every commit is an ancestor of the integration branch;\n" +
   "  `git cherry` shows every commit already has an equivalent patch upstream; or\n" +
@@ -872,9 +878,11 @@ export const CLEANUP_USAGE =
   "             head / new dirt / missing path / concurrent activation fails\n" +
   "             closed (no substitution). Then resume explicitly: roll loop resume\n" +
   "  --json     emit the schema-1 plan (dry-run) or result (apply) as JSON\n" +
-  "  --workspace resolve Issue ownership through the Workspace registry\n" +
+  "  --workspace resolve Issue ownership through the Workspace registry; every\n" +
+  "             mutation holds the machine repository lock and requires exact\n" +
+  "             Workspace/Story/repository identity plus delivery proof\n" +
   "  --repo     explicit historical repo-local/migration input (default: current directory)\n" +
-  "  --reclaim-orphan <path>  (FIX-1460) bounded-rm ONE named orphan loop dir\n" +
+  "  --reclaim-orphan <path>  legacy --repo mode only: bounded-rm ONE named orphan loop dir\n" +
   "             (deregistered from git; delivery not auto-provable) after you\n" +
   "             review it. Fails closed unless it is an inactive loop orphan\n" +
   "             inside .roll/loop/worktrees. Auto-reclaim of provably-delivered\n" +

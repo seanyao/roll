@@ -205,6 +205,32 @@ describe("US-WS-011a Workspace worktree cleanup", () => {
     expect(lock).not.toHaveBeenCalled();
   });
 
+  it("labels Workspace Issue worktrees without changing the legacy cleanup renderer", async () => {
+    const result = await captureOutput(() => workspaceWorktreeCleanupCommand([
+      "--workspace", "ws-alpha", "--dry-run",
+    ], {
+      resolveTarget: () => ({
+        ok: true,
+        workspaceId: "ws-alpha",
+        workspaceRoot: "/workspaces/alpha",
+        canonicalRoot: "/workspaces/alpha",
+        backlogPath: "/workspaces/alpha/backlog/index.md",
+        storyRoot: "/workspaces/alpha/backlog",
+        runtimeRoot: "/workspaces/alpha/runtime",
+        configPath: "/workspaces/alpha/runtime/backlog-sync.yaml",
+      }),
+      rollHome: () => "/roll-home",
+      threshold: () => 0,
+      auditWorkspace: () => workspaceAudit([record()]),
+      resolveStandaloneBranches: () => [],
+    }));
+
+    expect(result).toMatchObject({ status: 0, stderr: "" });
+    expect(result.stdout).toContain("1 Workspace Issue worktree(s)");
+    expect(result.stdout).toContain("counted Workspace Issue worktrees");
+    expect(result.stdout).not.toContain("counted loop worktrees");
+  });
+
   it("discovers qualified standalone branches for the Workspace cleanup plan", async () => {
     const branch: CleanupBranchCandidate = {
       branch: "loop/cycle-shared",

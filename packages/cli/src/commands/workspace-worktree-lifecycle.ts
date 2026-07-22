@@ -644,7 +644,7 @@ export async function workspaceWorktreeCleanupCommand(
   const json = args.includes("--json");
   if (!args.includes("--apply")) {
     if (json) process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-    else process.stdout.write(renderPlanHuman(plan, "dry-run"));
+    else process.stdout.write(renderPlanHuman(plan, "dry-run", "workspace"));
     return 0;
   }
 

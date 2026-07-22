@@ -15,7 +15,8 @@ import {
 } from "../src/commands/loop-sched.js";
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 import { loopGoCommand, planGoTmuxCommands, type LoopGoDeps, type StartTmuxInput } from "../src/commands/loop-go.js";
-import { loopRunOnceCommand } from "../src/commands/loop-run-once.js";
+import { loopRunOnceCommand, workspaceBranchCanaryTrips } from "../src/commands/loop-run-once.js";
+import type { WorkspaceWorktreeAuditOutput } from "../src/commands/workspace-worktree-lifecycle.js";
 import { backlogClaimCommand } from "../src/commands/backlog-mgmt.js";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
@@ -141,6 +142,53 @@ afterEach(() => {
 });
 
 describe("US-WS-016 Workspace scheduler contract", () => {
+  it("pauses a Workspace loop when aggregate branch pressure exceeds the canary threshold", () => {
+    const root = workspaceRoot("workspace-canary");
+    const runtimeRoot = join(root, "runtime");
+    const alertsPath = join(runtimeRoot, "ALERT-ws-alpha.md");
+    const audit: WorkspaceWorktreeAuditOutput = {
+      schema: 1,
+      generatedAt: "2026-07-22T00:00:00.000Z",
+      selectedWorkspaceId: "ws-alpha",
+      records: [],
+      ephemeralBranches: [
+        { repoId: "repo-a", cachePath: "/cache/repo-a.git", branch: "loop/cycle-a" },
+        { repoId: "repo-b", cachePath: "/cache/repo-b.git", branch: "loop/cycle-b" },
+      ],
+      repositories: [
+        { repoId: "repo-a", cachePath: "/cache/repo-a.git", integrationBranch: "main" },
+        { repoId: "repo-b", cachePath: "/cache/repo-b.git", integrationBranch: "main" },
+      ],
+      summary: {
+        worktrees: 0,
+        active: 0,
+        disposableCandidates: 0,
+        preserved: 0,
+        ephemeralBranches: 2,
+        canaryTotal: 2,
+      },
+    };
+    const previous = process.env["ROLL_BRANCH_CANARY_MAX"];
+    process.env["ROLL_BRANCH_CANARY_MAX"] = "1";
+    try {
+      expect(workspaceBranchCanaryTrips({
+        workspaceId: "ws-alpha",
+        workspaceRoot: root,
+        runtimeRoot,
+        alertsPath,
+      }, () => audit)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env["ROLL_BRANCH_CANARY_MAX"];
+      else process.env["ROLL_BRANCH_CANARY_MAX"] = previous;
+    }
+
+    const pause = readFileSync(join(runtimeRoot, "PAUSE-ws-alpha"), "utf8");
+    expect(pause).toContain("repo-a:loop/cycle-a");
+    expect(pause).toContain("repo-b:loop/cycle-b");
+    expect(pause).toContain("roll worktree cleanup --workspace ws-alpha --dry-run");
+    expect(readFileSync(alertsPath, "utf8")).toContain("Leak count**: 2");
+  });
+
   it("binds the production backlog port to the Workspace backlog and leaves legacy repo-local state untouched", () => {
     const root = workspaceRoot("backlog-port");
     workspaceManifest(root, "ws-alpha");
@@ -554,6 +602,7 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     agentSpawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
     const repoPushable = vi.fn(() => ({ ok: true as const, reason: "ok" as const, detail: "" }));
     const branchCanary = vi.fn(() => false);
+    const workspaceBranchCanary = vi.fn(() => false);
     const reconcile = vi.fn(async () => undefined);
     const backfill = vi.fn(async () => []);
     const saved = new Map<string, string | undefined>();
@@ -581,6 +630,7 @@ describe("US-WS-016 Workspace scheduler contract", () => {
         agentSpawn,
         warnIfBinaryStale: async () => undefined,
         branchCanaryTrips: branchCanary,
+        workspaceBranchCanaryTrips: workspaceBranchCanary,
         runReconcileTick: reconcile,
         backfillMergedRuns: backfill,
       })).toBe(1);
@@ -601,6 +651,9 @@ describe("US-WS-016 Workspace scheduler contract", () => {
     expect(existsSync(join(root, "runtime", "story-leases.json"))).toBe(false);
     expect(existsSync(join(root, ".roll", "loop", "story-leases.json"))).toBe(false);
     expect(readFileSync(legacyBacklogPath, "utf8")).toContain("LEGACY-1 | Legacy decoy | 📋 Todo");
+    expect(workspaceBranchCanary).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "ws-alpha", workspaceRoot: root }),
+    );
     for (const rootGit of [repoPushable, branchCanary, reconcile, backfill]) {
       expect(rootGit).not.toHaveBeenCalled();
     }

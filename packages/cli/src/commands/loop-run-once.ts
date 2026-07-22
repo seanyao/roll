@@ -33,6 +33,7 @@ import { releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } f
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { classifyCycleFailure, playbookForFailure, readCycleEvents, recordRootCauseFailure, type FailureAttribution } from "../runner/failure-attribution.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
+import { auditWorkspaceWorktrees } from "./workspace-worktree-lifecycle.js";
 import { currentLang, realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
@@ -862,6 +863,7 @@ export interface LoopRunOnceDeps {
   readonly agentSpawn?: AgentSpawn;
   readonly warnIfBinaryStale?: typeof warnIfBinaryStale;
   readonly branchCanaryTrips?: typeof branchCanaryTrips;
+  readonly workspaceBranchCanaryTrips?: typeof workspaceBranchCanaryTrips;
   readonly runReconcileTick?: typeof runReconcileTick;
   readonly backfillMergedRuns?: typeof backfillMergedRuns;
 }
@@ -1204,10 +1206,15 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
   // US-LOOP-096: branch-leak canary circuit breaker — if ephemeral branches /
   // worktrees have piled up (cleanup contract broke), refuse to start a new
   // cycle (it would only add more), write a PAUSE + ALERT, and skip this tick.
-  if (
-    workspaceBinding === undefined &&
-    (deps.branchCanaryTrips ?? branchCanaryTrips)(id.path, id.slug, rt, alertsPath)
-  ) {
+  const canaryTripped = workspaceBinding === undefined
+    ? (deps.branchCanaryTrips ?? branchCanaryTrips)(id.path, id.slug, rt, alertsPath)
+    : (deps.workspaceBranchCanaryTrips ?? workspaceBranchCanaryTrips)({
+        workspaceId: workspaceBinding.workspaceId,
+        workspaceRoot: id.path,
+        runtimeRoot: rt,
+        alertsPath,
+      });
+  if (canaryTripped) {
     process.stdout.write("loop run-once: branch-leak canary tripped — loop paused (see ALERT); skipped\n");
     return 0;
   }
@@ -1783,6 +1790,89 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
         /* best-effort observability */
       }
     }
+  }
+  return verdict.tripped;
+}
+
+export interface WorkspaceBranchCanaryInput {
+  readonly workspaceId: string;
+  readonly workspaceRoot: string;
+  readonly runtimeRoot: string;
+  readonly alertsPath: string;
+}
+
+function writeWorkspaceCanaryPause(input: WorkspaceBranchCanaryInput, message: string): void {
+  const pauseMarker = join(input.runtimeRoot, `PAUSE-${input.workspaceId}`);
+  try {
+    mkdirSync(input.runtimeRoot, { recursive: true });
+    writeFileSync(pauseMarker, message, "utf8");
+  } catch {
+    /* stdout still makes the failure observable */
+  }
+  try {
+    appendFileSync(input.alertsPath, `${message}\n`, "utf8");
+  } catch {
+    /* stdout still makes the failure observable */
+  }
+}
+
+export function workspaceBranchCanaryTrips(
+  input: WorkspaceBranchCanaryInput,
+  auditWorkspace: typeof auditWorkspaceWorktrees = auditWorkspaceWorktrees,
+): boolean {
+  const pauseMarker = join(input.runtimeRoot, `PAUSE-${input.workspaceId}`);
+  const alreadyPaused = existsSync(pauseMarker);
+  const parsed = Number.parseInt(process.env["ROLL_BRANCH_CANARY_MAX"] ?? "", 10);
+  const threshold = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BRANCH_CANARY_MAX;
+  let audit: ReturnType<typeof auditWorkspaceWorktrees>;
+  try {
+    audit = auditWorkspace({
+      selectedWorkspaceId: input.workspaceId,
+      selectedWorkspaceRoot: input.workspaceRoot,
+      rollHome: rollHome(),
+    });
+  } catch (error) {
+    if (!alreadyPaused) {
+      const detail = error instanceof Error ? error.message : String(error);
+      writeWorkspaceCanaryPause(
+        input,
+        `# ALERT — Workspace loop auto-paused: worktree audit failed\n\n` +
+          `**Workspace**: ${input.workspaceId}\n` +
+          `**Failure**: ${detail}\n` +
+          `**Safe recovery**: \`roll worktree audit --workspace ${input.workspaceId}\` → ` +
+          `\`roll worktree cleanup --workspace ${input.workspaceId} --dry-run\` → ` +
+          `\`--apply\` → \`roll loop resume --workspace ${input.workspaceId}\`\n`,
+      );
+    }
+    return true;
+  }
+  const verdict = branchCanaryVerdict({
+    ephemeralBranchCount: audit.summary.ephemeralBranches,
+    worktreeCount: audit.summary.worktrees,
+    threshold,
+    alreadyPaused,
+  });
+  if (verdict.shouldPause) {
+    const branches = audit.ephemeralBranches.length === 0
+      ? "  - none"
+      : audit.ephemeralBranches.map((branch) => `  - ${branch.repoId}:${branch.branch}`).join("\n");
+    const worktrees = audit.records.length === 0
+      ? "  - none"
+      : audit.records.map((record) =>
+          `  - ${record.workspaceId ?? "unknown"}/${record.storyId ?? "unknown"}/` +
+          `${record.repositoryAlias ?? record.repoId ?? "unknown"}: ${record.path} [${record.disposition}]`,
+        ).join("\n");
+    writeWorkspaceCanaryPause(
+      input,
+      `# ALERT — Workspace loop auto-paused: branch/worktree leak canary tripped\n\n` +
+        `**Workspace**: ${input.workspaceId}\n` +
+        `**Leak count**: ${verdict.total} (ephemeral branches ${audit.summary.ephemeralBranches} + ` +
+        `worktrees ${audit.summary.worktrees}) > threshold ${threshold}\n\n` +
+        `**Counted branches**\n${branches}\n\n` +
+        `**Counted worktrees**\n${worktrees}\n\n` +
+        `**Safe recovery**: \`roll worktree cleanup --workspace ${input.workspaceId} --dry-run\` → ` +
+        `\`--apply\` → \`roll loop resume --workspace ${input.workspaceId}\`\n`,
+    );
   }
   return verdict.tripped;
 }

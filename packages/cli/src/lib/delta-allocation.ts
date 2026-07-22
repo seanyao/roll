@@ -34,8 +34,17 @@ export { loadLocalPresets, presetPath } from "./delta-artifacts.js";
 
 // ── ID generation ────────────────────────────────────────────────────────────
 
+/** Seam for test injection: override CSPRNG ID generation. */
+let _idGenerator: (() => string) | null = null;
+
+/** Inject a deterministic ID generator for testing collision retry paths. */
+export function injectIdGenerator(generator: (() => string) | null): void {
+  _idGenerator = generator;
+}
+
 /** Generate a CSPRNG delegation ID. */
 export function generateDelegationId(): string {
+  if (_idGenerator) return _idGenerator();
   return randomUUID();
 }
 

@@ -227,7 +227,7 @@ function prepareCommand(args: string[]): number {
   // Read presetSha256 from the host-supplied resolution template (credible provenance claim).
   // If the template omits it, fall back to computing from the preset file content.
   const hostPresetSha256 = (resolutionTemplate as Record<string, unknown>).presetSha256 as string | undefined;
-  
+
   // Resolve hostId from the machine-local preset identified by presetId.
   const presetId = flags["preset"] as string;
   let resolvedHostId = "unknown";

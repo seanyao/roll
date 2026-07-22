@@ -10,6 +10,7 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { deltaCommand, injectValidator } from "../src/commands/delta.js";
+import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
 
 // ── Temp project fixture ─────────────────────────────────────────────────────
@@ -222,46 +223,69 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     const dir = setupMinimalProject("US-DELTA-COLLIDE", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-COLLIDE", "local-preset");
 
-    // First prepare to get the card dir
-    const r1 = tsRunCwd([
-      "prepare", "US-DELTA-COLLIDE",
-      "--trigger", "host-guided", "--topology", "delta-team",
-      "--profile", "standard", "--preset", "local-preset",
-      "--resolution", resPath, "--json",
-    ], dir);
-    expect(r1.code).toBe(0);
-    const id1 = JSON.parse(r1.stdout).delegationId;
+    // Deterministic collision: control ID generator so first mkdir collides,
+    // second retry also collides, third attempt generates a fresh distinct ID.
+    // The collision frame is never touched (only own lease is released).
+    const controlledIds = ["collide-1", "collide-1", "collide-1", "collide-2"];
+    let callIndex = 0;
+    injectIdGenerator(() => {
+      const id = controlledIds[callIndex]!;
+      callIndex++;
+      return id;
+    });
 
-    // Manually create a second frame directory that would collide.
-    // This simulates a pathological collision the retry loop must handle.
-    // We need to first remove the lease so prepare can claim again.
-    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-COLLIDE.json");
-    unlinkSync(leasePath);
+    try {
+      // First prepare: "collide-1" successfully creates frame delta-collide-1
+      const r1 = tsRunCwd([
+        "prepare", "US-DELTA-COLLIDE",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+      expect(r1.code).toBe(0);
+      const id1 = JSON.parse(r1.stdout).delegationId;
+      expect(id1).toBe("collide-1");
 
-    // Create a frame directory with a known prefix to force the first mkdir to fail.
-    // We cannot predict the random UUID, so we create many directories to force collision.
-    // Instead, we rely on the retry loop: we create NO collision (normal path) and just
-    // verify the second prepare produces a distinct ID from the first.
-    const r2 = tsRunCwd([
-      "prepare", "US-DELTA-COLLIDE",
-      "--trigger", "host-guided", "--topology", "delta-team",
-      "--profile", "standard", "--preset", "local-preset",
-      "--resolution", resPath, "--json",
-    ], dir);
-    expect(r2.code).toBe(0);
-    const id2 = JSON.parse(r2.stdout).delegationId;
+      const collisionFrame = join(dir, ".roll", "features", "delta-team", "US-DELTA-COLLIDE", `delta-${id1}`);
+      expect(existsSync(collisionFrame)).toBe(true);
 
-    // Distinct delegations must have different IDs and different frames
-    expect(id1).not.toBe(id2);
+      // Remove the lease so second prepare can claim again
+      const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-COLLIDE.json");
+      unlinkSync(leasePath);
 
-    // Old frame directory still exists (not overwritten)
-    const oldFrame = join(dir, ".roll", "features", "delta-team", "US-DELTA-COLLIDE", `delta-${id1}`);
-    expect(existsSync(oldFrame)).toBe(true);
+      // Second prepare: first two generateDelegationId() calls produce "collide-1"
+      // → mkdirSync("delta-collide-1") throws EEXIST both times
+      // → only own lease is released, collision frame is preserved
+      // → third call produces "collide-2" → fresh frame succeeds
+      const r2 = tsRunCwd([
+        "prepare", "US-DELTA-COLLIDE",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+      expect(r2.code).toBe(0);
+      const id2 = JSON.parse(r2.stdout).delegationId;
 
-    // New frame directory also exists
-    const newFrame = join(dir, ".roll", "features", "delta-team", "US-DELTA-COLLIDE", `delta-${id2}`);
-    expect(existsSync(newFrame)).toBe(true);
-    expect(oldFrame).not.toBe(newFrame);
+      // Must have retried and used the distinct ID (collide-2, not collide-1)
+      expect(id2).toBe("collide-2");
+      expect(id2).not.toBe(id1);
+
+      // Original collision frame is preserved (never overwritten)
+      expect(existsSync(collisionFrame)).toBe(true);
+
+      // Only own lease was released during retry; the collision frame's
+      // delegation-open.json is untouched (verify it still has collided ID)
+      const collisionMarker = JSON.parse(readFileSync(
+        join(collisionFrame, "delegation-open.json"), "utf8"));
+      expect(collisionMarker.delegationId).toBe("collide-1");
+
+      // New distinct frame exists with the fresh ID
+      const newFrame = join(dir, ".roll", "features", "delta-team", "US-DELTA-COLLIDE", `delta-${id2}`);
+      expect(existsSync(newFrame)).toBe(true);
+      expect(newFrame).not.toBe(collisionFrame);
+    } finally {
+      injectIdGenerator(null);
+    }
   });
 
   it("prepare generates distinct crypto IDs on different stories", () => {

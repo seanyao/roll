@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { repositoryIdFromRemote } from "@roll/spec";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import { executeSetupCommand } from "../src/runner/setup-handlers.js";
+import { repositoryAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
 
 function git(cwd: string, args: readonly string[]): string {
   return execFileSync("git", [...args], {
@@ -106,6 +107,41 @@ describe("US-WS-011 Workspace repository preparation", () => {
         ["sot", "write"],
         ["docs", "read"],
       ]);
+    } finally {
+      if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = previousRollHome;
+    }
+  });
+
+  it("grants Builder writes only to writable worktrees, their git stores and Issue-owned runtime directories", async () => {
+    const f = fixture();
+    const previousRollHome = process.env["ROLL_HOME"];
+    process.env["ROLL_HOME"] = f.rollHome;
+    try {
+      const ports = nodePorts({
+        repoCwd: f.workspace,
+        paths: f.paths,
+        skillBody: "BUILD STORY",
+        routeDeps: { readSlot: () => ({ agent: "claude" }), firstInstalled: () => "claude" },
+      });
+      await ports.repositories?.prepare({ storyId: f.storyId, cycleId: "cycle-sandbox" });
+      const execution = await ports.repositories?.resolve(f.storyId);
+      if (execution === undefined) throw new Error("repository execution must resolve");
+      const writableRoots = repositoryAgentWritableRoots(execution);
+      const writable = Object.values(execution.repositories).find((entry) => entry.access === "write");
+      const readOnly = Object.values(execution.repositories).find((entry) => entry.access === "read");
+      if (writable === undefined || readOnly === undefined) throw new Error("fixture access modes missing");
+      const gitCommon = git(writable.worktreePath, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+
+      expect(writableRoots).toEqual(expect.arrayContaining([
+        realpathSync(writable.worktreePath),
+        realpathSync(gitCommon),
+        realpathSync(join(execution.issueRoot, "artifacts")),
+        realpathSync(join(execution.issueRoot, "evidence")),
+        realpathSync(join(execution.issueRoot, "runtime")),
+      ]));
+      expect(writableRoots).not.toContain(realpathSync(readOnly.worktreePath));
+      expect(writableRoots).not.toContain(execution.issueRoot);
     } finally {
       if (previousRollHome === undefined) delete process.env["ROLL_HOME"];
       else process.env["ROLL_HOME"] = previousRollHome;

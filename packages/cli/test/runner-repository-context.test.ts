@@ -628,6 +628,13 @@ describe("US-WS-010 repository Builder context", () => {
       expect(options.cwd).toBe(realpathSync(fixture.issueRoot));
       expect(options.skillBody).toContain(fixture.repositories[0]?.repoId ?? "missing-repo");
       expect(options.skillBody).toContain(fixture.repositories[1]?.repoId ?? "missing-repo");
+      expect(options.writableRoots).toEqual(expect.arrayContaining([
+        realpathSync(join(fixture.issueRoot, "artifacts")),
+        realpathSync(join(fixture.issueRoot, "evidence")),
+        realpathSync(join(fixture.issueRoot, "runtime")),
+        ...fixture.repositories.map((repo) => realpathSync(repo.path)),
+      ]));
+      expect(options.writableRoots).not.toContain(realpathSync(fixture.issueRoot));
       for (const repo of fixture.repositories) {
         writeFileSync(join(repo.path, "delivery.txt"), `${repo.alias} delivered\n`);
         execFileSync("git", ["add", "delivery.txt"], { cwd: repo.path });

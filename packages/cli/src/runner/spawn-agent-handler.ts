@@ -11,7 +11,7 @@ import { buildLowScoreFixForwardPrompt, injectRepositoryContext, maybeInjectProj
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startRepositoryCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
-import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { persistWorktreeAlerts, repositoryAgentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { readSkillBody } from "./skill-body.js";
@@ -262,9 +262,11 @@ export async function executeSpawnAgentCommand(
           cwd: execCwd,
           skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-          ...(execRepoCwd === undefined
-            ? {}
-            : { writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath) }),
+          ...(ctx.repositoryExecution !== undefined
+            ? { writableRoots: repositoryAgentWritableRoots(ctx.repositoryExecution) }
+            : execRepoCwd === undefined
+              ? {}
+              : { writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath) }),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
           env: {
             ...process.env,

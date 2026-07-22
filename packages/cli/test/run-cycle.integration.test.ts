@@ -378,6 +378,63 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
     expect(readFileSync(p.eventsPath, "utf8")).toContain('"outcome":"aborted_no_delivery"');
   });
 
+  it("US-WS-017b heartbeat ownership loss kills the live agent before failing loud", async () => {
+    const { repo } = makeFixture("capacity-heartbeat-loss");
+    const rt = tmp("capacity-heartbeat-loss-rt");
+    const cycleId = "20260722-230000-1703";
+    const p = paths(rt, cycleId);
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-heartbeat-loss-broker"),
+    });
+    let heartbeatCalls = 0;
+    let releaseCalls = 0;
+    let killCalls = 0;
+    let finishSpawn!: () => void;
+    const spawnFinished = new Promise<void>((resolve) => {
+      finishSpawn = resolve;
+    });
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        await spawnFinished;
+        return { stdout: "", stderr: "", exitCode: 137, timedOut: false };
+      },
+      capacity: {
+        ...base.capacity,
+        heartbeatIntervalMs: 5,
+        heartbeat(leaseId, ownerToken) {
+          heartbeatCalls += 1;
+          if (heartbeatCalls === 1) return base.capacity.heartbeat(leaseId, ownerToken);
+          return { kind: "ownership_lost", reason: "lease_missing_or_unreadable" };
+        },
+        release(leaseId, ownerToken) {
+          releaseCalls += 1;
+          return base.capacity.release(leaseId, ownerToken);
+        },
+      },
+    };
+
+    await expect(runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+      killAgents: () => {
+        killCalls += 1;
+        finishSpawn();
+        return 1;
+      },
+    })).rejects.toThrow("agent_capacity_ownership_lost:lease_missing_or_unreadable");
+
+    expect(killCalls).toBe(1);
+    expect(releaseCalls).toBe(1);
+    expect(readFileSync(p.alertsPath, "utf8")).toContain("killed live agent process");
+    expect(readFileSync(p.eventsPath, "utf8")).toContain('"outcome":"aborted_no_delivery"');
+  });
+
   it("US-LOOP-098 proves detached cycle branch governance against real git refs", async () => {
     const { repo, remote } = makeGitignoredFixture("branch-gov");
     // CI runners carry no global git identity; the cycle's own commits (worktree

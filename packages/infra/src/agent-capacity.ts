@@ -32,6 +32,10 @@ export interface NodeAgentCapacityBrokerOptions {
   readonly clockMs: () => number;
   readonly host: string;
   readonly processIdentity: (pid: number) => ProcessIdentity;
+  /** Bounded real-time wait for another broker transaction to finish. */
+  readonly lockWaitMs?: number;
+  /** Poll cadence while the machine broker lock is held elsewhere. */
+  readonly lockPollMs?: number;
 }
 
 interface LeaseRead {
@@ -80,6 +84,8 @@ export class NodeAgentCapacityBroker {
   readonly #clockMs: () => number;
   readonly #host: string;
   readonly #processIdentity: (pid: number) => ProcessIdentity;
+  readonly #lockWaitMs: number;
+  readonly #lockPollMs: number;
 
   constructor(options: NodeAgentCapacityBrokerOptions) {
     this.#root = options.root;
@@ -89,6 +95,8 @@ export class NodeAgentCapacityBroker {
     this.#clockMs = options.clockMs;
     this.#host = options.host;
     this.#processIdentity = options.processIdentity;
+    this.#lockWaitMs = options.lockWaitMs ?? 2_000;
+    this.#lockPollMs = options.lockPollMs ?? 10;
   }
 
   acquire(request: AgentCapacityAcquireRequest): AgentCapacityAcquireResult {
@@ -154,11 +162,19 @@ export class NodeAgentCapacityBroker {
 
   #withLock<T>(operation: () => T): T {
     mkdirSync(this.#leasesDir, { recursive: true });
-    let fd: number;
-    try {
-      fd = openSync(this.#lockPath, "wx", 0o600);
-    } catch {
-      throw new Error("agent_capacity_broker_lock_busy");
+    const deadline = Date.now() + this.#lockWaitMs;
+    let fd: number | undefined;
+    while (fd === undefined) {
+      try {
+        fd = openSync(this.#lockPath, "wx", 0o600);
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code ?? "")
+          : "";
+        if (code !== "EEXIST") throw new Error(`agent_capacity_broker_lock_failed:${code || "unknown"}`);
+        if (Date.now() >= deadline) throw new Error("agent_capacity_broker_lock_busy");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, this.#lockPollMs);
+      }
     }
     try {
       writeFileSync(fd, JSON.stringify({ schema: "roll-agent-capacity-broker-lock/v1", host: this.#host }));

@@ -41,6 +41,7 @@ import { AGENT_CAPACITY_LEASE_SCHEMA } from "@roll/spec";
 import { type Ports, type ProcessClock, executeCommand, buildRunRow, revertPrematureDone } from "./executor.js";
 import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 import { classifyCycleFailure, readCycleEvents } from "./failure-attribution.js";
+import { killLiveAgents } from "./agent-spawn.js";
 
 /** Inputs for one cycle run. */
 export interface RunCycleOptions {
@@ -53,6 +54,8 @@ export interface RunCycleOptions {
   lockStaleSec?: number;
   /** Max steps before bailing (loop-safety; a terminal is normally reached fast). */
   maxSteps?: number;
+  /** Test seam for fail-loud capacity ownership loss; production kills live agent trees. */
+  killAgents?: () => number;
 }
 
 /** What a finished cycle reports back. */
@@ -78,6 +81,7 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
   const { ports, ctx } = opts;
   const timeoutSec = opts.timeoutSec ?? CYCLE_TIMEOUT_SEC;
   const maxSteps = opts.maxSteps ?? 1000;
+  const killAgents = opts.killAgents ?? ((): number => killLiveAgents("SIGKILL"));
 
   // Lock: single-flight re-entry guard. Skip if another live cycle holds it.
   const acq = ports.process.acquireLock(ports.paths.lockPath, { staleSec: opts.lockStaleSec, cycleId: ctx.cycleId });
@@ -163,27 +167,45 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
           });
         }
         let ownershipLostReason: string | undefined;
+        const stopUnleasedExecution = (reason: string): void => {
+          if (ownershipLostReason !== undefined) return;
+          ownershipLostReason = reason;
+          try {
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `cycle ${liveCtx.cycleId}: agent capacity ownership lost (${reason}); killed live agent process`,
+            );
+          } catch {
+            /* the thrown ownership-loss terminal remains authoritative */
+          }
+          killAgents();
+        };
         const heartbeatTimer = (cmd.kind === "spawn_agent" || cmd.kind === "spawn_role") && liveCapacity !== undefined
           ? setInterval(() => {
               if (liveCapacity === undefined || ownershipLostReason !== undefined) return;
-              const heartbeat = ports.capacity.heartbeat(
-                liveCapacity.owner.leaseId,
-                liveCapacity.owner.ownerToken,
-              );
-              if (heartbeat.kind === "ownership_lost") {
-                ownershipLostReason = heartbeat.reason;
-                return;
+              try {
+                const heartbeat = ports.capacity.heartbeat(
+                  liveCapacity.owner.leaseId,
+                  liveCapacity.owner.ownerToken,
+                );
+                if (heartbeat.kind === "ownership_lost") {
+                  stopUnleasedExecution(heartbeat.reason);
+                  return;
+                }
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "workspace:capacity_heartbeat",
+                  workspaceId: liveCapacity.owner.workspaceId,
+                  storyId: liveCapacity.owner.storyId,
+                  cycleId: liveCapacity.owner.cycleId,
+                  spawnId: liveCapacity.owner.spawnId,
+                  agent: liveCapacity.key.agent,
+                  model: liveCapacity.key.model,
+                  ts: ports.clock() * 1_000,
+                });
+              } catch (error) {
+                const reason = error instanceof Error ? error.message : String(error);
+                stopUnleasedExecution(`heartbeat_error:${reason}`);
               }
-              ports.events.appendEvent(ports.paths.eventsPath, {
-                type: "workspace:capacity_heartbeat",
-                workspaceId: liveCapacity.owner.workspaceId,
-                storyId: liveCapacity.owner.storyId,
-                cycleId: liveCapacity.owner.cycleId,
-                spawnId: liveCapacity.owner.spawnId,
-                agent: liveCapacity.key.agent,
-                model: liveCapacity.key.model,
-                ts: ports.clock() * 1_000,
-              });
             }, ports.capacity.heartbeatIntervalMs)
           : undefined;
         let res;

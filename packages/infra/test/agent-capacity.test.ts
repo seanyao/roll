@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +51,39 @@ function broker(root: string, now = 1_000) {
 }
 
 describe("NodeAgentCapacityBroker", () => {
+  it("serializes a real concurrent broker transaction before claiming", async () => {
+    const root = tempDir("capacity-lock-contention");
+    const child = spawn(process.execPath, [
+      "-e",
+      [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const root = process.argv[1];",
+        "fs.mkdirSync(root, { recursive: true });",
+        "const lock = path.join(root, 'broker.lock');",
+        "fs.writeFileSync(lock, 'held');",
+        "process.stdout.write('ready\\n');",
+        "setTimeout(() => fs.unlinkSync(lock), 100);",
+      ].join(""),
+      root,
+    ], { stdio: ["ignore", "pipe", "inherit"] });
+    await once(child.stdout!, "data");
+
+    const result = new NodeAgentCapacityBroker({
+      root,
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processIdentity: () => ({ alive: true, startedAtMs: 500 }),
+      lockWaitMs: 1_000,
+      lockPollMs: 5,
+    }).acquire(request("contended"));
+
+    expect(result.kind).toBe("acquired");
+    const [exitCode] = await once(child, "exit");
+    expect(exitCode).toBe(0);
+  });
+
   it("enforces per-agent aggregation across model and context while distinct slots run", () => {
     const root = tempDir("capacity-limits");
     const first = broker(root).acquire(request("one"));

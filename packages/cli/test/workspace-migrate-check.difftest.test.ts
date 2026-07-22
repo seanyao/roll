@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { planHistoricalWorkspaceMigration } from "@roll/core";
 import {
   parseHistoricalMigrationFacts,
@@ -95,10 +95,6 @@ async function run(input: HistoricalMigrationFacts, args: string[], language: "e
     }
   }
 }
-
-afterEach(() => {
-  for (const key of ENV_KEYS) delete process.env[key];
-});
 
 describe("US-WS-019b migration check CLI contract", () => {
   it("freezes ready output in one locale at a time", async () => {
@@ -198,15 +194,28 @@ describe("US-WS-019b migration check CLI contract", () => {
 
   it("rejects anything except the explicit check-only grammar without collecting", async () => {
     let collected = 0;
-    const status = await workspaceMigrateCommand(["--from", resolve("/fixture/repo")], {
-      collectFacts: async () => {
-        collected += 1;
-        return facts();
-      },
-      plan: planHistoricalWorkspaceMigration,
-    });
+    let stderr = "";
+    const realErr = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error test capture
+    process.stderr.write = (chunk: string | Uint8Array): boolean => {
+      stderr += String(chunk);
+      return true;
+    };
+    let status: number;
+    try {
+      status = await workspaceMigrateCommand(["--from", resolve("/fixture/repo")], {
+        collectFacts: async () => {
+          collected += 1;
+          return facts();
+        },
+        plan: planHistoricalWorkspaceMigration,
+      });
+    } finally {
+      process.stderr.write = realErr;
+    }
 
     expect(status).toBe(1);
     expect(collected).toBe(0);
+    expect(stderr).toContain("workspace migrate: invalid_arguments");
   });
 });

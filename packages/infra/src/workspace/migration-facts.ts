@@ -48,8 +48,9 @@ interface WorktreeRecord {
 }
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
-const STORY_ID = /^(?:US|FIX|REFACTOR|IDEA|PROPOSAL)-[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const STORY_ID = /^(?:US|FIX|BUG|REFACTOR|IDEA|PROPOSAL)-[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const HUMAN_SOFT_LEASE_MS = 24 * 60 * 60 * 1_000;
+const GIT_READ_TIMEOUT_MS = 60_000;
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -71,7 +72,11 @@ function sha256(bytes: Buffer): string {
 }
 
 function gitRunner(runGit: HistoricalMigrationGitRunner): HistoricalMigrationGitRunner {
-  return (args, cwd, options) => runGit(["--no-optional-locks", ...args], cwd, options);
+  return (args, cwd, options) => runGit(
+    ["--no-optional-locks", ...args],
+    cwd,
+    { timeoutMs: options?.timeoutMs ?? GIT_READ_TIMEOUT_MS },
+  );
 }
 
 async function requiredGit(
@@ -175,6 +180,14 @@ function dirtyPaths(output: string): readonly string[] {
 }
 
 async function productGitFacts(root: string, runGit: HistoricalMigrationGitRunner): Promise<ProductGitSafetyFacts> {
+  const local = await localGitFacts(root, runGit);
+  return { ...local, remote: await remoteTruth(root, runGit, local.head) };
+}
+
+async function localGitFacts(
+  root: string,
+  runGit: HistoricalMigrationGitRunner,
+): Promise<Omit<ProductGitSafetyFacts, "remote">> {
   const head = await requiredGit(runGit, root, ["rev-parse", "HEAD"], "head");
   const status = await requiredGit(runGit, root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], "status");
   const paths = dirtyPaths(status);
@@ -184,7 +197,6 @@ async function productGitFacts(root: string, runGit: HistoricalMigrationGitRunne
     state: operation === "none" ? (paths.length === 0 ? "clean" : "dirty") : "in_flight",
     dirtyPaths: paths,
     operation,
-    remote: await remoteTruth(root, runGit, head),
   };
 }
 
@@ -203,7 +215,7 @@ function parseWorktrees(output: string): readonly WorktreeRecord[] {
     current = {};
   };
   for (const token of output.split("\0")) {
-    const line = token.trim();
+    const line = token;
     if (line === "") continue;
     if (line.startsWith("worktree ")) {
       flush();
@@ -244,15 +256,25 @@ async function submoduleFacts(root: string, runGit: HistoricalMigrationGitRunner
   if (result.code !== 0) throw new Error("historical_migration_submodules_unreadable");
   const entries = await Promise.all(result.stdout.split("\n").filter((line) => line !== "").map(async (line) => {
     const prefix = line[0] ?? " ";
-    const match = /^[ +-U]([0-9a-f]{40,64})\s+([^\s]+)(?:\s|$)/u.exec(line);
-    const path = match?.[2];
-    if (path === undefined) throw new Error("historical_migration_submodule_status_invalid");
+    const match = /^[ +-U]([0-9a-f]{40,64})\s+(.+)$/u.exec(line);
+    const remainder = match?.[2];
+    if (remainder === undefined) throw new Error("historical_migration_submodule_status_invalid");
+    const describeIndex = remainder.lastIndexOf(" (");
+    const path = describeIndex < 0 ? remainder : remainder.slice(0, describeIndex);
+    if (path === "") throw new Error("historical_migration_submodule_status_invalid");
     const listedHead = match?.[1];
     if (listedHead === undefined) throw new Error("historical_migration_submodule_status_invalid");
     const moduleRoot = join(root, path);
     if (prefix === "-") return { path, head: null, state: "uninitialized" as const, remote: null };
     if (prefix === "U") return { path, head: listedHead, state: "conflicted" as const, remote: null };
-    if (!existsSync(moduleRoot)) return { path, head: listedHead, state: "missing" as const, remote: null };
+    try {
+      const stat = lstatSync(moduleRoot);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        return { path: posix(path), head: listedHead, state: "missing" as const, remote: null };
+      }
+    } catch {
+      return { path: posix(path), head: listedHead, state: "missing" as const, remote: null };
+    }
     const head = await requiredGit(runGit, moduleRoot, ["rev-parse", "HEAD"], "submodule_head");
     const status = await runGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], moduleRoot);
     const state = prefix === "+" || status.code !== 0 || status.stdout !== "" ? "dirty" as const : "clean" as const;
@@ -290,7 +312,13 @@ function safeFile(root: string, path: string): boolean {
 
 function activeCycles(rollRoot: string): readonly string[] {
   const ids = new Set<string>();
-  for (const path of [join(rollRoot, "loop", "inner.lock"), join(rollRoot, "loop", "cycle.lock"), join(rollRoot, "loop", "locks", "cycle.lock")]) {
+  const locks = [
+    join(rollRoot, "loop", "inner.lock"),
+    join(rollRoot, "loop", "cycle.lock"),
+    join(rollRoot, "loop", "locks", "cycle.lock"),
+  ];
+  const candidates = locks.flatMap((path) => [path, join(path, "meta.json")]);
+  for (const path of candidates) {
     if (!safeFile(rollRoot, path)) continue;
     let text = "";
     try {
@@ -343,7 +371,7 @@ function sourceClass(path: string): { readonly sourceClass: HistoricalRollSource
   if (parts[0] === "features") {
     const storyId = parts.find((part) => STORY_ID.test(part));
     if (storyId !== undefined) {
-      const evidence = parts.some((part) => /(?:evidence|attest|review|report|run|screenshot)/iu.test(part));
+      const evidence = parts.some((part) => /(?:^|[-_.])(?:evidence|attest|review|report|runs?|screenshots?)(?:[-_.]|$)/iu.test(part));
       return { sourceClass: evidence ? "story_evidence" : "story_contract", storyId };
     }
     return { sourceClass: "design" };
@@ -359,8 +387,13 @@ function sourceClass(path: string): { readonly sourceClass: HistoricalRollSource
 }
 
 function inventory(rollRoot: string, skipGitDatabase: boolean): readonly HistoricalRollEntry[] {
-  if (!existsSync(rollRoot)) return [];
-  const rootStat = lstatSync(rollRoot);
+  let rootStat: ReturnType<typeof lstatSync>;
+  try {
+    rootStat = lstatSync(rollRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
   if (rootStat.isSymbolicLink()) return [{ kind: "symlink", path: ".", target: readlinkSync(rollRoot) }];
   const entries: HistoricalRollEntry[] = [];
   const visit = (absolute: string, relativePath: string): void => {
@@ -410,7 +443,7 @@ async function rollOwnership(
   const topLevel = await requiredGit(runGit, rollRoot, ["rev-parse", "--show-toplevel"], "roll_toplevel");
   if (realpathSync(topLevel) !== realpathSync(rollRoot)) return { kind: "ordinary" };
   const gitdir = gitPath(rollRoot, await requiredGit(runGit, rollRoot, ["rev-parse", "--git-dir"], "roll_gitdir"));
-  const facts = await productGitFacts(rollRoot, runGit);
+  const facts = await localGitFacts(rollRoot, runGit);
   const branchResult = await runGit(["symbolic-ref", "--quiet", "--short", "HEAD"], rollRoot);
   const upstreamResult = await runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], rollRoot);
   const origin = await runGit(["remote", "get-url", "origin"], rollRoot);

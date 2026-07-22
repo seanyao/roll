@@ -234,6 +234,19 @@ describe("historical Workspace migration fact collection", () => {
     expect(digestTree(rollHome)).toBe(beforeHome);
   });
 
+  it("reports a dangling .roll symlink instead of treating metadata as absent", async () => {
+    const root = sandbox();
+    const { repo } = seedRepository(root);
+    const target = join(root, "missing-roll");
+    const rollHome = join(root, "roll-home");
+    mkdirSync(rollHome, { recursive: true });
+    symlinkSync(target, join(repo, ".roll"));
+
+    const facts = await collectHistoricalMigrationFacts({ sourceRoot: repo, rollHome });
+
+    expect(facts.rollInventory).toEqual([{ kind: "symlink", path: ".", target }]);
+  });
+
   it("distinguishes product-tracked metadata from an independent roll-meta repository", async () => {
     const root = sandbox();
     const tracked = seedRepository(join(root, "tracked"), true);
@@ -245,6 +258,9 @@ describe("historical Workspace migration fact collection", () => {
     writeFileSync(join(independent.repo, ".roll", "backlog.md"), "# Backlog\n", "utf8");
     git(join(independent.repo, ".roll"), ["add", "backlog.md"]);
     git(join(independent.repo, ".roll"), ["commit", "-q", "-m", "meta"]);
+    const metaRemote = join(root, "meta.git");
+    git(root, ["init", "-q", "--bare", metaRemote]);
+    git(join(independent.repo, ".roll"), ["remote", "add", "origin", `file://${metaRemote}`]);
     const trackedHome = join(root, "roll-home-tracked");
     const independentHome = join(root, "roll-home-independent");
     mkdirSync(trackedHome, { recursive: true });
@@ -258,9 +274,14 @@ describe("historical Workspace migration fact collection", () => {
       sourceRoot: tracked.repo,
       rollHome: trackedHome,
     });
+    const independentCalls: Array<{ readonly args: readonly string[]; readonly cwd?: string }> = [];
     const independentFacts = await collectHistoricalMigrationFacts({
       sourceRoot: independent.repo,
       rollHome: independentHome,
+      runGit: async (args, cwd) => {
+        independentCalls.push({ args, ...(cwd === undefined ? {} : { cwd }) });
+        return rawGit(args, cwd);
+      },
     });
 
     expect(trackedFacts.rollOwnership).toEqual({ kind: "product_tracked", trackedPaths: ["backlog.md"] });
@@ -269,10 +290,14 @@ describe("historical Workspace migration fact collection", () => {
       state: "clean",
       branch: "main",
       upstream: null,
-      normalizedRemote: null,
+      normalizedRemote: normalizeRepositoryRemote(`file://${metaRemote}`).ok
+        ? normalizeRepositoryRemote(`file://${metaRemote}`).value
+        : null,
     });
     expect(independentFacts.rollInventory.map((entry) => entry.path)).toEqual(["backlog.md"]);
     expect(independentFacts.rollInventory.some((entry) => entry.path.startsWith(".git"))).toBe(false);
+    expect(independentCalls.some((call) =>
+      call.cwd === join(independent.repo, ".roll") && call.args.includes("ls-remote"))).toBe(false);
     expect(digestTree(tracked.repo)).toBe(beforeTracked);
     expect(digestTree(independent.repo)).toBe(beforeIndependent);
     expect(digestTree(trackedHome)).toBe(beforeTrackedHome);
@@ -292,14 +317,20 @@ describe("historical Workspace migration fact collection", () => {
     git(moduleRoot, ["add", "module.txt"]);
     git(moduleRoot, ["commit", "-q", "-m", "module"]);
     git(root, ["clone", "-q", "--bare", moduleRoot, moduleRemote]);
-    git(repo, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", `file://${moduleRemote}`, "modules/sample"]);
+    git(repo, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", `file://${moduleRemote}`, "modules/sample module"]);
     git(repo, ["commit", "-q", "-am", "add submodule"]);
     git(repo, ["push", "-q", "origin", "HEAD:refs/heads/main"]);
     const linked = join(root, "linked");
     git(repo, ["worktree", "add", "-q", "-b", "topic", linked]);
 
     mkdirSync(join(repo, ".roll", "loop", "locks"), { recursive: true });
-    writeFileSync(join(repo, ".roll", "loop", "inner.lock"), "cycle-live owner\n", "utf8");
+    mkdirSync(join(repo, ".roll", "loop", "inner.lock"), { recursive: true });
+    writeFileSync(join(repo, ".roll", "loop", "inner.lock", "meta.json"), `${JSON.stringify({
+      pid: process.pid,
+      hostname: "fixture",
+      startedAt: 1,
+      cycleId: "cycle-live",
+    })}\n`, "utf8");
     writeFileSync(join(repo, ".roll", "loop", "locks", "story-leases.json"), `${JSON.stringify({
       "US-LIVE": { source: "cycle", pid: process.pid, claimedAt: 1 },
       "US-DEAD": { source: "cycle", pid: 999_999_999, claimedAt: 1 },
@@ -361,8 +392,8 @@ describe("historical Workspace migration fact collection", () => {
       state: "clean",
     }]);
     expect(facts.submodules).toMatchObject([{
-      path: "modules/sample",
-      head: git(join(repo, "modules", "sample"), ["rev-parse", "HEAD"]),
+      path: "modules/sample module",
+      head: git(join(repo, "modules", "sample module"), ["rev-parse", "HEAD"]),
       state: "clean",
       remote: { kind: "verified", defaultBranch: "main" },
     }]);

@@ -74,6 +74,18 @@ export interface RequirementSourceCaptureResult {
   readonly manifest: RequirementSourceManifest;
 }
 
+export type RequirementProjectionState =
+  | "current"
+  | "drift"
+  | "pending_journal"
+  | "unsupported_schema";
+
+export interface RequirementProjectionInspection {
+  readonly requirementId: string;
+  readonly requirementPath: string;
+  readonly state: RequirementProjectionState;
+}
+
 export interface RequirementSourceStoreDeps {
   readonly renameFile?: (from: string, to: string) => void;
   readonly afterReadFile?: (path: string) => void;
@@ -325,6 +337,58 @@ function readExisting(path: string): RequirementSourceManifest | undefined {
   } catch (error) {
     if (error instanceof RequirementSourceStoreError) throw error;
     return fail("io_failure", "Requirement source index could not be read", error);
+  }
+}
+
+/** Inspect only the mutable current projection. Immutable archive trust is a
+ * separate read model supplied by auditRequirementArchive; doctor combines
+ * both facts before it can offer an explicit projection repair. */
+export function inspectRequirementProjection(input: {
+  readonly workspaceRoot: string;
+  readonly provider: string;
+  readonly requirementId: string;
+}): RequirementProjectionInspection {
+  const workspaceRoot = resolve(input.workspaceRoot);
+  const requirementPath = join(workspaceRoot, "requirements", input.provider, input.requirementId);
+  const unsupported = (): RequirementProjectionInspection => ({
+    requirementId: input.requirementId,
+    requirementPath,
+    state: "unsupported_schema",
+  });
+  let canonicalWorkspace: string;
+  let canonicalRequirement: string;
+  try {
+    canonicalWorkspace = realpathSync(workspaceRoot);
+    canonicalRequirement = realpathSync(requirementPath);
+  } catch {
+    return unsupported();
+  }
+  if (!contained(canonicalWorkspace, canonicalRequirement) || canonicalRequirement !== requirementPath) {
+    return unsupported();
+  }
+  let manifest: RequirementSourceManifest | undefined;
+  try {
+    manifest = readExisting(join(requirementPath, "source.yaml"));
+  } catch {
+    return unsupported();
+  }
+  if (
+    manifest === undefined ||
+    manifest.provider !== input.provider ||
+    manifest.requirementId !== input.requirementId
+  ) return unsupported();
+  if (existsSync(join(requirementPath, PROJECTION_JOURNAL))) {
+    return { requirementId: input.requirementId, requirementPath, state: "pending_journal" };
+  }
+  try {
+    const evidence = validateRevision(requirementPath, manifest);
+    return {
+      requirementId: input.requirementId,
+      requirementPath,
+      state: isProjectionCurrent(requirementPath, manifest, evidence) ? "current" : "drift",
+    };
+  } catch {
+    return { requirementId: input.requirementId, requirementPath, state: "drift" };
   }
 }
 

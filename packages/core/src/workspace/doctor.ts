@@ -43,7 +43,7 @@ export interface RequirementProjectionDoctorProbe extends DoctorProbeBase {
 
 export interface IssueDoctorProbe extends DoctorProbeBase {
   readonly kind: "issue";
-  readonly state: "compatible" | "partial_journal" | "missing_worktree" | "conflict" | "unsupported_schema";
+  readonly state: "compatible" | "partial_journal" | "missing_worktree" | "dirty_or_unpushed" | "conflict" | "unsupported_schema";
   readonly dirty?: boolean;
 }
 
@@ -199,7 +199,9 @@ function classifyIssue(probe: IssueDoctorProbe): WorkspaceDoctorFinding | undefi
   if (probe.state === "compatible") return undefined;
   if (probe.state === "unsupported_schema") return finding(probe, "issue_unsupported_schema", "blocked");
   if (probe.state === "conflict") return finding(probe, "issue_conflict", "data_loss_risk");
-  if (probe.dirty === true) return finding(probe, "issue_worktree_dirty_or_unpushed", "data_loss_risk");
+  if (probe.state === "dirty_or_unpushed" || probe.dirty === true) {
+    return finding(probe, "issue_worktree_dirty_or_unpushed", "data_loss_risk");
+  }
   if (probe.state === "partial_journal") {
     return finding(probe, "issue_partial_journal", "repairable", "recreate_clean_worktree");
   }

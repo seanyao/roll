@@ -14,6 +14,7 @@ import { configLang } from "./lang.js";
 import { workspaceInitCommand } from "./workspace-init.js";
 import { workspaceIssueCommand } from "./workspace-issue.js";
 import { workspaceRequirementCommand } from "./workspace-requirement.js";
+import { workspaceDoctorCommand } from "./workspace-doctor.js";
 import { workspaceRegistryCandidates, workspaceRollHome, workspaceTargetSelector } from "./workspace-target.js";
 
 const WORKSPACE_LIST_V1 = "roll.workspace-list/v1" as const;
@@ -294,6 +295,7 @@ export function workspaceCommand(args: string[]): number | Promise<number> {
   if (subcommand === "init") return workspaceInitCommand(rest);
   if (subcommand === "issue") return workspaceIssueCommand(rest);
   if (subcommand === "requirement") return workspaceRequirementCommand(rest);
+  if (subcommand === "doctor") return workspaceDoctorCommand(rest);
   const store = new WorkspaceRegistry({ rollHome: workspaceRollHome() });
   if (subcommand === "list") return listCommand(rest, store);
   if (subcommand === "show") return showCommand(rest, store);

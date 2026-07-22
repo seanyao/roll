@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath } from "../src/lib/delta-allocation.js";
+import { claimStoryLease, releaseStoryLease } from "@roll/core";
 import { deltaCommand, injectValidator, injectPrepareInterrupt } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
@@ -2143,6 +2144,151 @@ describe("US-DELTA-003 — snapshot scrubber determinism", () => {
     expect(scrubbed).not.toMatch(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/);
     // Must NOT contain raw 64-char hex
     expect(scrubbed).not.toMatch(/[a-f0-9]{64}/i);
+  });
+});
+
+// ── Cross-source mutual exclusion (bidirectional no-clobber) ─────────────────
+
+describe("US-DELTA-003 — cross-source atomic exclusion", () => {
+  it("host claim blocks cycle claim (host then cycle fails)", () => {
+    const dir = setupMinimalProject("US-DELTA-X-HC", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    // Host claims first
+    const hResult = claimHostDelegationLease(dir, "US-DELTA-X-HC", randomUUID(), "delta-host");
+    expect(hResult).toBe("claimed");
+
+    // Cycle tries to claim via core primitive — must fail
+    const cResult = claimStoryLease(slPath, "US-DELTA-X-HC", {
+      pid: process.pid, claimedAt: Date.now(), source: "cycle",
+    });
+    expect(cResult.status).toBe("exists");
+    if (cResult.status === "exists") {
+      expect(cResult.existingSource).toBe("host-delegation");
+    }
+
+    // Host entry still intact
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(sl["US-DELTA-X-HC"].source).toBe("host-delegation");
+
+    // Cleanup
+    releaseHostDelegationLease(dir, "US-DELTA-X-HC", sl["US-DELTA-X-HC"].delegationId);
+  });
+
+  it("cycle claim blocks host claim (cycle then host fails)", () => {
+    const dir = setupMinimalProject("US-DELTA-X-CH", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    // Cycle claims first
+    const cResult = claimStoryLease(slPath, "US-DELTA-X-CH", {
+      pid: process.pid, claimedAt: Date.now(), source: "cycle",
+    });
+    expect(cResult.status).toBe("claimed");
+
+    // Host tries to claim — must fail
+    const hResult = claimHostDelegationLease(dir, "US-DELTA-X-CH", randomUUID(), "delta-host");
+    expect(hResult).toBe("exists");
+
+    // Cycle entry still intact
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(sl["US-DELTA-X-CH"].source).toBe("cycle");
+
+    // Cleanup
+    releaseStoryLease(slPath, "US-DELTA-X-CH", { source: "cycle", pid: process.pid });
+  });
+
+  it("human claim blocks host prepare (bidirectional)", () => {
+    const dir = setupMinimalProject("US-DELTA-X-HH", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-X-HH", "local-preset");
+
+    // Human claims via story-leases.json
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+    writeFileSync(slPath, JSON.stringify({
+      "US-DELTA-X-HH": { claimedAt: Date.now(), source: "human" },
+    }), "utf8");
+
+    // Host prepare must fail
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-X-HH",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(1);
+
+    // No frame created (failed contender has no frame/events)
+    const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-X-HH");
+    const deltaDirs = existsSync(cardDir)
+      ? readdirSync(cardDir, { withFileTypes: true }).filter(e => e.isDirectory() && e.name.startsWith("delta-"))
+      : [];
+    expect(deltaDirs.length).toBe(0);
+  });
+
+  it("host claim blocks human claim via claimStoryLease", () => {
+    const dir = setupMinimalProject("US-DELTA-X-HC2", "delta-team");
+    const slPath = storyLeasesPath(dir);
+    mkdirSync(dirname(slPath), { recursive: true });
+
+    // Host claims first
+    const hResult = claimHostDelegationLease(dir, "US-DELTA-X-HC2", randomUUID(), "delta-host");
+    expect(hResult).toBe("claimed");
+
+    // Human tries to claim — must fail
+    const huResult = claimStoryLease(slPath, "US-DELTA-X-HC2", {
+      claimedAt: Date.now(), source: "human",
+    });
+    expect(huResult.status).toBe("exists");
+    if (huResult.status === "exists") {
+      expect(huResult.existingSource).toBe("host-delegation");
+    }
+
+    // Host entry preserved
+    const sl = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(sl["US-DELTA-X-HC2"].source).toBe("host-delegation");
+
+    // Cleanup
+    releaseHostDelegationLease(dir, "US-DELTA-X-HC2", sl["US-DELTA-X-HC2"].delegationId);
+  });
+
+  it("failed contender has no frame or events", async () => {
+    const dir = setupMinimalProject("US-DELTA-NOFRAME", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-NOFRAME", "local-preset");
+
+    // First prepare succeeds
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-NOFRAME",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const winnerId = JSON.parse(r1.stdout).delegationId;
+
+    // Snapshot events count
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    // Second prepare must fail — no new frame, no new events
+    const r2 = tsRunCwd([
+      "prepare", "US-DELTA-NOFRAME",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length);
+
+    // Only winner's frame exists
+    const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-NOFRAME");
+    const deltaDirs = readdirSync(cardDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name.startsWith("delta-"));
+    expect(deltaDirs.length).toBe(1);
+    expect(deltaDirs[0]!.name).toBe(`delta-${winnerId}`);
   });
 });
 

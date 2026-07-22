@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runIntegrationAcceptance,
   type IntegrationAcceptanceInput,
@@ -10,6 +14,26 @@ const API = "repo-aaaaaaaaaaaa";
 const WEB = "repo-bbbbbbbbbbbb";
 const API_MERGE = "a".repeat(40);
 const WEB_MERGE = "b".repeat(40);
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function repository(branch: "main" | "release"): { readonly path: string; readonly mergeCommit: string } {
+  const path = mkdtempSync(join(tmpdir(), "roll-integration-acceptance-"));
+  roots.push(path);
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: path });
+  execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: path });
+  execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: path });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "base"], { cwd: path });
+  if (branch === "release") execFileSync("git", ["checkout", "-q", "-b", "release"], { cwd: path });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", `${branch}-merge`], { cwd: path });
+  return {
+    path,
+    mergeCommit: execFileSync("git", ["rev-parse", "HEAD"], { cwd: path, encoding: "utf8" }).trim(),
+  };
+}
 
 function input(overrides: Partial<IntegrationAcceptanceInput> = {}): IntegrationAcceptanceInput {
   return {
@@ -121,6 +145,45 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
       status: "recorded",
       evidence: { verdict: "fail", inputMergeCommits: { [API]: API_MERGE, [WEB]: WEB_MERGE } },
       message: "integration acceptance command failed with exit code 7",
+    });
+  });
+
+  it("runs against real local repositories and their distinct configured integration branches", async () => {
+    const api = repository("main");
+    const web = repository("release");
+    const actual = input({
+      repositories: [
+        { ...input().repositories[0]!, repositoryPath: api.path, mergeCommit: api.mergeCommit },
+        { ...input().repositories[1]!, repositoryPath: web.path, mergeCommit: web.mergeCommit },
+      ],
+    });
+    const isReachable = async (candidate: {
+      readonly repositoryPath: string;
+      readonly mergeCommit: string;
+      readonly integrationBranch: string;
+    }): Promise<boolean | undefined> => {
+      const result = spawnSync(
+        "git",
+        ["merge-base", "--is-ancestor", candidate.mergeCommit, candidate.integrationBranch],
+        { cwd: candidate.repositoryPath, stdio: "ignore" },
+      );
+      return result.status === 0 ? true : result.status === 1 ? false : undefined;
+    };
+
+    await expect(runIntegrationAcceptance(actual, {
+      isReachable,
+      execute: vi.fn(async () => ({ exitCode: 0 })),
+    })).resolves.toMatchObject({ status: "recorded", evidence: { verdict: "pass" } });
+    await expect(runIntegrationAcceptance({
+      ...actual,
+      repositories: [actual.repositories[0]!, { ...actual.repositories[1]!, integrationBranch: "main" }],
+    }, {
+      isReachable,
+      execute: vi.fn(async () => ({ exitCode: 0 })),
+    })).resolves.toMatchObject({
+      status: "recorded",
+      evidence: { verdict: "fail" },
+      message: `integration acceptance blocked: ${WEB}@${web.mergeCommit} is not reachable from integration branch main`,
     });
   });
 });

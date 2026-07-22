@@ -152,6 +152,8 @@ describe("US-WS-011a Workspace worktree lifecycle terminal fixture", () => {
       ci: "green",
       mergeCommit: alphaHead,
     });
+    mkdirSync(join(alphaIssue, "evidence"), { recursive: true });
+    writeFileSync(join(alphaIssue, "evidence", "integration.txt"), "PASS\n", "utf8");
     appendIssueIntegrationAcceptanceEvidence(alphaIssue, {
       workspaceId: "ws-alpha",
       storyId: "US-A",

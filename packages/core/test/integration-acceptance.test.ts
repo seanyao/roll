@@ -98,29 +98,21 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
     expect(isReachable).not.toHaveBeenCalled();
   });
 
-  it("records a failed exact-SHA verdict and names the repository mismatch without running the command", async () => {
+  it("blocks on an exact-SHA reachability mismatch without inventing command evidence", async () => {
     const isReachable = vi.fn(async (repository: { readonly repoId: string }) => repository.repoId === API);
     const execute = vi.fn();
 
     const result = await runIntegrationAcceptance(input(), { isReachable, execute });
 
-    expect(result.status).toBe("recorded");
-    if (result.status !== "recorded") return;
-    expect(result.evidence).toMatchObject({
-      inputMergeCommits: { [API]: API_MERGE, [WEB]: WEB_MERGE },
-      verdict: "fail",
-      profile: "workspace-integration/v1",
-      artifactPath: "evidence/integration/result.txt",
+    expect(result).toEqual({
+      status: "blocked",
+      message: `integration acceptance blocked: ${WEB}@${WEB_MERGE} is not reachable from integration branch release`,
     });
-    expect(result.evidence.commandDigest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(result.message).toBe(
-      `integration acceptance blocked: ${WEB}@${WEB_MERGE} is not reachable from integration branch release`,
-    );
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("executes once with the exact merge map and persists command/profile identity", async () => {
-    const execute = vi.fn(async () => ({ exitCode: 0 }));
+    const execute = vi.fn(async () => ({ exitCode: 0, artifactPath: "evidence/integration/result.txt" }));
 
     const result = await runIntegrationAcceptance(input(), {
       isReachable: vi.fn(async () => true),
@@ -151,7 +143,7 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
   it("records command failure against the same exact merge inputs", async () => {
     const result = await runIntegrationAcceptance(input(), {
       isReachable: vi.fn(async () => true),
-      execute: vi.fn(async () => ({ exitCode: 7 })),
+      execute: vi.fn(async () => ({ exitCode: 7, artifactPath: "evidence/integration/result.txt" })),
     });
 
     expect(result).toMatchObject({
@@ -159,6 +151,13 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
       evidence: { verdict: "fail", inputMergeCommits: { [API]: API_MERGE, [WEB]: WEB_MERGE } },
       message: "integration acceptance command failed with exit code 7",
     });
+  });
+
+  it("refuses to persist command output under a different artifact identity", async () => {
+    await expect(runIntegrationAcceptance(input(), {
+      isReachable: vi.fn(async () => true),
+      execute: vi.fn(async () => ({ exitCode: 0, artifactPath: "evidence/integration/other.txt" })),
+    })).rejects.toThrow(IntegrationAcceptanceError);
   });
 
   it("runs against real local repositories and their distinct configured integration branches", async () => {
@@ -185,17 +184,16 @@ describe("US-WS-014 exact-SHA integration acceptance", () => {
 
     await expect(runIntegrationAcceptance(actual, {
       isReachable,
-      execute: vi.fn(async () => ({ exitCode: 0 })),
+      execute: vi.fn(async () => ({ exitCode: 0, artifactPath: "evidence/integration/result.txt" })),
     })).resolves.toMatchObject({ status: "recorded", evidence: { verdict: "pass" } });
     await expect(runIntegrationAcceptance({
       ...actual,
       repositories: [actual.repositories[0]!, { ...actual.repositories[1]!, integrationBranch: "main" }],
     }, {
       isReachable,
-      execute: vi.fn(async () => ({ exitCode: 0 })),
+      execute: vi.fn(async () => ({ exitCode: 0, artifactPath: "evidence/integration/result.txt" })),
     })).resolves.toMatchObject({
-      status: "recorded",
-      evidence: { verdict: "fail" },
+      status: "blocked",
       message: `integration acceptance blocked: ${WEB}@${web.mergeCommit} is not reachable from integration branch main`,
     });
   });

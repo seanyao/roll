@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,6 +38,8 @@ function fixture(): string {
     }],
     integrationAcceptance: { command: ["pnpm", "test:integration"] },
   })}\n`, "utf8");
+  mkdirSync(join(issueRoot, "evidence"), { recursive: true });
+  writeFileSync(join(issueRoot, "evidence", "integration.txt"), "PASS\n", "utf8");
   return issueRoot;
 }
 
@@ -151,6 +153,15 @@ describe("US-WS-013 Issue completion evidence store", () => {
       ...acceptance(),
       inputMergeCommits: { [REPO]: MERGE, "repo-foreign": "f".repeat(40) },
     })).toThrow(IssueCompletionEvidenceError);
+    expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
+  });
+
+  it("requires the acceptance artifact to exist as an Issue-owned regular file at append time", () => {
+    const issueRoot = fixture();
+    rmSync(join(issueRoot, "evidence", "integration.txt"));
+
+    expect(() => appendIssueIntegrationAcceptanceEvidence(issueRoot, acceptance()))
+      .toThrow(IssueCompletionEvidenceError);
     expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import {
   ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
@@ -62,6 +62,20 @@ function assertAcceptanceIssueIdentity(manifest: IssueManifest, evidence: IssueI
   const actualRepoIds = Object.keys(evidence.inputMergeCommits).sort();
   if (JSON.stringify(actualRepoIds) !== JSON.stringify(expectedRepoIds)) {
     throw new IssueCompletionEvidenceError("integration acceptance merge inputs do not match the required repository set");
+  }
+}
+
+function assertAcceptanceArtifact(issueRoot: string, evidence: IssueIntegrationAcceptanceEvidence): void {
+  try {
+    const canonicalIssueRoot = realpathSync(issueRoot);
+    const artifactPath = join(canonicalIssueRoot, evidence.artifactPath);
+    const stat = lstatSync(artifactPath);
+    if (stat.isSymbolicLink() || !stat.isFile() || realpathSync(artifactPath) !== artifactPath) {
+      throw new IssueCompletionEvidenceError("integration acceptance artifact must be an Issue-owned regular file");
+    }
+  } catch (error) {
+    if (error instanceof IssueCompletionEvidenceError) throw error;
+    throw new IssueCompletionEvidenceError("integration acceptance artifact is missing or unsafe");
   }
 }
 
@@ -301,6 +315,7 @@ export function appendIssueIntegrationAcceptanceEvidence(
     ts: evidence.recordedAt,
   });
   assertAcceptanceIssueIdentity(manifest, integrationAcceptance(event));
+  assertAcceptanceArtifact(issueRoot, integrationAcceptance(event));
   appendIssueEventAtomically(issueRoot, { ...event });
   return event;
 }

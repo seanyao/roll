@@ -42,11 +42,15 @@ export interface IntegrationAcceptanceExecutionInput {
 
 export interface IntegrationAcceptancePorts {
   readonly isReachable: (input: IntegrationAcceptanceReachabilityInput) => Promise<boolean | undefined>;
-  readonly execute: (input: IntegrationAcceptanceExecutionInput) => Promise<{ readonly exitCode: number }>;
+  readonly execute: (input: IntegrationAcceptanceExecutionInput) => Promise<{
+    readonly exitCode: number;
+    readonly artifactPath: string;
+  }>;
 }
 
 export type IntegrationAcceptanceResult =
   | { readonly status: "pending"; readonly message: string }
+  | { readonly status: "blocked"; readonly message: string }
   | {
       readonly status: "recorded";
       readonly evidence: IssueIntegrationAcceptanceEvidence;
@@ -140,8 +144,7 @@ export async function runIntegrationAcceptance(
     });
     if (reachable !== true) {
       return {
-        status: "recorded",
-        evidence: evidence(input, inputMergeCommits, "fail"),
+        status: "blocked",
         message: `integration acceptance blocked: ${repository.repoId}@${mergeCommit} is not reachable from integration branch ${repository.integrationBranch}`,
       };
     }
@@ -155,6 +158,9 @@ export async function runIntegrationAcceptance(
     inputMergeCommits,
     artifactPath: input.artifactPath,
   });
+  if (execution.artifactPath !== input.artifactPath || !isSafeIssueEvidencePath(execution.artifactPath)) {
+    throw new IntegrationAcceptanceError("integration acceptance command returned an invalid artifact identity");
+  }
   const verdict = execution.exitCode === 0 ? "pass" : "fail";
   return {
     status: "recorded",

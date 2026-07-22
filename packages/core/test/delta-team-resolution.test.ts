@@ -81,6 +81,8 @@ const freshnessOk: InventoryFreshnessParams = {
   maxInventoryAgeMs: 600_000, // 10 minutes
 };
 
+const testDelegationId = "delta-test-001";
+
 // ── AC1: Pin available ────────────────────────────────────────────────────────
 
 describe("US-DELTA-002 AC1 — Pin handling", () => {
@@ -88,7 +90,7 @@ describe("US-DELTA-002 AC1 — Pin handling", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, healthyInventory, {
       pins: { designer: "model-alpha" },
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -104,7 +106,7 @@ describe("US-DELTA-002 AC1 — Pin handling", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, healthyInventory, {
       pins: { designer: "model-unicorn" }, // not in inventory
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
@@ -121,7 +123,7 @@ describe("US-DELTA-002 AC1 — Pin handling", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, inventory, {
       pins: { designer: "model-alpha" },
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
@@ -133,7 +135,7 @@ describe("US-DELTA-002 AC1 — Pin handling", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, healthyInventory, {
       pins: { builder: "model-gamma" },
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -147,7 +149,7 @@ describe("US-DELTA-002 AC1 — Pin handling", () => {
 describe("US-DELTA-002 AC2 — Preference order", () => {
   it("picks the first available preferred model", () => {
     const preset = mkPreset();
-    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -163,7 +165,7 @@ describe("US-DELTA-002 AC2 — Preference order", () => {
       mkModel("model-epsilon", true, ["review"], "high"),
     ]);
     const preset = mkPreset();
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -180,7 +182,7 @@ describe("US-DELTA-002 AC2 — Preference order", () => {
       mkModel("model-beta", true, ["reasoning"]),
     ]);
     const preset = mkPreset();
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -219,7 +221,7 @@ describe("US-DELTA-002 AC3 — Required diversity", () => {
       },
     });
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
     expect(result.reason.toLowerCase()).toContain("diversity");
@@ -253,7 +255,7 @@ describe("US-DELTA-002 AC3 — Required diversity", () => {
       },
     });
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     const modelIds = result.assignments.map(a => a.modelId);
@@ -265,7 +267,9 @@ describe("US-DELTA-002 AC3 — Required diversity", () => {
 // ── AC4: Prefer-diversity fallback ────────────────────────────────────────────
 
 describe("US-DELTA-002 AC4 — Prefer diversity", () => {
-  it("uses different models when possible with prefer diversity", () => {
+  it("preference order beats diversity (same-tier tiebreak only)", () => {
+    // Plan 4.3: pin → preference → risk → diversity → cost → lexical
+    // For prefer diversity, a higher-preference used model beats a lower-preference unused model.
     const preset = mkPreset({
       roles: {
         designer: {
@@ -292,15 +296,20 @@ describe("US-DELTA-002 AC4 — Prefer diversity", () => {
       mkModel("model-epsilon", true, []),
     ]);
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
-    // Designer picks model-shared. Builder has diversity:prefer, so it should
-    // prefer model-gamma (different from model-shared) over model-shared.
+    // Designer picks model-shared (first pref).
+    // Builder: pref is [model-shared, model-gamma]. model-shared is prefIndex=0 (used),
+    // model-gamma is prefIndex=1 (unused). Preference order is primary, so builder
+    // still picks model-shared (prefIndex 0 beats 1, despite it being used).
     const designer = result.assignments.find(a => a.role === "designer");
     const builder = result.assignments.find(a => a.role === "builder");
     expect(designer!.modelId).toBe("model-shared");
-    expect(builder!.modelId).toBe("model-gamma");
+    // Builder picks model-shared because preference order beats diversity tiebreaker
+    expect(builder!.modelId).toBe("model-shared");
+    // Source should be availability-fallback since it was already used with prefer diversity
+    expect(builder!.source).toBe("availability-fallback");
   });
 
   it("falls back to same model with availability-fallback when prefer diversity cannot be met", () => {
@@ -327,7 +336,7 @@ describe("US-DELTA-002 AC4 — Prefer diversity", () => {
       mkModel("model-only", true, []),
     ]);
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     // All roles get the same model — prefer diversity allows this
@@ -374,7 +383,7 @@ describe("US-DELTA-002 AC5 — Cost-class filter", () => {
       },
     });
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     const builder = result.assignments.find(a => a.role === "builder");
@@ -410,7 +419,7 @@ describe("US-DELTA-002 AC5 — Cost-class filter", () => {
       },
     });
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     const builder = result.assignments.find(a => a.role === "builder");
@@ -431,7 +440,7 @@ describe("US-DELTA-002 AC6 — Tag filter", () => {
     ]);
     const preset = mkPreset(); // designer needs reasoning tag
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     const designer = result.assignments.find(a => a.role === "designer");
@@ -446,7 +455,7 @@ describe("US-DELTA-002 AC6 — Tag filter", () => {
     ]);
     const preset = mkPreset(); // designer needs reasoning tag, none have it
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
     expect(result.reason).toContain("designer");
@@ -485,7 +494,7 @@ describe("US-DELTA-002 AC7 — Stable lexical tie-break", () => {
       },
     });
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
     const designer = result.assignments.find(a => a.role === "designer");
@@ -520,8 +529,8 @@ describe("US-DELTA-002 AC7 — Stable lexical tie-break", () => {
       },
     });
 
-    const r1 = resolveRoles(preset, inventory, {}, freshnessOk);
-    const r2 = resolveRoles(preset, inventory, {}, freshnessOk);
+    const r1 = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
+    const r2 = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(r1).toEqual(r2);
 
     if (r1.outcome !== "success") return;
@@ -541,7 +550,7 @@ describe("US-DELTA-002 AC8 — HostId validation", () => {
       mkModel("model-epsilon", true, ["review"], "high"),
     ]);
 
-    const result = resolveRoles(preset, inventory, {}, freshnessOk);
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
     expect(result.reason.toLowerCase()).toContain("host");
@@ -551,7 +560,7 @@ describe("US-DELTA-002 AC8 — HostId validation", () => {
 
   it("succeeds when hostIds match", () => {
     const preset = mkPreset({ hostId: "test-host" });
-    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
   });
 });
@@ -574,7 +583,7 @@ describe("US-DELTA-002 AC9 — Stale inventory", () => {
 
   it("succeeds when inventory is within age limit", () => {
     const preset = mkPreset();
-    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
   });
 
@@ -586,7 +595,7 @@ describe("US-DELTA-002 AC9 — Stale inventory", () => {
       mkModel("model-epsilon", true, ["review"], "high"),
     ]);
 
-    const result = resolveRoles(preset, badInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, badInventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
     expect(result.reason).toContain("timestamp");
@@ -620,7 +629,7 @@ describe("US-DELTA-002 AC10 — Exclusion filter", () => {
     // Exclude model-alpha, so designer must pick model-beta
     const result = resolveRoles(preset, healthyInventory, {
       exclusions: { designer: ["model-alpha"] },
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -632,7 +641,7 @@ describe("US-DELTA-002 AC10 — Exclusion filter", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, healthyInventory, {
       exclusions: { designer: ["model-alpha", "model-beta", "model-gamma", "model-delta", "model-epsilon", "model-zeta"] },
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
@@ -674,7 +683,7 @@ describe("US-DELTA-002 AC11 — Hard cost cap", () => {
 
     const result = resolveRoles(preset, inventory, {
       maxCostClass: "medium",
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -692,7 +701,7 @@ describe("US-DELTA-002 AC11 — Hard cost cap", () => {
     const preset = mkPreset();
     const result = resolveRoles(preset, inventory, {
       maxCostClass: "low",
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
@@ -705,7 +714,7 @@ describe("US-DELTA-002 AC11 — Hard cost cap", () => {
 
 describe("US-DELTA-002 AC12 — Full delegation with all three roles", () => {
   it("resolves designer, builder, and evaluator with distinct models", () => {
-    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -722,7 +731,7 @@ describe("US-DELTA-002 AC12 — Full delegation with all three roles", () => {
   });
 
   it("roleInstanceIds are all non-empty and unique", () => {
-    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -732,7 +741,7 @@ describe("US-DELTA-002 AC12 — Full delegation with all three roles", () => {
   });
 
   it("all assignments reference the correct hostId", () => {
-    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -740,7 +749,7 @@ describe("US-DELTA-002 AC12 — Full delegation with all three roles", () => {
   });
 
   it("each assignment has reasons", () => {
-    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -763,7 +772,7 @@ describe("US-DELTA-002 AC13 — Peer resolution", () => {
       },
     });
 
-    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -775,7 +784,7 @@ describe("US-DELTA-002 AC13 — Peer resolution", () => {
 
   it("omits peer when peer preference is undefined", () => {
     const preset = mkPreset({ peer: undefined });
-    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(preset, healthyInventory, {}, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -811,7 +820,7 @@ describe("US-DELTA-002 AC14 — Combined constraints", () => {
       pins: { builder: "model-gamma" },
       exclusions: { designer: ["model-alpha"], evaluator: ["model-alpha"] },
       maxCostClass: "high",
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
@@ -858,7 +867,7 @@ describe("US-DELTA-002 AC15 — Constraint diversity override", () => {
     // Override with require diversity
     const result = resolveRoles(preset, inventory, {
       diversity: "require",
-    }, freshnessOk);
+    }, freshnessOk, testDelegationId);
 
     expect(result.outcome).toBe("failure");
     if (result.outcome !== "failure") return;
@@ -866,10 +875,10 @@ describe("US-DELTA-002 AC15 — Constraint diversity override", () => {
   });
 });
 
-// ── AC16: Audit — no Pi hardcoding in core fixtures ───────────────────────────
+// ── AC16: Audit — no Pi hardcoding in core fixtures + production source ──────
 
 describe("US-DELTA-002 AC16 — Core audit for Pi hardcoding", () => {
-  // This test verifies that the test fixtures themselves use opaque IDs
+  // Patterns for real provider/model IDs that must NOT appear in production source
   const realModelPatterns = [
     "claude",
     "sonnet",
@@ -891,6 +900,9 @@ describe("US-DELTA-002 AC16 — Core audit for Pi hardcoding", () => {
     "meta",
     "a-proxy",
     "o-proxy",
+    "a-proxy/",
+    "o-proxy/",
+    "deepseek/",
   ];
 
   it("fixture model IDs do not contain real provider/model names", () => {
@@ -908,7 +920,7 @@ describe("US-DELTA-002 AC16 — Core audit for Pi hardcoding", () => {
   });
 
   it("resolution results use only opaque model IDs", () => {
-    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk);
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, testDelegationId);
     expect(result.outcome).toBe("success");
     if (result.outcome !== "success") return;
 
@@ -916,5 +928,198 @@ describe("US-DELTA-002 AC16 — Core audit for Pi hardcoding", () => {
     for (const a of result.assignments) {
       expect(a.modelId).not.toMatch(pattern);
     }
+  });
+
+  it("production source packages/core/src/delta-team/model-resolution.ts has no Pi concrete/provider IDs", async () => {
+    // AC16 requires actual production source audit, not just fixture audit
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const prodSource = fs.readFileSync(
+      path.resolve(__dirname, "../src/delta-team/model-resolution.ts"),
+      "utf8",
+    );
+
+    // These patterns must NOT appear in production source at all
+    const forbiddenPatterns = [
+      /a-proxy[/]\w/i,       // a-proxy/provider
+      /o-proxy[/]\w/i,       // o-proxy/provider
+      /deepseek[/]\w/i,      // deepseek/model
+      /claude[- ]?opus/i,     // claude opus
+      /claude[- ]?sonnet/i,   // claude sonnet
+      /gpt[- ]?[45]/i,        // gpt-4 or gpt-5
+      /gemini/i,              // gemini
+      /llama/i,               // llama
+      /mistral/i,             // mistral
+      /command[- ]?r/i,       // command-r
+      /nova[- ]?/i,           // nova
+      /titan[- ]?/i,          // titan
+      /inflection/i,          // inflection
+    ];
+
+    for (const pattern of forbiddenPatterns) {
+      // Construct a precise message
+      const match = prodSource.match(pattern);
+      expect(match).toBeNull();
+    }
+  });
+});
+
+// ── Delegation-unique roleInstanceId ──────────────────────────────────────────
+
+describe("US-DELTA-002 — Delegation-unique roleInstanceId", () => {
+  it("different delegationIds produce different roleInstanceIds", () => {
+    const result1 = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, "delta-aaa");
+    const result2 = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, "delta-bbb");
+
+    expect(result1.outcome).toBe("success");
+    expect(result2.outcome).toBe("success");
+    if (result1.outcome !== "success" || result2.outcome !== "success") return;
+
+    // Every role's instanceId must differ between the two delegations
+    for (let i = 0; i < result1.assignments.length; i++) {
+      expect(result1.assignments[i]!.roleInstanceId).not.toBe(
+        result2.assignments[i]!.roleInstanceId,
+      );
+    }
+  });
+
+  it("roleInstanceIds contain the delegationId", () => {
+    const result = resolveRoles(mkPreset(), healthyInventory, {}, freshnessOk, "my-delegation");
+    expect(result.outcome).toBe("success");
+    if (result.outcome !== "success") return;
+
+    for (const a of result.assignments) {
+      expect(a.roleInstanceId).toContain("my-delegation");
+    }
+  });
+});
+
+// ── Ranking order regression — conflict cases ────────────────────────────────
+
+describe("US-DELTA-002 — Ranking order: pin → preference → diversity → cost → lexical", () => {
+  it("preference order beats diversity for prefer (conflict regression)", () => {
+    // When two models have different preference indices, the higher-preference
+    // model must win even if it is already used and the lower one is unused.
+    const inventory = mkInventory("test-host", "2026-07-22T10:00:00.000Z", [
+      mkModel("model-first", true, ["reasoning"]),
+      mkModel("model-second", true, ["reasoning"]),
+      mkModel("model-gamma", true, ["coding"], "medium"),
+      mkModel("model-epsilon", true, ["review"], "high"),
+    ]);
+    const preset = mkPreset({
+      roles: {
+        designer: {
+          preferredModelIds: ["model-first", "model-second"],
+          requiredTags: ["reasoning"],
+          diversity: "prefer",
+        },
+        builder: {
+          preferredModelIds: ["model-first"],
+          requiredTags: ["reasoning"],
+          diversity: "prefer",
+        },
+        evaluator: {
+          preferredModelIds: ["model-epsilon"],
+          requiredTags: ["review"],
+          diversity: "prefer",
+        },
+      },
+    });
+
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, "rank-test");
+    expect(result.outcome).toBe("success");
+    if (result.outcome !== "success") return;
+
+    const designer = result.assignments.find(a => a.role === "designer");
+    const builder = result.assignments.find(a => a.role === "builder");
+
+    // Designer picks model-first (prefIndex 0)
+    expect(designer!.modelId).toBe("model-first");
+
+    // Builder's prefs: [model-first]. model-first is already used.
+    // Builder can also use model-second (has reasoning tag) but it's not in prefs.
+    // Since model-first is the only preferred model, builder picks it (used but preferred).
+    // This proves preference beats diversity.
+    expect(builder!.modelId).toBe("model-first");
+    expect(builder!.source).toBe("availability-fallback");
+  });
+
+  it("same preference tier: unused beats used (diversity secondary)", () => {
+    // When two models have the SAME preference index (both first preference),
+    // the unused one should win.
+    // The only way to get same prefIndex is for both to be unlisted (MAX_SAFE_INTEGER).
+    const inventory = mkInventory("test-host", "2026-07-22T10:00:00.000Z", [
+      mkModel("model-a", true, []),
+      mkModel("model-b", true, []),
+      mkModel("model-c", true, []),
+    ]);
+    const preset = mkPreset({
+      roles: {
+        designer: {
+          preferredModelIds: ["model-a"],
+          requiredTags: [],
+          diversity: "prefer",
+        },
+        builder: {
+          preferredModelIds: [],
+          requiredTags: [],
+          diversity: "prefer",
+        },
+        evaluator: {
+          preferredModelIds: [],
+          requiredTags: [],
+          diversity: "prefer",
+        },
+      },
+    });
+
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, "rank-test-2");
+    expect(result.outcome).toBe("success");
+    if (result.outcome !== "success") return;
+
+    const designer = result.assignments.find(a => a.role === "designer");
+    const builder = result.assignments.find(a => a.role === "builder");
+    const evaluator = result.assignments.find(a => a.role === "evaluator");
+
+    // Designer gets model-a (only pref)
+    expect(designer!.modelId).toBe("model-a");
+    // Builder and evaluator have no preferences. All have same prefIndex=MAX.
+    // With diversity:prefer, builder picks model-b (unused, lexical first of unused)
+    // evaluator picks model-c (unused). model-a is used, gets diversity penalty.
+    expect(builder!.modelId).not.toBe("model-a");
+    expect(evaluator!.modelId).not.toBe("model-a");
+  });
+
+  it("require diversity is a hard block, not just ranking", () => {
+    // With require diversity, no amount of preference can override the hard block.
+    const inventory = mkInventory("test-host", "2026-07-22T10:00:00.000Z", [
+      mkModel("model-only", true, []),
+    ]);
+    const preset = mkPreset({
+      roles: {
+        designer: {
+          preferredModelIds: ["model-only"],
+          requiredTags: [],
+          diversity: "require",
+        },
+        builder: {
+          preferredModelIds: ["model-only"],
+          requiredTags: [],
+          diversity: "require",
+        },
+        evaluator: {
+          preferredModelIds: ["model-only"],
+          requiredTags: [],
+          diversity: "require",
+        },
+      },
+    });
+
+    const result = resolveRoles(preset, inventory, {}, freshnessOk, "rank-hard");
+    expect(result.outcome).toBe("failure");
+    if (result.outcome !== "failure") return;
+    expect(result.reason.toLowerCase()).toContain("diversity");
   });
 });

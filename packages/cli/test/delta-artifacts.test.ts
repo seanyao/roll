@@ -55,40 +55,31 @@ describe("US-DELTA-002 — CLI preset loader", () => {
     expect(result).toEqual([]);
   });
 
-  it("parses the Pi-balanced example preset", async () => {
+  it("parses the Pi-balanced example preset with flow-array syntax", async () => {
+    // Use the exact flow-array syntax from the actual example file: [a, b]
     const yaml = `schema: roll-delta-preset/v1
 presets:
   - id: pi-balanced-v1
     hostId: pi
     roles:
       designer:
-        preferredModelIds:
-          - a-proxy/claude-opus-4-8
-          - o-proxy/gpt-5.6-terra
+        preferredModelIds: [a-proxy/claude-opus-4-8, o-proxy/gpt-5.6-terra]
         requiredTags:
           - reasoning
         diversity: prefer
       builder:
-        preferredModelIds:
-          - a-proxy/claude-sonnet-5
-          - o-proxy/gpt-5.6-sol
-          - deepseek/deepseek-v4-pro
+        preferredModelIds: [a-proxy/claude-sonnet-5, o-proxy/gpt-5.6-sol, deepseek/deepseek-v4-pro]
         requiredTags:
           - coding
         preferredCostClass: medium
         diversity: prefer
       evaluator:
-        preferredModelIds:
-          - o-proxy/gpt-5.6-terra
-          - a-proxy/claude-opus-4-8
-          - deepseek/deepseek-v4-pro
+        preferredModelIds: [o-proxy/gpt-5.6-terra, a-proxy/claude-opus-4-8, deepseek/deepseek-v4-pro]
         requiredTags:
           - review
         diversity: require
       peer:
-        preferredModelIds:
-          - deepseek/deepseek-v4-flash
-          - o-proxy/gpt-5.6-luna
+        preferredModelIds: [deepseek/deepseek-v4-flash, o-proxy/gpt-5.6-luna]
         preferredCostClass: low
         diversity: prefer
 `;
@@ -102,7 +93,7 @@ presets:
     expect(p.hostId).toBe("pi");
     expect(p.schema).toBe("roll-delta-preset/v1");
 
-    // Designer
+    // Designer — match plan 4.4 exactly
     expect(p.roles.designer.preferredModelIds).toEqual([
       "a-proxy/claude-opus-4-8",
       "o-proxy/gpt-5.6-terra",
@@ -110,7 +101,7 @@ presets:
     expect(p.roles.designer.requiredTags).toEqual(["reasoning"]);
     expect(p.roles.designer.diversity).toBe("prefer");
 
-    // Builder
+    // Builder — match plan 4.4 exactly
     expect(p.roles.builder.preferredModelIds).toEqual([
       "a-proxy/claude-sonnet-5",
       "o-proxy/gpt-5.6-sol",
@@ -120,7 +111,7 @@ presets:
     expect(p.roles.builder.preferredCostClass).toBe("medium");
     expect(p.roles.builder.diversity).toBe("prefer");
 
-    // Evaluator
+    // Evaluator — match plan 4.4 exactly
     expect(p.roles.evaluator.preferredModelIds).toEqual([
       "o-proxy/gpt-5.6-terra",
       "a-proxy/claude-opus-4-8",
@@ -129,7 +120,7 @@ presets:
     expect(p.roles.evaluator.requiredTags).toEqual(["review"]);
     expect(p.roles.evaluator.diversity).toBe("require");
 
-    // Peer
+    // Peer — match plan 4.4 exactly
     expect(p.peer).toBeDefined();
     expect(p.peer!.preferredModelIds).toEqual([
       "deepseek/deepseek-v4-flash",
@@ -137,6 +128,96 @@ presets:
     ]);
     expect(p.peer!.preferredCostClass).toBe("low");
     expect(p.peer!.diversity).toBe("prefer");
+
+    // All preferredModelIds must be non-empty per plan 4.4
+    for (const role of ["designer", "builder", "evaluator"] as const) {
+      expect(p.roles[role].preferredModelIds.length).toBeGreaterThan(0);
+    }
+    expect(p.peer!.preferredModelIds.length).toBeGreaterThan(0);
+  });
+
+  it("parses flow-array with single element", async () => {
+    const yaml = `schema: roll-delta-preset/v1
+presets:
+  - id: p1
+    hostId: h1
+    roles:
+      designer:
+        preferredModelIds: [only-model]
+        diversity: allow
+      builder:
+        preferredModelIds: [b1]
+        diversity: allow
+      evaluator:
+        preferredModelIds: [e1]
+        diversity: allow
+`;
+    const path = setupTempPreset(yaml);
+    const presets = await loadWithHome(tmpDir);
+    expect(presets[0]!.roles.designer.preferredModelIds).toEqual(["only-model"]);
+    expect(presets[0]!.roles.builder.preferredModelIds).toEqual(["b1"]);
+  });
+
+  it("parses empty flow-array []", async () => {
+    const yaml = `schema: roll-delta-preset/v1
+presets:
+  - id: p1
+    hostId: h1
+    roles:
+      designer:
+        preferredModelIds: []
+        diversity: allow
+      builder:
+        preferredModelIds: []
+        diversity: allow
+      evaluator:
+        preferredModelIds: []
+        diversity: allow
+`;
+    const path = setupTempPreset(yaml);
+    const presets = await loadWithHome(tmpDir);
+    expect(presets[0]!.roles.designer.preferredModelIds).toEqual([]);
+  });
+
+  it("rejects invalid diversity value", async () => {
+    const yaml = `schema: roll-delta-preset/v1
+presets:
+  - id: p1
+    hostId: h1
+    roles:
+      designer:
+        preferredModelIds: []
+        diversity: unknown-value
+      builder:
+        preferredModelIds: []
+        diversity: allow
+      evaluator:
+        preferredModelIds: []
+        diversity: allow
+`;
+    setupTempPreset(yaml);
+    await expect(loadWithHome(tmpDir)).rejects.toThrow("unknown-value");
+  });
+
+  it("rejects invalid preferredCostClass value", async () => {
+    const yaml = `schema: roll-delta-preset/v1
+presets:
+  - id: p1
+    hostId: h1
+    roles:
+      designer:
+        preferredModelIds: []
+        diversity: allow
+      builder:
+        preferredModelIds: []
+        preferredCostClass: free
+        diversity: allow
+      evaluator:
+        preferredModelIds: []
+        diversity: allow
+`;
+    setupTempPreset(yaml);
+    await expect(loadWithHome(tmpDir)).rejects.toThrow("free");
   });
 
   it("parses multiple presets", async () => {
@@ -233,6 +314,63 @@ presets:
 
     setupTempPreset(yaml);
     await expect(loadWithHome(tmpDir)).rejects.toThrow("evaluator");
+  });
+
+  it("parses the actual ~/.roll/delta-team/presets.yaml.example file content", async () => {
+    // Read the actual example file from disk and copy it into a temp
+    // ROLL_HOME as presets.yaml so the loader can parse it.
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const examplePath = path.join(os.homedir(), ".roll", "delta-team", "presets.yaml.example");
+    if (!fs.existsSync(examplePath)) {
+      // Skip if example doesn't exist on this machine
+      return;
+    }
+    const content = fs.readFileSync(examplePath, "utf8");
+    // Set up a temp dir with the example content as presets.yaml
+    tmpDir = join(tmpdir(), `roll-test-${randomUUID()}`);
+    mkdirSync(join(tmpDir, "delta-team"), { recursive: true });
+    writeFileSync(join(tmpDir, "delta-team", "presets.yaml"), content, "utf8");
+
+    const presets = await loadWithHome(tmpDir);
+
+    expect(presets).toHaveLength(1);
+    const p = presets[0]!;
+    expect(p.id).toBe("pi-balanced-v1");
+    expect(p.hostId).toBe("pi");
+
+    // Verify all preferredModelIds match plan 4.4 and are non-empty
+    expect(p.roles.designer.preferredModelIds).toEqual([
+      "a-proxy/claude-opus-4-8",
+      "o-proxy/gpt-5.6-terra",
+    ]);
+    expect(p.roles.builder.preferredModelIds).toEqual([
+      "a-proxy/claude-sonnet-5",
+      "o-proxy/gpt-5.6-sol",
+      "deepseek/deepseek-v4-pro",
+    ]);
+    expect(p.roles.evaluator.preferredModelIds).toEqual([
+      "o-proxy/gpt-5.6-terra",
+      "a-proxy/claude-opus-4-8",
+      "deepseek/deepseek-v4-pro",
+    ]);
+    expect(p.peer!.preferredModelIds).toEqual([
+      "deepseek/deepseek-v4-flash",
+      "o-proxy/gpt-5.6-luna",
+    ]);
+
+    // All must be non-empty
+    for (const role of ["designer", "builder", "evaluator"] as const) {
+      expect(p.roles[role].preferredModelIds.length).toBeGreaterThan(0);
+    }
+    expect(p.peer!.preferredModelIds.length).toBeGreaterThan(0);
+
+    // Verify diversities
+    expect(p.roles.designer.diversity).toBe("prefer");
+    expect(p.roles.builder.diversity).toBe("prefer");
+    expect(p.roles.evaluator.diversity).toBe("require");
+    expect(p.peer!.diversity).toBe("prefer");
   });
 
   it("handles empty roles gracefully", async () => {

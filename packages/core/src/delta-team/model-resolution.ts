@@ -80,17 +80,19 @@ interface Candidate {
  *
  * Pure function — no I/O, no host API, no Date.now, no side effects.
  *
- * @param preset     Machine-local preset with role preferences.
- * @param inventory  Host-supplied live model inventory.
- * @param constraints Normalized owner constraints (pins, exclusions, caps, diversity).
- * @param freshness  nowMs + maxInventoryAgeMs for staleness check.
- * @returns          Success with assignments, or failure with reason+detail.
+ * @param preset       Machine-local preset with role preferences.
+ * @param inventory    Host-supplied live model inventory.
+ * @param constraints  Normalized owner constraints (pins, exclusions, caps, diversity).
+ * @param freshness    nowMs + maxInventoryAgeMs for staleness check.
+ * @param delegationId Non-empty delegation identifier used to generate delegation-unique roleInstanceIds.
+ * @returns            Success with assignments, or failure with reason+detail.
  */
 export function resolveRoles(
   preset: MachineDeltaPreset,
   inventory: HostModelInventory,
   constraints: OwnerConstraints,
   freshness: InventoryFreshnessParams,
+  delegationId: string,
 ): ResolutionResult {
   // ── 0. Validate hostId match ──────────────────────────────────────────────
   if (preset.hostId !== inventory.hostId) {
@@ -149,11 +151,10 @@ export function resolveRoles(
     const result = resolveOneRole(
       role,
       prefs!,
-      preset,
       inventory,
       constraints,
       assignedModelIds,
-      freshness,
+      delegationId,
     );
 
     if (result.outcome === "failure") {
@@ -181,11 +182,10 @@ type SingleRoleResult = SingleRoleSuccess | ResolutionResult;
 function resolveOneRole(
   role: DeltaRole,
   prefs: RoleModelPreference,
-  _preset: MachineDeltaPreset,
   inventory: HostModelInventory,
   constraints: OwnerConstraints,
   alreadyAssigned: ReadonlySet<string>,
-  _freshness: InventoryFreshnessParams,
+  delegationId: string,
 ): SingleRoleResult {
   const reasons: string[] = [];
 
@@ -253,7 +253,7 @@ function resolveOneRole(
       outcome: "success",
       assignment: {
         role,
-        roleInstanceId: `ri-${role}`,
+        roleInstanceId: `ri-${delegationId}-${role}`,
         hostId: inventory.hostId,
         modelId: pinnedModel.id,
         source: "user-pin",
@@ -326,7 +326,7 @@ function resolveOneRole(
       outcome: "success",
       assignment: {
         role,
-        roleInstanceId: `ri-${role}`,
+        roleInstanceId: `ri-${delegationId}-${role}`,
         hostId: inventory.hostId,
         modelId: c.model.id,
         source,
@@ -357,15 +357,19 @@ function resolveOneRole(
 // ── Candidate ranking ─────────────────────────────────────────────────────────
 
 /**
- * Rank candidates by:
- * 1. Preset preference order (index in preferredModelIds)
- * 2. Diversity (strong penalty for already-used models when prefer/require)
- * 3. Cost preference match
+ * Rank candidates by (per ratified plan §4.3 step 5):
+ * 1. Preset preference order (index in preferredModelIds) — primary
+ * 2. Diversity (secondary priority for "prefer": among same preference tier,
+ *    unused models rank ahead of already-assigned models)
+ * 3. Cost preference match (preferredCostClass match boosts)
  * 4. Cost class ordinal (lower cost preferred when no explicit preference)
  * 5. Stable lexical tie-break (model id)
  *
- * The diversity penalty for "prefer" is strong enough to push an already-used
- * model below any unused model, regardless of preference order difference.
+ * For "require" diversity, ranking is the same but the caller enforces
+ * the hard diversity block before picking a used model.
+ * For "prefer", diversity is a tie-breaker AFTER preference order —
+ * a higher-preference model that is already used still beats a lower-preference
+ * unused model.
  */
 function rankCandidates(
   candidates: HostModelDescriptor[],
@@ -389,17 +393,15 @@ function rankCandidates(
 
   // Sort with stable comparator
   return withPref.sort((a, b) => {
-    // 1. Diversity penalty: for prefer/require, already-used models get
-    //    a large penalty so they lose to any non-used model.
-    //    For "allow", no penalty.
+    // 1. Preference order (lower is better; unlisted = MAX) — PRIMARY
+    if (a.prefIndex !== b.prefIndex) return a.prefIndex - b.prefIndex;
+
+    // 2. Diversity: same preference tier, unused > used (prefer/require only)
     if (diversity !== "allow") {
       const aPenalty = alreadyAssigned.has(a.model.id) ? 1 : 0;
       const bPenalty = alreadyAssigned.has(b.model.id) ? 1 : 0;
       if (aPenalty !== bPenalty) return aPenalty - bPenalty;
     }
-
-    // 2. Preference order (lower is better; unlisted = MAX)
-    if (a.prefIndex !== b.prefIndex) return a.prefIndex - b.prefIndex;
 
     // 3. Cost class match (preferred cost class gets priority)
     const aCostMatch = preferredCostClass !== undefined && a.model.costClass === (preferredCostClass as string) ? 0 : 1;

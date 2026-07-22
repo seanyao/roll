@@ -278,18 +278,30 @@ function parseRolePreference(
         const v = t.value;
         if (v === "low" || v === "medium" || v === "high") {
           preferredCostClass = v;
+        } else {
+          throw new ParseError(
+            `Invalid preferredCostClass "${v}". Must be "low", "medium", or "high".`,
+            filePath,
+            t.line,
+          );
         }
       } else if (t.key === "diversity" && t.value) {
         const v = t.value;
         if (v === "allow" || v === "prefer" || v === "require") {
           diversity = v;
+        } else {
+          throw new ParseError(
+            `Invalid diversity "${v}". Must be "allow", "prefer", or "require".`,
+            filePath,
+            t.line,
+          );
         }
       } else if (t.key === "preferredModelIds") {
-        preferredModelIds = parseStringSequence(tokens, i + 1, indent + 2);
+        preferredModelIds = parseModelIdsValue(tokens, i, indent, filePath);
         i = consumeIndentedBlock(tokens, i + 1, indent);
         continue;
       } else if (t.key === "requiredTags") {
-        requiredTags = parseStringSequence(tokens, i + 1, indent + 2);
+        requiredTags = parseModelIdsValue(tokens, i, indent, filePath);
         i = consumeIndentedBlock(tokens, i + 1, indent);
         continue;
       }
@@ -298,6 +310,43 @@ function parseRolePreference(
   }
 
   return { preferredModelIds, requiredTags, preferredCostClass, diversity };
+}
+
+/**
+ * Parse a model-ids / tags value that may be either:
+ * - A flow-array inline value: `[a, b, c]`
+ * - A block sequence at the next indent level: `- a\n  - b`
+ *
+ * Returns a non-null array (may be empty if the inline value is `[]`).
+ * Throws ParseError if the value is present but cannot be parsed as a list.
+ */
+function parseModelIdsValue(
+  tokens: Token[],
+  currentIdx: number,
+  parentIndent: number,
+  filePath: string,
+): string[] {
+  const current = tokens[currentIdx];
+  if (current === undefined) return [];
+
+  // Case 1: Inline flow-array value like `[a, b, c]` or `[]`
+  if (current.value !== null && current.value.startsWith("[") && current.value.endsWith("]")) {
+    const inner = current.value.slice(1, -1).trim();
+    if (inner.length === 0) return [];
+    return inner.split(",").map(s => s.trim()).filter(s => s.length > 0);
+  }
+
+  // Case 2: Empty inline like `preferredModelIds:` with no value → block sequence follows
+  if (current.value === null || current.value === "") {
+    return parseStringSequence(tokens, currentIdx + 1, parentIndent + 2);
+  }
+
+  // Case 3: Scalar value that is not an array — fail loud
+  throw new ParseError(
+    `Expected a list for "${current.key}", got "${current.value}". Use flow-array syntax "[a, b]" or a block sequence.`,
+    filePath,
+    current.line,
+  );
 }
 
 function parseStringSequence(tokens: Token[], startIdx: number, itemIndent: number): string[] {

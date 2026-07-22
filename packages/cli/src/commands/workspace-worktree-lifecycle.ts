@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   DEFAULT_BRANCH_CANARY_MAX,
@@ -225,9 +225,16 @@ function ownershipForFact(
     throw new Error(`workspace_worktree_identity_mismatch: ${manifest.workspaceId}/${manifest.storyId}/${target.alias}`);
   }
   const expectedPrefix = resolve(workspaceRoot, "issues", manifest.storyId);
+  const expectedPath = resolve(expectedPrefix, target.alias);
   const factPath = resolve(fact.path);
-  if (factPath !== resolve(expectedPrefix, target.alias)) {
+  if (factPath !== expectedPath) {
     throw new Error(`workspace_worktree_path_mismatch: ${manifest.workspaceId}/${manifest.storyId}/${target.alias}`);
+  }
+  if (existsSync(factPath)) {
+    const canonicalExpected = resolve(realpathSync(workspaceRoot), "issues", manifest.storyId, target.alias);
+    if (realpathSync(factPath) !== canonicalExpected) {
+      throw new Error(`workspace_worktree_path_mismatch: ${manifest.workspaceId}/${manifest.storyId}/${target.alias}`);
+    }
   }
   return {
     workspaceId: manifest.workspaceId,

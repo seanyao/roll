@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   auditWorktrees,
@@ -239,6 +242,77 @@ describe("US-WS-011a Workspace worktree audit", () => {
       branch: "loop/cycle-shared",
     }]);
     expect(output.summary).toMatchObject({ worktrees: 2, ephemeralBranches: 1, canaryTotal: 3 });
+  });
+
+  it("rejects an Issue repository leg whose canonical path escapes through a symlink", () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-workspace-audit-root-"));
+    const outside = mkdtempSync(join(tmpdir(), "roll-workspace-audit-outside-"));
+    const issueRoot = join(root, "issues", "US-A");
+    mkdirSync(issueRoot, { recursive: true });
+    symlinkSync(outside, join(issueRoot, "primary"));
+    const binding = {
+      schema: REPOSITORY_BINDING_V1,
+      repoId: "repo-shared",
+      alias: "primary",
+      remote: "https://example.test/shared.git",
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    } as const;
+    const workspace: WorkspaceManifest = {
+      schema: WORKSPACE_MANIFEST_V1,
+      workspaceId: "ws-alpha",
+      displayName: "Alpha",
+      requirements: [],
+      repositories: [binding],
+    };
+    const issue: IssueManifest = {
+      schema: ISSUE_MANIFEST_V1,
+      workspaceId: "ws-alpha",
+      storyId: "US-A",
+      requirements: [],
+      repositories: [{
+        repoId: "repo-shared",
+        alias: "primary",
+        access: "write",
+        requiredDelivery: true,
+        noChangePolicy: "changes_required",
+      }],
+    };
+    try {
+      expect(() => auditWorkspaceWorktrees({
+        selectedWorkspaceId: "ws-alpha",
+        selectedWorkspaceRoot: root,
+        rollHome: "/roll-home",
+      }, {
+        inspectWorkspaces: () => [{
+          workspaceId: "ws-alpha",
+          root,
+          canonicalRoot: root,
+          consistency: "consistent",
+        }],
+        readWorkspace: () => workspace,
+        listIssueIds: () => ["US-A"],
+        readIssueManifest: () => issue,
+        readRepositoryBoundFacts: () => new Map([["primary", {
+          workspaceId: "ws-alpha",
+          storyId: "US-A",
+          repoId: "repo-shared",
+          baseSha: HEAD,
+          access: "write",
+          path: join(issueRoot, "primary"),
+          workBranch: "roll/ws-alpha/US-A",
+        }]]),
+        readIssueCompletionEvidence: () => ({ repositoryFacts: [], integrationAcceptances: [] }),
+        storyActive: () => false,
+        resolveCache: () => ({ repoId: "repo-shared", cachePath: "/roll-home/repos/repo-shared.git", integrationBranch: "main" }),
+        auditRepository: () => { throw new Error("audit must not reach an escaped path"); },
+        nowISO: () => "2026-07-22T00:00:00.000Z",
+      })).toThrow("workspace_worktree_path_mismatch");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("exposes the registry-resolved Workspace audit through the CLI without falling back to repo-local layout", () => {

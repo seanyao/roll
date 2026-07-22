@@ -5,6 +5,7 @@ export * from "./requirement-source-store.js";
 export * from "./requirement-archive-audit.js";
 export * from "./repository-cache.js";
 export * from "./issue-worktrees.js";
+export * from "./issue-completion-store.js";
 export * from "./issue-story-contract.js";
 export * from "./issue-worktree-git.js";
 export * from "./git.js";

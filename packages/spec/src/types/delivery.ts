@@ -192,6 +192,12 @@ export type RepositoryMergeEvidence =
       readonly mergeCommit?: string;
     });
 
+export const REPOSITORY_MERGE_EVIDENCE_RECORDED = "issue:repository_merge_evidence_recorded" as const;
+export type RepositoryMergeEvidenceRecordedEvent = RepositoryMergeEvidence & {
+  readonly type: typeof REPOSITORY_MERGE_EVIDENCE_RECORDED;
+  readonly ts: number;
+};
+
 export interface IssueIntegrationAcceptanceEvidence {
   readonly workspaceId: string;
   readonly storyId: string;
@@ -200,6 +206,12 @@ export interface IssueIntegrationAcceptanceEvidence {
   readonly artifactPath: string;
   readonly recordedAt: number;
 }
+
+export const ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED = "issue:integration_acceptance_evidence_recorded" as const;
+export type IssueIntegrationAcceptanceEvidenceRecordedEvent = IssueIntegrationAcceptanceEvidence & {
+  readonly type: typeof ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED;
+  readonly ts: number;
+};
 
 export interface IssueRepositoryCompletion {
   readonly repoId: string;

@@ -2,8 +2,13 @@
  * US-DELTA-003 — Delta delegation allocation, lease, and artifact I/O primitives.
  *
  * Extends the US-DELTA-002 preset loader with host-guided delegation frame
- * allocation, atomic no-clobber lease claim, recovery markers, and immutable
- * artifact writing. Deep artifact validation belongs to US-DELTA-004.
+ * allocation, atomic no-clobber lease claim (via @roll/core claimStoryLease),
+ * recovery markers, and immutable artifact writing. Deep artifact validation
+ * belongs to US-DELTA-004.
+ *
+ * Single-owner lease truth: `.roll/loop/story-leases.json`. No per-story
+ * lease files. The lock file (`story-leases.json.lock`) is a short-life
+ * synchronisation mechanism only — it is NOT a second state store.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -18,11 +23,10 @@ import {
   openSync,
   closeSync,
   fdatasyncSync,
-  linkSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { findFeatureFiles, liveEpicOf } from "./archive.js";
-import { setLease, removeLease } from "@roll/core";
+import { claimStoryLease, releaseStoryLease, readLeases } from "@roll/core";
 import type {
   DelegationTrigger,
   DeliveryTopology,
@@ -87,220 +91,100 @@ export function resolveExistingUniqueCardArchiveDir(
 
 // ── Lease operations ─────────────────────────────────────────────────────────
 
-export interface HostDelegationLease {
-  storyId: string;
-  state: "in_flight";
-  ownerKind: "host-delegation";
-  delegationId: string;
-  runId: string;
-  claimedAt: number;
-}
-
-
-
-/** Lease file path under the project's .roll/loop/host-delegation-leases/. */
-export function leaseFilePath(projectPath: string, storyId: string): string {
-  return join(projectPath, ".roll", "loop", "host-delegation-leases", `${storyId}.json`);
+/**
+ * Shared story-leases.json path — the single lease truth for all sources
+ * (cycle, human, supervisor, host-delegation).
+ */
+export function storyLeasesPath(projectPath: string): string {
+  return join(projectPath, ".roll", "loop", "story-leases.json");
 }
 
 /**
- * Check whether a live cycle lease exists for a story in the shared
- * story-leases.json. Exported so cycle readers can also check for
- * host-delegation leases (see readHostDelegationLease below).
- *
- * Implementation note: this is the delta-side of the mutual exclusion
- * contract (plan §6.1 step 2). Full cycle-side integration (rejecting
- * a cycle claim when a host-delegation lease is live) is deferred to
- * a cross-loop integration card — the cycle code is in a different
- * domain and out of scope for US-DELTA-003.
+ * Check whether any live lease exists for a story in the shared truth.
+ * The claimStoryLease no-clobber contract means any entry = the story is owned.
  */
-export function hasLiveCycleLease(projectPath: string, storyId: string): boolean {
-  const leasePath = join(projectPath, ".roll", "loop", "story-leases.json");
-  if (!existsSync(leasePath)) return false;
+export function hasLiveLease(projectPath: string, storyId: string): boolean {
+  const path = storyLeasesPath(projectPath);
+  if (!existsSync(path)) return false;
 
   try {
-    const raw = JSON.parse(readFileSync(leasePath, "utf8"));
-    const entry = raw[storyId];
-    if (!entry || typeof entry.source !== "string") return false;
-    // cycle claims are authoritative — always block
-    if (entry.source === "cycle") return true;
-    // host-delegation claims must cross-check the per-story lease file:
-    // if the per-story file is gone, the story-leases.json entry is stale and should not block
-    if (entry.source === "host-delegation") {
-      const hdLeasePath = leaseFilePath(projectPath, storyId);
-      return existsSync(hdLeasePath);
-    }
+    const leases = readLeases(path);
+    return leases[storyId] !== undefined;
   } catch {
-    // best-effort
+    return false;
   }
-  return false;
-}
-
-/**
- * Check whether a live host-delegation per-story lease file exists.
- * Exported so cycle readers can also check for host-delegation leases
- * (bidirectional atomic exclusion requires both sides to check this file).
- */
-export function hasHostDelegationLeaseFile(projectPath: string, storyId: string): boolean {
-  return existsSync(leaseFilePath(projectPath, storyId));
 }
 
 /**
  * Attempt to atomically claim a host-delegation lease for a story.
- * Uses a per-story lease file with temp+fsync+hardlink protocol.
  *
- * Exclusion protocol (plan §6.1 step 2):
- * 1. Stamp story-leases.json FIRST (before hardlink) so cycle readers see the claim.
- * 2. Hardlink the per-story lease file (atomic no-clobber).
- * 3. If hardlink fails → undo the stamp and return conflict.
+ * Delegates to the core claimStoryLease primitive — the single no-clobber
+ * atomic claim on the shared story-leases.json. No per-story files.
  *
- * The story-leases.json RMW has a narrow race window between read and write
- * (same as the pre-existing cycle claim path). Full elimination requires the
- * cycle side to also check hasHostDelegationLeaseFile() before claiming —
- * this is the single no-clobber ownership truth for host-delegation.
- *
- * Returns "claimed" on success, "exists" if a lease file already exists,
- * "conflict" on concurrent write collision.
+ * Returns "claimed" on success, "exists" if any lease already exists for
+ * the story (cycle, human, supervisor, or another host-delegation).
  */
 export function claimHostDelegationLease(
   projectPath: string,
-  lease: HostDelegationLease,
-): "claimed" | "conflict" | "exists" {
-  // Mutual exclusion: reject if a live cycle lease exists for this story
-  if (hasLiveCycleLease(projectPath, lease.storyId)) {
-    return "exists";
+  storyId: string,
+  delegationId: string,
+  runId: string,
+): "claimed" | "exists" {
+  const path = storyLeasesPath(projectPath);
+
+  // Ensure loop directory exists for the lock file
+  const loopDir = dirname(path);
+  if (!existsSync(loopDir)) {
+    mkdirSync(loopDir, { recursive: true });
   }
 
-  const leasePath = leaseFilePath(projectPath, lease.storyId);
-  const dir = dirname(leasePath);
-
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-
-  // Check if per-story lease file already exists (atomic no-replace gate)
-  if (existsSync(leasePath)) {
-    return "exists";
-  }
-
-  // STEP 1: Stamp story-leases.json FIRST — before the hardlink — so that
-  // a concurrent cycle reader sees the host-delegation claim and blocks.
-  // This minimises the race window (cycle could still stamp between our
-  // hasLiveCycleLease check and this write, but that is the same RMW race
-  // the cycle path has always had).
-  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
-  let stampApplied = false;
-  try {
-    // Re-check under the same read: if a cycle entry appeared since our
-    // earlier check, bail out before stamping.
-    const recheckLeases = JSON.parse(
-      existsSync(storyLeasesPath) ? readFileSync(storyLeasesPath, "utf8") : "{}",
-    );
-    const recheckEntry = recheckLeases[lease.storyId];
-    if (recheckEntry && typeof recheckEntry.source === "string" && recheckEntry.source === "cycle") {
-      return "exists";
-    }
-
-    setLease(storyLeasesPath, lease.storyId, {
-      pid: process.pid,
-      source: "host-delegation",
-      claimedAt: lease.claimedAt,
-    });
-    stampApplied = true;
-  } catch {
-    // If stamp fails, don't proceed — we can't provide bidirectional visibility
-    return "exists";
-  }
-
-  // STEP 2: Hardlink the per-story lease file (atomic, deterministic winner)
-  const leaseEntry = {
+  const result = claimStoryLease(path, storyId, {
     pid: process.pid,
-    claimedAt: lease.claimedAt,
-    storyId: lease.storyId,
-    state: "in_flight",
-    ownerKind: "host-delegation",
-    delegationId: lease.delegationId,
-    runId: lease.runId,
-  };
+    claimedAt: Date.now(),
+    source: "host-delegation",
+    delegationId,
+    runId,
+  });
 
-  const tmpPath = `${leasePath}.tmp.${randomUUID()}`;
-  writeFileSync(tmpPath, JSON.stringify(leaseEntry, null, 2) + "\n", "utf8");
-
-  const tmpFd = openSync(tmpPath, "r+");
-  fdatasyncSync(tmpFd);
-  closeSync(tmpFd);
-
-  try {
-    linkSync(tmpPath, leasePath);
-  } catch {
-    try { unlinkSync(tmpPath); } catch { /* best-effort */ }
-    // Hardlink failed → undo stamp and report conflict
-    if (stampApplied) {
-      try { removeLease(storyLeasesPath, lease.storyId, "host-delegation"); } catch { /* best-effort */ }
-    }
-    return "conflict";
-  }
-
-  // fsync parent directory
-  const dirFd = openSync(dir, "r");
-  fdatasyncSync(dirFd);
-  closeSync(dirFd);
-
-  // Remove temp
-  try { unlinkSync(tmpPath); } catch { /* best-effort */ }
-
-  return "claimed";
+  if (result.status === "claimed") return "claimed";
+  return "exists";
 }
 
 /**
  * Release a matching host-delegation lease. Only removes if the delegationId matches.
+ *
+ * Delegates to core releaseStoryLease with match-only contract.
  */
 export function releaseHostDelegationLease(
   projectPath: string,
   storyId: string,
   delegationId: string,
 ): boolean {
-  const leasePath = leaseFilePath(projectPath, storyId);
-  if (!existsSync(leasePath)) return false;
-
-  try {
-    const raw = JSON.parse(readFileSync(leasePath, "utf8"));
-    if (raw.delegationId !== delegationId) return false;
-    if (raw.ownerKind !== "host-delegation") return false;
-  } catch {
-    return false;
-  }
-
-  try { unlinkSync(leasePath); } catch { return false; }
-
-  // Clean up the shared story-leases.json entry (fail-loud — same atomicity as claim).
-  // Scoped to source: "host-delegation" so it never touches human/supervisor claims.
-  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
-  removeLease(storyLeasesPath, storyId, "host-delegation");
-
-  return true;
+  return releaseStoryLease(storyLeasesPath(projectPath), storyId, {
+    source: "host-delegation",
+    delegationId,
+  });
 }
 
 /**
- * Read host-delegation lease for a story, if present.
+ * Read host-delegation lease for a story from the shared lease truth.
  */
 export function readHostDelegationLease(
   projectPath: string,
   storyId: string,
-): HostDelegationLease | null {
-  const leasePath = leaseFilePath(projectPath, storyId);
-  if (!existsSync(leasePath)) return null;
+): { storyId: string; delegationId: string; runId: string; claimedAt: number } | null {
+  const path = storyLeasesPath(projectPath);
+  if (!existsSync(path)) return null;
 
   try {
-    const raw = JSON.parse(readFileSync(leasePath, "utf8"));
-    if (raw.ownerKind !== "host-delegation") return null;
+    const leases = readLeases(path);
+    const entry = leases[storyId];
+    if (!entry || entry.source !== "host-delegation" || !entry.delegationId) return null;
     return {
       storyId,
-      state: "in_flight",
-      ownerKind: "host-delegation",
-      delegationId: raw.delegationId,
-      runId: raw.runId,
-      claimedAt: raw.claimedAt,
+      delegationId: entry.delegationId,
+      runId: entry.runId ?? `delta-${entry.delegationId}`,
+      claimedAt: entry.claimedAt,
     };
   } catch {
     return null;
@@ -407,15 +291,13 @@ export function prepareDelegation(
     const delegationId = generateDelegationId();
     const runId = runIdFromDelegationId(delegationId);
 
-    // 3. Attempt lease claim
-    const leaseResult = claimHostDelegationLease(projectPath, {
-      storyId: input.storyId,
-      state: "in_flight",
-      ownerKind: "host-delegation",
+    // 3. Attempt lease claim — first claim shared authority, then write frame
+    const leaseResult = claimHostDelegationLease(
+      projectPath,
+      input.storyId,
       delegationId,
       runId,
-      claimedAt: Date.now(),
-    });
+    );
 
     if (leaseResult !== "claimed") {
       // Other-owner lease exists — fail-loud, no retry
@@ -483,7 +365,7 @@ export function prepareDelegation(
         markerPath,
         preparationPath,
         eventsPath,
-        leasePath: leaseFilePath(projectPath, input.storyId),
+        leasePath: storyLeasesPath(projectPath),
       };
     } catch (err) {
       // Cleanup on write failure

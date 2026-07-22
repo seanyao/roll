@@ -6,7 +6,7 @@ import {
   nodeDeliveryStore,
   planPublishDocPr,
   planPublishPr,
-  removeLease,
+  releaseStoryLease,
   type CycleCommand,
   type CycleContext,
   type PublishResult,
@@ -446,7 +446,7 @@ export async function executeTerminalCommand(
       // keep its soft-lease protection past this cycle's terminal (kimi review).
       if (terminalStoryId !== "") {
         try {
-          removeLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, "cycle");
+          releaseStoryLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, { source: "cycle", pid: process.pid });
         } catch {
           /* lease cleanup must never block terminal */
         }

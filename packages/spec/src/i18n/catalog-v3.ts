@@ -981,7 +981,7 @@ export const v3Catalog: Catalog = {
   },
   "delta.error.invalid_value": {
     en: "roll delta: invalid value '%s' for '%s'. Expected: %s",
-    zh: "roll delta：'%s' 的值 '%s' 无效。应为：%s",
+    zh: "roll delta：值 '%s' 对 '%s' 无效。应为：%s",
   },
   "delta.error.cycle_rejected": {
     en: "roll delta: --cycle is not supported for host-guided prepare (no cycle allocation)",

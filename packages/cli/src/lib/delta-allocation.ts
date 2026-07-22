@@ -105,8 +105,36 @@ export function leaseFilePath(projectPath: string, storyId: string): string {
 }
 
 /**
+ * Check whether a live cycle lease exists for a story in the shared
+ * story-leases.json. Exported so cycle readers can also check for
+ * host-delegation leases (see readHostDelegationLease below).
+ *
+ * Implementation note: this is the delta-side of the mutual exclusion
+ * contract (plan §6.1 step 2). Full cycle-side integration (rejecting
+ * a cycle claim when a host-delegation lease is live) is deferred to
+ * a cross-loop integration card — the cycle code is in a different
+ * domain and out of scope for US-DELTA-003.
+ */
+export function hasLiveCycleLease(projectPath: string, storyId: string): boolean {
+  const leasePath = join(projectPath, ".roll", "loop", "story-leases.json");
+  if (!existsSync(leasePath)) return false;
+
+  try {
+    const raw = JSON.parse(readFileSync(leasePath, "utf8"));
+    const entry = raw[storyId];
+    if (entry && typeof entry.source === "string" && entry.source === "cycle") {
+      return true;
+    }
+  } catch {
+    // best-effort
+  }
+  return false;
+}
+
+/**
  * Attempt to atomically claim a host-delegation lease for a story.
  * Uses a per-story lease file with temp+fsync+hardlink protocol.
+ * Rejects if a live cycle lease exists for this story (mutual exclusion).
  *
  * Returns "claimed" on success, "exists" if a lease file already exists,
  * "conflict" on concurrent write collision.
@@ -115,6 +143,11 @@ export function claimHostDelegationLease(
   projectPath: string,
   lease: HostDelegationLease,
 ): "claimed" | "conflict" | "exists" {
+  // Mutual exclusion: reject if a live cycle lease exists for this story
+  if (hasLiveCycleLease(projectPath, lease.storyId)) {
+    return "exists";
+  }
+
   const leasePath = leaseFilePath(projectPath, lease.storyId);
   const dir = dirname(leasePath);
 
@@ -218,6 +251,14 @@ export function readHostDelegationLease(
 // ── Atomic file write (temp + fsync + rename) ────────────────────────────────
 
 function atomicWriteJson(filePath: string, data: unknown): void {
+  // No-overwrite invariant: target must not already exist (immutable evidence)
+  if (existsSync(filePath)) {
+    throw new PrepareError(
+      "artifact_exists",
+      `Refusing to overwrite existing artifact: ${filePath}`,
+    );
+  }
+
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 

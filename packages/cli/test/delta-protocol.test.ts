@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, afterEach, beforeAll } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, unlinkSync, existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { deltaCommand, injectValidator } from "../src/commands/delta.js";
@@ -315,6 +315,48 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     // No frame, no lease, no events
     expect(existsSync(join(dir, ".roll", "loop", "events.ndjson"))).toBe(false);
     expect(existsSync(join(dir, ".roll", "loop", "host-delegation-leases"))).toBe(false);
+  });
+
+  it("prepare rejects when a live cycle lease exists for the story (cross-lease exclusion)", () => {
+    const dir = setupMinimalProject("US-DELTA-XLEASE", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-XLEASE", "local-preset");
+
+    // Write a simulated cycle lease into story-leases.json
+    const leasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    mkdirSync(dirname(leasesPath), { recursive: true });
+    writeFileSync(leasesPath, JSON.stringify({
+      "US-DELTA-XLEASE": { pid: 12345, claimedAt: Date.now(), source: "cycle" },
+    }), "utf8");
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-XLEASE",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(1);
+    const err = JSON.parse(r.stderr);
+    expect(err.error).toBe("builder_lease_conflict");
+  });
+
+  it("prepare succeeds when story-leases.json has a non-cycle source (human/supervisor)", () => {
+    const dir = setupMinimalProject("US-DELTA-XLEASE2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-XLEASE2", "local-preset");
+
+    // Write a human lease (not cycle) — should NOT block host-delegation
+    const leasesPath = join(dir, ".roll", "loop", "story-leases.json");
+    mkdirSync(dirname(leasesPath), { recursive: true });
+    writeFileSync(leasesPath, JSON.stringify({
+      "US-DELTA-XLEASE2": { pid: undefined, claimedAt: Date.now(), source: "human" },
+    }), "utf8");
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-XLEASE2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r.code).toBe(0);
   });
 
   it("prepare fails when story card directory cannot be uniquely resolved", () => {

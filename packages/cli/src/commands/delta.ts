@@ -545,18 +545,6 @@ function concludeCommand(args: string[]): number {
     return 1;
   }
 
-  const disposition = flags["delivery-disposition"];
-  const validDispositions = ["owner_continue", "owner_hold", "owner_redelegate"];
-  if (!disposition || disposition === true || !validDispositions.includes(disposition as string)) {
-    const msg = T("delta.error.invalid_value", disposition === true ? "(empty)" : String(disposition ?? ""), "--delivery-disposition", validDispositions.join("|"));
-    if (json) {
-      process.stderr.write(JSON.stringify({ ok: false, error: "invalid_value", detail: msg }) + "\n");
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
-    return 1;
-  }
-
   // Load delegation events
   const cwd = process.cwd();
   const bus = new EventBus();
@@ -591,6 +579,37 @@ function concludeCommand(args: string[]): number {
 
   const storyId = preparedEvent.storyId as string;
   const now = Date.now();
+
+  // Per-delegation owner terminal decision required (plan §7, §8.2 step 8).
+  // The project-level Option-C ratification (§0.1/§14.5) is satisfied; what
+  // remains is the per-delegation deliveryDisposition choice.
+  const disposition = flags["delivery-disposition"];
+  const validDispositions = ["owner_continue", "owner_hold", "owner_redelegate"];
+  if (!disposition || disposition === true || !validDispositions.includes(disposition as string)) {
+    // Typed terminal_path_unselected block — append event, retain lease, non-zero exit
+    const detail = disposition === true || !disposition
+      ? "No delivery-disposition selected; owner must choose owner_continue, owner_hold, or owner_redelegate"
+      : `Invalid delivery-disposition '${disposition}'; must be owner_continue, owner_hold, or owner_redelegate`;
+    bus.appendEvent(eventsPath, {
+      type: "delta:blocked",
+      delegationId,
+      storyId,
+      reason: "terminal_path_unselected",
+      detail,
+      ts: now,
+    });
+
+    if (json) {
+      process.stderr.write(JSON.stringify({
+        ok: false,
+        error: "terminal_path_unselected",
+        detail,
+      }) + "\n");
+    } else {
+      process.stderr.write(`${detail}\n`);
+    }
+    return 1;
+  }
 
   // Record delta:terminal with Option C binding
   bus.appendEvent(eventsPath, {

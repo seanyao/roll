@@ -582,7 +582,7 @@ describe("US-DELTA-003 — validate plumbing", () => {
 // ── Conclude ─────────────────────────────────────────────────────────────────
 
 describe("US-DELTA-003 — conclude", () => {
-  it("conclude rejects with terminal_path_unselected when no binding exists", () => {
+  it("conclude with owner_continue disposition succeeds and writes terminal", () => {
     const dir = setupMinimalProject("US-DELTA-CONC", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC", "local-preset");
 
@@ -606,6 +606,74 @@ describe("US-DELTA-003 — conclude", () => {
     expect(result.ok).toBe(true);
     expect(result.outcome).toBe("handoff_ready");
     expect(result.terminalBinding).toBe("handoff_only");
+  });
+
+  it("conclude blocks with terminal_path_unselected when disposition is missing (BLOCK-2)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-BLK", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-BLK", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-BLK",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Conclude without --delivery-disposition should block
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId, "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err = JSON.parse(r2.stderr);
+    expect(err.error).toBe("terminal_path_unselected");
+
+    // Verify delta:blocked event was appended
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+    const lastEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+    expect(lastEvent.type).toBe("delta:blocked");
+    expect(lastEvent.reason).toBe("terminal_path_unselected");
+
+    // Lease must be retained
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-CONC-BLK.json");
+    expect(existsSync(leasePath)).toBe(true);
+  });
+
+  it("conclude blocks with terminal_path_unselected when disposition is invalid (BLOCK-2)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-BLK2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-BLK2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-BLK2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Conclude with invalid disposition should block
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "bad_value", "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err = JSON.parse(r2.stderr);
+    expect(err.error).toBe("terminal_path_unselected");
+
+    // Verify delta:blocked was appended with correct reason
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    const lastEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+    expect(lastEvent.type).toBe("delta:blocked");
+    expect(lastEvent.reason).toBe("terminal_path_unselected");
   });
 
   it("conclude with owner_hold disposition succeeds", () => {

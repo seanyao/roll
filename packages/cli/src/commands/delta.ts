@@ -347,11 +347,37 @@ export interface ValidatorResult {
   role?: string;
 }
 
+/** Narrow, host-neutral input passed into the protocol validator boundary. */
+export interface DeltaValidationInput {
+  /** Fixed path to the stage artifact file (e.g. evaluation-manifest.json). */
+  readonly artifactPath: string;
+  /** Fixed path to the manifest for this validation. */
+  readonly manifestPath: string;
+  /** The delegation being validated. */
+  readonly delegationId: string;
+  /** The stage/role being validated. */
+  readonly stage: string;
+  /** Story ID from the prepared delegation. */
+  readonly storyId: string;
+  /** Role instance identity from resolution. */
+  readonly roleInstanceId: string;
+  /** Host identity from resolution (may be "unknown" if preset unavailable). */
+  readonly hostId: string;
+  /** Model identity from resolution. */
+  readonly modelId: string;
+  /** Delegation trigger from prepared event. */
+  readonly trigger: string;
+  /** Delivery topology from prepared event. */
+  readonly topology: string;
+  /** Quality profile from prepared event. */
+  readonly qualityProfile: string;
+  /** Frame directory for the delegation (read-only reference, not for path derivation). */
+  readonly frameDir: string;
+}
+
 /** Narrow validator interface — tests inject, production uses the default stub. */
 export type DeltaProtocolValidator = (
-  delegationId: string,
-  stage: string,
-  frameDir: string,
+  input: DeltaValidationInput,
 ) => ValidatorResult;
 
 let _injectedValidator: DeltaProtocolValidator | null = null;
@@ -381,17 +407,15 @@ export function injectEventAppendFailure(fn: ((event: Record<string, unknown>) =
   _eventAppendFailure = fn;
 }
 
-function defaultValidator(_delegationId: string, _stage: string, frameDir: string): ValidatorResult {
-  // US-003 requires a fixed stage artifact *file*, not just directory existence.
+function defaultValidator(input: DeltaValidationInput): ValidatorResult {
+  // US-003 uses the HOST-SUPPLIED fixed artifact path — never re-derive from frameDir.
   // The host writes the prescribed role evidence/manifest at this fixed path.
-  const stageArtifactDir = join(frameDir, "role-artifacts", _stage);
-  const evidenceFile = join(stageArtifactDir, "evaluation-manifest.json");
-  if (!existsSync(evidenceFile)) {
+  if (!existsSync(input.artifactPath)) {
     return {
       ok: false,
       reason: "artifact_invalid",
-      detail: `Stage artifact not found for role '${_stage}' at ${evidenceFile}`,
-      role: _stage,
+      detail: `Stage artifact not found for role '${input.stage}' at ${input.artifactPath}`,
+      role: input.stage,
     };
   }
   return { ok: true };
@@ -595,15 +619,34 @@ function validateCommand(args: string[]): number {
     return 1;
   }
 
-  // ── Invoke validator ────────────────────────────────────────────────────
-  // Admission passed — call the validator with the fixed stage artifact path
-  // and the evaluation manifest placeholder path.
+  // ── Build validation input from immutable delegation context ─────────────
+  // Gather the resolved role metadata from the event stream (role_resolved event)
+  // and the prepared event so the validator receives the complete, fixed context.
+  const roleResolvedEvent = delegationEvents.find(
+    (e) => e.type === "delta:role_resolved" && (e as Record<string, unknown>).role === stage,
+  ) as Record<string, unknown> | undefined;
+
   const stageArtifactDir = join(frameDir, "role-artifacts", stage);
   const stageArtifactPath = join(stageArtifactDir, "evaluation-manifest.json");
   const evaluationManifestPath = stageArtifactPath;
 
+  const validationInput: DeltaValidationInput = {
+    artifactPath: stageArtifactPath,
+    manifestPath: evaluationManifestPath,
+    delegationId,
+    stage,
+    storyId: preparedEvent.storyId as string,
+    roleInstanceId: (roleResolvedEvent?.roleInstanceId as string) ?? "",
+    hostId: (roleResolvedEvent?.hostId as string) ?? (preparedEvent.hostId as string) ?? "unknown",
+    modelId: (roleResolvedEvent?.modelId as string) ?? "?",
+    trigger: preparedEvent.trigger as string,
+    topology: preparedEvent.topology as string,
+    qualityProfile: preparedEvent.qualityProfile as string,
+    frameDir,
+  };
+
   const validator = _injectedValidator ?? defaultValidator;
-  const result = validator(delegationId, stage, frameDir);
+  const result = validator(validationInput);
 
   if (!result.ok) {
     // Block: append delta:blocked event, return non-zero

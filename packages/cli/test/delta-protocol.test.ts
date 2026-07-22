@@ -717,10 +717,25 @@ describe("US-DELTA-003 — validate plumbing", () => {
     // Inject a validator that always blocks with a custom reason
     let calledWithDelegationId = "";
     let calledWithStage = "";
-    injectValidator((did: string, s: string, _fd: string) => {
-      calledWithDelegationId = did;
-      calledWithStage = s;
-      return { ok: false, reason: "host_supervisor_required", detail: "test injected block", role: s };
+    let capturedInput: Record<string, unknown> = {};
+    injectValidator((input) => {
+      calledWithDelegationId = input.delegationId;
+      calledWithStage = input.stage;
+      capturedInput = {
+        delegationId: input.delegationId,
+        stage: input.stage,
+        artifactPath: typeof input.artifactPath === "string" && input.artifactPath.length > 0,
+        manifestPath: typeof input.manifestPath === "string" && input.manifestPath.length > 0,
+        storyId: input.storyId,
+        roleInstanceId: input.roleInstanceId,
+        hostId: input.hostId,
+        modelId: input.modelId,
+        trigger: input.trigger,
+        topology: input.topology,
+        qualityProfile: input.qualityProfile,
+        frameDir: input.frameDir,
+      };
+      return { ok: false, reason: "host_supervisor_required", detail: "test injected block", role: input.stage };
     });
 
     try {
@@ -731,6 +746,17 @@ describe("US-DELTA-003 — validate plumbing", () => {
       expect(r2.code).toBe(1);
       expect(calledWithDelegationId).toBe(delegationId);
       expect(calledWithStage).toBe("builder");
+      // Spy captures complete context
+      expect(capturedInput.artifactPath).toBe(true);
+      expect(capturedInput.storyId).toBe("US-DELTA-VAL5");
+      expect(typeof capturedInput.roleInstanceId).toBe("string");
+      expect(capturedInput.hostId).toBe("pi");
+      expect(capturedInput.modelId).toBe("claude");
+      expect(capturedInput.trigger).toBe("host-guided");
+      expect(capturedInput.topology).toBe("delta-team");
+      expect(capturedInput.qualityProfile).toBe("standard");
+      expect(capturedInput.frameDir).toContain("US-DELTA-VAL5");
+      expect(capturedInput.frameDir).toContain(`delta-${delegationId}`);
 
       // Verify custom block event was appended
       const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
@@ -1615,11 +1641,11 @@ describe("US-DELTA-003 — validate admission boundaries", () => {
     let capturedStage = "";
     let capturedFrameDir = "";
 
-    injectValidator((did, stage, fd) => {
+    injectValidator((input) => {
       callCount++;
-      capturedDelegationId = did;
-      capturedStage = stage;
-      capturedFrameDir = fd;
+      capturedDelegationId = input.delegationId;
+      capturedStage = input.stage;
+      capturedFrameDir = input.frameDir;
       // Return allow even though no artifact exists — this is a spy test
       return { ok: true };
     });
@@ -1660,7 +1686,7 @@ describe("US-DELTA-003 — validate admission boundaries", () => {
     const eventsPathBlock = join(dirBlock, ".roll", "loop", "events.ndjson");
     const eventsBeforeBlock = readFileSync(eventsPathBlock, "utf8").trim().split("\n").filter(l => l.trim());
 
-    injectValidator((_did, _stage, _fd) => ({ ok: false, reason: "host_attestation_invalid", detail: "test block", role: _stage }));
+    injectValidator((input) => ({ ok: false, reason: "host_attestation_invalid", detail: "test block", role: input.stage }));
     try {
       const r2 = tsRunCwd(["validate", "--delegation", delegationIdBlock, "--stage", "builder", "--json"], dirBlock);
       expect(r2.code).toBe(1);
@@ -1696,7 +1722,7 @@ describe("US-DELTA-003 — validate admission boundaries", () => {
     mkdirSync(evaluatorArtifactDir, { recursive: true });
     writeFileSync(join(evaluatorArtifactDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
 
-    injectValidator((_did, _stage, _fd) => ({ ok: true }));
+    injectValidator((_input) => ({ ok: true }));
     try {
       const r3 = tsRunCwd(["validate", "--delegation", delegationIdAllow, "--stage", "evaluator", "--json"], dirAllow);
       expect(r3.code).toBe(0);
@@ -1727,7 +1753,7 @@ describe("US-DELTA-003 — validate admission boundaries", () => {
 
     // Peer role not in resolution — admission short-circuits before validator
     // The block reason is "invalid_resolution" because stage is not a resolved role
-    injectValidator((_did, _stage, _fd) => {
+    injectValidator((_input) => {
       // Validator should never be called for unassigned roles
       throw new Error("validator must not be called for unassigned role");
     });

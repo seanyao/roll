@@ -167,6 +167,7 @@ describe("US-WS-015 delivery reconcile parity", () => {
   it("returns the identical partial verdict for a two-repository Issue and ignores backlog Done claims", () => {
     const f = workspace();
     const storyId = "US-MULTI";
+    writeFileSync(f.target.backlogPath, `| ${storyId} | false completion truth | ✅ Done |\n`, "utf8");
     const issueRoot = writeIssue(f.root, storyId, [
       { repoId: API, alias: "api" },
       { repoId: WEB, alias: "web" },
@@ -178,13 +179,18 @@ describe("US-WS-015 delivery reconcile parity", () => {
 
     const result = commands(f.target, storyId);
     expect(result.delivery.status).toBe(0);
-    expect(result.loop).toEqual(result.delivery);
-    expect(JSON.parse(result.delivery.stdout).issues[0]).toMatchObject({
+    expect(result.loop.status).toBe(0);
+    const deliveryResult = JSON.parse(result.delivery.stdout) as { changed: boolean; issues: readonly unknown[] };
+    const loopResult = JSON.parse(result.loop.stdout) as { changed: boolean; issues: readonly unknown[] };
+    expect(loopResult.issues).toEqual(deliveryResult.issues);
+    expect([deliveryResult.changed, loopResult.changed]).toEqual([true, false]);
+    expect(deliveryResult.issues[0]).toMatchObject({
       storyId,
       state: "partial_delivery",
       outstandingGates: [{ kind: "repository", repoId: WEB, status: "awaiting_merge" }],
     });
-    expect(readFileSync(f.target.backlogPath, "utf8")).toBe(backlogBefore);
+    expect(backlogBefore).toContain("✅ Done");
+    expect(readFileSync(f.target.backlogPath, "utf8")).toContain("📋 Todo");
     expect(readFileSync(join(issueRoot, "events.jsonl"), "utf8")).toBe(eventsBefore);
   });
 

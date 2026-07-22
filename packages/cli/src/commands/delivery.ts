@@ -7,16 +7,20 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
 import {
+  BacklogStore,
   deriveIssueCompletion,
   validateStoryId,
 } from "@roll/core";
 import {
   IssueCompletionEvidenceError,
+  rebuildRequirementAttest,
   readIssueCompletionEvidence,
 } from "@roll/infra";
 import {
+  STATUS_MARKER,
   integrationAcceptanceCommandDigest,
   parseIssueManifest,
+  parseRequirementSourceManifest,
   resolveLang,
   t,
   v3Catalog,
@@ -530,6 +534,85 @@ function selectedWorkspaces(decision: Extract<BacklogTargetDecision, { readonly 
   return [readDeliveryWorkspace(decision)];
 }
 
+function projectDeliveredBacklog(
+  backlogPath: string,
+  issues: readonly DeliveryIssueView[],
+): boolean {
+  if (!existsSync(backlogPath)) return false;
+  const store = new BacklogStore();
+  let snapshot = store.readBacklog(backlogPath);
+  let changed = false;
+  for (const issue of issues) {
+    const row = snapshot.items.find((item) => item.id === issue.storyId);
+    if (row === undefined) continue;
+    const projected = issue.state === "delivered"
+      ? STATUS_MARKER.done
+      : row.status.includes(STATUS_MARKER.done)
+        ? STATUS_MARKER.todo
+        : undefined;
+    if (projected === undefined || row.status === projected) continue;
+    const result = store.mark(backlogPath, snapshot.hash, issue.storyId, projected);
+    if (result.count === 0) continue;
+    changed = true;
+    snapshot = store.readBacklog(backlogPath);
+  }
+  return changed;
+}
+
+function requirementInputs(
+  workspaceRoot: string,
+  storyIds: ReadonlySet<string>,
+): readonly { readonly provider: string; readonly requirementId: string; readonly attestPath: string }[] {
+  const root = join(workspaceRoot, "requirements");
+  if (!existsSync(root)) return [];
+  const inputs: Array<{ readonly provider: string; readonly requirementId: string; readonly attestPath: string }> = [];
+  for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
+    if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink()) continue;
+    const providerRoot = join(root, providerEntry.name);
+    for (const requirementEntry of readdirSync(providerRoot, { withFileTypes: true })) {
+      if (!requirementEntry.isDirectory() || requirementEntry.isSymbolicLink()) continue;
+      const requirementRoot = join(providerRoot, requirementEntry.name);
+      const sourcePath = join(requirementRoot, "source.yaml");
+      if (!existsSync(sourcePath)) continue;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(readFileSync(sourcePath, "utf8"));
+      } catch {
+        continue;
+      }
+      const parsed = parseRequirementSourceManifest(raw);
+      if (!parsed.ok || !parsed.value.stories.some((storyId) => storyIds.has(storyId))) continue;
+      inputs.push({
+        provider: parsed.value.provider,
+        requirementId: parsed.value.requirementId,
+        attestPath: join(requirementRoot, "attest.md"),
+      });
+    }
+  }
+  return inputs.sort((left, right) => compareCodeUnits(
+    `${left.provider}/${left.requirementId}`,
+    `${right.provider}/${right.requirementId}`,
+  ));
+}
+
+function rebuildLinkedRequirementAttests(
+  workspaceRoot: string,
+  issues: readonly DeliveryIssueView[],
+): boolean {
+  const storyIds = new Set(issues.map((issue) => issue.storyId));
+  let changed = false;
+  for (const input of requirementInputs(workspaceRoot, storyIds)) {
+    const before = existsSync(input.attestPath) ? readFileSync(input.attestPath, "utf8") : undefined;
+    const result = rebuildRequirementAttest({
+      workspaceRoot,
+      provider: input.provider,
+      requirementId: input.requirementId,
+    });
+    if (before !== result.content) changed = true;
+  }
+  return changed;
+}
+
 function listCommand(args: readonly string[], resolver: BacklogTargetResolver): number {
   const json = args.includes("--json");
   const positional = positionalArgs(args, new Set(["--workspace", "--all", "--json"]));
@@ -603,12 +686,15 @@ export function reconcileWorkspaceDeliveries(
         : [];
     if (storyId !== undefined && issues.length === 0) return emitError("story_not_found", json);
     const dryRun = args.includes("--dry-run");
+    const requirementChanged = dryRun ? false : rebuildLinkedRequirementAttests(decision.workspaceRoot, issues);
+    const backlogChanged = dryRun ? false : projectDeliveredBacklog(decision.backlogPath, issues);
+    const changed = backlogChanged || requirementChanged;
     process.stdout.write(json
       ? `${JSON.stringify({
           schema: DELIVERY_RECONCILE_V1,
           workspaceId: decision.workspaceId,
           dryRun,
-          changed: false,
+          changed,
           issues,
         }, null, 2)}\n`
       : `${msg("delivery.reconcile.title", decision.workspaceId, issues.length, dryRun ? msg("delivery.reconcile.dry_run") : msg("delivery.reconcile.applied"))}\n${renderList([{ workspaceId: decision.workspaceId, path: decision.canonicalRoot, issues }])}`);

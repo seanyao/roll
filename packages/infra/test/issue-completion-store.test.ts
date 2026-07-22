@@ -20,6 +20,19 @@ const MERGE = "a".repeat(40);
 function fixture(): string {
   const issueRoot = mkdtempSync(join(tmpdir(), "roll-issue-completion-"));
   roots.push(issueRoot);
+  writeFileSync(join(issueRoot, "manifest.json"), `${JSON.stringify({
+    schema: "roll.issue/v1",
+    workspaceId: WORKSPACE,
+    storyId: STORY,
+    requirements: [],
+    repositories: [{
+      repoId: REPO,
+      alias: "api",
+      access: "write",
+      requiredDelivery: true,
+      noChangePolicy: "changes_required",
+    }],
+  })}\n`, "utf8");
   return issueRoot;
 }
 
@@ -94,5 +107,15 @@ describe("US-WS-013 Issue completion evidence store", () => {
     })}\n`, "utf8");
 
     expect(() => readIssueCompletionEvidence(issueRoot)).toThrow(IssueCompletionEvidenceError);
+  });
+
+  it("rejects evidence bound to another Issue identity before writing any event", () => {
+    const issueRoot = fixture();
+
+    expect(() => appendRepositoryMergeEvidence(issueRoot, {
+      ...mergeEvidence(),
+      storyId: "US-WS-OTHER",
+    })).toThrow(IssueCompletionEvidenceError);
+    expect(existsSync(join(issueRoot, "events.jsonl"))).toBe(false);
   });
 });

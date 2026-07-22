@@ -4,8 +4,10 @@ import {
   ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
   REPOSITORY_MERGE_EVIDENCE_RECORDED,
   isImmutableGitObjectId,
+  parseIssueManifest,
   type IssueIntegrationAcceptanceEvidence,
   type IssueIntegrationAcceptanceEvidenceRecordedEvent,
+  type IssueManifest,
   type RepositoryMergeEvidence,
   type RepositoryMergeEvidenceRecordedEvent,
 } from "@roll/spec";
@@ -17,6 +19,37 @@ export interface IssueCompletionEvidenceCollection {
 }
 
 export class IssueCompletionEvidenceError extends Error {}
+
+function readIssueManifest(issueRoot: string): IssueManifest {
+  const path = join(issueRoot, "manifest.json");
+  if (!existsSync(path)) throw new IssueCompletionEvidenceError(`Issue manifest is missing: ${path}`);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new IssueCompletionEvidenceError(`Issue manifest is corrupted: ${(error as Error).message}`);
+  }
+  const parsed = parseIssueManifest(raw);
+  if (!parsed.ok) {
+    throw new IssueCompletionEvidenceError(`Issue manifest is invalid: ${parsed.errors.map((error) => `${error.path}:${error.code}`).join(", ")}`);
+  }
+  return parsed.value;
+}
+
+function assertRepositoryIssueIdentity(manifest: IssueManifest, evidence: RepositoryMergeEvidence): void {
+  if (evidence.workspaceId !== manifest.workspaceId || evidence.storyId !== manifest.storyId) {
+    throw new IssueCompletionEvidenceError("repository merge evidence does not match the Issue identity");
+  }
+  if (!manifest.repositories.some((repository) => repository.repoId === evidence.repoId)) {
+    throw new IssueCompletionEvidenceError(`repository merge evidence names undeclared repoId: ${evidence.repoId}`);
+  }
+}
+
+function assertAcceptanceIssueIdentity(manifest: IssueManifest, evidence: IssueIntegrationAcceptanceEvidence): void {
+  if (evidence.workspaceId !== manifest.workspaceId || evidence.storyId !== manifest.storyId) {
+    throw new IssueCompletionEvidenceError("integration acceptance evidence does not match the Issue identity");
+  }
+}
 
 function record(raw: unknown): Record<string, unknown> | undefined {
   return typeof raw === "object" && raw !== null && !Array.isArray(raw)
@@ -218,11 +251,13 @@ export function appendRepositoryMergeEvidence(
   issueRoot: string,
   evidence: RepositoryMergeEvidence,
 ): RepositoryMergeEvidenceRecordedEvent {
+  const manifest = readIssueManifest(issueRoot);
   const event = validateRepositoryEvent({
     type: REPOSITORY_MERGE_EVIDENCE_RECORDED,
     ...evidence,
     ts: evidence.recordedAt,
   });
+  assertRepositoryIssueIdentity(manifest, repositoryFact(event));
   appendIssueEventAtomically(issueRoot, { ...event });
   return event;
 }
@@ -231,16 +266,19 @@ export function appendIssueIntegrationAcceptanceEvidence(
   issueRoot: string,
   evidence: IssueIntegrationAcceptanceEvidence,
 ): IssueIntegrationAcceptanceEvidenceRecordedEvent {
+  const manifest = readIssueManifest(issueRoot);
   const event = validateAcceptanceEvent({
     type: ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED,
     ...evidence,
     ts: evidence.recordedAt,
   });
+  assertAcceptanceIssueIdentity(manifest, integrationAcceptance(event));
   appendIssueEventAtomically(issueRoot, { ...event });
   return event;
 }
 
 export function readIssueCompletionEvidence(issueRoot: string): IssueCompletionEvidenceCollection {
+  const manifest = readIssueManifest(issueRoot);
   const path = join(issueRoot, "events.jsonl");
   if (!existsSync(path)) return { repositoryFacts: [], integrationAcceptances: [] };
   const repositoryFacts: RepositoryMergeEvidence[] = [];
@@ -255,9 +293,13 @@ export function readIssueCompletionEvidence(issueRoot: string): IssueCompletionE
     }
     const value = record(raw);
     if (value?.["type"] === REPOSITORY_MERGE_EVIDENCE_RECORDED) {
-      repositoryFacts.push(repositoryFact(validateRepositoryEvent(value)));
+      const evidence = repositoryFact(validateRepositoryEvent(value));
+      assertRepositoryIssueIdentity(manifest, evidence);
+      repositoryFacts.push(evidence);
     } else if (value?.["type"] === ISSUE_INTEGRATION_ACCEPTANCE_EVIDENCE_RECORDED) {
-      integrationAcceptances.push(integrationAcceptance(validateAcceptanceEvent(value)));
+      const evidence = integrationAcceptance(validateAcceptanceEvent(value));
+      assertAcceptanceIssueIdentity(manifest, evidence);
+      integrationAcceptances.push(evidence);
     }
   }
   return { repositoryFacts, integrationAcceptances };

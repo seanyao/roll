@@ -236,6 +236,8 @@ function rankedWithResolutionSkips(ranked: readonly RankedRoleCandidate[], resol
 /** Test seams; production reads the real ROLL_HOME, installed agents, and runs.jsonl. */
 export interface ScopedRouteDeps {
   readonly rollHome?: string;
+  /** Registered Workspace root. Production also recognizes a resolved root by workspace.yaml. */
+  readonly workspaceRoot?: string;
   readonly installed?: ReadonlySet<string>;
   readonly recentUse?: Readonly<Partial<Record<AgentName, number>>>;
   readonly successfulDeliveries?: Readonly<Partial<Record<AgentName, number>>>;
@@ -289,9 +291,21 @@ export function resolveScopedStoryExecute(repoCwd: string, deps: ScopedRouteDeps
 
 export function resolveScopedCastRole(repoCwd: string, castRole: CastRoleName, deps: ScopedRouteDeps = {}): ScopedExecuteRoute | null {
   const rollHome = deps.rollHome ?? process.env["ROLL_HOME"] ?? join(homedir(), ".roll");
+  const workspaceRoot = deps.workspaceRoot ?? (existsSync(join(repoCwd, "workspace.yaml")) ? repoCwd : undefined);
+  const workspacePath = workspaceRoot === undefined ? undefined : join(workspaceRoot, "agents.yaml");
+  let workspaceLayer: { config: AgentScopeConfig; path: string } | null = null;
+  if (workspacePath !== undefined && existsSync(workspacePath)) {
+    const text = readFileSync(workspacePath, "utf8");
+    const parsed = normalizeAgentScopeConfig(text);
+    if (parsed.config === null || parsed.errors.length > 0 || parsed.config.scope !== "workspace") {
+      const details = parsed.errors.length > 0 ? parsed.errors.join("; ") : `expected scope 'workspace'`;
+      throw new Error(`invalid workspace agent scope at ${workspacePath}: ${details}`);
+    }
+    workspaceLayer = { config: parsed.config, path: workspacePath };
+  }
   const layers = [
     readScopedAgentLayer(join(rollHome, "agents.yaml")),
-    readScopedAgentLayer(join(repoCwd, ".roll", "agents.yaml")),
+    workspaceRoot === undefined ? readScopedAgentLayer(join(repoCwd, ".roll", "agents.yaml")) : workspaceLayer,
   ].filter((layer): layer is { config: AgentScopeConfig; path: string } => layer !== null);
   if (layers.length === 0) return null;
 

@@ -326,7 +326,7 @@ describe("recommendNext — what should Roll do next?", () => {
             reason: "setup skill root pollution on reasonix",
             detail: 'skill "skill-authoring" has no description',
             source: "setup",
-            routing: "delta_team",
+            routing: "delivery_team",
           },
         ],
       }),

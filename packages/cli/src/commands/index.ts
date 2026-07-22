@@ -52,6 +52,7 @@ import { initCommand } from "./init.js";
 import { NEXT_USAGE, nextCommand } from "./next.js";
 import { northCommand } from "./north.js";
 import { designCommand } from "./design.js";
+import { deliveryCommand, deliveryUsage } from "./delivery.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
 import { loopFmtCommand } from "./loop-fmt.js";
@@ -174,6 +175,7 @@ export function registerAll(): void {
     return statusCommand(args);
   }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。" });
   registerPorted("workspace", workspaceCommand, { help: workspaceUsage });
+  registerPorted("delivery", deliveryCommand, { help: deliveryUsage });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as

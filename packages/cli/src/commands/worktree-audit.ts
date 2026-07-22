@@ -18,7 +18,28 @@ import { resolveIntegrationBranch } from "@roll/infra";
 
 // ─── types (shared with the spec) ───────────────────────────────────────────
 
-export type WorktreeOwner = "loop" | "manual" | "external";
+export type WorktreeOwner = "loop" | "workspace" | "manual" | "external";
+
+export type WorkspaceDeliveryProof =
+  | "delivered"
+  | "abandoned"
+  | "incomplete"
+  | "blocked"
+  | "unknown";
+
+/** Registry- and Issue-fact-backed ownership supplied by the Workspace aggregate.
+ * Path names never create this authority: callers must derive it from one valid
+ * Workspace registry entry plus one matching `issue:repository_bound` fact. */
+export interface WorkspaceWorktreeOwnership {
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly repoId: string;
+  readonly repositoryAlias: string;
+  readonly cachePath: string;
+  readonly expectedBranch: string | null;
+  readonly active: boolean;
+  readonly deliveryProof: WorkspaceDeliveryProof;
+}
 
 export type MergeEvidenceKind =
   | "ancestor"
@@ -49,6 +70,12 @@ export interface WorktreeAuditRecord {
   branch?: string;
   head?: string;
   owner: WorktreeOwner;
+  workspaceId?: string;
+  repoId?: string;
+  repositoryAlias?: string;
+  cachePath?: string;
+  deliveryProof?: WorkspaceDeliveryProof;
+  ownershipState?: "verified" | "mismatch";
   cycleId?: string;
   storyId?: string;
   outcome?: string;
@@ -83,6 +110,7 @@ export interface WorktreeAuditOutput {
   summary: {
     total: number;
     loop: number;
+    workspace?: number;
     manual: number;
     external: number;
     active: number;
@@ -120,6 +148,8 @@ export interface WorktreeAuditDeps {
    * overridden). Injected in tests.
    */
   integrationBranch?: string;
+  /** Exact registered worktree path -> Workspace ownership facts. */
+  workspaceOwnership?: ReadonlyMap<string, WorkspaceWorktreeOwnership>;
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -433,6 +463,28 @@ function classifyDisposition(
 ): { disposition: WorktreeDisposition; reason: string } {
   if (rec.active) return { disposition: "active", reason: "active cycle with fresh lock/heartbeat" };
 
+  if (rec.owner === "workspace") {
+    if (rec.ownershipState === "mismatch") {
+      return { disposition: "preserved_needs_review", reason: "Workspace Issue branch does not match its repository-bound fact" };
+    }
+    if (rec.dirtyTracked === "unknown" || rec.dirtyUntracked === "unknown") {
+      return { disposition: "preserved_needs_review", reason: "Workspace Issue dirt could not be verified" };
+    }
+    if (rec.dirtyTracked || rec.dirtyUntracked) {
+      return { disposition: "preserved_dirty_no_tcr", reason: "Workspace Issue worktree is dirty; cleanup is forbidden" };
+    }
+    if (rec.deliveryProof === "delivered" || rec.deliveryProof === "abandoned") {
+      return { disposition: "disposable_candidate", reason: `Workspace Issue ${rec.deliveryProof} proof permits clean inactive disposal` };
+    }
+    if (rec.deliveryProof === "blocked") {
+      return { disposition: "preserved_needs_review", reason: "Workspace Issue delivery is blocked; cleanup is forbidden" };
+    }
+    if (rec.deliveryProof === "incomplete") {
+      return { disposition: "preserved_unpublished", reason: "Workspace Issue delivery is incomplete; cleanup is forbidden" };
+    }
+    return { disposition: "preserved_needs_review", reason: "Workspace Issue delivery proof is unknown; cleanup is forbidden" };
+  }
+
   if (rec.owner === "external") {
     return { disposition: "external_unmanaged", reason: "external worktree; not managed by loop" };
   }
@@ -484,6 +536,10 @@ function classifyDisposition(
 
 export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
   const repoRoot = resolve(deps.repoRoot);
+  const workspaceOwnership = new Map<string, WorkspaceWorktreeOwnership>();
+  for (const [path, ownership] of deps.workspaceOwnership ?? []) {
+    workspaceOwnership.set(realpathSafe(resolve(path)), ownership);
+  }
   // E1: resolve the integration branch ONCE (injected override wins for tests;
   // otherwise the project's `integration_branch` config, default origin/main).
   const integrationBranch = deps.integrationBranch ?? resolveIntegrationBranch(repoRoot);
@@ -526,7 +582,8 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
 
   for (const entry of entries) {
     const absPath = resolve(entry.path);
-    const owner = classifyOwner(absPath, repoRoot);
+    const owned = workspaceOwnership.get(realpathSafe(absPath));
+    const owner = owned === undefined ? classifyOwner(absPath, repoRoot) : "workspace";
 
     let cycleId: string | undefined;
     let storyId: string | undefined;
@@ -546,15 +603,27 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
     const dirty = detectDirty(absPath, deps);
     const ahead = countAhead(absPath, deps, integrationBranch);
     const mergeEvidence = detectMergeEvidence(absPath, entry.branch || undefined, deps, integrationBranch);
-    const active = isActiveCycle(cycleId, repoRoot, deps);
+    const active = owned?.active ?? isActiveCycle(cycleId, repoRoot, deps);
+    const actualBranch = entry.branch.replace(/^refs\/heads\//, "") || null;
+    const ownershipState = owned === undefined || owned.expectedBranch === actualBranch
+      ? "verified"
+      : "mismatch";
 
     const baseRec: WorktreeAuditRecord = {
       path: absPath,
       branch: entry.branch || undefined,
       head: entry.head || undefined,
       owner,
+      ...(owned === undefined ? {} : {
+        workspaceId: owned.workspaceId,
+        repoId: owned.repoId,
+        repositoryAlias: owned.repositoryAlias,
+        cachePath: owned.cachePath,
+        deliveryProof: owned.deliveryProof,
+        ownershipState,
+      }),
       cycleId,
-      storyId,
+      storyId: owned?.storyId ?? storyId,
       outcome,
       dirtyTracked: dirty.dirtyTracked,
       dirtyUntracked: dirty.dirtyUntracked,
@@ -609,6 +678,9 @@ export function auditWorktrees(deps: WorktreeAuditDeps): WorktreeAuditOutput {
   const summary = {
     total: records.length,
     loop: records.filter((r) => r.owner === "loop").length,
+    ...(records.some((r) => r.owner === "workspace")
+      ? { workspace: records.filter((r) => r.owner === "workspace").length }
+      : {}),
     manual: records.filter((r) => r.owner === "manual").length,
     external: records.filter((r) => r.owner === "external").length,
     active: records.filter((r) => r.active).length,
@@ -639,6 +711,7 @@ function renderHuman(output: WorktreeAuditOutput): string {
 
   lines.push(`  total: ${output.summary.total}`);
   lines.push(`  loop: ${output.summary.loop}`);
+  if ((output.summary.workspace ?? 0) > 0) lines.push(`  workspace: ${output.summary.workspace}`);
   lines.push(`  manual: ${output.summary.manual}`);
   if (output.summary.external > 0) lines.push(`  external: ${output.summary.external}`);
   lines.push(`  active: ${output.summary.active}`);

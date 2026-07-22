@@ -340,6 +340,53 @@ export interface NormalizedAgentCapacityPolicy {
   readonly staleAfterSeconds: number;
 }
 
+export const AGENT_CAPACITY_LEASE_SCHEMA = "roll-agent-capacity-lease/v1" as const;
+
+export interface AgentCapacityKey {
+  readonly agent: AgentName;
+  readonly model: ModelId;
+  /** Opaque account/profile identity; never rendered in diagnostics. */
+  readonly contextKey: string;
+}
+
+export interface AgentCapacityOwner {
+  readonly leaseId: string;
+  readonly ownerToken: string;
+  readonly workspaceId: string;
+  readonly storyId: string;
+  readonly cycleId: string;
+  readonly spawnId: string;
+  readonly host: string;
+  readonly pid: number;
+  readonly processStartedAtMs: number;
+}
+
+export interface AgentCapacityLease {
+  readonly schema: typeof AGENT_CAPACITY_LEASE_SCHEMA;
+  readonly key: AgentCapacityKey;
+  readonly owner: AgentCapacityOwner;
+  readonly acquiredAtMs: number;
+  readonly heartbeatAtMs: number;
+}
+
+export interface AgentCapacityAcquireRequest {
+  readonly key: AgentCapacityKey;
+  readonly owner: AgentCapacityOwner;
+}
+
+export type AgentCapacityAcquireResult =
+  | { readonly kind: "acquired"; readonly lease: AgentCapacityLease }
+  | {
+      readonly kind: "waiting";
+      readonly retryAtMs: number;
+      readonly contenders: readonly { readonly agent: AgentName; readonly cycleId: string }[];
+      readonly suspect: boolean;
+    };
+
+export type AgentCapacityOwnershipResult =
+  | { readonly kind: "updated" | "released" | "already_released" }
+  | { readonly kind: "ownership_lost"; readonly reason: string };
+
 export type AgentScopeResolutionStrategy = AgentBindingStrategy | "fixed";
 
 export interface AgentScopeSkippedCandidate {

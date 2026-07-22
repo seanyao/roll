@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -146,6 +146,40 @@ describe("NodeAgentCapacityBroker", () => {
       processIdentity: () => ({ alive: false }),
     });
     expect(reclaim.acquire(request("next", "claude"))).toMatchObject({ kind: "acquired" });
+  });
+
+  it("cleans exactly one stale same-host dead lease and repeats idempotently", () => {
+    const root = tempDir("capacity-doctor-cleanup");
+    expect(broker(root).acquire(request("dead", "codex", { pid: 2000 })).kind).toBe("acquired");
+    const doctor = new NodeAgentCapacityBroker({
+      root,
+      policy: POLICY,
+      clockMs: () => 40_000,
+      host: hostname(),
+      processIdentity: () => ({ alive: false }),
+    });
+
+    expect(doctor.cleanupStaleOwned("lease-dead")).toEqual({ kind: "cleaned" });
+    expect(doctor.cleanupStaleOwned("lease-dead")).toEqual({ kind: "already_clean" });
+  });
+
+  it.each([
+    ["active", 2_000, hostname(), { alive: false }, "lease_active"],
+    ["foreign", 40_000, "remote-host", { alive: false }, "foreign_owner"],
+    ["live", 40_000, hostname(), { alive: true, startedAtMs: 500 }, "owner_process_alive"],
+  ] as const)("blocks %s lease cleanup without deleting it", (_label, now, leaseHost, identity, reason) => {
+    const root = tempDir("capacity-doctor-blocked");
+    expect(broker(root).acquire(request("held", "codex", { host: leaseHost })).kind).toBe("acquired");
+    const doctor = new NodeAgentCapacityBroker({
+      root,
+      policy: POLICY,
+      clockMs: () => now,
+      host: hostname(),
+      processIdentity: () => identity,
+    });
+
+    expect(doctor.cleanupStaleOwned("lease-held")).toEqual({ kind: "blocked", reason });
+    expect(readdirSync(join(root, "leases"))).toHaveLength(1);
   });
 
   it.each([

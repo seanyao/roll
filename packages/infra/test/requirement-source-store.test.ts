@@ -18,6 +18,8 @@ import { MAX_REQUIREMENT_CONTEXT_BYTES, MAX_REQUIREMENT_CONTEXT_FILES } from "@r
 import { acquireLock, releaseLock } from "../src/process.js";
 import {
   captureRequirementSource,
+  inspectRequirementProjection,
+  repairRequirementProjection,
   requirementCaptureLockPath,
   resolveRequirementSourcesForStoryOnDisk,
 } from "../src/requirement-source-store.js";
@@ -876,5 +878,31 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(join(first.requirementPath, "requirement.md"), "utf8")).toBe("corrupted body\n");
     expect(existsSync(join(first.requirementPath, "context"))).toBe(false);
     expect(existsSync(join(first.requirementPath, "attest.md"))).toBe(false);
+  });
+
+  it("repairs only the mutable projection from a healthy immutable revision and converges", () => {
+    const f = fixture();
+    const captured = captureRequirementSource(request(f));
+    const revision = join(captured.requirementPath, "revisions", readdirSync(join(captured.requirementPath, "revisions"))[0] ?? "missing");
+    const immutableBefore = createHash("sha256").update(readFileSync(join(revision, "requirement.md"))).digest("hex");
+    writeFileSync(join(captured.requirementPath, "requirement.md"), "projection drift\n", "utf8");
+
+    expect(inspectRequirementProjection({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      requirementId: captured.manifest.requirementId,
+    }).state).toBe("drift");
+    expect(repairRequirementProjection({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      requirementId: captured.manifest.requirementId,
+    }).outcome).toBe("repaired");
+    expect(readFileSync(join(captured.requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
+    expect(createHash("sha256").update(readFileSync(join(revision, "requirement.md"))).digest("hex")).toBe(immutableBefore);
+    expect(repairRequirementProjection({
+      workspaceRoot: f.workspace,
+      provider: "jira",
+      requirementId: captured.manifest.requirementId,
+    }).outcome).toBe("reused");
   });
 });

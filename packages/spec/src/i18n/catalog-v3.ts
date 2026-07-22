@@ -55,8 +55,8 @@ export const v3Catalog: Catalog = {
     zh: "用法：roll workspace <init|issue|requirement|doctor|list|show|register|activate|pause|archive> [选项]\n  `init <ID> --config <文件> [--check] [--json]`\n  `issue init <Story ID> --workspace <ID> [--check] [--json]`\n  `requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]`\n  `doctor <ID> [--json]`\n  `list [--json] [--all]`\n  `show <ID|路径> [--json]`\n  `register <ID> <路径> [--json]`\n  `activate|pause|archive <ID|路径> [--json]`\n  init/issue --check 和 doctor 只读；生命周期变更必须显式指定一个目标；--all 仅限只读。\n",
   },
   "workspace.doctor.usage": {
-    en: "Usage: roll workspace doctor <id> [--json]\n  Reports registry, cache, Requirement projection, Issue/worktree, runtime lock and machine lease drift without writing.\n",
-    zh: "用法：roll workspace doctor <ID> [--json]\n  只读报告 registry、缓存、Requirement 投影、Issue/worktree、运行时锁和机器 lease 漂移。\n",
+    en: "Usage: roll workspace doctor <id> [--json] [--repair <typed-action>] [--path <new-workspace-path>]\n  Diagnosis is read-only. Repair accepts only an action emitted by doctor; registry path repair additionally requires an explicit absolute --path.\n",
+    zh: "用法：roll workspace doctor <ID> [--json] [--repair <类型化动作>] [--path <工作区新路径>]\n  诊断只读。修复仅接受 doctor 输出的动作；registry 路径修复还必须显式提供绝对 --path。\n",
   },
   "workspace.doctor.title": { en: "Workspace %s doctor: %s", zh: "工作区 %s doctor：%s" },
   "workspace.doctor.header": { en: "Status\tFinding\tEvidence\tNext action", zh: "状态\t发现\t证据\t下一步" },
@@ -64,10 +64,12 @@ export const v3Catalog: Catalog = {
   "workspace.doctor.next": { en: "Next: %s", zh: "下一步：%s" },
   "workspace.doctor.next.none": { en: "none", zh: "无" },
   "workspace.doctor.next.owner": { en: "owner intervention (%s)", zh: "需要 owner 处理（%s）" },
+  "workspace.doctor.repair.title": { en: "Workspace doctor repair %s: %s", zh: "工作区 doctor 修复 %s：%s" },
   "workspace.doctor.error.line": { en: "workspace doctor: %s — %s", zh: "工作区 doctor：%s — %s" },
   "workspace.doctor.error.invalid_arguments": { en: "Invalid arguments; run `roll workspace doctor --help`", zh: "参数无效；请运行 `roll workspace doctor --help`" },
   "workspace.doctor.error.not_found": { en: "Workspace is not registered", zh: "工作区未注册" },
   "workspace.doctor.error.invalid_workspace": { en: "Workspace facts could not be read safely", zh: "无法安全读取工作区事实" },
+  "workspace.doctor.error.repair_blocked": { en: "Repair is not currently safe or was not offered by the latest diagnosis", zh: "当前修复不安全，或最新诊断未提供该动作" },
   "workspace.issue.usage": {
     en: "Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]\n  --check resolves the Story Contract, Workspace bindings and every repository target's state with zero writes.\n  Apply creates/reuses/repairs one Issue root: an immutable roll.issue/v1 manifest and one worktree per declared repository target.\n",
     zh: "用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]\n  --check 只读解析 Story Contract、工作区绑定与每个仓库目标的状态，零写入。\n  Apply 创建/复用/修复一个 Issue root：不可变的 roll.issue/v1 manifest 与每个声明仓库目标各一个 worktree。\n",

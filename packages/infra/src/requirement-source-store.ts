@@ -34,6 +34,7 @@ import {
   type WorkspaceManifest,
 } from "@roll/spec";
 import { acquireLock, releaseLock } from "./process.js";
+import { auditRequirementArchive } from "./requirement-archive-audit.js";
 
 export type RequirementSourceStoreErrorCode =
   | "invalid_workspace"
@@ -84,6 +85,12 @@ export interface RequirementProjectionInspection {
   readonly requirementId: string;
   readonly requirementPath: string;
   readonly state: RequirementProjectionState;
+}
+
+export interface RequirementProjectionRepairResult {
+  readonly outcome: "repaired" | "reused";
+  readonly requirementId: string;
+  readonly requirementPath: string;
 }
 
 export interface RequirementSourceStoreDeps {
@@ -349,7 +356,7 @@ export function inspectRequirementProjection(input: {
   readonly requirementId: string;
 }): RequirementProjectionInspection {
   const workspaceRoot = resolve(input.workspaceRoot);
-  const requirementPath = join(workspaceRoot, "requirements", input.provider, input.requirementId);
+  let requirementPath = join(workspaceRoot, "requirements", input.provider, input.requirementId);
   const unsupported = (): RequirementProjectionInspection => ({
     requirementId: input.requirementId,
     requirementPath,
@@ -359,6 +366,7 @@ export function inspectRequirementProjection(input: {
   let canonicalRequirement: string;
   try {
     canonicalWorkspace = realpathSync(workspaceRoot);
+    requirementPath = join(canonicalWorkspace, "requirements", input.provider, input.requirementId);
     canonicalRequirement = realpathSync(requirementPath);
   } catch {
     return unsupported();
@@ -389,6 +397,72 @@ export function inspectRequirementProjection(input: {
     };
   } catch {
     return { requirementId: input.requirementId, requirementPath, state: "drift" };
+  }
+}
+
+/** Rebuild the mutable current projection only from the current immutable
+ * revision after the archive auditor proves the full revision graph healthy.
+ * The projection journal is written before any projection file changes and is
+ * retained on interruption so the same operation can resume idempotently. */
+export function repairRequirementProjection(
+  input: {
+    readonly workspaceRoot: string;
+    readonly provider: string;
+    readonly requirementId: string;
+  },
+  deps: RequirementSourceStoreDeps = {},
+): RequirementProjectionRepairResult {
+  let workspaceRoot: string;
+  try {
+    workspaceRoot = realpathSync(resolve(input.workspaceRoot));
+  } catch (error) {
+    return fail("invalid_workspace", "Workspace root could not be resolved", error);
+  }
+  const workspace = readWorkspace(workspaceRoot);
+  const requirementPath = join(workspaceRoot, "requirements", input.provider, input.requirementId);
+  let manifest: RequirementSourceManifest | undefined;
+  try {
+    manifest = readExisting(join(requirementPath, "source.yaml"));
+  } catch (error) {
+    return fail("revision_conflict", "Requirement source authority is invalid", error);
+  }
+  if (
+    manifest === undefined || manifest.provider !== input.provider ||
+    manifest.requirementId !== input.requirementId ||
+    !declaredSource(workspace.requirements, manifest.provider, manifest.ref)
+  ) {
+    return fail("source_not_declared", "Requirement source is not declared by this Workspace");
+  }
+  const lockPath = requirementCaptureLockPath(workspaceRoot, input.requirementId);
+  ensureSafeDirectory(workspaceRoot, dirname(lockPath), true);
+  const lock = acquireLock(lockPath, process.pid, {
+    cycleId: `requirement-repair:${workspace.workspaceId}:${input.requirementId}`,
+    unparseableIsHeld: true,
+  });
+  if (!lock.acquired) fail("concurrent_capture", "Requirement source capture or repair is already running");
+  try {
+    const audit = auditRequirementArchive({
+      workspaceRoot,
+      provider: input.provider,
+      requirementId: input.requirementId,
+    });
+    if (audit.status !== "healthy") {
+      return fail("revision_conflict", "Immutable Requirement archive is not trusted for projection repair");
+    }
+    const current = inspectRequirementProjection(input);
+    if (current.state === "current") {
+      return { outcome: "reused", requirementId: input.requirementId, requirementPath };
+    }
+    if (current.state === "unsupported_schema") {
+      return fail("revision_conflict", "Requirement projection authority is unsupported");
+    }
+    const evidence = validateRevision(requirementPath, manifest);
+    const renameFile = deps.renameFile ?? renameSync;
+    prepareProjectionJournal(workspaceRoot, requirementPath, manifest, renameFile);
+    projectCurrent(workspaceRoot, requirementPath, manifest, evidence, deps);
+    return { outcome: "repaired", requirementId: input.requirementId, requirementPath };
+  } finally {
+    releaseLock(lockPath);
   }
 }
 

@@ -38,6 +38,14 @@ export interface NodeAgentCapacityBrokerOptions {
   readonly lockPollMs?: number;
 }
 
+export type AgentCapacityCleanupResult =
+  | { readonly kind: "cleaned" }
+  | { readonly kind: "already_clean" }
+  | {
+      readonly kind: "blocked";
+      readonly reason: "lease_unreadable_or_unknown_schema" | "lease_active" | "foreign_owner" | "owner_process_alive";
+    };
+
 interface LeaseRead {
   readonly path: string;
   readonly lease?: AgentCapacityLease;
@@ -157,6 +165,28 @@ export class NodeAgentCapacityBroker {
       }
       unlinkSync(read.path);
       return { kind: "released" };
+    });
+  }
+
+  /** Remove exactly one stale lease only when the persisted owner belongs to
+   * this host and its process is provably dead. No owner token is required:
+   * this is an operator repair guarded by stronger persisted identity facts,
+   * and it never guesses across hosts or live/PID-reused processes. */
+  cleanupStaleOwned(leaseId: string): AgentCapacityCleanupResult {
+    return this.#withLock(() => {
+      const read = this.#readExact(leaseId);
+      if (read === undefined) return { kind: "already_clean" };
+      if (read.lease === undefined) {
+        return { kind: "blocked", reason: "lease_unreadable_or_unknown_schema" };
+      }
+      const now = this.#clockMs();
+      const stale = now - read.lease.heartbeatAtMs > this.#policy.staleAfterSeconds * 1_000;
+      if (!stale) return { kind: "blocked", reason: "lease_active" };
+      if (read.lease.owner.host !== this.#host) return { kind: "blocked", reason: "foreign_owner" };
+      const identity = this.#processIdentity(read.lease.owner.pid);
+      if (identity.alive) return { kind: "blocked", reason: "owner_process_alive" };
+      unlinkSync(read.path);
+      return { kind: "cleaned" };
     });
   }
 

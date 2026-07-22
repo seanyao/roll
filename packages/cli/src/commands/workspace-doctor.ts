@@ -1,22 +1,35 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { hostname } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   HUMAN_SOFT_LEASE_HOURS,
   diagnoseWorkspace,
+  normalizeAgentCapacityPolicy,
+  normalizeAgentScopeConfig,
   normalizeRequirementSourceReference,
+  type IssueStoryContract,
   type WorkspaceDoctorProbe,
+  type WorkspaceDoctorRepairKind,
   type WorkspaceDoctorRepairAction,
   type WorkspaceDoctorReport,
 } from "@roll/core";
 import {
+  NodeAgentCapacityBroker,
+  applyIssueInit,
   auditRequirementArchive,
+  ensureRepositoryCache,
+  git,
   inspectRepositoryCache,
+  inspectIssueInitJournal,
   inspectRequirementProjection,
   issueWorktreeIdentity,
   readLockOwner,
   readWorkspace,
+  repairRequirementProjection,
   resolveRepositoryCacheIdentity,
+  resolveRequirementSourcesForStoryOnDisk,
+  resolveWorkspaceBacklogStoryContract,
   workspaceRegistryTransactionPath,
   WorkspaceRegistry,
   WorkspaceRegistryError,
@@ -30,14 +43,18 @@ import {
   v3Catalog,
   type AgentCapacityLease,
   type Lang,
+  type NormalizedAgentCapacityPolicy,
   type WorkspaceManifest,
 } from "@roll/spec";
 import { configLang } from "./lang.js";
 import { workspaceRollHome } from "./workspace-target.js";
 
 const WORKSPACE_DOCTOR_ERROR_V1 = "roll.workspace-doctor-error/v1" as const;
+const WORKSPACE_DOCTOR_REPAIR_V1 = "roll.workspace-doctor-repair/v1" as const;
 
-type DoctorErrorCode = "invalid_arguments" | "not_found" | "invalid_workspace";
+type DoctorErrorCode = "invalid_arguments" | "not_found" | "invalid_workspace" | "repair_blocked";
+
+class WorkspaceDoctorRepairError extends Error {}
 
 function lang(): Lang {
   return resolveLang({
@@ -54,6 +71,70 @@ function msg(key: string, ...args: ReadonlyArray<string | number>): string {
 
 export function workspaceDoctorUsage(): string {
   return msg("workspace.doctor.usage");
+}
+
+interface ParsedDoctorArgs {
+  readonly workspaceId: string;
+  readonly json: boolean;
+  readonly repair?: WorkspaceDoctorRepairAction;
+  readonly path?: string;
+}
+
+const REPAIR_KINDS = new Set<WorkspaceDoctorRepairKind>([
+  "update_registry_path",
+  "rebuild_cache",
+  "repair_requirement_projection",
+  "recreate_clean_worktree",
+  "cleanup_stale_owned_lease",
+]);
+
+function parseRepairAction(value: string): WorkspaceDoctorRepairAction | undefined {
+  const separator = value.indexOf(":");
+  if (separator <= 0 || separator === value.length - 1) return undefined;
+  const kind = value.slice(0, separator);
+  const targetId = value.slice(separator + 1);
+  if (!REPAIR_KINDS.has(kind as WorkspaceDoctorRepairKind) || !/^[A-Za-z0-9._/-]+$/u.test(targetId) || targetId.includes("..")) {
+    return undefined;
+  }
+  return { kind: kind as WorkspaceDoctorRepairKind, targetId };
+}
+
+function parseArgs(args: readonly string[]): ParsedDoctorArgs | undefined {
+  let json = false;
+  let repair: WorkspaceDoctorRepairAction | undefined;
+  let path: string | undefined;
+  const positional: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      if (json) return undefined;
+      json = true;
+      continue;
+    }
+    if (arg === "--repair" || arg === "--path") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("-")) return undefined;
+      if (arg === "--repair") {
+        if (repair !== undefined) return undefined;
+        repair = parseRepairAction(value);
+        if (repair === undefined) return undefined;
+      } else {
+        if (path !== undefined) return undefined;
+        path = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === undefined || arg.startsWith("-")) return undefined;
+    positional.push(arg);
+  }
+  const workspaceId = positional[0];
+  if (workspaceId === undefined || workspaceId === "" || positional.length !== 1) return undefined;
+  if (repair === undefined && path !== undefined) return undefined;
+  if (repair?.kind === "update_registry_path") {
+    if (path === undefined || !isAbsolute(path)) return undefined;
+  } else if (path !== undefined) return undefined;
+  return { workspaceId, json, ...(repair === undefined ? {} : { repair }), ...(path === undefined ? {} : { path }) };
 }
 
 function emitError(code: DoctorErrorCode, json: boolean): number {
@@ -118,6 +199,26 @@ function emitReport(report: WorkspaceDoctorReport, json: boolean): number {
   return 0;
 }
 
+function emitRepair(
+  action: WorkspaceDoctorRepairAction,
+  outcome: "repaired" | "reused",
+  report: WorkspaceDoctorReport,
+  json: boolean,
+): number {
+  if (json) {
+    process.stdout.write(`${JSON.stringify({
+      schema: WORKSPACE_DOCTOR_REPAIR_V1,
+      workspaceId: report.workspaceId,
+      action,
+      outcome,
+      report,
+    }, null, 2)}\n`);
+    return 0;
+  }
+  process.stdout.write(`${msg("workspace.doctor.repair.title", actionToken(action), outcome)}\n${renderHuman(report)}`);
+  return 0;
+}
+
 function registryReport(
   workspaceId: string,
   state: Extract<WorkspaceDoctorProbe, { kind: "registry" }>["state"],
@@ -158,9 +259,20 @@ async function cacheProbes(rollHome: string, workspace: WorkspaceManifest): Prom
   for (const binding of workspace.repositories) {
     const state = await inspectRepositoryCache({ rollHome, binding });
     const identity = resolveRepositoryCacheIdentity({ rollHome, binding });
+    let safeState = state;
+    if ((state === "absent" || state === "repairable") && registeredIssueWorktreeExists(rollHome, binding.repoId)) {
+      safeState = "conflict";
+    }
+    if (state === "repairable" && existsSync(identity.cachePath)) {
+      const worktrees = await git(["--no-optional-locks", "worktree", "list", "--porcelain"], identity.cachePath);
+      const linked = worktrees.code === 0
+        ? worktrees.stdout.split("\n").filter((line) => line.startsWith("worktree ")).length
+        : Number.POSITIVE_INFINITY;
+      if (linked > 1) safeState = "conflict";
+    }
     probes.push({
       kind: "cache",
-      state,
+      state: safeState,
       targetId: binding.repoId,
       evidencePath: `repos/${basename(identity.cachePath)}`,
     });
@@ -217,11 +329,20 @@ async function issueProbes(
   for (const storyId of issueDirectories(workspaceRoot)) {
     const issueRoot = join(workspaceRoot, "issues", storyId);
     const manifestPath = join(issueRoot, "manifest.json");
-    const journal = existsSync(join(issueRoot, "issue-init.pending.json"));
+    const journal = inspectIssueInitJournal(issueRoot, { workspaceId: workspace.workspaceId, storyId });
+    if (journal === "unsupported_schema") {
+      probes.push({
+        kind: "issue",
+        state: "unsupported_schema",
+        targetId: storyId,
+        evidencePath: `issues/${storyId}/issue-init.pending.json`,
+      });
+      continue;
+    }
     if (!existsSync(manifestPath)) {
       probes.push({
         kind: "issue",
-        state: journal ? "partial_journal" : "unsupported_schema",
+        state: journal === "valid" ? "partial_journal" : "unsupported_schema",
         targetId: storyId,
         evidencePath: `issues/${storyId}`,
       });
@@ -238,7 +359,7 @@ async function issueProbes(
       probes.push({ kind: "issue", state: "unsupported_schema", targetId: storyId, evidencePath: `issues/${storyId}/manifest.json` });
       continue;
     }
-    if (journal) {
+    if (journal === "valid") {
       probes.push({ kind: "issue", state: "partial_journal", targetId: storyId, evidencePath: `issues/${storyId}/issue-init.pending.json` });
     }
     for (const target of parsed.value.repositories) {
@@ -247,7 +368,7 @@ async function issueProbes(
       );
       const evidencePath = `issues/${storyId}/${target.alias}`;
       if (binding === undefined) {
-        probes.push({ kind: "issue", state: "conflict", targetId: `${storyId}/${target.alias}`, evidencePath });
+        probes.push({ kind: "issue", state: "conflict", targetId: storyId, evidencePath });
         continue;
       }
       const cache = resolveRepositoryCacheIdentity({ rollHome, binding });
@@ -255,7 +376,7 @@ async function issueProbes(
       const state = identity.state === "absent"
         ? "missing_worktree"
         : identity.state === "conflict" ? "conflict" : identity.dirty ? "dirty_or_unpushed" : "compatible";
-      probes.push({ kind: "issue", state, targetId: `${storyId}/${target.alias}`, evidencePath });
+      probes.push({ kind: "issue", state, targetId: storyId, evidencePath });
     }
   }
   return probes;
@@ -333,30 +454,55 @@ function capacityLeaseProbes(rollHome: string, workspaceId: string): WorkspaceDo
   } catch {
     return [];
   }
+  const policy = machineCapacityPolicy(rollHome);
+  if (policy === undefined) {
+    return [{
+      kind: "lease",
+      state: "unsupported_schema",
+      targetId: "capacity-policy",
+      evidencePath: "agents.yaml",
+    }];
+  }
   const currentHost = hostname();
   const probes: WorkspaceDoctorProbe[] = [];
   for (const name of names) {
+    const redactedId = createHash("sha256").update(name).digest("hex").slice(0, 12);
+    const evidencePath = `locks/capacity/leases/${redactedId}.json`;
     let value: unknown;
     try {
       value = JSON.parse(readFileSync(join(root, name), "utf8"));
     } catch {
-      probes.push({ kind: "lease", state: "unreadable", targetId: basename(name, ".json"), evidencePath: `locks/capacity/leases/${name}` });
+      probes.push({ kind: "lease", state: "unreadable", targetId: `lease-file-${redactedId}`, evidencePath });
       continue;
     }
     if (!isCapacityLease(value)) {
-      probes.push({ kind: "lease", state: "unsupported_schema", targetId: basename(name, ".json"), evidencePath: `locks/capacity/leases/${name}` });
+      probes.push({ kind: "lease", state: "unsupported_schema", targetId: `lease-file-${redactedId}`, evidencePath });
       continue;
     }
     if (value.owner.workspaceId !== workspaceId) continue;
-    const stale = Date.now() - value.heartbeatAtMs > 120_000;
+    const stale = Date.now() - value.heartbeatAtMs > policy.staleAfterSeconds * 1_000;
     const state = !stale
       ? "active"
       : value.owner.host !== currentHost || pidAlive(value.owner.pid)
         ? "stale_live_or_foreign"
         : "stale_owned_dead";
-    probes.push({ kind: "lease", state, targetId: value.owner.leaseId, evidencePath: `locks/capacity/leases/${name}` });
+    probes.push({ kind: "lease", state, targetId: value.owner.leaseId, evidencePath });
   }
   return probes;
+}
+
+function machineCapacityPolicy(rollHome: string): NormalizedAgentCapacityPolicy | undefined {
+  const path = join(rollHome, "agents.yaml");
+  if (!existsSync(path)) {
+    return { global: 1, perAgent: {}, heartbeatSeconds: 30, staleAfterSeconds: 120 };
+  }
+  try {
+    const parsed = normalizeAgentScopeConfig(readFileSync(path, "utf8"));
+    if (parsed.config === null || parsed.config.scope !== "machine" || parsed.errors.length > 0) return undefined;
+    return normalizeAgentCapacityPolicy(parsed.config);
+  } catch {
+    return undefined;
+  }
 }
 
 async function diagnose(rollHome: string, entry: InspectedWorkspace): Promise<WorkspaceDoctorReport> {
@@ -382,27 +528,240 @@ async function diagnose(rollHome: string, entry: InspectedWorkspace): Promise<Wo
   return diagnoseWorkspace({ workspaceId: entry.workspaceId, probes });
 }
 
+function actionMatches(left: WorkspaceDoctorRepairAction, right: WorkspaceDoctorRepairAction): boolean {
+  return left.kind === right.kind && left.targetId === right.targetId;
+}
+
+function repairOffered(report: WorkspaceDoctorReport, action: WorkspaceDoctorRepairAction): boolean {
+  return report.findings.some((finding) => finding.repairAction !== undefined && actionMatches(finding.repairAction, action));
+}
+
+function readIssueManifestSafe(workspaceRoot: string, storyId: string) {
+  try {
+    const parsed = parseIssueManifest(JSON.parse(readFileSync(join(workspaceRoot, "issues", storyId, "manifest.json"), "utf8")));
+    return parsed.ok ? parsed.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function registeredIssueWorktreeExists(rollHome: string, repoId: string): boolean {
+  let entries: readonly InspectedWorkspace[];
+  try {
+    entries = new WorkspaceRegistry({ rollHome }).inspect();
+  } catch {
+    return true;
+  }
+  for (const entry of entries) {
+    if (entry.consistency !== "consistent") continue;
+    for (const storyId of issueDirectories(entry.root)) {
+      const manifest = readIssueManifestSafe(entry.root, storyId);
+      if (manifest === undefined) continue;
+      for (const target of manifest.repositories) {
+        if (target.repoId === repoId && existsSync(join(entry.root, "issues", storyId, target.alias))) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function storyContract(workspaceRoot: string, storyId: string): IssueStoryContract {
+  const resolved = resolveWorkspaceBacklogStoryContract(workspaceRoot, storyId);
+  if (!resolved.ok) throw new WorkspaceDoctorRepairError("story_contract_unavailable");
+  return resolved.value;
+}
+
+async function repairRegistryPath(
+  rollHome: string,
+  action: WorkspaceDoctorRepairAction,
+  newPath: string | undefined,
+  report: WorkspaceDoctorReport,
+): Promise<"repaired" | "reused"> {
+  if (newPath === undefined || action.targetId !== report.workspaceId) throw new WorkspaceDoctorRepairError("registry_path_required");
+  const store = new WorkspaceRegistry({ rollHome });
+  const entry = store.read().entries.find((candidate) => candidate.workspaceId === action.targetId);
+  if (entry === undefined) throw new WorkspaceDoctorRepairError("registry_entry_missing");
+  const requested = resolve(newPath);
+  const current = (() => {
+    try { return store.inspect().find((candidate) => candidate.workspaceId === action.targetId); } catch { return undefined; }
+  })();
+  if (current?.consistency === "consistent" && resolve(current.root) === requested) return "reused";
+  if (!repairOffered(report, action)) throw new WorkspaceDoctorRepairError("registry_repair_not_offered");
+  store.repair({ workspaceId: action.targetId, oldRoot: entry.root, newRoot: requested });
+  return "repaired";
+}
+
+async function repairCache(
+  rollHome: string,
+  workspace: WorkspaceManifest,
+  action: WorkspaceDoctorRepairAction,
+  report: WorkspaceDoctorReport,
+): Promise<"repaired" | "reused"> {
+  const binding = workspace.repositories.find((candidate) => candidate.repoId === action.targetId);
+  if (binding === undefined) throw new WorkspaceDoctorRepairError("cache_binding_missing");
+  const state = await inspectRepositoryCache({ rollHome, binding });
+  if (state === "compatible") return "reused";
+  if (!repairOffered(report, action) || state === "conflict") throw new WorkspaceDoctorRepairError("cache_repair_not_offered");
+  if (registeredIssueWorktreeExists(rollHome, binding.repoId)) {
+    throw new WorkspaceDoctorRepairError("cache_has_registered_worktrees");
+  }
+  const identity = resolveRepositoryCacheIdentity({ rollHome, binding });
+  if (existsSync(identity.cachePath)) {
+    const worktrees = await git(["--no-optional-locks", "worktree", "list", "--porcelain"], identity.cachePath);
+    const count = worktrees.code === 0
+      ? worktrees.stdout.split("\n").filter((line) => line.startsWith("worktree ")).length
+      : Number.POSITIVE_INFINITY;
+    if (count > 1) throw new WorkspaceDoctorRepairError("cache_has_linked_worktrees");
+  }
+  await ensureRepositoryCache({
+    rollHome,
+    binding,
+    integrationRefspec: `+refs/heads/${binding.integrationBranch}:refs/remotes/origin/${binding.integrationBranch}`,
+  });
+  return "repaired";
+}
+
+function repairProjection(
+  workspaceRoot: string,
+  workspace: WorkspaceManifest,
+  action: WorkspaceDoctorRepairAction,
+  report: WorkspaceDoctorReport,
+): "repaired" | "reused" {
+  const source = workspace.requirements
+    .map((declared) => normalizeRequirementSourceReference(declared.provider, declared.ref))
+    .find((candidate) => candidate.ok && candidate.value.requirementId === action.targetId);
+  if (source === undefined || !source.ok) throw new WorkspaceDoctorRepairError("requirement_source_missing");
+  const inspection = inspectRequirementProjection({
+    workspaceRoot,
+    provider: source.value.provider,
+    requirementId: source.value.requirementId,
+  });
+  if (inspection.state === "current") return "reused";
+  if (!repairOffered(report, action)) throw new WorkspaceDoctorRepairError("projection_repair_not_offered");
+  return repairRequirementProjection({
+    workspaceRoot,
+    provider: source.value.provider,
+    requirementId: source.value.requirementId,
+  }).outcome;
+}
+
+async function repairIssue(
+  rollHome: string,
+  entry: InspectedWorkspace,
+  workspace: WorkspaceManifest,
+  action: WorkspaceDoctorRepairAction,
+  report: WorkspaceDoctorReport,
+): Promise<"repaired" | "reused"> {
+  const issueRoot = join(entry.root, "issues", action.targetId);
+  const manifest = readIssueManifestSafe(entry.root, action.targetId);
+  const offered = repairOffered(report, action);
+  if (report.findings.some((finding) =>
+    finding.targetId === action.targetId && finding.status === "data_loss_risk"
+  )) {
+    throw new WorkspaceDoctorRepairError("issue_has_data_loss_risk");
+  }
+  if (!offered && report.findings.some((finding) =>
+    finding.targetId === action.targetId && finding.code.startsWith("issue_")
+  )) {
+    throw new WorkspaceDoctorRepairError("issue_repair_not_offered");
+  }
+  const hasMissing = manifest === undefined || manifest.repositories.some((target) => !existsSync(join(issueRoot, target.alias)));
+  if (!hasMissing && !existsSync(join(issueRoot, "issue-init.pending.json"))) return "reused";
+  if (!offered) throw new WorkspaceDoctorRepairError("issue_repair_not_offered");
+  const result = await applyIssueInit({
+    workspaceId: entry.workspaceId,
+    rollHome,
+    workspaceRoot: entry.root,
+    issueRoot,
+    contract: storyContract(entry.root, action.targetId),
+    bindings: workspace.repositories,
+    requirementManifests: resolveRequirementSourcesForStoryOnDisk(entry.root, action.targetId),
+  });
+  return result.outcome === "reused" ? "reused" : "repaired";
+}
+
+function cleanupLease(
+  rollHome: string,
+  action: WorkspaceDoctorRepairAction,
+  report: WorkspaceDoctorReport,
+): "repaired" | "reused" {
+  const offered = repairOffered(report, action);
+  if (!offered) {
+    const unsafeFinding = report.findings.some((finding) =>
+      finding.targetId === action.targetId && finding.code.startsWith("lease_")
+    );
+    if (unsafeFinding) throw new WorkspaceDoctorRepairError("lease_repair_not_offered");
+    const leasePath = join(
+      rollHome,
+      "locks",
+      "capacity",
+      "leases",
+      `${createHash("sha256").update(action.targetId).digest("hex")}.json`,
+    );
+    if (!existsSync(leasePath)) return "reused";
+    throw new WorkspaceDoctorRepairError("lease_repair_not_offered");
+  }
+  const policy = machineCapacityPolicy(rollHome);
+  if (policy === undefined) throw new WorkspaceDoctorRepairError("capacity_policy_invalid");
+  const broker = new NodeAgentCapacityBroker({
+    root: join(rollHome, "locks", "capacity"),
+    policy,
+    clockMs: Date.now,
+    host: hostname(),
+    processIdentity: (pid) => ({ alive: pidAlive(pid) }),
+  });
+  const result = broker.cleanupStaleOwned(action.targetId);
+  if (result.kind === "cleaned") {
+    return "repaired";
+  }
+  if (result.kind === "already_clean") return "reused";
+  throw new WorkspaceDoctorRepairError(result.reason);
+}
+
+async function executeRepair(
+  rollHome: string,
+  entry: InspectedWorkspace,
+  action: WorkspaceDoctorRepairAction,
+  path: string | undefined,
+  report: WorkspaceDoctorReport,
+): Promise<"repaired" | "reused"> {
+  if (action.kind === "update_registry_path") return repairRegistryPath(rollHome, action, path, report);
+  const workspace = readWorkspace(entry.root);
+  if (action.kind === "rebuild_cache") return repairCache(rollHome, workspace, action, report);
+  if (action.kind === "repair_requirement_projection") return repairProjection(entry.root, workspace, action, report);
+  if (action.kind === "recreate_clean_worktree") return repairIssue(rollHome, entry, workspace, action, report);
+  return cleanupLease(rollHome, action, report);
+}
+
 export async function workspaceDoctorCommand(args: readonly string[]): Promise<number> {
   const json = args.includes("--json");
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h" || args[0] === "help")) {
     process.stdout.write(workspaceDoctorUsage());
     return 0;
   }
-  const unknown = args.filter((arg) => arg.startsWith("-") && arg !== "--json");
-  const positional = args.filter((arg) => !arg.startsWith("-"));
-  if (unknown.length > 0 || positional.length !== 1 || args.filter((arg) => arg === "--json").length > 1) {
-    return emitError("invalid_arguments", json);
-  }
-  const workspaceId = positional[0];
-  if (workspaceId === undefined || workspaceId === "") return emitError("invalid_arguments", json);
+  const parsed = parseArgs(args);
+  if (parsed === undefined) return emitError("invalid_arguments", json);
+  const workspaceId = parsed.workspaceId;
   const rollHome = workspaceRollHome();
   try {
     const registry = inspectRegistry(rollHome, workspaceId);
     if ("report" in registry) return emitReport(registry.report, json);
-    return emitReport(await diagnose(rollHome, registry.entry), json);
+    const report = await diagnose(rollHome, registry.entry);
+    if (parsed.repair === undefined) return emitReport(report, json);
+    let outcome: "repaired" | "reused";
+    try {
+      outcome = await executeRepair(rollHome, registry.entry, parsed.repair, parsed.path, report);
+    } catch (error) {
+      if (error instanceof WorkspaceDoctorRepairError) throw error;
+      throw new WorkspaceDoctorRepairError("repair_subsystem_rejected", { cause: error });
+    }
+    const freshRegistry = inspectRegistry(rollHome, workspaceId);
+    if ("report" in freshRegistry) return emitRepair(parsed.repair, outcome, freshRegistry.report, json);
+    return emitRepair(parsed.repair, outcome, await diagnose(rollHome, freshRegistry.entry), json);
   } catch (error) {
     if (error instanceof WorkspaceRegistryError && error.code === "not_found") return emitError("not_found", json);
     if (error instanceof WorkspaceRegistryError) return emitError("invalid_workspace", json);
+    if (error instanceof WorkspaceDoctorRepairError) return emitError("repair_blocked", json);
     throw error;
   }
 }

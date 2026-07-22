@@ -370,6 +370,29 @@ function readJournalPinnedFacts(issueRoot: string): ReadonlyMap<string, PinnedTa
   return facts;
 }
 
+export type IssueInitJournalInspection = "absent" | "valid" | "unsupported_schema";
+
+/** Read-only doctor seam over the same strict journal parser used by apply.
+ * It exposes no pinned SHA/path/owner facts and only confirms whether the
+ * interrupted transaction belongs to the expected Workspace/Story. */
+export function inspectIssueInitJournal(
+  issueRoot: string,
+  expected: { readonly workspaceId: string; readonly storyId: string },
+): IssueInitJournalInspection {
+  if (!existsSync(journalPath(issueRoot))) return "absent";
+  try {
+    const facts = readJournalPinnedFacts(issueRoot);
+    for (const fact of facts.values()) {
+      if (fact.workspaceId !== expected.workspaceId || fact.storyId !== expected.storyId) {
+        return "unsupported_schema";
+      }
+    }
+    return "valid";
+  } catch {
+    return "unsupported_schema";
+  }
+}
+
 function pinnedFactsEqual(a: PinnedTargetFacts, b: PinnedTargetFacts): boolean {
   return a.workspaceId === b.workspaceId
     && a.storyId === b.storyId

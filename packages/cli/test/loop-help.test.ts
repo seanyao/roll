@@ -15,7 +15,7 @@ const help = (lang: "en" | "zh"): string => stripAnsi(renderLoopHelp(lang));
 // monitor / attach / branches / test-quality-check just print a redirect).
 const LIVE_SUBCOMMANDS = [
   "watch", "status", "eval", "story", "runs", "goal", "go", "signals", "log", "events",
-  "alert", "run-once", "fmt", "reconcile-pending", "on", "off", "pause",
+  "alert", "run-once", "fmt", "reconcile", "reconcile-pending", "on", "off", "pause",
   "resume", "now", "reset", "mute", "unmute", "gc", "test", "notify",
   "enforce-tcr", "precheck-ci", "hotfix-head-context", "agent-routes", "fallback",
 ];
@@ -40,7 +40,7 @@ describe("roll loop --help groups — US-DOSSIER-035", () => {
     expect(out).toMatch(/control\s+on --workspace <id\|path> · off \[--all\] · now · pause --workspace <id\|path> · resume --workspace <id\|path> · reset · go --workspace <id\|path> · goal · recover · fallback/);
     expect(out).toMatch(/observe\s+watch · status \[--workspace <id\|path>\|--all\] · runs · log · events · signals · eval/);
     expect(out).toMatch(/alerts\s+alert list · alert ack · alert resolve · alert log/);
-    expect(out).toMatch(/maintain\s+gc · fmt · mute · unmute · reconcile-pending/);
+    expect(out).toMatch(/maintain\s+gc · fmt · mute · unmute · reconcile --workspace <id\|path> · reconcile-pending/);
   });
 
   it("US-WS-016: top-level help exposes Workspace targeting for scheduler controls", () => {

@@ -38,7 +38,7 @@ The autonomous delivery loop — grouped control / observe / alerts / maintain.
 control   on --workspace <id|path> · off [--all] · now · pause --workspace <id|path> · resume --workspace <id|path> · reset · go --workspace <id|path> · goal · recover · fallback
 observe   watch · status [--workspace <id|path>|--all] · runs · log · events · signals · eval
 alerts    alert list · alert ack · alert resolve · alert log
-maintain  gc · fmt · mute · unmute · reconcile-pending
+maintain  gc · fmt · mute · unmute · reconcile --workspace <id|path> · reconcile-pending
 internal  test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes
 
 [38;2;88;166;255mstates    [0mACTIVE (lanes armed) · DORMANT (backlog drained → loop lane self-unloads, zero idle records) · PAUSED (you stopped it)
@@ -50,7 +50,7 @@ internal  test · run-once · story · notify · enforce-tcr · precheck-ci · h
 作动      on --workspace <id|path> · off [--all] · now · pause --workspace <id|path> · resume --workspace <id|path> · reset · go --workspace <id|path> · goal · recover · fallback
 传感      watch · status [--workspace <id|path>|--all] · runs · log · events · signals · eval
 告警      alert list · alert ack · alert resolve · alert log
-维护      gc · fmt · mute · unmute · reconcile-pending
+维护      gc · fmt · mute · unmute · reconcile --workspace <id|path> · reconcile-pending
 内部      test · run-once · story · notify · enforce-tcr · precheck-ci · hotfix-head-context · agent-routes
 
 [38;2;88;166;255m状态      [0mACTIVE 运行中(lane 就绪) · DORMANT 休眠(backlog 抽干→自卸 loop lane、不再记空转) · PAUSED 已暂停(你停的)

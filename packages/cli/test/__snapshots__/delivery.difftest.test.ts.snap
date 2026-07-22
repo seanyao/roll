@@ -204,6 +204,12 @@ exports[`US-WS-015 roll delivery surface > freezes locale-specific help without 
   \`reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]\`
   Delivery is an Issue fact view; --all is read-only and reconciliation never reads backlog Markdown as completion truth.
 ",
+  "loopEn": "Usage: roll loop reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]
+  Alias of \`roll delivery reconcile\`; folds Workspace Issue facts and never reads backlog Markdown as completion truth.
+",
+  "loopZh": "用法：roll loop reconcile [<Story ID>] --workspace <ID|路径> [--dry-run] [--json]
+  \`roll delivery reconcile\` 的别名；折叠工作区 Issue 事实，绝不把 backlog Markdown 当作完成真相。
+",
   "zh": "用法：roll delivery <list|show|reconcile> [选项]
   \`list [--workspace <ID|路径> | --all] [--json]\`
   \`show <Story ID> [--workspace <ID|路径>] [--json]\`

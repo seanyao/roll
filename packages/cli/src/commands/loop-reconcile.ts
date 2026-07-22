@@ -65,6 +65,7 @@ import { branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence, resolveRe
 import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
 import { markDoneGuarded } from "../runner/done-guard.js";
 import {
+  deliveryLoopReconcileUsage,
   reconcileWorkspaceDeliveries,
   type DeliveryCommandDeps,
 } from "./delivery.js";
@@ -103,6 +104,10 @@ export function loopDeliveryReconcileCommand(
   args: string[],
   deps: DeliveryCommandDeps = {},
 ): number {
+  if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
+    process.stdout.write(deliveryLoopReconcileUsage());
+    return 0;
+  }
   return reconcileWorkspaceDeliveries(args, deps.resolveTarget);
 }
 

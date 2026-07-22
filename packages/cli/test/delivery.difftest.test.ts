@@ -249,11 +249,19 @@ describe("US-WS-015 roll delivery surface", () => {
     const f = fixture();
     const en = await runCli(["delivery", "--help"], f, "en");
     const zh = await runCli(["delivery", "--help"], f, "zh");
+    const loopEn = await runCli(["loop", "reconcile", "--help"], f, "en");
+    const loopZh = await runCli(["loop", "reconcile", "--help"], f, "zh");
     expect(en.status).toBe(0);
     expect(zh.status).toBe(0);
+    expect(loopEn.status).toBe(0);
+    expect(loopZh.status).toBe(0);
     expectNoAdjacentBilingualPairs(en.stdout);
     expectNoAdjacentBilingualPairs(zh.stdout);
-    expect({ en: en.stdout, zh: zh.stdout }).toMatchSnapshot();
+    expectNoAdjacentBilingualPairs(loopEn.stdout);
+    expectNoAdjacentBilingualPairs(loopZh.stdout);
+    expect(loopEn.stdout).toContain("roll loop reconcile");
+    expect(loopZh.stdout).toContain("roll loop reconcile");
+    expect({ en: en.stdout, zh: zh.stdout, loopEn: loopEn.stdout, loopZh: loopZh.stdout }).toMatchSnapshot();
   });
 
   it("freezes stable list/show JSON with every required repository fact and exact-SHA acceptance", async () => {

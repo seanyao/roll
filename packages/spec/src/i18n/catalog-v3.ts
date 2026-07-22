@@ -27,6 +27,10 @@ export const v3Catalog: Catalog = {
     en: "Usage: roll delivery <list|show|reconcile> [options]\n  `list [--workspace <id|path> | --all] [--json]`\n  `show <story-id> [--workspace <id|path>] [--json]`\n  `reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]`\n  Delivery is an Issue fact view; --all is read-only and reconciliation never reads backlog Markdown as completion truth.\n",
     zh: "用法：roll delivery <list|show|reconcile> [选项]\n  `list [--workspace <ID|路径> | --all] [--json]`\n  `show <Story ID> [--workspace <ID|路径>] [--json]`\n  `reconcile [<Story ID>] --workspace <ID|路径> [--dry-run] [--json]`\n  Delivery 是 Issue 事实视图；--all 仅限只读，对账绝不把 backlog Markdown 当作完成真相。\n",
   },
+  "delivery.loop_reconcile_usage": {
+    en: "Usage: roll loop reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]\n  Alias of `roll delivery reconcile`; folds Workspace Issue facts and never reads backlog Markdown as completion truth.\n",
+    zh: "用法：roll loop reconcile [<Story ID>] --workspace <ID|路径> [--dry-run] [--json]\n  `roll delivery reconcile` 的别名；折叠工作区 Issue 事实，绝不把 backlog Markdown 当作完成真相。\n",
+  },
   "delivery.list.title": { en: "Deliveries %s (%d)", zh: "交付 %s（%d）" },
   "delivery.list.header": { en: "Story\tState\tOutstanding", zh: "Story\t状态\t待完成闸门" },
   "delivery.list.empty": { en: "No Issues", zh: "没有 Issue" },

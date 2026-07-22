@@ -144,6 +144,10 @@ export function deliveryUsage(): string {
   return msg("delivery.usage");
 }
 
+export function deliveryLoopReconcileUsage(): string {
+  return msg("delivery.loop_reconcile_usage");
+}
+
 function compareCodeUnits(left: string, right: string): number {
   if (left < right) return -1;
   if (left > right) return 1;

@@ -26,7 +26,7 @@ const BANDS: Band[] = [
   { key: "control", color: "amber", en: "control", zh: "作动", verbs: "on --workspace <id|path> · off [--all] · now · pause --workspace <id|path> · resume --workspace <id|path> · reset · go --workspace <id|path> · goal · recover · fallback" },
   { key: "observe", color: "green", en: "observe", zh: "传感", verbs: "watch · status [--workspace <id|path>|--all] · runs · log · events · signals · eval" },
   { key: "alerts", color: "red", en: "alerts", zh: "告警", verbs: "alert list · alert ack · alert resolve · alert log" },
-  { key: "maintain", color: "muted", en: "maintain", zh: "维护", verbs: "gc · fmt · mute · unmute · reconcile-pending" },
+  { key: "maintain", color: "muted", en: "maintain", zh: "维护", verbs: "gc · fmt · mute · unmute · reconcile --workspace <id|path> · reconcile-pending" },
   // Agent-invoked entry points — live, but not user-facing daily verbs. Listed
   // so AC5's "no live subcommand dropped" holds without polluting the four
   // design bands.

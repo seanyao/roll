@@ -93,6 +93,14 @@ export type StoryVerificationVerdict =
       readonly failedLegs: readonly { readonly repoId: string; readonly code: LegFailureCode }[];
     };
 
+export interface StoryVerificationOptions {
+  /** Whether the Story contract declares a cross-repo integration command.
+   *  Default true (conservative). A single-writable-leg story without one is
+   *  covered by its own repo-scoped gate; a multi-leg story can never skip it —
+   *  cross-repo acceptance is exactly what per-leg tests cannot prove. */
+  readonly integrationDeclared?: boolean;
+}
+
 /**
  * Fold per-leg verdicts and the integration observation into one Story
  * verification verdict. Leg failures win (fix-forward needs the per-leg
@@ -102,12 +110,18 @@ export type StoryVerificationVerdict =
 export function storyVerification(
   legFacts: readonly RepositoryLegFacts[],
   integration: IntegrationFacts,
+  options: StoryVerificationOptions = {},
 ): StoryVerificationVerdict {
   const legs = legFacts.map(legVerdict);
   const failedLegs = legs.flatMap((verdict) => (verdict.ok ? [] : [{ repoId: verdict.repoId, code: verdict.code }]));
   if (failedLegs.length > 0) return { ok: false, code: "leg_failed", legs, failedLegs };
 
-  if (!integration.ran) return { ok: false, code: "integration_not_run", legs, failedLegs: [] };
+  const writableCount = legFacts.filter((leg) => leg.access === "write").length;
+  const integrationRequired = (options.integrationDeclared ?? true) || writableCount > 1;
+  if (!integration.ran) {
+    if (!integrationRequired) return { ok: true, legs, integrationInputs: {} };
+    return { ok: false, code: "integration_not_run", legs, failedLegs: [] };
+  }
   const writableIds = legFacts.filter((leg) => leg.access === "write").map((leg) => leg.repoId);
   const missing = writableIds.filter((repoId) => {
     const sha = integration.inputHeads[repoId];

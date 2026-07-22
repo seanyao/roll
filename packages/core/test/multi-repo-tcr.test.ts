@@ -142,6 +142,24 @@ describe("US-WS-012 storyVerification — no aggregate boolean hides a leg", () 
     if (!verdict.ok) expect(verdict.code).toBe("integration_not_run");
   });
 
+  it("a single-writable-leg story without a declared integration command passes on leg evidence alone (AC8)", () => {
+    const verdict = storyVerification([leg()], { ran: false }, { integrationDeclared: false });
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(verdict.integrationInputs).toEqual({});
+  });
+
+  it("a multi-writable-leg story cannot skip integration even when undeclared — cross-repo acceptance is the point", () => {
+    const verdict = storyVerification(green, { ran: false }, { integrationDeclared: false });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.code).toBe("integration_not_run");
+  });
+
+  it("a declared integration command must run even for a single-leg story", () => {
+    const verdict = storyVerification([leg()], { ran: false }, { integrationDeclared: true });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.code).toBe("integration_not_run");
+  });
+
   it("a story with only a read-only extra leg needs pinned heads only for writable legs", () => {
     const legs = [leg(), leg({ repoId: "repo-cccccccccccc", alias: "sot3", access: "read", changed: false, tcrCount: 0, testResult: "not_run" })];
     const verdict = storyVerification(legs, {

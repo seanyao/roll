@@ -17,6 +17,13 @@ import {
   type QualityProfile,
   type DeltaRole,
 } from "@roll/spec";
+import {
+  prepareDelegation,
+  PrepareError,
+  type PrepareInput,
+} from "../lib/delta-allocation.js";
+import { EventBus } from "@roll/core";
+import { existsSync, readFileSync } from "node:fs";
 
 // ── Locale resolution ────────────────────────────────────────────────────────
 
@@ -189,14 +196,113 @@ function prepareCommand(args: string[]): number {
     return 1;
   }
 
-  // TODO: full implementation with delegation allocation
-  const msg = "TODO: prepare not yet implemented";
-  if (json) {
-    process.stderr.write(JSON.stringify({ ok: false, error: "not_implemented", detail: msg }) + "\n");
-  } else {
-    process.stderr.write(`${msg}\n`);
+  // Read resolution template from host-provided path
+  const resolutionPath = flags["resolution"] as string;
+  if (!existsSync(resolutionPath)) {
+    const msg = `Resolution file not found: ${resolutionPath}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "resolution_not_found", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
   }
-  return 1;
+
+  let resolutionTemplate: unknown;
+  try {
+    resolutionTemplate = JSON.parse(readFileSync(resolutionPath, "utf8"));
+  } catch {
+    const msg = `Failed to parse resolution file: ${resolutionPath}`;
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "resolution_parse_error", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  const input: PrepareInput = {
+    storyId,
+    trigger: flags["trigger"] as DelegationTrigger,
+    topology: flags["topology"] as DeliveryTopology,
+    qualityProfile: flags["profile"] as QualityProfile,
+    presetId: flags["preset"] as string,
+    presetSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // TODO: compute from actual preset
+    resolutionTemplate: resolutionTemplate as PrepareInput["resolutionTemplate"],
+  };
+
+  try {
+    const result = prepareDelegation(process.cwd(), input);
+
+    // Append events
+    const bus = new EventBus();
+    const now = Date.now();
+
+    // delta:prepared
+    bus.appendEvent(result.eventsPath, {
+      type: "delta:prepared",
+      delegationId: result.delegationId,
+      runId: result.runId,
+      storyId,
+      trigger: input.trigger,
+      topology: input.topology,
+      qualityProfile: input.qualityProfile,
+      presetId: input.presetId,
+      presetSha256: input.presetSha256,
+      hostId: "pi",
+      ts: now,
+    });
+
+    // delta:role_resolved for each role
+    const roles = (input.resolutionTemplate as unknown as Record<string, unknown>).roles;
+    if (Array.isArray(roles)) {
+      for (const role of roles) {
+        const r = role as Record<string, unknown>;
+        bus.appendEvent(result.eventsPath, {
+          type: "delta:role_resolved",
+          delegationId: result.delegationId,
+          storyId,
+          role: r.role as DeltaRole,
+          roleInstanceId: r.roleInstanceId as string,
+          hostId: r.hostId as string,
+          modelId: r.modelId as string,
+          source: r.source as "user-pin" | "preset-preference" | "availability-fallback",
+          reasons: r.reasons as string[],
+          inventorySha256: input.presetSha256,
+          ts: now,
+        });
+      }
+    }
+
+    if (json) {
+      process.stdout.write(JSON.stringify({
+        ok: true,
+        delegationId: result.delegationId,
+        runId: result.runId,
+        artifacts: {
+          frameDir: result.frameDir,
+          resolutionPath: result.resolutionPath,
+          markerPath: result.markerPath,
+          preparationPath: result.preparationPath,
+        },
+      }) + "\n");
+    } else {
+      process.stdout.write(`Delegation prepared: ${result.delegationId}\n`);
+      process.stdout.write(`  runId: ${result.runId}\n`);
+      process.stdout.write(`  frame: ${result.frameDir}\n`);
+    }
+    return 0;
+  } catch (err) {
+    if (err instanceof PrepareError) {
+      if (json) {
+        process.stderr.write(JSON.stringify({ ok: false, error: err.code, detail: err.message }) + "\n");
+      } else {
+        process.stderr.write(`roll delta prepare: ${err.message}\n`);
+      }
+      return 1;
+    }
+    throw err;
+  }
 }
 
 // ── Validate ─────────────────────────────────────────────────────────────────

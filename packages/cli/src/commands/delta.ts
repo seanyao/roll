@@ -25,6 +25,7 @@ import {
   releaseHostDelegationLease,
   type PrepareInput,
 } from "../lib/delta-allocation.js";
+import { loadLocalPresets } from "../lib/delta-artifacts.js";
 import { EventBus, projectDelegationStatus } from "@roll/core";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -223,13 +224,30 @@ function prepareCommand(args: string[]): number {
     return 1;
   }
 
+  // Read presetSha256 from the host-supplied resolution template (credible provenance claim).
+  // If the template omits it, fall back to computing from the preset file content.
+  const hostPresetSha256 = (resolutionTemplate as Record<string, unknown>).presetSha256 as string | undefined;
+  
+  // Resolve hostId from the machine-local preset identified by presetId.
+  const presetId = flags["preset"] as string;
+  let resolvedHostId = "unknown";
+  try {
+    const presets = loadLocalPresets();
+    const matched = presets.find((p) => p.id === presetId);
+    if (matched) {
+      resolvedHostId = matched.hostId;
+    }
+  } catch {
+    // preset file unreadable — hostId stays "unknown"
+  }
+
   const input: PrepareInput = {
     storyId,
     trigger: flags["trigger"] as DelegationTrigger,
     topology: flags["topology"] as DeliveryTopology,
     qualityProfile: flags["profile"] as QualityProfile,
-    presetId: flags["preset"] as string,
-    presetSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", // TODO: compute from actual preset
+    presetId,
+    presetSha256: hostPresetSha256 ?? "",
     resolutionTemplate: resolutionTemplate as PrepareInput["resolutionTemplate"],
   };
 
@@ -251,7 +269,7 @@ function prepareCommand(args: string[]): number {
       qualityProfile: input.qualityProfile,
       presetId: input.presetId,
       presetSha256: input.presetSha256,
-      hostId: "pi",
+      hostId: resolvedHostId,
       ts: now,
     });
 

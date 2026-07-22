@@ -106,9 +106,9 @@ function writeResolutionTemplate(projectDir: string, storyId: string, presetId: 
     topology: "delta-team",
     qualityProfile: "standard",
     presetId,
-    presetSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    presetSha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
     inventoryObservedAt: new Date().toISOString(),
-    inventorySha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    inventorySha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
     roles: [
       { role: "designer", roleInstanceId: "ri-1", hostId: "pi", modelId: "claude", source: "user-pin", reasons: ["test"] },
       { role: "builder", roleInstanceId: "ri-2", hostId: "pi", modelId: "claude", source: "user-pin", reasons: ["test"] },
@@ -164,6 +164,14 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(events.length).toBeGreaterThanOrEqual(2);
     const preparedEvent = JSON.parse(events[0]!);
     expect(preparedEvent.type).toBe("delta:prepared");
+
+    // F-3: presetSha256 must match the host-supplied resolution template value (not fabricated)
+    expect(preparedEvent.presetSha256).toBe("0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff");
+
+    // F-5: hostId is resolved from preset (not hardcoded "pi")
+    // When no machine-local preset exists, hostId is "unknown" — not a fabricated host name
+    expect(typeof preparedEvent.hostId).toBe("string");
+    expect(preparedEvent.hostId).not.toBe("pi");
 
     // Verify lease exists (per-story file)
     const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-TEST.json");
@@ -277,9 +285,9 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
       topology: "delta-team",
       qualityProfile: "standard",
       presetId: "x",
-      presetSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      presetSha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
       inventoryObservedAt: new Date().toISOString(),
-      inventorySha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      inventorySha256: "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
       roles: [],
     }), "utf8");
 

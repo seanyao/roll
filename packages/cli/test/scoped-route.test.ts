@@ -156,6 +156,23 @@ agents:
       installed: ALL_INSTALLED,
     })).toThrow("invalid workspace agent scope");
   });
+
+  it("US-WS-017a: repository cardinality does not create an agent scope", () => {
+    const { rollHome, workspaceRoot } = workspaceFixture();
+    const resolve = () => resolveScopedStoryExecute(workspaceRoot, {
+      rollHome,
+      workspaceRoot,
+      installed: ALL_INSTALLED,
+      recentUse: {},
+      builderNoConsecutiveRepeat: false,
+    });
+    writeFileSync(join(workspaceRoot, "workspace.yaml"), JSON.stringify({ repositories: [{ repoId: "app" }] }));
+    const oneRepository = resolve();
+    writeFileSync(join(workspaceRoot, "workspace.yaml"), JSON.stringify({ repositories: [{ repoId: "app" }, { repoId: "api" }] }));
+    const multiRepository = resolve();
+
+    expect(multiRepository).toEqual(oneRepository);
+  });
   it("keeps the assigned Supervisor visible without excluding it from the Builder pool by default", () => {
     const { rollHome, repoCwd } = fixture();
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });

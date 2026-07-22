@@ -7,8 +7,9 @@ model is:
 Scope -> Role -> Binding -> Agent -> optional Model
 ```
 
-The same shape repeats at every level. A machine can declare the agents it has,
-a project can bind roles for its work, and a story or skill can narrow those
+The same shape repeats at every level. A machine declares capability; a Project
+can bind legacy repository work, while a registered Workspace casts roles through
+`machine -> workspace -> story -> skill` and a story or skill can narrow those
 bindings when needed.
 
 ## Agent-Domain Files
@@ -17,6 +18,10 @@ bindings when needed.
   machine-level roles such as `supervise`.
 - `.roll/agents.yaml` is Project Scope. It binds project/story roles such as
   `supervise`, `execute`, and `evaluate`.
+- `<workspace>/agents.yaml` is Workspace Scope. It is a closed casting-only file:
+  `roles` plus `defaults.story` / `defaults.skill`. It cannot declare agents,
+  models, disabled state, or capacity, and Workspace runtime never falls back to
+  repository-local Project Scope.
 
 `~/.roll/config.yaml` may still exist for generic preferences and legacy
 migration input, but it is no longer the primary authoring surface for agent
@@ -27,7 +32,13 @@ roll agent                      # show Machine Scope, effective Project Scope, a
 roll agent migrate --dry-run    # preview conversion from legacy files
 roll agent migrate              # write roll-agents/v1 files
 roll agent list                 # show installed agents
+roll agent readiness [agent]    # show machine readiness
+roll agent --workspace <id>     # show read-only effective Workspace casting and trace
 ```
+
+`roll agent list` and `roll agent readiness` are machine views and never change
+with cwd or active Workspace. Runtime auth/network/quota signals affect only the
+current trace; Roll does not rewrite either policy file.
 
 ## Roles
 

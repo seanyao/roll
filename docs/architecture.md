@@ -101,10 +101,14 @@ web          站点与静态展示（当前不是活体 Supervisor 控制台）
 Scope -> Role -> Binding -> Agent -> optional Model
 ```
 
-**Scope**：`machine` / `project` / `story` / `skill` 等层级使用同一套形状。
+**Scope**：`machine` / `workspace` / `project` / `story` / `skill` 等层级使用同一套形状。
 Machine Scope 写在 `~/.roll/agents.yaml`，声明本机 Agent Pool、能力和机器级
 `supervise`；Project Scope 写在 `.roll/agents.yaml`，绑定项目/Story 默认角色并可
 `inherits: machine`。
+
+Workspace runtime 固定解析 `machine -> workspace -> story -> skill`。其中
+`<workspace>/agents.yaml` 是 closed、casting-only scope；agent/model/readiness/disabled
+能力仍只由 Machine Scope 声明，repository-local Project Scope 仅作 migration input。
 
 **Role**：Canonical user-facing role model is **Supervisor / Designer / Builder / Evaluator**。
 

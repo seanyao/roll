@@ -156,6 +156,13 @@ defaults:
 Runtime availability is explicit: if a candidate is not callable on the current
 machine because of auth, network, VPN, or account state, the current resolution
 records that limitation instead of rewriting the static pool.
+Workspace execution uses a separate `machine -> workspace -> story -> skill`
+chain. `<workspace>/agents.yaml` may only cast roles and refine Story/skill
+defaults; machine declarations, models, disabled state, and readiness remain
+machine-owned. Repository-local Project Scope is migration input only for a
+Workspace run. Inspect the read-only effective trace with
+`roll agent --workspace <id|path>`; `roll agent list` and `roll agent readiness`
+always remain machine views.
 For open role casting, `strategy: health-aware` keeps the installed pool visible
 and ranks candidates by capability, recent health, successful deliveries, recent
 use, and cost band. Inspect a cast with
@@ -213,7 +220,7 @@ with `roll loop resume` when ready.
 
 | Command | Description |
 |---------|-------------|
-| `roll agent [migrate\|list\|cast]` | Agent Scope, installed-agent inventory, and role casting |
+| `roll agent [--workspace <id\|path>\|migrate\|list\|readiness]` | Agent Scope, machine inventory/readiness, and read-only Workspace casting |
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <id\|path>]` | View and manage one Workspace backlog; `--all` is read-only |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
 | `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, handoff, and an optional `roll loop go --review auto` continuation when new Todo cards are created |

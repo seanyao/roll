@@ -137,9 +137,27 @@ export function hasLiveCycleLease(projectPath: string, storyId: string): boolean
 }
 
 /**
+ * Check whether a live host-delegation per-story lease file exists.
+ * Exported so cycle readers can also check for host-delegation leases
+ * (bidirectional atomic exclusion requires both sides to check this file).
+ */
+export function hasHostDelegationLeaseFile(projectPath: string, storyId: string): boolean {
+  return existsSync(leaseFilePath(projectPath, storyId));
+}
+
+/**
  * Attempt to atomically claim a host-delegation lease for a story.
  * Uses a per-story lease file with temp+fsync+hardlink protocol.
- * Rejects if a live cycle lease exists for this story (mutual exclusion).
+ *
+ * Exclusion protocol (plan §6.1 step 2):
+ * 1. Stamp story-leases.json FIRST (before hardlink) so cycle readers see the claim.
+ * 2. Hardlink the per-story lease file (atomic no-clobber).
+ * 3. If hardlink fails → undo the stamp and return conflict.
+ *
+ * The story-leases.json RMW has a narrow race window between read and write
+ * (same as the pre-existing cycle claim path). Full elimination requires the
+ * cycle side to also check hasHostDelegationLeaseFile() before claiming —
+ * this is the single no-clobber ownership truth for host-delegation.
  *
  * Returns "claimed" on success, "exists" if a lease file already exists,
  * "conflict" on concurrent write collision.
@@ -160,12 +178,41 @@ export function claimHostDelegationLease(
     mkdirSync(dir, { recursive: true });
   }
 
-  // Check if lease file already exists
+  // Check if per-story lease file already exists (atomic no-replace gate)
   if (existsSync(leasePath)) {
     return "exists";
   }
 
-  // Build lease entry (host-delegation own file)
+  // STEP 1: Stamp story-leases.json FIRST — before the hardlink — so that
+  // a concurrent cycle reader sees the host-delegation claim and blocks.
+  // This minimises the race window (cycle could still stamp between our
+  // hasLiveCycleLease check and this write, but that is the same RMW race
+  // the cycle path has always had).
+  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
+  let stampApplied = false;
+  try {
+    // Re-check under the same read: if a cycle entry appeared since our
+    // earlier check, bail out before stamping.
+    const recheckLeases = JSON.parse(
+      existsSync(storyLeasesPath) ? readFileSync(storyLeasesPath, "utf8") : "{}",
+    );
+    const recheckEntry = recheckLeases[lease.storyId];
+    if (recheckEntry && typeof recheckEntry.source === "string" && recheckEntry.source === "cycle") {
+      return "exists";
+    }
+
+    setLease(storyLeasesPath, lease.storyId, {
+      pid: process.pid,
+      source: "host-delegation",
+      claimedAt: lease.claimedAt,
+    });
+    stampApplied = true;
+  } catch {
+    // If stamp fails, don't proceed — we can't provide bidirectional visibility
+    return "exists";
+  }
+
+  // STEP 2: Hardlink the per-story lease file (atomic, deterministic winner)
   const leaseEntry = {
     pid: process.pid,
     claimedAt: lease.claimedAt,
@@ -176,20 +223,21 @@ export function claimHostDelegationLease(
     runId: lease.runId,
   };
 
-  // Write temp file
   const tmpPath = `${leasePath}.tmp.${randomUUID()}`;
   writeFileSync(tmpPath, JSON.stringify(leaseEntry, null, 2) + "\n", "utf8");
 
-  // fsync temp file
   const tmpFd = openSync(tmpPath, "r+");
   fdatasyncSync(tmpFd);
   closeSync(tmpFd);
 
-  // Try hard-link (EEXIST on collision)
   try {
     linkSync(tmpPath, leasePath);
   } catch {
     try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+    // Hardlink failed → undo stamp and report conflict
+    if (stampApplied) {
+      try { removeLease(storyLeasesPath, lease.storyId, "host-delegation"); } catch { /* best-effort */ }
+    }
     return "conflict";
   }
 
@@ -200,17 +248,6 @@ export function claimHostDelegationLease(
 
   // Remove temp
   try { unlinkSync(tmpPath); } catch { /* best-effort */ }
-
-  // Stamp the shared story-leases.json so cycle readers automatically
-  // reject this story (bidirectional mutual exclusion, plan §6.1 step 2).
-  // Uses source: "host-delegation" — a distinct, mutually-recognized claim type
-  // that the cycle machinery respects as an active claim (fail-loud, not best-effort).
-  const storyLeasesPath = join(projectPath, ".roll", "loop", "story-leases.json");
-  setLease(storyLeasesPath, lease.storyId, {
-    pid: process.pid,
-    source: "host-delegation",
-    claimedAt: lease.claimedAt,
-  });
 
   return "claimed";
 }

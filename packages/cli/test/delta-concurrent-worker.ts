@@ -21,9 +21,9 @@ while (true) {
     } catch { /* retry */ }
   }
 }
-// Small random jitter to avoid exact same microsecond
-await new Promise((r) => setTimeout(r, Math.random() * 10));
-
+// No jitter — barrier release is the sole synchronization point.
+// Both workers see "go" in the same event-loop tick; the hardlink
+// protocol (linkSync + EEXIST) is the deterministic winner.
 const saveCwd = process.cwd();
 let code: number;
 try {

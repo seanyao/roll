@@ -217,7 +217,7 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(existsSync(join(dir, ".roll", "loop", "runs.jsonl"))).toBe(false);
   });
 
-  it("prepare rejects duplicate lease (concurrent collision)", () => {
+  it("prepare rejects duplicate lease (sequential second attempt)", () => {
     const dir = setupMinimalProject("US-DELTA-TEST-2", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-TEST-2", "local-preset");
 
@@ -927,6 +927,55 @@ describe("US-DELTA-003 — conclude", () => {
     expect(foreignLease.delegationId).toBe("foreign-deleg-id");
   });
 
+  it("conclude does not release same-story mismatched-delegationId lease (AC6 boundary)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-SAMESTORY", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-SAMESTORY", "local-preset");
+
+    // Prepare delegation A for this story
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-SAMESTORY",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationIdA = JSON.parse(r1.stdout).delegationId;
+
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-CONC-SAMESTORY.json");
+    const originalContent = readFileSync(leasePath, "utf8");
+
+    // Overwrite lease file content with a DIFFERENT delegationId (simulating
+    // same-story host-delegation from another instance that bypassed atomic claim)
+    writeFileSync(leasePath, JSON.stringify({
+      pid: 88888,
+      claimedAt: Date.now(),
+      storyId: "US-DELTA-CONC-SAMESTORY",
+      state: "in_flight",
+      ownerKind: "host-delegation",
+      delegationId: "wrong-deleg-id",
+      runId: "delta-wrong-deleg-id",
+    }, null, 2), "utf8");
+
+    // Conclude with delegationId A — must NOT release because the file now
+    // has a mismatched delegationId
+    const r2 = tsRunCwd([
+      "conclude", "--delegation", delegationIdA,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    // conclude returns 0 for terminal write BUT the lease release fails internally
+    // The event is written but the lease is retained because delegationId mismatch
+    expect(r2.code).toBe(0);
+
+    // Lease file MUST still exist with the mismatched delegationId
+    expect(existsSync(leasePath)).toBe(true);
+    const leaseAfter = JSON.parse(readFileSync(leasePath, "utf8"));
+    expect(leaseAfter.delegationId).toBe("wrong-deleg-id");
+
+    // Restore original content and release for cleanup
+    writeFileSync(leasePath, originalContent, "utf8");
+    releaseHostDelegationLease(dir, "US-DELTA-CONC-SAMESTORY", delegationIdA);
+  });
+
   it("conclude writes exact delta:terminal event fields (AC6)", () => {
     const dir = setupMinimalProject("US-DELTA-CONC-FIELDS", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-FIELDS", "local-preset");
@@ -1107,6 +1156,50 @@ describe("US-DELTA-003 — hardlink lease concurrency protocol", () => {
 
     // Release the winner
     releaseHostDelegationLease(dir, "US-DELTA-HL-LEASE", leaseData.delegationId);
+  });
+
+  it("claimHostDelegationLease hardlink never replaces existing lease file content (no-replace evidence)", () => {
+    const dir = setupMinimalProject("US-DELTA-HL-NOREPLACE", "delta-team");
+
+    // First claim wins
+    const winnerLease: HostDelegationLease = {
+      storyId: "US-DELTA-HL-NOREPLACE",
+      state: "in_flight",
+      ownerKind: "host-delegation",
+      delegationId: randomUUID(),
+      runId: "delta-winner",
+      claimedAt: Date.now(),
+    };
+    const r1 = claimHostDelegationLease(dir, winnerLease);
+    expect(r1).toBe("claimed");
+
+    const leasePath = join(dir, ".roll", "loop", "host-delegation-leases", "US-DELTA-HL-NOREPLACE.json");
+    const contentAfterWinner = readFileSync(leasePath, "utf8");
+    const statAfterWinner = JSON.parse(contentAfterWinner);
+    expect(statAfterWinner.delegationId).toBe(winnerLease.delegationId);
+
+    // Second claim with DIFFERENT content must NOT overwrite
+    const loserLease: HostDelegationLease = {
+      storyId: "US-DELTA-HL-NOREPLACE",
+      state: "in_flight",
+      ownerKind: "host-delegation",
+      delegationId: randomUUID(), // different ID
+      runId: "delta-loser",
+      claimedAt: Date.now() + 9999, // different timestamp
+    };
+    const r2 = claimHostDelegationLease(dir, loserLease);
+    expect(r2).toBe("exists");
+
+    // File content is byte-identical to after first claim — no replacement occurred
+    const contentAfterLoser = readFileSync(leasePath, "utf8");
+    expect(contentAfterLoser).toBe(contentAfterWinner);
+
+    // Winner's delegationId is still in the file
+    const statFinal = JSON.parse(contentAfterLoser);
+    expect(statFinal.delegationId).toBe(winnerLease.delegationId);
+    expect(statFinal.delegationId).not.toBe(loserLease.delegationId);
+
+    releaseHostDelegationLease(dir, "US-DELTA-HL-NOREPLACE", winnerLease.delegationId);
   });
 
   it("claimHostDelegationLease rejects when story-leases.json has cycle entry", () => {
@@ -1432,6 +1525,8 @@ describe("US-DELTA-003 — prepare crash before delta:prepared", () => {
     expect(rHuman.stdout).toContain("uncommitted_delegation_frame");
     expect(rHuman.stdout).toContain(delegationId);
     expect(rHuman.stdout).toContain("frame:");
+    expect(rHuman.stdout).toContain("recovery:");
+    expect(rHuman.stdout).toContain("release");
 
     // Next prepare must NOT adopt/resume/delete the orphan frame
     // The lease is still active, so prepare should fail with builder_lease_conflict

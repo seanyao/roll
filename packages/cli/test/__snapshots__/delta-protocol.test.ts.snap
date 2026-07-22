@@ -29,6 +29,7 @@ exports[`US-DELTA-003 — orphan status human + JSON snapshots > orphan frame sh
 "Uncommitted frames:
   <DELEGATION_ID>: unknown: uncommitted_delegation_frame
     frame: <TMP>/roll-delta-test-<DELEGATION_ID>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>
+    recovery: release the host-delegation lease then re-prepare or remove the orphan frame
 "
 `;
 

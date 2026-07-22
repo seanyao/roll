@@ -828,6 +828,7 @@ function statusCommand(args: string[]): number {
       for (const o of orphans) {
         process.stdout.write(`  ${o.delegationId}: unknown: uncommitted_delegation_frame\n`);
         process.stdout.write(`    frame: ${o.frameDir}\n`);
+        process.stdout.write(`    recovery: release the host-delegation lease then re-prepare or remove the orphan frame\n`);
       }
     }
     if (!statusView && delegationViews.length === 0 && orphans.length === 0) {

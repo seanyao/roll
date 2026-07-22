@@ -64,7 +64,7 @@ import {
   loopTestCommand,
   loopUnmuteCommand,
 } from "./loop-maint.js";
-import { loopReconcileCommand } from "./loop-reconcile.js";
+import { loopDeliveryReconcileCommand, loopReconcileCommand } from "./loop-reconcile.js";
 import { loopReconcilePendingCommand } from "./loop-reconcile-pending.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
@@ -533,9 +533,10 @@ export function registerAll(): void {
     // US-LOOP-077 renderer. Never writes/signals the loop; not network-gated
     // (local file tail only — see networkNeeds). `--attach` = tmux attach -r.
     if (args[0] === "watch") return loopWatchCommand(args.slice(1));
-    // `loop reconcile`: US-DELIV-002 layered reconcile-from-main — probes
-    // awaiting cycles against main (PR state + patch-id), emits delivery:reconciled.
-    if (args[0] === "reconcile") return loopReconcileCommand(args.slice(1));
+    // `loop reconcile`: US-WS-015 Workspace-scoped alias of `delivery reconcile`.
+    // The legacy reconcile-from-main engine remains internal to runner ticks;
+    // the public alias never revives repository-local operation.
+    if (args[0] === "reconcile") return loopDeliveryReconcileCommand(args.slice(1));
     // `loop reconcile-pending`: FIX-1052 bounded PR polling reconciler — polls
     // pending-merge PRs, fetches origin/main on merge, and updates delivery truth.
     if (args[0] === "reconcile-pending") return loopReconcilePendingCommand(args.slice(1));

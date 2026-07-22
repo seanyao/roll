@@ -153,6 +153,32 @@ defaults:
         strategy: health-aware
 ```
 
+Machine Scope also owns the closed process-capacity policy shared by every
+registered Workspace:
+
+```yaml
+schema: roll-agents/v1
+scope: machine
+agents:
+  codex:
+    capabilities: [supervise, execute, evaluate]
+  kimi:
+    capabilities: [execute, evaluate]
+capacity:
+  global: auto
+  default_per_agent: 1
+  agents:
+    codex: 2
+  heartbeat_seconds: 30
+  stale_after_seconds: 120
+```
+
+When `capacity` is absent, each enabled machine agent gets one slot and the
+global limit is their sum. Every Builder and adversarial role process acquires
+one exact-owned lease before spawn. Exhaustion is a neutral wait: no agent is
+spawned, the Story returns to Todo, and `roll loop status --all` shows the
+agent/model/retry state without exposing credentials or provider health.
+
 Runtime availability is explicit: if a candidate is not callable on the current
 machine because of auth, network, VPN, or account state, the current resolution
 records that limitation instead of rewriting the static pool.

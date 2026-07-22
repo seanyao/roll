@@ -84,7 +84,33 @@ agents:
 roles:
   supervise:
     use: codex
+capacity:
+  global: auto
+  default_per_agent: 1
+  agents:
+    codex: 2
+  heartbeat_seconds: 30
+  stale_after_seconds: 120
 ```
+
+## 机器进程容量
+
+`capacity` 是 closed Machine Scope policy；Project 与 Workspace 文件不能声明或扩大
+它。`global: auto` 等于所有启用 agent 的 slot 总和。若整个 block 缺失，每个启用的
+machine agent 默认一个 slot，global limit 就是这些 slot 的总和。
+
+每个 Builder、test-author、implementer 和 attacker 进程都必须在 spawn 前取得一个
+exact-owned lease。per-agent limit 跨 model 与 account/context key 聚合。没有可用 slot
+时，cycle 记录中性的 `waiting_capacity`，把 Story 恢复为 Todo，等后续 eligible tick
+再试；它不会触发 fallback、Story failure 或 no-progress 计数。当前 acquired/waiting
+agent、model 与 retry 状态可用以下命令查看：
+
+```bash
+roll loop status --all
+```
+
+lease event 只保留 routing identity 与时间信息；auth、quota、network 和 credential
+状态不会写入 capacity policy 或 status。
 
 ## 公平候选池
 

@@ -110,6 +110,13 @@ Workspace runtime 固定解析 `machine -> workspace -> story -> skill`。其中
 `<workspace>/agents.yaml` 是 closed、casting-only scope；agent/model/readiness/disabled
 能力仍只由 Machine Scope 声明，repository-local Project Scope 仅作 migration input。
 
+机器级 `capacity` 同样只属于 `~/.roll/agents.yaml`。每个 Builder 或 adversarial role
+进程在 spawn 前，必须通过机器 broker 原子获取一个带 Workspace/Story/Cycle/spawn
+身份的 lease；全局上限统计所有 lease，per-agent 上限跨 model/context 聚合。容量不足
+产生显式 `waiting_capacity`：不 spawn、不换 agent、不计 Story 失败或 no-progress，释放
+Story claim 后留待后续 tick。心跳或 release 的 exact ownership 丢失会立即终止未授权
+进程并 fail loud；只有同主机且确认死进程的 stale lease 可在 broker lock 内回收。
+
 **Role**：Canonical user-facing role model is **Supervisor / Designer / Builder / Evaluator**。
 
 - Supervisor = control plane：接收 owner 意图、选卡、选执行剖面、观察 cycle、暂停或升级，但不替交付角色写实现或验收结论。

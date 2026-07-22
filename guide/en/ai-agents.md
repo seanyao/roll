@@ -92,7 +92,35 @@ agents:
 roles:
   supervise:
     use: codex
+capacity:
+  global: auto
+  default_per_agent: 1
+  agents:
+    codex: 2
+  heartbeat_seconds: 30
+  stale_after_seconds: 120
 ```
+
+## Machine Process Capacity
+
+`capacity` is a closed Machine Scope policy; Project and Workspace files cannot
+declare or enlarge it. `global: auto` sums the enabled per-agent slots. If the
+whole block is absent, each enabled machine agent receives one slot and the
+global limit is that sum.
+
+Every Builder, test-author, implementer, and attacker process must acquire one
+exact-owned lease before spawn. Per-agent limits aggregate across models and
+account/context keys. When no slot is available, the cycle records a neutral
+`waiting_capacity` result, returns the Story to Todo, and retries on a later
+eligible tick without fallback or failure accounting. Inspect current acquired
+or waiting agent/model/retry state with:
+
+```bash
+roll loop status --all
+```
+
+Lease events contain only routing identity and timing; auth, quota, network, and
+credential state are not persisted into capacity policy or status.
 
 ## Fair Eligibility
 

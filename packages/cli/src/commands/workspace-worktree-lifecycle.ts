@@ -36,6 +36,13 @@ import {
   type BacklogTargetDecision,
 } from "./backlog-target.js";
 import { workspaceRollHome } from "./workspace-target.js";
+import {
+  applyWorktreeCleanup,
+  planWorktreeCleanup,
+  type CleanupCandidate,
+  type WorktreeCleanupPlan,
+  type WorktreeCleanupResult,
+} from "./worktree-cleanup.js";
 
 export interface WorkspaceWorktreeAuditInput {
   readonly selectedWorkspaceId: string;
@@ -89,6 +96,15 @@ export interface WorkspaceWorktreeAuditCommandDeps {
   readonly resolveTarget: (args: readonly string[]) => BacklogTargetDecision;
   readonly rollHome: () => string;
   readonly auditWorkspace: typeof auditWorkspaceWorktrees;
+}
+
+export interface ApplyWorkspaceWorktreeCleanupOptions {
+  readonly selectedWorkspaceId: string;
+  readonly dryRun?: boolean;
+  readonly auditWorkspace: () => WorkspaceWorktreeAuditOutput;
+  readonly withRepositoryLock: <T>(candidate: CleanupCandidate, action: () => Promise<T>) => Promise<T>;
+  readonly removeWorktree?: (repositoryRoot: string, path: string) => { ok: boolean; detail: string };
+  readonly nowMs?: () => number;
 }
 
 function listIssueIds(root: string): readonly string[] {
@@ -302,6 +318,95 @@ export function auditWorkspaceWorktrees(
     ephemeralBranches: branches,
     repositories,
     summary,
+  };
+}
+
+function repositoryAudit(
+  audit: WorkspaceWorktreeAuditOutput,
+  repoId?: string,
+): WorktreeAuditOutput {
+  const records = repoId === undefined
+    ? [...audit.records]
+    : audit.records.filter((record) => record.repoId === repoId);
+  const branches = audit.ephemeralBranches
+    .filter((branch) => repoId === undefined || branch.repoId === repoId)
+    .map((branch) => repoId === undefined ? `${branch.repoId}:${branch.branch}` : branch.branch);
+  return {
+    schema: 1,
+    generatedAt: audit.generatedAt,
+    repo: `workspace:${audit.selectedWorkspaceId}${repoId === undefined ? "" : `:${repoId}`}`,
+    records,
+    ephemeralBranches: branches,
+    summary: {
+      total: records.length,
+      loop: 0,
+      ...(records.length > 0 ? { workspace: records.length } : {}),
+      manual: 0,
+      external: 0,
+      active: records.filter((record) => record.active).length,
+      disposableCandidates: records.filter((record) => record.disposition === "disposable_candidate").length,
+      preserved: records.filter((record) => record.disposition !== "disposable_candidate").length,
+      ephemeralBranches: branches.length,
+    },
+  };
+}
+
+export function planWorkspaceWorktreeCleanup(
+  audit: WorkspaceWorktreeAuditOutput,
+  threshold: number,
+): WorktreeCleanupPlan {
+  return planWorktreeCleanup(
+    repositoryAudit(audit),
+    threshold,
+    [],
+    { workspaceId: audit.selectedWorkspaceId },
+  );
+}
+
+export async function applyWorkspaceWorktreeCleanup(
+  plan: WorktreeCleanupPlan,
+  options: ApplyWorkspaceWorktreeCleanupOptions,
+): Promise<WorktreeCleanupResult> {
+  const removed: WorktreeCleanupResult["removed"] = [];
+  const branchesRemoved: WorktreeCleanupResult["branchesRemoved"] = [];
+  const refused: WorktreeCleanupResult["refused"] = [];
+
+  for (const candidate of plan.candidates) {
+    if (
+      candidate.workspaceId !== options.selectedWorkspaceId ||
+      candidate.repoId === undefined ||
+      candidate.cachePath === undefined
+    ) {
+      refused.push({ path: candidate.path, reason: "identity: cleanup candidate is outside the selected Workspace" });
+      continue;
+    }
+    const result = await options.withRepositoryLock(candidate, async () => {
+      const oneCandidatePlan: WorktreeCleanupPlan = {
+        ...plan,
+        candidates: [candidate],
+        branchCandidates: [],
+        preserved: [],
+      };
+      return applyWorktreeCleanup(oneCandidatePlan, {
+        repositoryRoot: candidate.cachePath as string,
+        dryRun: options.dryRun === true,
+        audit: () => repositoryAudit(options.auditWorkspace(), candidate.repoId),
+        ...(options.removeWorktree === undefined ? {} : { removeWorktree: options.removeWorktree }),
+        ...(options.nowMs === undefined ? {} : { nowMs: options.nowMs }),
+      });
+    });
+    removed.push(...result.removed);
+    branchesRemoved.push(...result.branchesRemoved);
+    refused.push(...result.refused);
+  }
+
+  return {
+    schema: 1,
+    dryRun: options.dryRun === true,
+    removed,
+    branchesRemoved,
+    refused,
+    preserved: [...plan.preserved],
   };
 }
 

@@ -5,6 +5,11 @@ import {
   planWorktreeCleanup,
 } from "../src/commands/worktree-cleanup.js";
 import type { WorktreeAuditOutput, WorktreeAuditRecord } from "../src/commands/worktree-audit.js";
+import {
+  applyWorkspaceWorktreeCleanup,
+  planWorkspaceWorktreeCleanup,
+  type WorkspaceWorktreeAuditOutput,
+} from "../src/commands/workspace-worktree-lifecycle.js";
 
 const HEAD = "b".repeat(40);
 
@@ -49,6 +54,25 @@ function audit(records: readonly WorktreeAuditRecord[]): WorktreeAuditOutput {
       disposableCandidates: records.filter((item) => item.disposition === "disposable_candidate").length,
       preserved: records.filter((item) => item.disposition !== "disposable_candidate").length,
       ephemeralBranches: 0,
+    },
+  };
+}
+
+function workspaceAudit(records: readonly WorktreeAuditRecord[]): WorkspaceWorktreeAuditOutput {
+  return {
+    schema: 1,
+    generatedAt: "2026-07-22T00:00:00.000Z",
+    selectedWorkspaceId: "ws-alpha",
+    records,
+    ephemeralBranches: [],
+    repositories: [{ repoId: "repo-shared", cachePath: "/roll-home/repos/repo-shared.git", integrationBranch: "main" }],
+    summary: {
+      worktrees: records.length,
+      active: records.filter((item) => item.active).length,
+      disposableCandidates: records.filter((item) => item.disposition === "disposable_candidate").length,
+      preserved: records.filter((item) => item.disposition !== "disposable_candidate").length,
+      ephemeralBranches: 0,
+      canaryTotal: records.length,
     },
   };
 }
@@ -102,6 +126,34 @@ describe("US-WS-011a Workspace worktree cleanup", () => {
     expect(result.removed).toEqual([]);
     expect(result.refused).toEqual([
       expect.objectContaining({ path: planned.path, reason: expect.stringContaining("identity") }),
+    ]);
+  });
+
+  it("acquires the machine repository lock before fresh audit, removal and prune", async () => {
+    const safe = record();
+    const plan = planWorkspaceWorktreeCleanup(workspaceAudit([safe]), 0);
+    const calls: string[] = [];
+    const result = await applyWorkspaceWorktreeCleanup(plan, {
+      selectedWorkspaceId: "ws-alpha",
+      auditWorkspace: () => (calls.push("audit"), workspaceAudit([safe])),
+      withRepositoryLock: async (candidate, action) => {
+        calls.push(`lock:${candidate.repoId}`);
+        try {
+          return await action();
+        } finally {
+          calls.push(`unlock:${candidate.repoId}`);
+        }
+      },
+      removeWorktree: (_repoRoot, path) => (calls.push(`remove:${path}`), { ok: true, detail: "" }),
+    });
+
+    expect(result.refused).toEqual([]);
+    expect(result.removed).toEqual([expect.objectContaining({ path: safe.path, workspaceId: "ws-alpha", repoId: "repo-shared" })]);
+    expect(calls).toEqual([
+      "lock:repo-shared",
+      "audit",
+      `remove:${safe.path}`,
+      "unlock:repo-shared",
     ]);
   });
 });

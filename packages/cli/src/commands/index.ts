@@ -94,6 +94,7 @@ import { updateCommand } from "./update.js";
 import { versionCommand } from "./version.js";
 import { worktreeAuditCommand } from "./worktree-audit.js";
 import { worktreeCleanupCommand } from "./worktree-cleanup.js";
+import { deltaCommand } from "./delta.js";
 
 let registered = false;
 
@@ -430,6 +431,7 @@ export function registerAll(): void {
   registerPorted("-v", versionCommand);
   // US-LOOP-093: `worktree audit` — read-only worktree lifecycle audit
   // FIX-1273: `worktree cleanup` — safe, audit-derived recovery for canary pressure
+  registerPorted("delta", deltaCommand, { hidden: true });
   registerPorted("worktree", (args): number | Promise<number> => {
     if (args[0] === "audit") return worktreeAuditCommand(args.slice(1));
     if (args[0] === "cleanup") return worktreeCleanupCommand(args.slice(1));

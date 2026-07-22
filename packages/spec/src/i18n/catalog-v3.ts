@@ -957,4 +957,38 @@ export const v3Catalog: Catalog = {
     en: "  · next migration — %s (%s)",
     zh: "  · 下次迁移 — %s（%s）",
   },
+
+  // US-DELTA-003 — protocol-only `roll delta` CLI
+  "delta.help.usage": {
+    en: "Usage: roll delta <prepare|validate|conclude|status|help>\n\n  Host-guided delegation lifecycle commands (protocol-only; no agent spawning).\n\n  roll delta prepare <story-id> --trigger host-guided|loop-autonomous --topology solo|delta-team|full-delta-team --profile standard|verified|designed --preset <id> --resolution <path> [--json]\n    Atomically claim a delegation frame and host-delegation lease.\n\n  roll delta validate --delegation <id> --stage designer|builder|evaluator|peer [--json]\n    Validate a role-stage submission through the protocol-validator boundary.\n\n  roll delta conclude --delegation <id> --delivery-disposition owner_continue|owner_hold|owner_redelegate [--json]\n    Record owner-approved terminal binding (Option C: handoff_ready/handoff_only).\n\n  roll delta status [--story <id>|--delegation <id>] [--json]\n    Read-only delegation status projection from event truth.\n\n  roll delta help\n    Print this help.\n",
+    zh: "用法：roll delta <prepare|validate|conclude|status|help>\n\n  宿主导引的委派生命周期命令（仅协议层；不启任何 agent）。\n\n  roll delta prepare <story-id> --trigger host-guided|loop-autonomous --topology solo|delta-team|full-delta-team --profile standard|verified|designed --preset <id> --resolution <path> [--json]\n    原子化申领委派帧与 host-delegation 租约。\n\n  roll delta validate --delegation <id> --stage designer|builder|evaluator|peer [--json]\n    经过协议校验边界验证角色阶段提交。\n\n  roll delta conclude --delegation <id> --delivery-disposition owner_continue|owner_hold|owner_redelegate [--json]\n    记录 owner 批准的终止绑定（Option C：handoff_ready/handoff_only）。\n\n  roll delta status [--story <id>|--delegation <id>] [--json]\n    从事件真相只读投影委派状态。\n\n  roll delta help\n    打印此帮助。\n",
+  },
+  "delta.error.unknown_subcommand": {
+    en: "roll delta: unknown subcommand '%s'. Try: prepare, validate, conclude, status, help",
+    zh: "roll delta：未知子命令 '%s'。可用：prepare、validate、conclude、status、help",
+  },
+  "delta.error.missing_story": {
+    en: "roll delta: <story-id> is required",
+    zh: "roll delta：需要提供 <story-id>",
+  },
+  "delta.error.unknown_flag": {
+    en: "roll delta: unknown flag '%s'",
+    zh: "roll delta：未知标志 '%s'",
+  },
+  "delta.error.missing_required": {
+    en: "roll delta: missing required flag '%s'",
+    zh: "roll delta：缺少必需标志 '%s'",
+  },
+  "delta.error.invalid_value": {
+    en: "roll delta: invalid value '%s' for '%s'. Expected: %s",
+    zh: "roll delta：'%s' 的值 '%s' 无效。应为：%s",
+  },
+  "delta.error.cycle_rejected": {
+    en: "roll delta: --cycle is not supported for host-guided prepare (no cycle allocation)",
+    zh: "roll delta：host-guided prepare 不支持 --cycle（无 cycle 分配）",
+  },
+  "delta.error.status_selector": {
+    en: "roll delta status: provide --story <id> or --delegation <id>",
+    zh: "roll delta status：请提供 --story <id> 或 --delegation <id>",
+  },
 };

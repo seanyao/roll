@@ -561,6 +561,30 @@ export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
   ];
 }
 
+/**
+ * FIX-1474 — the clean-teardown command sequence when the builder child was
+ * detected DEAD/MISSING out-of-band (liveness probe; external SIGKILL / PTY
+ * leader death / lost exit delivery). Same durable shape as the timeout
+ * teardown (I8: kill → measure → terminal cycle:end → runs row → alert →
+ * release lock LAST, worktree PRESERVED), but the terminal is the explicit
+ * `aborted` status — this is NOT a timeout (`blocked`) and NOT a code failure
+ * (`failed` after retries). The `cycle:agent_lost` event was already appended
+ * by the probe at the detection moment.
+ */
+export function abortedTeardownCommands(ctx: TerminalContext): CycleCommand[] {
+  return [
+    { kind: "kill_agent", graceSec: WATCHDOG_KILL_GRACE_SEC },
+    { kind: "measure_worktree" },
+    { kind: "emit_event", event: cycleEndEvent(ctx, "aborted") },
+    { kind: "append_run", status: "aborted", outcome: mapV2Status("aborted"), cycleId: ctx.cycleId },
+    {
+      kind: "append_alert",
+      message: `cycle ${ctx.cycleId}: builder child process lost (killed out-of-band) — cycle aborted; worktree preserved`,
+    },
+    { kind: "release_lock" },
+  ];
+}
+
 // ── FIX-907: per-cycle HARD timeout (wall-clock + no-progress) ───────────────
 //
 // The watchdog above ({@link watchdogVerdict}) is checked only BETWEEN steps of
@@ -571,13 +595,21 @@ export function timeoutTeardownCommands(ctx: TerminalContext): CycleCommand[] {
 // 46min after one TCR commit). FIX-907 races the spawn against this decision so
 // a hung builder is killed and the lock freed without human intervention.
 //
-// TWO criteria, EITHER trips:
+// THREE criteria, ANY trips:
 //   (a) WALL — total cycle elapsed exceeds the hard ceiling (default 45min).
-//   (b) NO-PROGRESS — no NEW commit or stdout/event for the idle window
-//       (default 15min). Critically this is keyed on the LAST PROGRESS time, NOT
-//       on pure elapsed time: a slow `deepseek` call sits at 0% CPU but keeps
-//       emitting stdout/events, which bumps `lastProgressSec`, so it is NEVER
-//       mis-killed. Only a TRULY silent hang trips no-progress.
+//   (b) NO-PROGRESS (true silence) — no NEW commit, dirty-state change, or
+//       stdout/event for the idle window (default 15min). Keyed on the LAST
+//       PROGRESS time, NOT on pure elapsed time: a slow `deepseek` call sits
+//       at 0% CPU but keeps emitting stdout/events, which bumps
+//       `lastProgressSec`, so it is NEVER mis-killed. Only a TRULY silent
+//       hang trips no-progress.
+//   (c) NO-STATE-CHANGE (FIX-1477) — no NEW commit AND no worktree dirty-state
+//       change for the state window (default 25min), EVEN IF stdout flows.
+//       Progress is redefined as GIT STATE CHANGE (agent-agnostic): stdout
+//       activity feeds only the silence fuse (b), it no longer counts as
+//       "working" — a thrashing agent (kimi打转白烧) is caught ~20min early,
+//       while a stdout-buffering agent that keeps writing files (pi冤杀) is
+//       saved by its dirty-state signature changes.
 
 /** v3 per-cycle WALL-clock hard ceiling (seconds). Default 45min — a cycle that
  *  runs this long total is a runaway, killed regardless of recent progress.
@@ -587,6 +619,14 @@ export const CYCLE_WALL_TIMEOUT_SEC = 2700;
  *  builder produces no new commit AND no new stdout/event for this long, it is
  *  judged hung (the FIX-390 silent-hang shape) and killed. */
 export const CYCLE_NO_PROGRESS_SEC = 900;
+/** FIX-1477 — per-cycle NO-STATE-CHANGE window (seconds). Default 25min — if
+ *  the cycle worktree's GIT STATE (new commit OR dirty-state signature change)
+ *  has not changed for this long, the builder is judged stuck and killed EVEN
+ *  IF stdout is still flowing (the kimi-thrash shape: tokens burning, zero git
+ *  progress). stdout activity does NOT reset this clock — only git state does.
+ *  Rationale (owner-approved): a real full test run takes minutes; 25min with
+ *  zero git state change is genuinely stuck. */
+export const CYCLE_NO_STATE_CHANGE_SEC = 1500;
 
 /** FIX-929 — agent stall detection threshold (seconds). Default 10min (600s) —
  *  a softer signal that fires BEFORE the hard timeout kill. Does NOT kill the
@@ -597,45 +637,65 @@ export const CYCLE_STALL_THRESHOLD_SEC = 600;
 export const STALL_STARTUP_GRACE_SEC = 120;
 
 /** The per-cycle hard-timeout verdict. `timedOut:false` carries the tighter of
- *  the two remaining budgets so the poller can schedule its next wake. */
+ *  the enabled budgets so the poller can schedule its next wake. */
 export type CycleTimeoutVerdict =
   | { timedOut: false; remainingSec: number }
-  | { timedOut: true; reason: "wall" | "no-progress"; elapsedSec: number; idleSec: number };
+  | { timedOut: true; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number };
 
 /** Inputs for {@link cycleTimeoutVerdict} — all clocks injected (pure). */
 export interface CycleTimeoutInput {
   /** Seconds since the agent spawn started (now - spawnStart). */
   elapsedSec: number;
-  /** Seconds since the LAST observed progress (new commit or stdout/event):
-   *  now - lastProgressSec. Reset to 0 whenever progress is seen, so a slow but
-   *  still-emitting call (deepseek) never accrues idle time. */
+  /** Seconds since the LAST observed progress (new commit, dirty-state change,
+   *  or stdout/event): now - lastProgressSec. Reset to 0 whenever any liveness
+   *  signal is seen, so a slow but still-emitting call (deepseek) — or a
+   *  stdout-buffering agent that keeps changing the worktree (pi, FIX-1477) —
+   *  never accrues idle time. This is the TRUE-SILENCE fuse. */
   idleSec: number;
+  /** FIX-1477 — seconds since the last GIT STATE change (new commit OR
+   *  worktree dirty-state signature change): now - lastStateSec. stdout does
+   *  NOT reset this clock. Omitted ⇒ the no-state-change criterion is skipped
+   *  (legacy callers byte-identical). */
+  stateIdleSec?: number;
   /** WALL ceiling (default {@link CYCLE_WALL_TIMEOUT_SEC}). */
   wallLimitSec?: number;
   /** NO-PROGRESS idle window (default {@link CYCLE_NO_PROGRESS_SEC}). */
   noProgressLimitSec?: number;
+  /** FIX-1477 — NO-STATE-CHANGE window (default
+   *  {@link CYCLE_NO_STATE_CHANGE_SEC}). Only consulted when `stateIdleSec` is
+   *  supplied. */
+  noStateChangeLimitSec?: number;
 }
 
 /**
- * Pure per-cycle hard-timeout decision (FIX-907). WALL is checked FIRST so a
- * runaway that also happens to be idle is attributed to the wall ceiling. A
- * non-positive limit DISABLES that criterion (an operator escape hatch); if both
- * are disabled the cycle never times out by this gate. Boundary `>=` (the limit
- * itself is a breach, mirroring {@link watchdogVerdict}).
+ * Pure per-cycle hard-timeout decision (FIX-907; the no-state-change criterion
+ * is FIX-1477). WALL is checked FIRST so a runaway that also happens to be idle
+ * is attributed to the wall ceiling; NO-PROGRESS (true silence) is checked
+ * before NO-STATE-CHANGE so a fully hung agent keeps its historical
+ * `no-progress` attribution. A non-positive limit DISABLES that criterion (an
+ * operator escape hatch); if all are disabled the cycle never times out by this
+ * gate. Boundary `>=` (the limit itself is a breach, mirroring
+ * {@link watchdogVerdict}).
  */
 export function cycleTimeoutVerdict(input: CycleTimeoutInput): CycleTimeoutVerdict {
   const wall = input.wallLimitSec ?? CYCLE_WALL_TIMEOUT_SEC;
   const idle = input.noProgressLimitSec ?? CYCLE_NO_PROGRESS_SEC;
+  const stateIdle = input.noStateChangeLimitSec ?? CYCLE_NO_STATE_CHANGE_SEC;
   if (wall > 0 && input.elapsedSec >= wall) {
     return { timedOut: true, reason: "wall", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
   }
   if (idle > 0 && input.idleSec >= idle) {
     return { timedOut: true, reason: "no-progress", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
   }
-  // Remaining = the tighter of the two budgets (whichever is enabled).
+  if (input.stateIdleSec !== undefined && stateIdle > 0 && input.stateIdleSec >= stateIdle) {
+    return { timedOut: true, reason: "no-state-change", elapsedSec: input.elapsedSec, idleSec: input.idleSec };
+  }
+  // Remaining = the tighter of the enabled budgets.
   const wallRemain = wall > 0 ? wall - input.elapsedSec : Number.POSITIVE_INFINITY;
   const idleRemain = idle > 0 ? idle - input.idleSec : Number.POSITIVE_INFINITY;
-  return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain) };
+  const stateRemain =
+    input.stateIdleSec !== undefined && stateIdle > 0 ? stateIdle - input.stateIdleSec : Number.POSITIVE_INFINITY;
+  return { timedOut: false, remainingSec: Math.min(wallRemain, idleRemain, stateRemain) };
 }
 
 /** FIX-929 stall-detection inputs — all clocks injected (pure). */
@@ -1076,7 +1136,7 @@ export type CycleEvent =
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
   | { type: "route_resolved"; agent: AgentId; model: ModelId; adversarial?: AdversarialPlan; adversarialDegraded?: { cause: string; from?: "verified" | "designed" } }
   | { type: "route_pending"; reason: string }
-  | { type: "agent_exited"; exit: number; timedOut: boolean }
+  | { type: "agent_exited"; exit: number; timedOut: boolean; lost?: boolean }
   // US-LOOP-102: an adversarial role spawn (test_author/implementer/attacker)
   // exited. `newHole`/`attackTest` are meaningful only for attacker rounds;
   // `elapsedSec` lets the pure termination check enforce the total timeout.
@@ -1368,6 +1428,17 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
       ]);
 
     case "agent_exited": {
+      // FIX-1474 — a LOST builder child (killed out-of-band; detected by the
+      // runner's liveness probe, surfaced via cycle:agent_lost) converges to
+      // the explicit `aborted` terminal: no retry (the death is environmental,
+      // not a code failure) and NOT the timeout's `blocked`. Takes precedence
+      // over the retry plan.
+      if (event.lost === true) {
+        return {
+          state: { ...state, phase: "execute", terminal: "aborted", done: true, ctx: { ...state.ctx, agentExitCode: event.exit, agentTimedOut: event.timedOut } },
+          commands: abortedTeardownCommands(terminalCtx(state)),
+        };
+      }
       const plan = retryPlan({ attempt: state.attempt, exit: event.exit, timedOut: event.timedOut });
       if (plan.action === "abort_timeout") {
         // Watchdog breach → clean teardown (worktree PRESERVED, bin/roll:9122).

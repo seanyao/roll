@@ -10,7 +10,7 @@ import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agen
 import { buildLowScoreFixForwardPrompt, injectRepositoryContext, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
-import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startCycleObserver, startRepositoryCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
+import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startBuilderLivenessProbe, startCycleObserver, startRepositoryCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
 import { persistWorktreeAlerts, repositoryAgentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -154,11 +154,15 @@ export async function executeSpawnAgentCommand(
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
       // it just holds the inflight lock and blocks the whole loop (实证: FIX-390
-      // hung 46min). This poller races the spawn: a NEW commit OR any stdout
-      // chunk is "progress" (resets the no-progress clock so a slow-but-emitting
-      // deepseek is never mis-killed); a wall-clock overrun OR a truly silent
-      // idle window kills the agent tree + records cycle:timeout. On a kill the
-      // spawn resolves and we fold `timedOut` so the orchestrator's existing
+      // hung 46min). This poller races the spawn. FIX-1477 redefines "progress"
+      // as GIT STATE CHANGE, agent-agnostic: a NEW commit OR a worktree
+      // dirty-state signature change (`git status --porcelain` diff) resets BOTH
+      // idle clocks (this is what saves stdout-buffering agents like pi that
+      // write files long before committing); a stdout chunk now feeds ONLY the
+      // true-silence fuse. A wall-clock overrun, a truly silent idle window, OR
+      // a no-state-change window (thrash: tokens flowing, zero git progress)
+      // kills the agent tree + records cycle:timeout. On a kill the spawn
+      // resolves and we fold `timedOut` so the orchestrator's existing
       // abort_timeout teardown frees the lock and PRESERVES the worktree branch.
       // FIX-929 — the STALL DETECTOR. Fires a SOFT `agent:stall` signal when
       // the agent has produced zero output for ≥ threshold after startup grace.
@@ -179,12 +183,17 @@ export async function executeSpawnAgentCommand(
         throw new Error("missing_repository_ports");
       }
       const reportedCommitProbeFailures = new Set<string>();
+      // FIX-1477: the dirty-state probe rides the same git port (optional — a
+      // port without it runs the state fuse on commits only). A repository
+      // cycle's Issue root is not itself a git worktree, so the state fuse
+      // stays commit-only there until a per-leg signature exists.
+      const statusSignature = ports.git.worktreeStatusSignature;
       const timeoutWatchdog = startSpawnTimeoutWatchdog({
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
         commitCount: repositoryPorts === undefined
-          ? () => ports.git.commitsAhead(legacyExecCwd, observeBase)
+          ? () => ports.git.commitsAhead(execCwd, observeBase)
           : () => observeWritableRepositoryCommitCount(ctx, repositoryPorts),
         ...(repositoryPorts === undefined ? {} : {
           onCommitProbeError: (error: unknown) => {
@@ -206,6 +215,9 @@ export async function executeSpawnAgentCommand(
             );
           },
         }),
+        ...(repositoryPorts === undefined && statusSignature !== undefined
+          ? { stateSignature: () => statusSignature(execCwd) }
+          : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -238,9 +250,36 @@ export async function executeSpawnAgentCommand(
       // codex; the cold spawn below is the only path. A future resumable engine
       // re-introduces this as registry-driven, agent-agnostic logic.
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
-      let timeoutFired: "wall" | "no-progress" | null = null;
+      let timeoutFired: "wall" | "no-progress" | "no-state-change" | null = null;
       let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
       let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
+      // FIX-1474 — the LOST-CHILD probe. The watchdogs above cover a child that
+      // is ALIVE (hung / silent / thrashing); they cannot see a child that DIED
+      // out-of-band while this spawn await never settles (external SIGKILL of a
+      // process-tree member, PTY leader death, lost exit delivery) — the shape
+      // that hung supervised cycles forever with no terminal state. The probe
+      // polls the child's pid (reported via the onSpawn seam) and, on two
+      // consecutive dead observations, records cycle:agent_lost, reaps the
+      // tree, and resolves the race below so the cycle converges to the
+      // explicit `aborted` terminal (no retry, no silent hang).
+      let spawnedPid: number | undefined;
+      let spawnSettled = false;
+      let agentLost = false;
+      let resolveLostRace: (() => void) | undefined;
+      const lostRace = new Promise<Awaited<ReturnType<typeof ports.agentSpawn>>>((resolve) => {
+        resolveLostRace = () => resolve({ stdout: "", stderr: "", exitCode: 137, timedOut: false });
+      });
+      const livenessProbe = startBuilderLivenessProbe({
+        cycleId: ctx.cycleId ?? "",
+        agent: cmd.agent,
+        pid: () => spawnedPid,
+        spawnPending: () => !spawnSettled,
+        appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
+        onLost: () => {
+          agentLost = true;
+          resolveLostRace?.();
+        },
+      });
       try {
         if (ctx.repositoryExecution === undefined) {
           appendWriteProtectionEvent(
@@ -254,7 +293,8 @@ export async function executeSpawnAgentCommand(
           );
           mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
         }
-        res = await ports.agentSpawn(cmd.agent, applyRepositoryBuilderContext(ctx, {
+        res = await Promise.race([
+          ports.agentSpawn(cmd.agent, applyRepositoryBuilderContext(ctx, {
           purpose: "builder",
           // E4: the builder runs in the submodule cycle worktree for a submodule
           // story (execCwd); its git env + writable roots target the submodule's
@@ -277,8 +317,10 @@ export async function executeSpawnAgentCommand(
           // claim (pick_story → 🔨) and the work must be the same story.
           ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
           onChunk: (d: Buffer) => {
-            // FIX-907: any stdout chunk is PROGRESS — resets the no-progress
-            // clock so a slow-but-still-emitting agent never trips the idle gate.
+            // FIX-907/FIX-1477: any stdout chunk is LIVENESS — resets only the
+            // true-silence (no-progress) clock, NOT the git-state clock, so a
+            // thrashing agent burning tokens with zero git progress is still
+            // caught by the no-state-change fuse.
             timeoutWatchdog.markProgress();
             // FIX-929: bump the stall-detector's progress clock — same signal,
             // separate detector with its own (lower) threshold.
@@ -291,8 +333,19 @@ export async function executeSpawnAgentCommand(
             }
             signalRecorder.accept(d);
           },
-        }));
+          // FIX-1474: hand the live child to the liveness probe so an
+          // out-of-band death is detected within a bounded window.
+          onSpawn: (child) => {
+            spawnedPid = child.pid;
+          },
+          })),
+          lostRace,
+        ]);
       } finally {
+        // FIX-1474: the spawn await settled (either side of the race) — the
+        // liveness probe stands down BEFORE the other observers stop.
+        spawnSettled = true;
+        livenessProbe.stop();
         if (mainLeakWatchdog !== undefined) {
           activeMainLeak = await mainLeakWatchdog.stop();
         }
@@ -318,7 +371,7 @@ export async function executeSpawnAgentCommand(
       // FIX-907: fold a watchdog kill into `timedOut` so the orchestrator runs
       // its clean abort_timeout teardown (kill + cycle:end blocked + lock release;
       // worktree PRESERVED). The cycle:timeout event was already emitted at the
-      // breach moment (auditable reason: wall/no-progress).
+      // breach moment (auditable reason: wall/no-progress/no-state-change).
       if (timeoutFired !== null) res = { ...res, timedOut: true };
       await captureSink?.flush();
       // E4: scoop ALERT*.md the builder dropped in its OWN cwd (the submodule
@@ -456,7 +509,7 @@ export async function executeSpawnAgentCommand(
           // FIX-343 (step ①): the builder session id is part of the auditable
           // header — the attest gate's scorer≠builder-session invariant is then
           // traceable to a recorded build-session id, not asserted.
-          `# exit=${res.exitCode} timedOut=${res.timedOut} build-session=${builderSessionId}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
+          `# exit=${res.exitCode} timedOut=${res.timedOut} lost=${agentLost} build-session=${builderSessionId}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}\n`,
         );
       } catch {
         /* logging must never fail the cycle */
@@ -549,7 +602,10 @@ export async function executeSpawnAgentCommand(
             }) ?? undefined
           : undefined;
       return {
-        event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut },
+        // FIX-1474: a lost child converges the cycle to the explicit `aborted`
+        // terminal in the orchestrator (no retry, no blocked) — the death was
+        // environmental, recorded fail-loud via cycle:agent_lost.
+        event: { type: "agent_exited", exit: res.exitCode, timedOut: res.timedOut, ...(agentLost ? { lost: true } : {}) },
         // FIX-343 (step ①): persist the builder session id on the cycle context so
         // it survives to the attest gate (the scorer≠builder-session invariant is then
         // traceable to a recorded build-session id, not asserted).

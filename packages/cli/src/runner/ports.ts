@@ -66,6 +66,12 @@ export interface GitPort {
    *  ({@link resolveIntegrationBranch}(execRepoCwd)) — a submodule has no
    *  `origin/main`, so the hardcode fataled → false zero. */
   commitsAhead(worktreeCwd: string, baseRef?: string): Promise<number>;
+  /** FIX-1477: `git status --porcelain` output in the worktree — the dirty-state
+   *  fingerprint the spawn timeout watchdog diffs tick-over-tick (a CHANGE is
+   *  git-state progress, agent-agnostic). Raw output, no hashing; THROWS on a
+   *  git error so the watchdog treats the blip as neither progress nor a kill.
+   *  Optional: ports without it run the state fuse on commits only. */
+  worktreeStatusSignature?(worktreeCwd: string): Promise<string>;
   /** FIX-252: `git rev-list --count origin/main..main` in the main checkout. */
   mainAhead(repoCwd: string): Promise<number>;
   /** FIX-903: save the current main HEAD as a rescue ref (`rescue/leaked-<cycleId>`),

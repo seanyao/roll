@@ -52,6 +52,7 @@ import {
   rescueLeakedMain,
   resetDirective,
   startSpawnTimeoutWatchdog,
+  startBuilderLivenessProbe,
   readCycleTimeoutThresholds,
   storyPinDirective,
   RESUME_DISABLED_ENV,
@@ -6174,7 +6175,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-wall",
-        thresholds: { wallSec: 60, noProgressSec: 30 },
+        thresholds: { wallSec: 60, noProgressSec: 30, noStateChangeSec: 100000 },
         clock: fc.clock,
         commitCount: async () => 1, // a single early commit, then quiet (no new ones)
         appendEvent: (ev) => events.push(ev),
@@ -6205,7 +6206,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-hang",
-        thresholds: { wallSec: 100000, noProgressSec: 30 }, // wall far away; only idle matters
+        thresholds: { wallSec: 100000, noProgressSec: 30, noStateChangeSec: 100000 }, // wall + state far away; only silence matters
         clock: fc.clock,
         commitCount: async () => 1, // ONE commit then frozen — exactly the FIX-390 shape
         appendEvent: (ev) => events.push(ev),
@@ -6231,7 +6232,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-slow",
-        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        thresholds: { wallSec: 100000, noProgressSec: 30, noStateChangeSec: 100000 },
         clock: fc.clock,
         commitCount: async () => 0, // NO commits at all — only stdout keeps it alive
         appendEvent: (ev) => events.push(ev),
@@ -6262,7 +6263,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let commits = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-commits",
-        thresholds: { wallSec: 100000, noProgressSec: 30 },
+        thresholds: { wallSec: 100000, noProgressSec: 30, noStateChangeSec: 100000 },
         clock: fc.clock,
         commitCount: async () => commits, // grows over time → progress
         appendEvent: (ev) => events.push(ev),
@@ -6288,7 +6289,7 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       let kills = 0;
       const wd = startSpawnTimeoutWatchdog({
         cycleId: "c-off",
-        thresholds: { wallSec: 0, noProgressSec: 0 },
+        thresholds: { wallSec: 0, noProgressSec: 0, noStateChangeSec: 0 },
         clock: fc.clock,
         commitCount: async () => 0,
         appendEvent: () => {},
@@ -6329,12 +6330,377 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
   });
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// FIX-1477 — progress = GIT STATE CHANGE (agent-agnostic). stdout activity no
+// longer counts as "working"; it only feeds the true-silence fuse. A worktree
+// dirty-state signature change (the pi shape: buffered stdout, actively writing
+// files) resets BOTH idle clocks; a new kill reason `no-state-change` fires when
+// neither a commit nor a dirty-state change happened for the window, EVEN IF
+// stdout is flowing (the kimi-thrash shape).
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("FIX-1477 startSpawnTimeoutWatchdog — git-state progress + the no-state-change fuse", () => {
+  /** Injected clock in SECONDS; advance to drive the watchdog deterministically. */
+  function clockSeconds(start: number): { clock: () => number; set: (v: number) => void } {
+    let now = start;
+    return { clock: () => now, set: (v) => (now = v) };
+  }
+
+  it("(a) pi冤杀 regression: dirty-state signature changes (no commits, no stdout) keep the builder ALIVE", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let signature = "clean";
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-pi",
+        thresholds: { wallSec: 100000, noProgressSec: 30, noStateChangeSec: 60 },
+        clock: fc.clock,
+        commitCount: async () => 0, // pi hasn't committed yet
+        stateSignature: async () => signature, // but IS writing files (porcelain changes)
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      // NO markProgress calls (pi buffers stdout — the冤杀 shape): only the
+      // dirty-state signature changes, every 20s, well past the old 30s
+      // no-progress window AND the 60s no-state-change window.
+      for (let t = 20; t <= 200; t += 20) {
+        fc.set(t);
+        signature = `dirty-${t}`; // file edits observed on the next tick
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+      expect(events.some((e) => e.type === "cycle:timeout")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("(b) kimi-thrash: stdout flowing (markProgress every tick) but ZERO git-state change → killed with reason no-state-change", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-thrash",
+        thresholds: { wallSec: 100000, noProgressSec: 30, noStateChangeSec: 60 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        stateSignature: async () => "", // worktree stays clean — nothing is being written
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      // Stdout never stops: the silence (no-progress) fuse NEVER trips…
+      for (let t = 10; t <= 50; t += 10) {
+        fc.set(t);
+        wd.markProgress();
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(kills).toBe(0); // …and the state window (60s) has not elapsed yet
+      }
+      // …then the no-state-change window elapses with stdout STILL flowing.
+      fc.set(61);
+      wd.markProgress();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(wd.stop().firedReason).toBe("no-state-change");
+      expect(events.find((e) => e.type === "cycle:timeout")).toMatchObject({
+        type: "cycle:timeout",
+        cycleId: "c-thrash",
+        reason: "no-state-change",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("(c1) regression: a NEW commit resets BOTH idle clocks (state fuse does not fire mid-work)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let commits = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-commit-resets",
+        thresholds: { wallSec: 100000, noProgressSec: 25, noStateChangeSec: 40 },
+        clock: fc.clock,
+        commitCount: async () => commits,
+        stateSignature: async () => "", // clean worktree between commits
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      // A TCR commit every 30s: no-progress window is 25s, state window 40s —
+      // both would trip if commits stopped resetting them.
+      for (let t = 30; t <= 180; t += 30) {
+        fc.set(t);
+        commits += 1;
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("(c2) regression: a stateSignature probe ERROR is neither progress nor a kill — commits still carry the cycle", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let commits = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-probe-blip",
+        thresholds: { wallSec: 100000, noProgressSec: 25, noStateChangeSec: 40 },
+        clock: fc.clock,
+        commitCount: async () => commits,
+        stateSignature: async () => {
+          throw new Error("git status blip"); // probe down the whole run
+        },
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      for (let t = 30; t <= 120; t += 30) {
+        fc.set(t);
+        commits += 1;
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("(c3) regression: the WALL clock still fires while git state keeps changing (final backstop unchanged)", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let signature = "clean";
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-wall-backstop",
+        thresholds: { wallSec: 60, noProgressSec: 100000, noStateChangeSec: 100000 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        stateSignature: async () => signature,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      fc.set(20);
+      signature = "dirty-20";
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(0);
+      fc.set(61);
+      signature = "dirty-61";
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(wd.stop().firedReason).toBe("wall");
+      expect(events.find((e) => e.type === "cycle:timeout")).toMatchObject({ reason: "wall" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("all three criteria disabled (0/0/0) → an inert handle that never fires", async () => {
+    vi.useFakeTimers();
+    try {
+      const fc = clockSeconds(0);
+      let kills = 0;
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-off-3",
+        thresholds: { wallSec: 0, noProgressSec: 0, noStateChangeSec: 0 },
+        clock: fc.clock,
+        commitCount: async () => 0,
+        stateSignature: async () => "",
+        appendEvent: () => {},
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      fc.set(1e9);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(wd.stop().firedReason).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// FIX-1474 — builder-child LIVENESS probe (the lost-child killer). The FIX-907
+// watchdog covers a child that is ALIVE (hung / silent / thrashing); it cannot
+// see a child that DIED out-of-band while the spawn await never settled
+// (external SIGKILL of a process-tree member, PTY leader death, lost exit
+// delivery). The probe polls the child's pid and, after consecutive dead
+// observations, records cycle:agent_lost + reaps the tree + resolves the race.
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("FIX-1474 startBuilderLivenessProbe — bounded detection of a dead/missing builder child", () => {
+  it("a child that dies out-of-band is declared lost after consecutive dead probes: cycle:agent_lost + kill + onLost, then inert", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let lostCalls = 0;
+      let alive = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-lost",
+        agent: "kimi",
+        pid: () => 4242,
+        spawnPending: () => true,
+        isAlive: () => alive,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        onLost: () => (lostCalls += 1),
+        pollMs: 1000,
+      });
+      // Alive child: two ticks, nothing happens.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(kills).toBe(0);
+      // Death: the FIRST dead observation only starts the confirmation streak
+      // (one tick can race the OS reap/close handshake); the second declares it.
+      alive = false;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(kills).toBe(1);
+      expect(lostCalls).toBe(1);
+      expect(probe.stop().lost).toBe(true);
+      const lost = events.find((e) => e.type === "cycle:agent_lost");
+      expect(lost).toMatchObject({ type: "cycle:agent_lost", cycleId: "c-lost", agent: "kimi", pid: 4242 });
+      // Bounded: once declared, no further kills/events on later ticks.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(kills).toBe(1);
+      expect(events.filter((e) => e.type === "cycle:agent_lost")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a live child NEVER fires (no event, no kill, stop().lost false)", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-live",
+        agent: "pi",
+        pid: () => 777,
+        spawnPending: () => true,
+        isAlive: () => true,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pid not yet reported (undefined) never fires; a later death is still caught", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let pid: number | undefined;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-late",
+        agent: "claude",
+        pid: () => pid,
+        spawnPending: () => true,
+        isAlive: () => false, // every probe of a real pid reads dead
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(kills).toBe(0); // no pid yet — nothing to accuse
+      pid = 31337;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(kills).toBe(1);
+      expect(probe.stop().lost).toBe(true);
+      expect(events.find((e) => e.type === "cycle:agent_lost")).toMatchObject({ pid: 31337 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("误杀-prevention: a single dead blip below the confirm streak recovers when the child is seen alive again", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let alive = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-blip",
+        agent: "reasonix",
+        pid: () => 555,
+        spawnPending: () => true,
+        isAlive: () => alive,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      alive = false; // one dead observation (e.g. mid-reap zombie race)…
+      await vi.advanceTimersByTimeAsync(1000);
+      alive = true; // …then the child reads alive again — streak resets
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a settled spawn makes the probe inert (never accuses a finished cycle)", async () => {
+    vi.useFakeTimers();
+    try {
+      const events: RollEvent[] = [];
+      let kills = 0;
+      let pending = true;
+      const probe = startBuilderLivenessProbe({
+        cycleId: "c-done",
+        agent: "kimi",
+        pid: () => 999,
+        spawnPending: () => pending,
+        isAlive: () => false,
+        appendEvent: (ev) => events.push(ev),
+        kill: () => (kills += 1, 1),
+        pollMs: 1000,
+      });
+      pending = false; // the spawn resolved — the probe must stand down
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(kills).toBe(0);
+      expect(events).toHaveLength(0);
+      expect(probe.stop().lost).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
-  it("defaults to 45min wall / 15min no-progress with no policy", () => {
+  it("defaults to 45min wall / 15min no-progress / 25min no-state-change with no policy", () => {
     const dir = mkdtempSync(join(tmpdir(), "roll-timeout-"));
     execDirs.push(dir);
     const t = readCycleTimeoutThresholds(dir);
-    expect(t).toEqual({ wallSec: 2700, noProgressSec: 900 });
+    expect(t).toEqual({ wallSec: 2700, noProgressSec: 900, noStateChangeSec: 1500 });
   });
 
   it("reads loop_safety thresholds from policy.yaml", () => {
@@ -6346,7 +6712,9 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
       "loop_safety:\n  cycle_wall_timeout_sec: 1800\n  cycle_no_progress_sec: 600\n",
       "utf8",
     );
-    expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 1800, noProgressSec: 600 });
+    // FIX-1477: no policy key for the state fuse (schema deliberately untouched)
+    // — it falls back to the core default even when policy.yaml exists.
+    expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 1800, noProgressSec: 600, noStateChangeSec: 1500 });
   });
 
   it("env override beats policy + default", () => {
@@ -6356,15 +6724,19 @@ describe("FIX-907 readCycleTimeoutThresholds — policy + env override", () => {
     writeFileSync(join(dir, ".roll", "policy.yaml"), "loop_safety:\n  cycle_wall_timeout_sec: 1800\n", "utf8");
     const savedWall = process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
     const savedNp = process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
+    const savedNsc = process.env["ROLL_CYCLE_NO_STATE_CHANGE_SEC"];
     process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = "120";
     process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = "30";
+    process.env["ROLL_CYCLE_NO_STATE_CHANGE_SEC"] = "45";
     try {
-      expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 120, noProgressSec: 30 });
+      expect(readCycleTimeoutThresholds(dir)).toEqual({ wallSec: 120, noProgressSec: 30, noStateChangeSec: 45 });
     } finally {
       if (savedWall === undefined) delete process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"];
       else process.env["ROLL_CYCLE_WALL_TIMEOUT_SEC"] = savedWall;
       if (savedNp === undefined) delete process.env["ROLL_CYCLE_NO_PROGRESS_SEC"];
       else process.env["ROLL_CYCLE_NO_PROGRESS_SEC"] = savedNp;
+      if (savedNsc === undefined) delete process.env["ROLL_CYCLE_NO_STATE_CHANGE_SEC"];
+      else process.env["ROLL_CYCLE_NO_STATE_CHANGE_SEC"] = savedNsc;
     }
   });
 });

@@ -41,6 +41,7 @@ import {
   CYCLE_TIMEOUT_SEC,
   CYCLE_WALL_TIMEOUT_SEC,
   CYCLE_NO_PROGRESS_SEC,
+  CYCLE_NO_STATE_CHANGE_SEC,
   CYCLE_STALL_THRESHOLD_SEC,
   STALL_STARTUP_GRACE_SEC,
 } from "../src/index.js";
@@ -1092,6 +1093,83 @@ describe("FIX-907 — cycleTimeoutVerdict (per-cycle hard timeout: wall + no-pro
   });
 });
 
+describe("FIX-1477 — cycleTimeoutVerdict no-state-change criterion (git-state progress)", () => {
+  it("default no-state-change window is 25min (1500s)", () => {
+    expect(CYCLE_NO_STATE_CHANGE_SEC).toBe(1500);
+  });
+
+  it("NO-STATE-CHANGE breach: stdout keeps the silence fuse reset but git state is frozen past the window (thrash)", () => {
+    // The kimi-thrash shape: stdout flowed 5s ago (silence fuse happy), but no
+    // commit AND no dirty-state change for the full 1500s window.
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1600,
+      idleSec: 5,
+      stateIdleSec: 1500,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v).toEqual({ timedOut: true, reason: "no-state-change", elapsedSec: 1600, idleSec: 5 });
+  });
+
+  it("does NOT trip while git state keeps changing (the pi冤杀 shape frozen as a contract)", () => {
+    // Dirty-state signature changed 10s ago; stdout silent for 20min — the
+    // watchdog bumps BOTH clocks on a state change, so idleSec stays low too.
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1300,
+      idleSec: 10,
+      stateIdleSec: 10,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v.timedOut).toBe(false);
+  });
+
+  it("no-progress still wins when a fully silent hang breaches BOTH idle fuses (attribution unchanged)", () => {
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 1600,
+      idleSec: 1000,
+      stateIdleSec: 1600,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    expect(v).toMatchObject({ timedOut: true, reason: "no-progress" });
+  });
+
+  it("the criterion is skipped when stateIdleSec is not supplied (legacy callers byte-identical)", () => {
+    const v = cycleTimeoutVerdict({ elapsedSec: 100, idleSec: 10, wallLimitSec: 2700, noProgressLimitSec: 900 });
+    expect(v).toEqual({ timedOut: false, remainingSec: 890 });
+  });
+
+  it("a 0 / negative no-state-change limit DISABLES the criterion (operator escape hatch)", () => {
+    expect(
+      cycleTimeoutVerdict({
+        elapsedSec: 100,
+        idleSec: 10,
+        stateIdleSec: 1e9,
+        wallLimitSec: 2700,
+        noProgressLimitSec: 900,
+        noStateChangeLimitSec: 0,
+      }).timedOut,
+    ).toBe(false);
+  });
+
+  it("the remaining budget folds in the state window when it is the tightest", () => {
+    const v = cycleTimeoutVerdict({
+      elapsedSec: 100,
+      idleSec: 10,
+      stateIdleSec: 1400,
+      wallLimitSec: 2700,
+      noProgressLimitSec: 900,
+      noStateChangeLimitSec: 1500,
+    });
+    // state remaining 100 < idle remaining 890 < wall remaining 2600.
+    expect(v).toEqual({ timedOut: false, remainingSec: 100 });
+  });
+});
+
 describe("FIX-929 — stallVerdict (agent stall detection: soft signal, no kill)", () => {
   it("defaults are 10min threshold / 2min startup grace", () => {
     expect(CYCLE_STALL_THRESHOLD_SEC).toBe(600);
@@ -1194,6 +1272,43 @@ describe("timeout breach mid-execute → clean teardown ORDER", () => {
       "append_alert",
       "release_lock",
     ]);
+  });
+
+  // FIX-1474 — the builder child died OUT-OF-BAND (external SIGKILL / PTY
+  // leader death / lost exit delivery): NOT a timeout (blocked) and NOT a code
+  // failure (retry/failed) — the cycle converges to the explicit `aborted`
+  // terminal with a durable cycle:end + runs row, and the lock is released.
+  it("FIX-1474 agent_exited with lost:true → aborted terminal teardown (no retry, no blocked)", () => {
+    let state = initialCycleState(CTX);
+    const drive = (ev: CycleEvent): CycleCommand[] => {
+      const r = cycleStep(state, ev);
+      state = r.state;
+      return r.commands;
+    };
+    drive({ type: "start", ctx: CTX });
+    drive({ type: "preflight_done" });
+    drive({ type: "worktree_created" });
+    drive({ type: "story_picked", storyId: "US-1" });
+    drive({ type: "route_resolved", agent: "claude", model: "sonnet" });
+    const cmds = drive({ type: "agent_exited", exit: 137, timedOut: false, lost: true });
+    expect(state.terminal).toBe("aborted");
+    expect(state.done).toBe(true);
+    expect(cmds.map((c) => c.kind)).toEqual([
+      "kill_agent",
+      "measure_worktree",
+      "emit_event",
+      "append_run",
+      "append_alert",
+      "release_lock",
+    ]);
+    // Lock release LAST; the worktree is PRESERVED (no cleanup command).
+    expect(cmds[cmds.length - 1]?.kind).toBe("release_lock");
+    expect(cmds.some((c) => c.kind === "cleanup_worktree")).toBe(false);
+    // The terminal records the aborted outcome — never the timeout's blocked.
+    const emit = cmds.find((c) => c.kind === "emit_event");
+    expect(emit).toMatchObject({ event: { type: "cycle:end", outcome: "aborted_no_delivery" } });
+    const run = cmds.find((c) => c.kind === "append_run");
+    expect(run).toMatchObject({ status: "aborted", outcome: "aborted_no_delivery" });
   });
 });
 

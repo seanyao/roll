@@ -101,6 +101,7 @@ export {
   createCaptureMarkerSink,
   readCycleTimeoutThresholds,
   readStallThreshold,
+  startBuilderLivenessProbe,
   startCycleObserver,
   startSpawnTimeoutWatchdog,
   startStallDetector,

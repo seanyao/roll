@@ -16,7 +16,7 @@ exports[`US-DELTA-003 — CLI snapshots > status --json after prepare is scrubbe
 `;
 
 exports[`US-DELTA-003 — CLI snapshots > validate block on missing artifact is scrubbed and snapshotted 1`] = `
-"{"ok":false,"error":"artifact_invalid","detail":"Stage artifact not found for role 'designer' at <TMP>/roll-delta-test-<DELEGATION_ID>/.roll/features/delta-team/US-DELTA-SNAP-3/delta-<DELEGATION_ID>/role-artifacts/designer","role":"designer"}
+"{"ok":false,"error":"artifact_invalid","detail":"Stage artifact not found for role 'designer' at <TMP>/roll-delta-test-<DELEGATION_ID>/.roll/features/delta-team/US-DELTA-SNAP-3/delta-<DELEGATION_ID>/role-artifacts/designer/evaluation-manifest.json","role":"designer"}
 "
 `;
 

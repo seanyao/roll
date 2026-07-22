@@ -371,13 +371,26 @@ export function injectPrepareInterrupt(fn: (() => void) | null): void {
   _prepareInterruptAfterWrite = fn;
 }
 
+// ── Event append failure seam (test-only) ─────────────────────────────────────
+
+/** Seam: if set, EventBus.appendEvent calls this after real append; if it throws, the test can simulate an append failure. */
+let _eventAppendFailure: ((event: Record<string, unknown>) => void) | null = null;
+
+/** Inject an event append failure for testing. Call with null to reset. */
+export function injectEventAppendFailure(fn: ((event: Record<string, unknown>) => void) | null): void {
+  _eventAppendFailure = fn;
+}
+
 function defaultValidator(_delegationId: string, _stage: string, frameDir: string): ValidatorResult {
-  const stageArtifactPath = join(frameDir, "role-artifacts", _stage);
-  if (!existsSync(stageArtifactPath)) {
+  // US-003 requires a fixed stage artifact *file*, not just directory existence.
+  // The host writes the prescribed role evidence/manifest at this fixed path.
+  const stageArtifactDir = join(frameDir, "role-artifacts", _stage);
+  const evidenceFile = join(stageArtifactDir, "evaluation-manifest.json");
+  if (!existsSync(evidenceFile)) {
     return {
       ok: false,
       reason: "artifact_invalid",
-      detail: `Stage artifact not found for role '${_stage}' at ${stageArtifactPath}`,
+      detail: `Stage artifact not found for role '${_stage}' at ${evidenceFile}`,
       role: _stage,
     };
   }
@@ -585,8 +598,9 @@ function validateCommand(args: string[]): number {
   // ── Invoke validator ────────────────────────────────────────────────────
   // Admission passed — call the validator with the fixed stage artifact path
   // and the evaluation manifest placeholder path.
-  const stageArtifactPath = join(frameDir, "role-artifacts", stage);
-  const evaluationManifestPath = join(frameDir, "role-artifacts", stage, "evaluation-manifest.json");
+  const stageArtifactDir = join(frameDir, "role-artifacts", stage);
+  const stageArtifactPath = join(stageArtifactDir, "evaluation-manifest.json");
+  const evaluationManifestPath = stageArtifactPath;
 
   const validator = _injectedValidator ?? defaultValidator;
   const result = validator(delegationId, stage, frameDir);
@@ -720,11 +734,22 @@ function concludeCommand(args: string[]): number {
   // remains is the per-delegation deliveryDisposition choice.
   const disposition = flags["delivery-disposition"];
   const validDispositions = ["owner_continue", "owner_hold", "owner_redelegate"];
-  if (!disposition || disposition === true || !validDispositions.includes(disposition as string)) {
-    // Typed terminal_path_unselected block — append event, retain lease, non-zero exit
-    const detail = disposition === true || !disposition
-      ? "No delivery-disposition selected; owner must choose owner_continue, owner_hold, or owner_redelegate"
-      : `Invalid delivery-disposition '${disposition}'; must be owner_continue, owner_hold, or owner_redelegate`;
+
+  // Invalid enum value → parser error, ZERO side effects (no event, no delegation lookup needed beyond what we already have).
+  // Design contract §5: "Reject … invalid enum literals … before side effects."
+  if (disposition !== undefined && disposition !== true && !validDispositions.includes(disposition as string)) {
+    const dispositionErr = T("delta.error.invalid_value", disposition as string, "--delivery-disposition", validDispositions.join("|"));
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "invalid_value", detail: dispositionErr }) + "\n");
+    } else {
+      process.stderr.write(`${dispositionErr}\n`);
+    }
+    return 1;
+  }
+
+  // Missing delivery-disposition → domain error, terminal_path_unselected (append event, retain lease)
+  if (!disposition || disposition === true) {
+    const detail = "No delivery-disposition selected; owner must choose owner_continue, owner_hold, or owner_redelegate";
     bus.appendEvent(eventsPath, {
       type: "delta:blocked",
       delegationId,
@@ -746,19 +771,48 @@ function concludeCommand(args: string[]): number {
     return 1;
   }
 
+  // Verify lease identity match BEFORE writing terminal event.
+  // If the lease entry has a mismatched delegationId/runId, fail-loud with
+  // non-zero exit and do NOT write terminal.
+  const runId = (preparedEvent.runId as string) ?? `delta-${delegationId}`;
+  const slPath = join(cwd, ".roll", "loop", "story-leases.json");
+  if (existsSync(slPath)) {
+    try {
+      const leaseMap = JSON.parse(readFileSync(slPath, "utf8"));
+      const entry = leaseMap[storyId];
+      if (entry && entry.source === "host-delegation") {
+        if (entry.delegationId !== delegationId || entry.runId !== runId) {
+          if (json) {
+            process.stderr.write(JSON.stringify({ ok: false, error: "lease_mismatch", detail: `Lease identity mismatch: expected delegationId=${delegationId} runId=${runId}, found delegationId=${entry.delegationId} runId=${entry.runId}` }) + "\n");
+          } else {
+            process.stderr.write(`Conclude failed: lease identity mismatch for story ${storyId}\n`);
+          }
+          return 1;
+        }
+      }
+    } catch { /* best-effort — if lease file is unreadable, proceed with terminal */ }
+  }
+
   // Record delta:terminal with Option C binding
-  bus.appendEvent(eventsPath, {
-    type: "delta:terminal",
+  const terminalEvent = {
+    type: "delta:terminal" as const,
     delegationId,
     storyId,
-    outcome: "handoff_ready",
-    terminalBinding: "handoff_only",
+    outcome: "handoff_ready" as const,
+    terminalBinding: "handoff_only" as const,
     deliveryDisposition: disposition as "owner_continue" | "owner_hold" | "owner_redelegate",
     ts: now,
-  });
+  };
+  bus.appendEvent(eventsPath, terminalEvent);
+
+  // ── Test seam: event append failure after terminal write ────────────────
+  // If the seam throws, the terminal event IS written but the caller must
+  // preserve the lease and not report success.
+  if (_eventAppendFailure) {
+    _eventAppendFailure(terminalEvent as Record<string, unknown>);
+  }
 
   // Release host-delegation lease (identity match requires delegationId + runId)
-  const runId = (preparedEvent.runId as string) ?? `delta-${delegationId}`;
   releaseHostDelegationLease(cwd, storyId, delegationId, runId);
 
   if (json) {

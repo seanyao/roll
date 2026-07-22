@@ -22,8 +22,9 @@ while (true) {
   }
 }
 // No jitter — barrier release is the sole synchronization point.
-// Both workers see "go" in the same event-loop tick; the hardlink
-// protocol (linkSync + EEXIST) is the deterministic winner.
+// Both workers see "go" in the same event-loop tick; the lock-based
+// atomic lease claim (acquireLeaseLock + claimStoryLease) is the
+// deterministic winner.
 const saveCwd = process.cwd();
 let code: number;
 try {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   LEGACY_PROJECT_EVENT_MIGRATION_V1,
+  WORKSPACE_ISSUE_INIT_FAILURE_CODES,
   parseEventLine,
   parseLegacyProjectEventMigrationInput,
   type RollEvent,
@@ -13,6 +14,33 @@ describe("parseEventLine (I8: readers skip bad lines, never crash)", () => {
     const issue: IssueIdentity = { ...workspace, storyId: "US-WS-001" };
     const repository: RepositoryIssueIdentity = { ...issue, repoId: "repo-0123456789ab" };
     expect(repository).toEqual({ workspaceId: "ws-sot", storyId: "US-WS-001", repoId: "repo-0123456789ab" });
+  });
+
+  it("types and parses a closed Workspace Issue initialization failure", () => {
+    expect(WORKSPACE_ISSUE_INIT_FAILURE_CODES).toEqual([
+      "rejected",
+      "manifest_conflict",
+      "apply_failed",
+      "symlink_escape",
+      "unexpected",
+    ]);
+    const failure: RollEvent = {
+      type: "workspace:issue_init_failed",
+      workspaceId: "ws-sot",
+      storyId: "US-WS-011",
+      cycleId: "cycle-11",
+      code: "apply_failed",
+      repairJournal: "issues/US-WS-011/.roll-issue-init.pending.json",
+      ts: 11,
+    };
+    expect(parseEventLine(JSON.stringify(failure))).toEqual(failure);
+
+    const beforeJournal: RollEvent = {
+      ...failure,
+      code: "manifest_conflict",
+      repairJournal: null,
+    };
+    expect(parseEventLine(JSON.stringify(beforeJournal))).toEqual(beforeJournal);
   });
 
   it("parses legacy Project events only through the migration input API", () => {

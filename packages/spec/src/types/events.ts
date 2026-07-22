@@ -14,6 +14,16 @@ import type { ContractError, ContractResult } from "./workspace.js";
 
 export const LEGACY_PROJECT_EVENT_MIGRATION_V1 = "roll.legacy-project-event-migration/v1" as const;
 
+export const WORKSPACE_ISSUE_INIT_FAILURE_CODES = [
+  "rejected",
+  "manifest_conflict",
+  "apply_failed",
+  "symlink_escape",
+  "unexpected",
+] as const;
+
+export type WorkspaceIssueInitFailureCode = (typeof WORKSPACE_ISSUE_INIT_FAILURE_CODES)[number];
+
 export interface LegacyProjectEventPayload {
   readonly type: string;
   readonly ts: number;
@@ -34,6 +44,15 @@ export type RollEvent =
   | { type: "loop:paused"; loop: LoopType; ts: number }
   | { type: "loop:resumed"; loop: LoopType; ts: number }
   | { type: "loop:pending"; loop: LoopType; cycleId: string; reason: string; suspended: Array<{ agent: string; cause: string; detail?: string }>; ts: number }
+  | {
+      type: "workspace:issue_init_failed";
+      workspaceId: string;
+      storyId: string;
+      cycleId: string;
+      code: WorkspaceIssueInitFailureCode;
+      repairJournal: string | null;
+      ts: number;
+    }
   // FIX-1268: the screen is locked and at least one physical-surface card was held.
   // Emitted once per idle cycle that is blocked solely (or primarily) by this gate.
   | { type: "loop:screen_locked"; cycleId: string; storyId?: string; locked: boolean; reason: string; ts: number }

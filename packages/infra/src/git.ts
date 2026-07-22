@@ -46,6 +46,8 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
+  isImmutableGitObjectId,
+  isSafeGitRef,
   type ProjectIdentityInputs,
   projectSlug,
   type ToolDeclaration,
@@ -904,6 +906,21 @@ export async function isAncestor(
   if (r.code === 0) return true;
   if (r.code === 1) return false;
   return undefined;
+}
+
+/**
+ * Proves that one immutable merge commit is contained by the configured
+ * integration branch. Ref-like or unsafe inputs fail closed without invoking
+ * Git, so diagnostics can report only the typed repo/SHA identity supplied by
+ * the caller and never echo remote URLs or credentials.
+ */
+export async function isCommitReachableFromIntegrationBranch(
+  repoCwd: string,
+  mergeCommit: string,
+  integrationBranch: string,
+): Promise<boolean | undefined> {
+  if (!isImmutableGitObjectId(mergeCommit) || !isSafeGitRef(integrationBranch)) return undefined;
+  return isAncestor(repoCwd, mergeCommit, integrationBranch);
 }
 
 /** A remote ref row from `git ls-remote`. */

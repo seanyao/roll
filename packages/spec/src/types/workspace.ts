@@ -536,7 +536,7 @@ function isSafeAlias(value: string): boolean {
   return /^[a-z][a-z0-9-]*$/u.test(value);
 }
 
-function isSafeGitRef(value: string): boolean {
+export function isSafeGitRef(value: string): boolean {
   if (
     value.startsWith("-") || value.startsWith("/") || value.endsWith("/") || value.endsWith(".") ||
     value === "@" || value === "HEAD"

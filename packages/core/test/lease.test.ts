@@ -1043,6 +1043,132 @@ describe("releaseStoryLease — match-only release (US-DELTA-003 directory)", ()
       try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
+
+  // ─── PID release safety (Fix #1: cycle MUST require non-empty/matching pid) ──
+
+  it("cycle release without pid NEVER deletes — returns false, bytes unchanged", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const entry = { pid: 4242, claimedAt: NOW, source: "cycle" as const };
+      claimStoryLease(dir, "US-CYC-NOPID", entry);
+
+      // Capture bytes before attempted release
+      const rp = join(dir, "US-CYC-NOPID.lease");
+      expect(existsSync(rp)).toBe(true);
+      const beforeBytes = readFileSync(rp);
+
+      // Attempt release with cycle source but NO pid
+      const r = releaseStoryLease(dir, "US-CYC-NOPID", { source: "cycle" });
+      expect(r).toBe(false);
+
+      // Record must still exist with identical bytes
+      expect(existsSync(rp)).toBe(true);
+      const afterBytes = readFileSync(rp);
+      expect(afterBytes).toEqual(beforeBytes);
+
+      // Lease must still be readable
+      const leases = readLeases(dir);
+      expect(leases["US-CYC-NOPID"]).toBeDefined();
+      expect(leases["US-CYC-NOPID"]!.source).toBe("cycle");
+      expect(leases["US-CYC-NOPID"]!.pid).toBe(4242);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("cycle release with missing pid on existing cycle lease: returns false, record untouched", () => {
+    const dir = tmpLeaseDir();
+    try {
+      claimStoryLease(dir, "US-CYC-MISS", {
+        pid: 8888, claimedAt: NOW, source: "cycle",
+      });
+      const rp = join(dir, "US-CYC-MISS.lease");
+      const beforeBytes = readFileSync(rp);
+
+      const r = releaseStoryLease(dir, "US-CYC-MISS", { source: "cycle" });
+      expect(r).toBe(false);
+
+      expect(readFileSync(rp)).toEqual(beforeBytes);
+      expect(readLeases(dir)["US-CYC-MISS"]!.pid).toBe(8888);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("cycle release with wrong pid on existing cycle lease: returns false, record untouched", () => {
+    const dir = tmpLeaseDir();
+    try {
+      claimStoryLease(dir, "US-CYC-WRONG", {
+        pid: 1111, claimedAt: NOW, source: "cycle",
+      });
+      const rp = join(dir, "US-CYC-WRONG.lease");
+      const beforeBytes = readFileSync(rp);
+
+      const r = releaseStoryLease(dir, "US-CYC-WRONG", { source: "cycle", pid: 2222 });
+      expect(r).toBe(false);
+
+      expect(readFileSync(rp)).toEqual(beforeBytes);
+      expect(readLeases(dir)["US-CYC-WRONG"]!.pid).toBe(1111);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("cycle release with correct pid on existing cycle lease succeeds (existing behavior verified)", () => {
+    const dir = tmpLeaseDir();
+    try {
+      claimStoryLease(dir, "US-CYC-OK", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      const rp = join(dir, "US-CYC-OK.lease");
+      expect(existsSync(rp)).toBe(true);
+
+      const r = releaseStoryLease(dir, "US-CYC-OK", { source: "cycle", pid: process.pid });
+      expect(r).toBe(true);
+      expect(existsSync(rp)).toBe(false);
+      expect(readLeases(dir)["US-CYC-OK"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("human release must not mistakenly delete a cycle lease with same story", () => {
+    const dir = tmpLeaseDir();
+    try {
+      claimStoryLease(dir, "US-X", {
+        pid: 3333, claimedAt: NOW, source: "cycle",
+      });
+      const rp = join(dir, "US-X.lease");
+      const beforeBytes = readFileSync(rp);
+
+      // Attempt to release as "human" — must NOT delete the cycle lease
+      const r = releaseStoryLease(dir, "US-X", { source: "human" });
+      expect(r).toBe(false);
+      expect(readFileSync(rp)).toEqual(beforeBytes);
+      expect(readLeases(dir)["US-X"]!.source).toBe("cycle");
+      expect(readLeases(dir)["US-X"]!.pid).toBe(3333);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("supervisor release must not mistakenly delete a cycle lease with same story", () => {
+    const dir = tmpLeaseDir();
+    try {
+      claimStoryLease(dir, "US-X-SUP", {
+        pid: 4444, claimedAt: NOW, source: "cycle",
+      });
+      const rp = join(dir, "US-X-SUP.lease");
+      const beforeBytes = readFileSync(rp);
+
+      const r = releaseStoryLease(dir, "US-X-SUP", { source: "supervisor" });
+      expect(r).toBe(false);
+      expect(readFileSync(rp)).toEqual(beforeBytes);
+      expect(readLeases(dir)["US-X-SUP"]!.source).toBe("cycle");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
 });
 
 // ─── Legacy compatibility tests ──────────────────────────────────────────────

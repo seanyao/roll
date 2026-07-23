@@ -361,8 +361,9 @@ export function releaseStoryLease(
     }
   }
 
-  // For cycle: pid must match
-  if (identity.source === "cycle" && identity.pid !== undefined) {
+  // For cycle: pid is REQUIRED and must match
+  if (identity.source === "cycle") {
+    if (identity.pid === undefined) return false;
     if (existing.pid !== identity.pid) return false;
   }
 

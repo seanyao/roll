@@ -117,49 +117,54 @@ function decodeEntry(raw: string): LeaseEntry | null {
  * If the directory does not exist, falls back to the legacy
  * `story-leases.json` single-file JSON map for backward compatibility
  * (read-only — new writes always go to the directory).
+ *
+ * BLOCK-1 fix: when canonical dir exists AND legacy file also exists,
+ * merge both sources (canonical wins for same story). No silent hiding.
  */
 export function readLeases(dirPath: string): LeaseMap {
-  // Strategy 1: Read from canonical per-story directory
   try {
-    if (!existsSync(dirPath)) {
-      // Fallback to legacy JSON file
-      const parentDir = dirname(dirPath);
-      // If dirPath is the leases dir, parent is loop dir
-      // If dirPath is something else, try story-leases.json alongside
-      for (const candidate of [
-        join(parentDir, "story-leases.json"),
-        join(dirPath, "..", "story-leases.json"),
-      ]) {
-        try {
-          if (existsSync(candidate)) {
-            const raw = readFileSync(candidate, "utf8");
-            const parsed = JSON.parse(raw);
-            if (typeof parsed === "object" && parsed !== null) {
-              return parsed as LeaseMap;
-            }
-          }
-        } catch {
-          // try next candidate
-        }
-      }
-      return {};
-    }
+    const canonicalExists = existsSync(dirPath);
+    const parentDir = dirname(dirPath);
+    const legacyPath = join(parentDir, "story-leases.json");
+    const legacyExists = existsSync(legacyPath);
 
-    const result: LeaseMap = {};
-    for (const entry of readdirSync(dirPath)) {
-      if (!entry.endsWith(LEASE_EXT)) continue;
-      const storyId = entry.slice(0, -LEASE_EXT.length);
+    // Neither source → empty
+    if (!canonicalExists && !legacyExists) return {};
+
+    // Read legacy if present
+    let legacyMap: LeaseMap = {};
+    if (legacyExists) {
       try {
-        const raw = readFileSync(join(dirPath, entry), "utf8");
-        const decoded = decodeEntry(raw);
-        if (decoded !== null) {
-          result[storyId] = decoded;
+        const raw = readFileSync(legacyPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === "object" && parsed !== null) {
+          legacyMap = parsed as LeaseMap;
         }
       } catch {
-        // skip unreadable entry
+        // unreadable legacy — ignore (canonical will be sole source if present)
       }
     }
-    return result;
+
+    // Read canonical if present
+    let canonicalMap: LeaseMap = {};
+    if (canonicalExists) {
+      for (const entry of readdirSync(dirPath)) {
+        if (!entry.endsWith(LEASE_EXT)) continue;
+        const storyId = entry.slice(0, -LEASE_EXT.length);
+        try {
+          const raw = readFileSync(join(dirPath, entry), "utf8");
+          const decoded = decodeEntry(raw);
+          if (decoded !== null) {
+            canonicalMap[storyId] = decoded;
+          }
+        } catch {
+          // skip unreadable entry
+        }
+      }
+    }
+
+    // Merge: legacy first, canonical overwrites for same story (canonical wins)
+    return { ...legacyMap, ...canonicalMap };
   } catch {
     return {};
   }
@@ -275,54 +280,79 @@ export function claimStoryLease(
   // One-time controlled migration: if legacy exists, either reject (same-story)
   // or migrate all entries to canonical records (different stories). This
   // prevents dual-ownership when a legacy lease exists for the same story.
+  //
+  // BLOCK-2 fix: migration is all-or-fail. Any link/fsync/parse failure
+  // propagates and blocks the new claim. No best-effort skipping, no
+  // fresh-canonical fallback on unreadable legacy.
   if (!existsSync(dirPath)) {
     const parentDir = dirname(dirPath);
     const legacyPath = join(parentDir, "story-leases.json");
     if (existsSync(legacyPath)) {
-      try {
-        const raw = readFileSync(legacyPath, "utf8");
-        const parsed = JSON.parse(raw);
-        if (typeof parsed === "object" && parsed !== null) {
-          const legacyMap = parsed as LeaseMap;
-
-          // Check for same-story conflict FIRST
-          if (legacyMap[storyId] !== undefined) {
-            const existing = legacyMap[storyId] as LeaseEntry;
-            return {
-              status: "exists",
-              existingSource: existing.source,
-              existingDelegationId: existing.delegationId,
-            };
-          }
-
-          // Different stories: one-time migration of ALL legacy entries
-          // to canonical directory before claiming the new story.
-          mkdirSync(dirPath, { recursive: true });
-          for (const [legacyStoryId, legacyEntry] of Object.entries(legacyMap)) {
-            const entry = legacyEntry as LeaseEntry;
-            const legacyTmpPath = join(dirPath, `${legacyStoryId}.migrate.${randomUUID().slice(0, 8)}.tmp`);
-            writeFileSync(legacyTmpPath, encodeEntry(entry), "utf8");
-            const tmpFd = openSync(legacyTmpPath, "r+");
-            fdatasyncSync(tmpFd);
-            closeSync(tmpFd);
-            try {
-              linkSync(legacyTmpPath, recordPath(dirPath, legacyStoryId));
-            } catch {
-              // If link fails for a migrated entry, skip it (best-effort migration)
-            }
-            try { unlinkSync(legacyTmpPath); } catch { /* best-effort */ }
-          }
-          // fsync migrated directory
-          const dirFd = openSync(dirPath, "r");
-          fdatasyncSync(dirFd);
-          closeSync(dirFd);
-        }
-      } catch {
-        // Unreadable legacy — proceed with fresh canonical directory
-        mkdirSync(dirPath, { recursive: true });
+      const raw = readFileSync(legacyPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null) {
+        throw new Error(`Legacy lease file ${legacyPath} is not a valid JSON object`);
       }
+      const legacyMap = parsed as LeaseMap;
+
+      // Check for same-story conflict FIRST
+      if (legacyMap[storyId] !== undefined) {
+        const existing = legacyMap[storyId] as LeaseEntry;
+        return {
+          status: "exists",
+          existingSource: existing.source,
+          existingDelegationId: existing.delegationId,
+        };
+      }
+
+      // Different stories: one-time atomic migration of ALL legacy entries
+      // to canonical directory before claiming the new story.
+      // Every linkSync must succeed; any failure aborts the entire migration.
+      mkdirSync(dirPath, { recursive: true });
+      for (const [legacyStoryId, legacyEntry] of Object.entries(legacyMap)) {
+        const entry = legacyEntry as LeaseEntry;
+        const legacyTmpPath = join(dirPath, `${legacyStoryId}.migrate.${randomUUID().slice(0, 8)}.tmp`);
+        writeFileSync(legacyTmpPath, encodeEntry(entry), "utf8");
+        const tmpFd = openSync(legacyTmpPath, "r+");
+        fdatasyncSync(tmpFd);
+        closeSync(tmpFd);
+        linkSync(legacyTmpPath, recordPath(dirPath, legacyStoryId));
+        unlinkSync(legacyTmpPath);
+      }
+      // fsync migrated directory
+      const dirFd = openSync(dirPath, "r");
+      fdatasyncSync(dirFd);
+      closeSync(dirFd);
     } else {
       mkdirSync(dirPath, { recursive: true });
+    }
+  } else {
+    // ═══ BLOCK-1: canonical dir exists — detect legacy coexistence ═══
+    // If the legacy story-leases.json still exists alongside the canonical
+    // directory, it's a split-brain / data-integrity condition. Fail-loud
+    // and refuse any new claim until the legacy file is reconciled.
+    const parentDir = dirname(dirPath);
+    const legacyPath = join(parentDir, "story-leases.json");
+    if (existsSync(legacyPath)) {
+      const raw = readFileSync(legacyPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null) {
+        const legacyMap = parsed as LeaseMap;
+        if (legacyMap[storyId] !== undefined) {
+          const existing = legacyMap[storyId] as LeaseEntry;
+          return {
+            status: "exists",
+            existingSource: existing.source,
+            existingDelegationId: existing.delegationId,
+          };
+        }
+        // Legacy has different stories — still fail-loud: coexistence is a
+        // data integrity error requiring manual reconciliation.
+        throw new Error(
+          `Legacy lease file ${legacyPath} coexists with canonical lease directory ${dirPath}. ` +
+          `Manual reconciliation required before new claims can proceed.`,
+        );
+      }
     }
   }
 

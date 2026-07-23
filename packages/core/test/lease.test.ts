@@ -51,6 +51,7 @@ import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { spawn } from "child_process";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
 
 const NOW = 1_700_000_000_000; // arbitrary stable epoch ms for tests
 
@@ -1188,14 +1189,18 @@ describe("claimStoryLease — hardlink no-clobber (US-DELTA-003)", () => {
 
 describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
   /**
-   * Resolved local node and built core dist — no npx, no tsx, no network.
+   * Resolved local node + tsx loader (declared devDependency) — no network.
+   * Workers import from tracked TypeScript source via --import tsx/esm.
    * Spawns a subprocess worker that uses a ready/go barrier for race tests.
    *
    * Returns { status, code, stderr }. Hard-fails on empty output or nonzero exit.
    */
   const nodeExe = process.execPath;
-  // Resolve the built core dist (not source TS — workers are plain Node)
-  const coreDistPath = join(__dirname, "..", "dist", "index.js");
+  // Resolve tracked TypeScript source and tsx ESM loader (both must exist before any spawn)
+  const coreSrcPath = join(__dirname, "..", "src", "index.ts");
+  const tsxLoader = createRequire(import.meta.url).resolve("tsx/esm");
+  if (!existsSync(coreSrcPath)) throw new Error(`core source not found: ${coreSrcPath}`);
+  if (!existsSync(tsxLoader)) throw new Error(`tsx loader not found: ${tsxLoader}`);
 
   async function runWorker(args: {
     dirPath: string;
@@ -1209,7 +1214,7 @@ describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
   }): Promise<{ status: string; code: number; stderr: string } & { child: ReturnType<typeof spawn> }> {
     const { dirPath, workDir, storyId, workerId, source, pid, delegationId, runId } = args;
 
-    // Write a worker script that uses node to import from built core dist
+    // Write a worker script that imports from tracked TypeScript source via tsx loader
     const workerScript = join(workDir, `worker-${workerId}.mjs`);
     const readyFile = join(workDir, `ready.${workerId}`);
     const goFile = join(workDir, "go.txt");
@@ -1221,7 +1226,7 @@ describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
     if (runId) entryObj.runId = runId;
 
     const scriptContent = `
-import { claimStoryLease } from ${JSON.stringify(coreDistPath)};
+import { claimStoryLease } from ${JSON.stringify(coreSrcPath)};
 import { writeFileSync, existsSync } from "node:fs";
 
 const dirPath = ${JSON.stringify(dirPath)};
@@ -1252,38 +1257,42 @@ process.exit(0);
     writeFileSync(workerScript, scriptContent, "utf8");
 
     return new Promise((resolve, reject) => {
-      const child = spawn(nodeExe, [workerScript], {
+      let settled = false;
+      const child = spawn(nodeExe, ["--import", tsxLoader, workerScript], {
         cwd: workDir,
         stdio: "pipe",
         env: { ...process.env, NODE_ENV: "test" },
       });
+      const settle = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
       let stderr = "";
       child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
       child.on("close", (code) => {
-        try {
-          if (existsSync(resultFile)) {
-            const raw = readFileSync(resultFile, "utf8").trim();
-            if (raw === "") {
-              reject(new Error(`worker ${workerId}: empty output, stderr=${stderr}`));
-              return;
+        settle(() => {
+          try {
+            if (existsSync(resultFile)) {
+              const raw = readFileSync(resultFile, "utf8").trim();
+              if (raw === "") {
+                reject(new Error(`worker ${workerId}: empty output, stderr=${stderr}`));
+                return;
+              }
+              const parsed = JSON.parse(raw);
+              resolve({ status: parsed.status, code: code ?? -1, stderr, child });
+            } else {
+              reject(new Error(`worker ${workerId}: no result file, code=${code}, stderr=${stderr}`));
             }
-            const parsed = JSON.parse(raw);
-            resolve({ status: parsed.status, code: code ?? -1, stderr, child });
-          } else {
-            reject(new Error(`worker ${workerId}: no result file, code=${code}, stderr=${stderr}`));
+          } catch (err) {
+            reject(new Error(`worker ${workerId}: parse error, code=${code}, stderr=${stderr}`));
           }
-        } catch (err) {
-          reject(new Error(`worker ${workerId}: parse error, code=${code}, stderr=${stderr}`));
-        }
+        });
       });
-      child.on("error", (err) => reject(err));
+      child.on("error", (err) => settle(() => reject(err)));
     });
   }
 
   /** Create a temp work dir, spawn 2 workers with ready/go barrier, assert outcome.
    *  On any error (timeout, etc.), kills both children and awaits them before
    *  cleanup — no unhandled rejections, no worker script deleted while starting. */
-  async function raceWorkers(worker1Args: Omit<Parameters<typeof runWorker>[0], "tsxPath">, worker2Args: Omit<Parameters<typeof runWorker>[0], "tsxPath">) {
+  async function raceWorkers(worker1Args: Parameters<typeof runWorker>[0], worker2Args: Parameters<typeof runWorker>[0]) {
     const dir = tmpLeaseDir();
     const workDir = mkdtempSync(join(tmpdir(), "lease-race-"));
     const w1Args = { ...worker1Args, dirPath: dir, workDir };

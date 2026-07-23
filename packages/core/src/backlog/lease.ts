@@ -231,6 +231,17 @@ export type ClaimResult =
   | { status: "conflict"; existingSource: LeaseSource }
   | { status: "exists"; existingSource: LeaseSource; existingDelegationId?: string };
 
+/** Steps in the claim protocol — observable by injected tracer. */
+export type ClaimStep = "before-temp-write" | "after-temp-write" | "after-temp-fsync" | "after-link" | "after-parent-fsync" | "before-temp-unlink";
+
+/** Production-default seam: called at each step of claimStoryLease. May throw to simulate crash. */
+let _claimStepHook: ((step: ClaimStep, context: { storyId: string; dirPath: string }) => void) | null = null;
+
+/** Inject a step hook for testing the claim protocol sequence and crash points. Call with null to reset. */
+export function injectClaimStepHook(hook: ((step: ClaimStep, context: { storyId: string; dirPath: string }) => void) | null): void {
+  _claimStepHook = hook;
+}
+
 /**
  * Atomically claim a story lease using hardlink no-clobber.
  *
@@ -319,12 +330,15 @@ export function claimStoryLease(
   const tmpPath = join(dirPath, `${storyId}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
 
   // Step 1: Write complete owner record to unique temp file
+  _claimStepHook?.("before-temp-write", { storyId, dirPath });
   writeFileSync(tmpPath, encodeEntry(entry), "utf8");
+  _claimStepHook?.("after-temp-write", { storyId, dirPath });
 
   // Step 2: fdatasync temp
   const tmpFd = openSync(tmpPath, "r+");
   fdatasyncSync(tmpFd);
   closeSync(tmpFd);
+  _claimStepHook?.("after-temp-fsync", { storyId, dirPath });
 
   // Step 3: Hardlink — EEXIST means someone beat us
   try {
@@ -352,13 +366,16 @@ export function claimStoryLease(
     }
     throw err;
   }
+  _claimStepHook?.("after-link", { storyId, dirPath });
 
   // Step 4: fdatasync parent directory
   const dirFd = openSync(dirPath, "r");
   fdatasyncSync(dirFd);
   closeSync(dirFd);
+  _claimStepHook?.("after-parent-fsync", { storyId, dirPath });
 
   // Step 5: Remove temp file
+  _claimStepHook?.("before-temp-unlink", { storyId, dirPath });
   try { unlinkSync(tmpPath); } catch { /* best-effort — the lease is already claimed */ }
 
   return { status: "claimed" };

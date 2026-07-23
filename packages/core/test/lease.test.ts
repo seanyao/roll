@@ -16,6 +16,7 @@ import {
   buildClaimedByOther,
   claimStoryLease,
   cleanDeadLeases,
+  injectClaimStepHook,
   isHumanSoftLeaseActive,
   isLeaseAlive,
   isPidAlive,
@@ -29,12 +30,14 @@ import {
   leaseDirPath,
   reconcileExpiredClaims,
   type LeaseMap,
+  type ClaimStep,
 } from "../src/index.js";
 import {
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   unlinkSync,
@@ -613,6 +616,90 @@ describe("claimStoryLease — hardlink no-clobber (US-DELTA-003)", () => {
       try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
+
+  // ─── Production hardlink sequence tracer (Fix #3/#4: tests real claimStoryLease, not manual linkSync) ──
+
+  it("tracer proves claimStoryLease follows ordered protocol: before-temp-write → after-temp-write → after-temp-fsync → after-link → after-parent-fsync → before-temp-unlink", () => {
+    const dir = tmpLeaseDir();
+    const steps: string[] = [];
+    try {
+      injectClaimStepHook((step: ClaimStep) => { steps.push(step); });
+
+      const result = claimStoryLease(dir, "US-TRACE", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(result.status).toBe("claimed");
+      expect(steps).toEqual([
+        "before-temp-write",
+        "after-temp-write",
+        "after-temp-fsync",
+        "after-link",
+        "after-parent-fsync",
+        "before-temp-unlink",
+      ]);
+      // No temp residue
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      injectClaimStepHook(null);
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("tracer proves EEXIST stops before after-link: second claim ends at after-temp-fsync, no overwrite", () => {
+    const dir = tmpLeaseDir();
+    const stepsB: string[] = [];
+    try {
+      claimStoryLease(dir, "US-NW", { pid: process.pid, claimedAt: NOW, source: "cycle" });
+
+      injectClaimStepHook((step: ClaimStep) => { stepsB.push(step); });
+      const r2 = claimStoryLease(dir, "US-NW", { pid: 99999, claimedAt: NOW + 1, source: "host-delegation", delegationId: "d2", runId: "rd2" });
+      expect(r2.status).toBe("exists");
+      expect(stepsB).toEqual(["before-temp-write", "after-temp-write", "after-temp-fsync"]);
+      // First claim preserved
+      expect(readLeases(dir)["US-NW"]!.source).toBe("cycle");
+    } finally {
+      injectClaimStepHook(null);
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── Crash points: each step, verify no second owner / no overwrite (Fix #4) ──
+
+  function crashTest(step: ClaimStep, expectWinner: boolean) {
+    const dir = tmpLeaseDir();
+    try {
+      injectClaimStepHook((s: ClaimStep) => { if (s === step) throw new Error("crash at " + step); });
+
+      expect(() => claimStoryLease(dir, "US-CR", { pid: process.pid, claimedAt: NOW, source: "cycle" })).toThrow();
+
+      if (expectWinner) {
+        expect(existsSync(join(dir, "US-CR.lease"))).toBe(true);
+      } else {
+        expect(existsSync(join(dir, "US-CR.lease"))).toBe(false);
+      }
+
+      // Retry without crash — must succeed and be sole owner
+      injectClaimStepHook(null);
+      const r2 = claimStoryLease(dir, "US-CR", { pid: 99999, claimedAt: NOW + 1, source: "host-delegation", delegationId: "d4", runId: "rd4" });
+      if (expectWinner) {
+        expect(r2.status).toBe("exists");
+        expect(readLeases(dir)["US-CR"]!.pid).toBe(process.pid);
+      } else {
+        expect(r2.status).toBe("claimed");
+        expect(readLeases(dir)["US-CR"]!.pid).toBe(99999);
+      }
+    } finally {
+      injectClaimStepHook(null);
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  }
+
+  it("crash at before-temp-write: no record, retry wins", () => crashTest("before-temp-write", false));
+  it("crash at after-temp-write: temp residue, no winner, retry wins", () => crashTest("after-temp-write", false));
+  it("crash at after-temp-fsync: no final record, retry wins", () => crashTest("after-temp-fsync", false));
+  it("crash at after-link: record exists (link durable), winner established, retry blocked", () => crashTest("after-link", true));
+  it("crash at after-parent-fsync: winner established, retry blocked", () => crashTest("after-parent-fsync", true));
+  it("crash at before-temp-unlink: winner established, retry blocked", () => crashTest("before-temp-unlink", true));
 });
 
 // ─── Concurrent subprocess claim (real process isolation) ────────────────────

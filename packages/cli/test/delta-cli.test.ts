@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { deltaCommand } from "../src/commands/delta.js";
 import { renderState } from "../src/render.js";
+import { auditImportClosure } from "./delta-import-audit.js";
 
 // ── tsRun helper ─────────────────────────────────────────────────────────────
 
@@ -173,136 +174,106 @@ describe("US-DELTA-003 — delta CLI parser and help", () => {
   });
 });
 
-// ── Architectural negative guard ────────────────────────────────────────────
+// ── Import closure audit helper fixture tests ────────────────────────────────
 
-describe("US-DELTA-003 — import closure audit (fail-closed recursive)", () => {
-  it("recursive import closure from commands/index.ts: no forbidden patterns, fail-closed on missing files", () => {
-    // Use dynamic ESM import for node modules in this audit
+describe("US-DELTA-003 — import closure audit helper (fixture-based)", () => {
+  const path = require("node:path") as typeof import("node:path");
+  const fixturesDir = path.resolve(__dirname, "fixtures");
+
+  it("traverses side-effect imports (import '...')", () => {
+    const entry = path.join(fixturesDir, "import-audit-side-effect", "main.ts");
+    const result = auditImportClosure(entry, { rejectDynamicImport: false, rejectNonNodeRequire: false });
+    const names = result.files.map((f) => path.basename(f));
+    // Must include both main.ts (entry) and side-effect.ts (traversed via import "...")
+    expect(names).toContain("main.ts");
+    expect(names).toContain("side-effect.ts");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("traverses export * from re-exports", () => {
+    const entry = path.join(fixturesDir, "import-audit-export-star", "main.ts");
+    const result = auditImportClosure(entry, { rejectDynamicImport: false, rejectNonNodeRequire: false });
+    const names = result.files.map((f) => path.basename(f));
+    // Must include both main.ts (entry) and reexported.ts (traversed via export * from)
+    expect(names).toContain("main.ts");
+    expect(names).toContain("reexported.ts");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("resolves directory/index.ts", () => {
+    const entry = path.join(fixturesDir, "import-audit-index-dir", "main.ts");
+    const result = auditImportClosure(entry, { rejectDynamicImport: false, rejectNonNodeRequire: false });
+    const names = result.files.map((f) => path.basename(f));
+    // Must include main.ts and the resolved index.ts from the ./bar directory
+    expect(names).toContain("main.ts");
+    expect(names).toContain("index.ts");
+    expect(result.violations).toEqual([]);
+  });
+
+  it("fail-closed on dynamic import()", () => {
+    const entry = path.join(fixturesDir, "import-audit-dynamic-import", "main.ts");
+    expect(() => auditImportClosure(entry)).toThrow(/dynamic import\(\)/);
+  });
+
+  it("fail-closed on non-node: require()", () => {
+    const entry = path.join(fixturesDir, "import-audit-require", "main.ts");
+    expect(() => auditImportClosure(entry)).toThrow(/require\(\)/);
+  });
+
+  it("fail-closed on unresolvable local import", () => {
+    // Create a temp file that imports a nonexistent module
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
+    const tmpDir = path.join(fixturesDir, "import-audit-tmp");
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const tmpFile = path.join(tmpDir, "broken-import.ts");
+    try {
+      fs.writeFileSync(tmpFile, 'import "./nonexistent-file.js";\n', "utf8");
+      expect(() => auditImportClosure(tmpFile, { rejectDynamicImport: false, rejectNonNodeRequire: false }))
+        .toThrow(/cannot resolve/i);
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* cleanup */ }
+    }
+  });
+});
+
+// ── Architectural negative guard (unified helper) ────────────────────────────
+
+describe("US-DELTA-003 — import closure audit (unified helper on real source)", () => {
+  it("recursive import closure from commands/index.ts: no forbidden patterns, fail-closed", () => {
+    const path = require("node:path") as typeof import("node:path");
+    const fs = require("node:fs") as typeof import("node:fs");
 
     // Entry: commands/index.ts (the dispatch registration point)
     const entryFile = path.resolve(__dirname, "..", "src", "commands", "index.ts");
 
-    // FAIL-CLOSED: entry must exist
-    if (!fs.existsSync(entryFile)) {
-      throw new Error(`Audit FAIL-CLOSED: entry file missing: ${entryFile}`);
-    }
-
     // Verify index.ts registers delta
+    if (!fs.existsSync(entryFile)) {
+      throw new Error(`Audit FAIL-CLOSED: commands/index.ts missing`);
+    }
     const indexContent = fs.readFileSync(entryFile, "utf8");
     if (!indexContent.includes("deltaCommand") || !indexContent.includes('registerPorted("delta"')) {
       throw new Error("Audit FAIL-CLOSED: commands/index.ts must import and register deltaCommand");
     }
 
-    // Collect all files in the Delta CLI closure starting from delta.ts
+    // Use the unified helper from delta.ts as primary entry (index.ts re-exports it)
     const deltaEntry = path.resolve(__dirname, "..", "src", "commands", "delta.ts");
+    const result = auditImportClosure(deltaEntry, {
+      forbiddenTokens: [
+        "agentSpawn", "@anthropic", "openai",
+        "cycleAllocator", "allocCycle",
+        "runs.jsonl", "createPR", "DeliveryRecord", "cycle:terminal", "upsertRun",
+        "artifact-protocol", "attestation", "role-access", "manifest-v2",
+      ],
+    });
+
+    // Must traverse at least delta.ts, delta-allocation.ts, delta-artifacts.ts
     const allocFile = path.resolve(__dirname, "..", "src", "lib", "delta-allocation.ts");
     const artifactsFile = path.resolve(__dirname, "..", "src", "lib", "delta-artifacts.ts");
 
-    // Required files must exist
-    for (const f of [deltaEntry, allocFile, artifactsFile]) {
-      if (!fs.existsSync(f)) throw new Error(`Audit FAIL-CLOSED: required file missing: ${f}`);
-    }
-
-    const forbiddenTokens = [
-      "agentSpawn", "@anthropic", "openai",
-      "cycleAllocator", "allocCycle",
-      "runs.jsonl", "createPR", "DeliveryRecord", "cycle:terminal", "upsertRun",
-      "artifact-protocol", "attestation", "role-access", "manifest-v2",
-    ];
-
-    // Recursively resolve local relative imports
-    const seen = new Set<string>();
-    const queue = [deltaEntry, allocFile, artifactsFile];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (seen.has(current)) continue;
-      seen.add(current);
-
-      // FAIL-CLOSED: file must exist
-      if (!fs.existsSync(current)) {
-        throw new Error(`Audit FAIL-CLOSED: file not found during traversal: ${current}`);
-      }
-
-      const content = fs.readFileSync(current, "utf8");
-      const dir = path.dirname(current);
-
-      // Check for forbidden tokens (non-comment lines only)
-      for (const line of content.split("\n")) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed === "*") continue;
-        for (const pattern of forbiddenTokens) {
-          if (trimmed.includes(pattern)) {
-            throw new Error(`Audit FAIL-CLOSED: ${current} contains forbidden token "${pattern}"`);
-          }
-        }
-        // Reject dynamic import() (runtime, not type annotation)
-        if (/\bimport\s*\(/.test(trimmed) &&
-            !/\b(as|typeof)\s+import\s*\(/.test(trimmed) &&
-            !/:\s*import\s*\(/.test(trimmed)) {
-          throw new Error(`Audit FAIL-CLOSED: ${current} contains dynamic import(): ${trimmed}`);
-        }
-        // Reject dynamic require() (non-node:)
-        if (/\brequire\s*\(/.test(trimmed) && !trimmed.includes("node:")) {
-          throw new Error(`Audit FAIL-CLOSED: ${current} contains dynamic require(): ${trimmed}`);
-        }
-      }
-
-      // Parse local relative imports/re-exports: from "...", import "...", export ... from "..."
-      // Match: from '<relative-path>', import '<relative-path>'
-      const importRe = /(?:from\s+["']|import\s+["'])(\.[^"']+)["']/g;
-      const exportFromRe = /export\s+(?:\{[^}]*\}\s+from\s+["']|\*\s+as\s+\w+\s+from\s+["'])(\.[^"']+)["']/g;
-
-      const resolveAndEnqueue = (relPath: string) => {
-        let resolved = relPath.replace(/\.js$/, ".ts");
-        const fullPath = path.resolve(dir, resolved);
-
-        // Check if the file exists; if not, try index.ts (directory resolution)
-        if (!fs.existsSync(fullPath)) {
-          const indexCandidate = path.resolve(dir, resolved, "index.ts");
-          if (fs.existsSync(indexCandidate)) {
-            if (!seen.has(indexCandidate)) queue.push(indexCandidate);
-            return;
-          }
-          // Only fail-closed for local (non-scoped) paths within cli/src
-          if (!resolved.startsWith("@") && fullPath.includes("/cli/src/")) {
-            throw new Error(`Audit FAIL-CLOSED: cannot resolve local import "${relPath}" from ${current}`);
-          }
-          return;
-        }
-        if (!seen.has(fullPath)) queue.push(fullPath);
-      };
-
-      let match;
-      const seenImports = new Set<string>();
-      while ((match = importRe.exec(content)) !== null) {
-        const relPath = match[1]!;
-        if (!seenImports.has(relPath)) {
-          seenImports.add(relPath);
-          // Only follow into cli/src (not node_modules, not ../../packages)
-          if (relPath.startsWith(".") && current.includes("/cli/src/")) {
-            resolveAndEnqueue(relPath);
-          }
-        }
-      }
-      while ((match = exportFromRe.exec(content)) !== null) {
-        const relPath = match[1]!;
-        if (!seenImports.has(relPath)) {
-          seenImports.add(relPath);
-          if (relPath.startsWith(".") && current.includes("/cli/src/")) {
-            resolveAndEnqueue(relPath);
-          }
-        }
-      }
-    }
-
-    // Verify we traversed at least the entry files
-    expect(seen.size).toBeGreaterThanOrEqual(3);
-    // Must include all 3 core files
-    expect(seen.has(deltaEntry)).toBe(true);
-    expect(seen.has(allocFile)).toBe(true);
-    expect(seen.has(artifactsFile)).toBe(true);
+    expect(result.files).toContain(deltaEntry);
+    expect(result.files).toContain(allocFile);
+    expect(result.files).toContain(artifactsFile);
+    expect(result.violations).toEqual([]);
   });
 });

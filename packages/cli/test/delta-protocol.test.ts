@@ -2724,106 +2724,21 @@ describe("US-DELTA-003 — concurrent subprocess barrier (ready ack)", () => {
 
 // ── Import closure audit: fail-closed recursive import traversal (BLOCK #1) ─
 
-describe("US-DELTA-003 — import closure audit (fail-closed recursive)", () => {
-  it("recursively resolves delta.ts imports and checks closure for forbidden patterns", async () => {
-    const fs = await import("node:fs");
+describe("US-DELTA-003 — import closure audit (unified helper)", () => {
+  it("recursive closure from delta.ts has no forbidden patterns", async () => {
     const path = await import("node:path");
-
-    // Entry points
-    const deltaFile = path.resolve(import.meta.dirname, "..", "src", "commands", "delta.ts");
-    const allocFile = path.resolve(import.meta.dirname, "..", "src", "lib", "delta-allocation.ts");
-    const artifactsFile = path.resolve(import.meta.dirname, "..", "src", "lib", "delta-artifacts.ts");
-
-    // FAIL-CLOSED: all required entry files must exist
-    for (const f of [deltaFile, allocFile, artifactsFile]) {
-      if (!fs.existsSync(f)) throw new Error(`Import audit FAIL-CLOSED: required file missing: ${f}`);
-    }
-
-    // Forbidden import patterns (matched against import/require statements)
-    const forbiddenImports = [
-      "agentSpawn",
-      "createAgent",
-      "@anthropic",
-      "openai",
-      "cycleAllocator",
-      "allocCycle",
-      "runs.jsonl",
-      "createPR",
-      "DeliveryRecord",
-      "cycle:terminal",
-      "upsertRun",
-      "artifact-protocol",
-      "attestation",
-      "role-access",
-      "manifest-v2",
-    ];
-
-    // Resolve relative imports from a file, mapping .js → .ts
-    const seen = new Set<string>();
-    const queue = [deltaFile, allocFile, artifactsFile];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (seen.has(current)) continue;
-      seen.add(current);
-
-      // FAIL-CLOSED: file must exist
-      if (!fs.existsSync(current)) throw new Error(`Import audit FAIL-CLOSED: file not found during traversal: ${current}`);
-
-      const content = fs.readFileSync(current, "utf8");
-      const dir = path.dirname(current);
-
-      // Check for forbidden patterns
-      const lines = content.split("\n");
-      for (const pattern of forbiddenImports) {
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
-          if (trimmed.includes(pattern)) {
-            throw new Error(`Import audit FAIL-CLOSED: ${current} contains forbidden pattern "${pattern}"`);
-          }
-        }
-      }
-
-      // Parse local relative imports (from "..."), side-effect imports, and re-exports
-      const importRe = /(?:from\s+["']|import\s+["'])(\.[^"']+)["']/g;
-      const exportFromRe = /export\s+(?:\{[^}]*\}\s+from\s+["']|\*\s+as\s+\w+\s+from\s+["'])(\.[^"']+)["']/g;
-      const seenLocalImports = new Set<string>();
-
-      const resolveRelative = (relPath: string) => {
-        if (seenLocalImports.has(relPath)) return;
-        seenLocalImports.add(relPath);
-        let importPath = relPath.replace(/\.js$/, ".ts");
-        const resolved = path.resolve(dir, importPath);
-        // Try direct file first
-        if (fs.existsSync(resolved) && resolved.includes("/cli/src/") && !seen.has(resolved)) {
-          queue.push(resolved);
-          return;
-        }
-        // Directory/index resolution: try <path>/index.ts
-        const indexCandidate = path.resolve(dir, relPath.replace(/\.js$/, ""), "index.ts");
-        if (fs.existsSync(indexCandidate) && indexCandidate.includes("/cli/src/") && !seen.has(indexCandidate)) {
-          queue.push(indexCandidate);
-          return;
-        }
-        // FAIL-CLOSED: cannot resolve local relative dependency within cli/src
-        if (!relPath.startsWith("@") && resolved.includes("/cli/src/")) {
-          throw new Error(`Import audit FAIL-CLOSED: cannot resolve local import "${relPath}" from ${current}`);
-        }
-      };
-
-      let match;
-      while ((match = importRe.exec(content)) !== null) {
-        resolveRelative(match[1]!);
-      }
-      while ((match = exportFromRe.exec(content)) !== null) {
-        resolveRelative(match[1]!);
-      }
-    }
-
-    // Verify we traversed at least the 3 expected files
-    expect(seen.size).toBeGreaterThanOrEqual(3);
-    // All files in closure must be clean — no forbidden patterns found
+    const { auditImportClosure } = await import("./delta-import-audit.js");
+    const deltaFile = path.resolve(__dirname, "..", "src", "commands", "delta.ts");
+    const result = auditImportClosure(deltaFile, {
+      forbiddenTokens: [
+        "agentSpawn", "createAgent", "@anthropic", "openai",
+        "cycleAllocator", "allocCycle",
+        "runs.jsonl", "createPR", "DeliveryRecord", "cycle:terminal", "upsertRun",
+        "artifact-protocol", "attestation", "role-access", "manifest-v2",
+      ],
+    });
+    expect(result.violations).toEqual([]);
+    expect(result.files.length).toBeGreaterThanOrEqual(3);
   });
 });
 

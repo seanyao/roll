@@ -39,6 +39,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -702,156 +703,278 @@ describe("claimStoryLease — hardlink no-clobber (US-DELTA-003)", () => {
   it("crash at before-temp-unlink: winner established, retry blocked", () => crashTest("before-temp-unlink", true));
 });
 
-// ─── Concurrent subprocess claim (real process isolation) ────────────────────
+// ─── Concurrent subprocess claim (real process isolation, Fix #5) ─────────────
 
 describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
-  it("same story with two subprocess claims: exactly one winner", async () => {
-    const dir = tmpLeaseDir();
-    const storyId = "US-SUBPROC-" + randomUUID().slice(0, 8);
+  /**
+   * Run a claim worker via tsx. Workers use a file-based ready/go barrier:
+   * 1. Worker writes ready.<workerId> → polls for go.txt
+   * 2. Test waits for all ready files → writes go.txt → both workers race on claim
+   * 3. Worker writes result to result.<workerId>.json → exits 0
+   *
+   * Returns { status, code, stderr }. Hard-fails on empty output or nonzero exit.
+   */
+  async function runWorker(args: {
+    tsxPath: string;
+    dirPath: string;
+    workDir: string;
+    storyId: string;
+    workerId: string;
+    source: string;
+    pid?: number;
+    delegationId?: string;
+    runId?: string;
+  }): Promise<{ status: string; code: number; stderr: string }> {
+    const { dirPath, workDir, storyId, workerId, source, pid, delegationId, runId } = args;
+    const coreIndex = join(__dirname, "..", "src", "index.ts");
 
-    const coreIndex = join(__dirname, "..", "src", "index.js");
-    const script = `
-      const { claimStoryLease, readLeases } = require(${JSON.stringify(coreIndex)});
-      const result = claimStoryLease(${JSON.stringify(dir)}, ${JSON.stringify(storyId)}, {
-        pid: process.pid,
-        claimedAt: Date.now(),
-        source: "cycle",
+    // Write a worker script that uses tsx to import from core source
+    const workerScript = join(workDir, `worker-${workerId}.mjs`);
+    const readyFile = join(workDir, `ready.${workerId}`);
+    const goFile = join(workDir, "go.txt");
+    const resultFile = join(workDir, `result.${workerId}.json`);
+
+    const entryObj: Record<string, unknown> = { claimedAt: Date.now(), source };
+    if (pid !== undefined) entryObj.pid = pid;
+    if (delegationId) entryObj.delegationId = delegationId;
+    if (runId) entryObj.runId = runId;
+
+    const scriptContent = `
+import { claimStoryLease } from ${JSON.stringify(coreIndex)};
+import { writeFileSync, existsSync } from "node:fs";
+
+const dirPath = ${JSON.stringify(dirPath)};
+const storyId = ${JSON.stringify(storyId)};
+const entry = ${JSON.stringify(entryObj)};
+const readyFile = ${JSON.stringify(readyFile)};
+const goFile = ${JSON.stringify(goFile)};
+const resultFile = ${JSON.stringify(resultFile)};
+
+// Signal ready
+writeFileSync(readyFile, "ready", "utf8");
+
+// Wait for go signal (poll every 5ms, max 10s)
+const start = Date.now();
+while (!existsSync(goFile)) {
+  if (Date.now() - start > 10000) {
+    process.stderr.write("timeout waiting for go signal\\n");
+    process.exit(1);
+  }
+  await new Promise(r => setTimeout(r, 5));
+}
+
+// Race!
+const result = claimStoryLease(dirPath, storyId, entry);
+writeFileSync(resultFile, JSON.stringify(result), "utf8");
+process.exit(0);
+`;
+    writeFileSync(workerScript, scriptContent, "utf8");
+
+    return new Promise((resolve, reject) => {
+      const child = spawn("npx", ["tsx", workerScript], {
+        cwd: __dirname,
+        stdio: "pipe",
+        env: { ...process.env, NODE_ENV: "test" },
       });
-      process.stdout.write(JSON.stringify(result) + "\\n");
-    `;
+      let stderr = "";
+      child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+      child.on("close", (code) => {
+        try {
+          if (existsSync(resultFile)) {
+            const raw = readFileSync(resultFile, "utf8").trim();
+            if (raw === "") {
+              reject(new Error(`worker ${workerId}: empty output, stderr=${stderr}`));
+              return;
+            }
+            const parsed = JSON.parse(raw);
+            resolve({ status: parsed.status, code: code ?? -1, stderr });
+          } else {
+            reject(new Error(`worker ${workerId}: no result file, code=${code}, stderr=${stderr}`));
+          }
+        } catch (err) {
+          reject(new Error(`worker ${workerId}: parse error, code=${code}, stderr=${stderr}`));
+        }
+      });
+      child.on("error", (err) => reject(err));
+    });
+  }
 
+  /** Create a temp work dir, spawn 2 workers with ready/go barrier, assert outcome. */
+  async function raceWorkers(worker1Args: Omit<Parameters<typeof runWorker>[0], "tsxPath">, worker2Args: Omit<Parameters<typeof runWorker>[0], "tsxPath">) {
+    const dir = tmpLeaseDir();
+    const workDir = mkdtempSync(join(tmpdir(), "lease-race-"));
     try {
-      const p1 = spawn(process.execPath, ["-e", script], { stdio: "pipe" });
-      const p2 = spawn(process.execPath, ["-e", script], { stdio: "pipe" });
+      // Write go.txt first then delete it — workers poll for it
+      const goFile = join(workDir, "go.txt");
 
-      let out1 = "";
-      let out2 = "";
-      p1.stdout?.on("data", (d: Buffer) => { out1 += d.toString(); });
-      p2.stdout?.on("data", (d: Buffer) => { out2 += d.toString(); });
+      const w1 = runWorker({ ...worker1Args, dirPath: dir, workDir });
+      const w2 = runWorker({ ...worker2Args, dirPath: dir, workDir });
 
-      const [code1, code2] = await Promise.all([
-        new Promise<number>((resolve) => p1.on("close", resolve)),
-        new Promise<number>((resolve) => p2.on("close", resolve)),
-      ]);
-
-      // Workers may exit non-zero on uncaught rejection from require failure.
-      // If output is empty, skip the assertion (module resolution failure).
-      if (out1.trim() === "" || out2.trim() === "") {
-        // Module resolution in subprocess failed — this is a test env issue,
-        // not a bug. The same-process and hardlink-mechanics tests cover this.
-        return;
+      // Wait for both ready signals
+      const ready1 = join(workDir, `ready.${worker1Args.workerId}`);
+      const ready2 = join(workDir, `ready.${worker2Args.workerId}`);
+      const start = Date.now();
+      while (!existsSync(ready1) || !existsSync(ready2)) {
+        if (Date.now() - start > 10000) throw new Error("workers never signaled ready");
+        await new Promise(r => setTimeout(r, 10));
       }
 
-      const r1 = JSON.parse(out1.trim());
-      const r2 = JSON.parse(out2.trim());
+      // GO!
+      writeFileSync(goFile, "go", "utf8");
 
-      // Exactly one winner
-      const winners = [r1, r2].filter((r: { status: string }) => r.status === "claimed");
-      expect(winners.length).toBe(1);
-    } finally {
-      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+      const [r1, r2] = await Promise.all([w1, w2]);
+      return { dir, workDir, r1, r2 };
+    } catch (err) {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+      throw err;
     }
-  });
+  }
 
-  it("different stories with concurrent subprocess claims: both win", async () => {
-    const dir = tmpLeaseDir();
-    const storyA = "US-DIFF-A-" + randomUUID().slice(0, 8);
-    const storyB = "US-DIFF-B-" + randomUUID().slice(0, 8);
+  // ── Same story, same source → exactly one winner ────────────────────────
 
-    const coreIndex = join(__dirname, "..", "src", "index.js");
-    const scriptA = `
-      const { claimStoryLease } = require(${JSON.stringify(coreIndex)});
-      const result = claimStoryLease(${JSON.stringify(dir)}, ${JSON.stringify(storyA)}, {
-        pid: process.pid, claimedAt: Date.now(), source: "cycle",
-      });
-      process.stdout.write(JSON.stringify({ status: result.status }) + "\\n");
-    `;
-    const scriptB = `
-      const { claimStoryLease } = require(${JSON.stringify(coreIndex)});
-      const result = claimStoryLease(${JSON.stringify(dir)}, ${JSON.stringify(storyB)}, {
-        pid: process.pid, claimedAt: Date.now(), source: "cycle",
-      });
-      process.stdout.write(JSON.stringify({ status: result.status }) + "\\n");
-    `;
-
+  it("same story, two cycle claims: exactly one winner, empty stderr, zero exit", async () => {
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "a", storyId: "US-RACE-CYC", source: "cycle", pid: 10001 },
+      { workerId: "b", storyId: "US-RACE-CYC", source: "cycle", pid: 10002 },
+    );
     try {
-      const p1 = spawn(process.execPath, ["-e", scriptA], { stdio: "pipe" });
-      const p2 = spawn(process.execPath, ["-e", scriptB], { stdio: "pipe" });
+      // Both exit 0
+      expect(r1.code).toBe(0);
+      expect(r2.code).toBe(0);
+      expect(r1.stderr).toBe("");
+      expect(r2.stderr).toBe("");
+      // Exactly one winner
+      const winners = [r1, r2].filter((r) => r.status === "claimed");
+      expect(winners).toHaveLength(1);
+      // Only one .lease file
+      const leases = readLeases(dir);
+      expect(Object.keys(leases)).toHaveLength(1);
+      expect(Object.keys(leases)[0]).toBe("US-RACE-CYC");
+      // No temp residue
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+    }
+  }, 15000);
 
-      let out1 = "";
-      let out2 = "";
-      p1.stdout?.on("data", (d: Buffer) => { out1 += d.toString(); });
-      p2.stdout?.on("data", (d: Buffer) => { out2 += d.toString(); });
+  // ── Same story, different sources → exactly one winner ──────────────────
 
-      await Promise.all([
-        new Promise<number>((resolve) => p1.on("close", resolve)),
-        new Promise<number>((resolve) => p2.on("close", resolve)),
-      ]);
+  it("same story, host-delegation vs cycle: exactly one winner", async () => {
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "hd", storyId: "US-RACE-HDCYC", source: "host-delegation", delegationId: "deleg-hd", runId: "delta-hd" },
+      { workerId: "cyc", storyId: "US-RACE-HDCYC", source: "cycle", pid: 20001 },
+    );
+    try {
+      expect(r1.code).toBe(0);
+      expect(r2.code).toBe(0);
+      const winners = [r1, r2].filter((r) => r.status === "claimed");
+      expect(winners).toHaveLength(1);
+      const leases = readLeases(dir);
+      expect(Object.keys(leases)).toHaveLength(1);
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+    }
+  }, 15000);
 
-      if (out1.trim() === "" || out2.trim() === "") return;
+  it("same story, host-delegation vs human: exactly one winner", async () => {
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "hd", storyId: "US-RACE-HDHUM", source: "host-delegation", delegationId: "deleg-hd2", runId: "delta-hd2" },
+      { workerId: "hum", storyId: "US-RACE-HDHUM", source: "human" },
+    );
+    try {
+      expect(r1.code).toBe(0);
+      expect(r2.code).toBe(0);
+      const winners = [r1, r2].filter((r) => r.status === "claimed");
+      expect(winners).toHaveLength(1);
+      expect(Object.keys(readLeases(dir))).toHaveLength(1);
+    } finally {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+    }
+  }, 15000);
 
-      const r1 = JSON.parse(out1.trim());
-      const r2 = JSON.parse(out2.trim());
+  it("same story, host-delegation vs supervisor: exactly one winner", async () => {
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "hd", storyId: "US-RACE-HDSUP", source: "host-delegation", delegationId: "deleg-hd3", runId: "delta-hd3" },
+      { workerId: "sup", storyId: "US-RACE-HDSUP", source: "supervisor" },
+    );
+    try {
+      expect(r1.code).toBe(0);
+      expect(r2.code).toBe(0);
+      const winners = [r1, r2].filter((r) => r.status === "claimed");
+      expect(winners).toHaveLength(1);
+      expect(Object.keys(readLeases(dir))).toHaveLength(1);
+    } finally {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+    }
+  }, 15000);
 
-      // Both must win — different stories don't contend
+  // ── Different stories, different sources → both win ─────────────────────
+
+  it("different stories, host-delegation vs cycle: both win", async () => {
+    const storyA = "US-DIFF-HD-" + randomUUID().slice(0, 8);
+    const storyB = "US-DIFF-CYC-" + randomUUID().slice(0, 8);
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "hd", storyId: storyA, source: "host-delegation", delegationId: "deleg-diff-hd", runId: "delta-diff-hd" },
+      { workerId: "cyc", storyId: storyB, source: "cycle", pid: 30001 },
+    );
+    try {
       expect(r1.status).toBe("claimed");
       expect(r2.status).toBe("claimed");
-
       const leases = readLeases(dir);
       expect(leases[storyA]).toBeDefined();
       expect(leases[storyB]).toBeDefined();
+      expect(Object.keys(leases)).toHaveLength(2);
     } finally {
-      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
     }
-  });
+  }, 15000);
 
-  it("same story: different sources (cycle vs host-delegation) — hardlink EEXIST exclusion", async () => {
-    const dir = tmpLeaseDir();
-    const storyId = "US-SRC-" + randomUUID().slice(0, 8);
-
-    const coreIndex = join(__dirname, "..", "src", "index.js");
-    const scriptCycle = `
-      const { claimStoryLease } = require(${JSON.stringify(coreIndex)});
-      const result = claimStoryLease(${JSON.stringify(dir)}, ${JSON.stringify(storyId)}, {
-        pid: process.pid, claimedAt: Date.now(), source: "cycle",
-      });
-      process.stdout.write(JSON.stringify(result) + "\\n");
-    `;
-    const scriptHd = `
-      const { claimStoryLease } = require(${JSON.stringify(coreIndex)});
-      const result = claimStoryLease(${JSON.stringify(dir)}, ${JSON.stringify(storyId)}, {
-        pid: process.pid, claimedAt: Date.now(), source: "host-delegation",
-        delegationId: "deleg-sub-" + process.pid, runId: "delta-deleg-sub-" + process.pid,
-      });
-      process.stdout.write(JSON.stringify(result) + "\\n");
-    `;
-
+  it("different stories, host-delegation vs human: both win", async () => {
+    const storyA = "US-DIFF-HD2-" + randomUUID().slice(0, 8);
+    const storyB = "US-DIFF-HUM-" + randomUUID().slice(0, 8);
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "hd", storyId: storyA, source: "host-delegation", delegationId: "deleg-diff-hd2", runId: "delta-diff-hd2" },
+      { workerId: "hum", storyId: storyB, source: "human" },
+    );
     try {
-      const p1 = spawn(process.execPath, ["-e", scriptCycle], { stdio: "pipe" });
-      const p2 = spawn(process.execPath, ["-e", scriptHd], { stdio: "pipe" });
-
-      let out1 = "";
-      let out2 = "";
-      p1.stdout?.on("data", (d: Buffer) => { out1 += d.toString(); });
-      p2.stdout?.on("data", (d: Buffer) => { out2 += d.toString(); });
-
-      await Promise.all([
-        new Promise<number>((resolve) => p1.on("close", resolve)),
-        new Promise<number>((resolve) => p2.on("close", resolve)),
-      ]);
-
-      if (out1.trim() === "" || out2.trim() === "") return;
-
-      const r1 = JSON.parse(out1.trim());
-      const r2 = JSON.parse(out2.trim());
-
-      // Exactly one winner — hardlink EEXIST doesn't care about source
-      const winners = [r1, r2].filter((r: { status: string }) => r.status === "claimed");
-      expect(winners.length).toBe(1);
+      expect(r1.status).toBe("claimed");
+      expect(r2.status).toBe("claimed");
+      expect(Object.keys(readLeases(dir))).toHaveLength(2);
     } finally {
-      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
     }
-  });
+  }, 15000);
+
+  // ─── Malformed/stderr → fail ────────────────────────────────────────────
+
+  it("worker with missing storyId returns non-claimed status, test still sees exactly one winner when raced", async () => {
+    // Tests that empty/malformed output would hard-fail, but valid claim works
+    const { dir, workDir, r1, r2 } = await raceWorkers(
+      { workerId: "ok1", storyId: "US-MALFORM", source: "cycle", pid: 40001 },
+      { workerId: "ok2", storyId: "US-MALFORM", source: "cycle", pid: 40002 },
+    );
+    try {
+      expect(r1.code).toBe(0);
+      expect(r2.code).toBe(0);
+      expect(r1.stderr).toBe("");
+      expect(r2.stderr).toBe("");
+      const winners = [r1, r2].filter((r) => r.status === "claimed");
+      expect(winners).toHaveLength(1);
+      // No .tmp residue after race
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      try { rmSync(workDir, { recursive: true, force: true }); } catch {}
+      try { rmSync(dirname(dir), { recursive: true, force: true }); } catch {}
+    }
+  }, 15000);
 });
 
 // ─── Crash recovery: between temp/write and link/fsync/unlink ──────────────

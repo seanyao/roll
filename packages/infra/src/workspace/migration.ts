@@ -586,14 +586,28 @@ function stageTransfers(path: string, initial: MigrationJournal, deps: Historica
     const transfer = journal.transfers[index];
     if (transfer === undefined || transfer.state !== "pending") continue;
     const source = child(join(journal.sourceRoot, ".roll"), transfer.source);
+    const destination = transfer.destination === null
+      ? null
+      : child(journal.stagingRoot, transfer.destination);
+    if (!existsSync(source)) {
+      if (transfer.mode !== "move" || destination === null || !existsSync(destination)) {
+        throw new HistoricalWorkspaceMigrationError("source_conflict", "Migration source disappeared before its transfer was journaled");
+      }
+      if (digestFile(destination) !== transfer.digest) {
+        throw new HistoricalWorkspaceMigrationError("destination_conflict", "Moved migration destination changed before journal recovery");
+      }
+      journal = updateTransfer(journal, index, { ...transfer, state: "staged" });
+      writeJournal(path, journal);
+      continue;
+    }
     if (digestFile(source) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("source_conflict", "Migration source changed after validation");
     let mode = transfer.mode;
     if (mode === "move" && (deps.forceCopy === true || !sameFilesystem(source, journal.stagingRoot))) mode = "copy";
-    if (transfer.destination !== null) {
-      const destination = child(journal.stagingRoot, transfer.destination);
+    if (destination !== null) {
       mkdirSync(dirname(destination), { recursive: true });
       if (existsSync(destination)) {
         if (digestFile(destination) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("destination_conflict", "Migration destination already contains different bytes");
+        if (mode === "move") mode = "copy";
       } else if (mode === "move") renameSync(source, destination);
       else copyFileSync(source, destination, 0);
       if (digestFile(destination) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("apply_failed", "Migration destination digest verification failed");
@@ -859,9 +873,19 @@ export function rollbackHistoricalWorkspaceMigration(
     }
     const contentRoot = journal.phase === "workspace_ready" ? journal.workspaceRoot : journal.stagingRoot;
     for (const transfer of [...journal.transfers].reverse()) {
-      if (transfer.mode !== "move" || transfer.state === "pending" || transfer.destination === null) continue;
+      if (transfer.mode !== "move" || transfer.destination === null) continue;
       const source = child(join(journal.sourceRoot, ".roll"), transfer.source);
       const destination = child(contentRoot, transfer.destination);
+      if (transfer.state === "pending" && existsSync(source)) {
+        if (digestFile(source) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("source_conflict", "Pending migration source changed and cannot be rolled back safely");
+        if (existsSync(destination) && digestFile(destination) !== transfer.digest) {
+          throw new HistoricalWorkspaceMigrationError("destination_conflict", "Pending migration destination changed and cannot be removed safely");
+        }
+        continue;
+      }
+      if (transfer.state === "pending" && !existsSync(destination)) {
+        throw new HistoricalWorkspaceMigrationError("source_conflict", "Pending migration bytes are missing from both source and staging");
+      }
       if (!existsSync(destination)) continue;
       if (digestFile(destination) !== transfer.digest) throw new HistoricalWorkspaceMigrationError("source_conflict", "Moved migration content changed and cannot be rolled back safely");
       mkdirSync(dirname(source), { recursive: true });

@@ -4,12 +4,13 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
   mkdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeAgentScopeConfig, planHistoricalWorkspaceMigration } from "@roll/core";
@@ -105,6 +106,32 @@ async function plan(f: Fixture): Promise<HistoricalMigrationPlan> {
   }));
 }
 
+function simulateMovedPendingTransfer(f: Fixture, saved: HistoricalMigrationPlan): {
+  readonly source: string;
+  readonly destination: string;
+} {
+  const journal = JSON.parse(
+    readFileSync(historicalWorkspaceMigrationJournalPath(f.rollHome, saved.workspaceId), "utf8"),
+  ) as {
+    readonly stagingRoot: string;
+    readonly transfers: ReadonlyArray<{
+      readonly source: string;
+      readonly destination: string | null;
+      readonly mode: string;
+      readonly state: string;
+    }>;
+  };
+  const transfer = journal.transfers.find((candidate) =>
+    candidate.mode === "move" && candidate.state === "pending" && candidate.destination !== null
+  );
+  if (transfer === undefined || transfer.destination === null) throw new Error("move transfer fixture missing");
+  const source = join(f.source, ".roll", transfer.source);
+  const destination = join(journal.stagingRoot, transfer.destination);
+  mkdirSync(dirname(destination), { recursive: true });
+  renameSync(source, destination);
+  return { source, destination };
+}
+
 describe("US-WS-019a historical Workspace migration transaction", () => {
   it("journals first, activates last, relocates ordinary metadata and reuses the completed migration", async () => {
     const f = fixture();
@@ -169,6 +196,41 @@ describe("US-WS-019a historical Workspace migration transaction", () => {
     expect(readFileSync(join(f.source, ".roll", "backlog.md"), "utf8")).toBe("# Backlog\n");
     expect(existsSync(join(f.rollHome, "workspaces", "ws-demo"))).toBe(false);
     expect(existsSync(historicalWorkspaceMigrationJournalPath(f.rollHome, saved.workspaceId))).toBe(false);
+  });
+
+  it("resumes when a move completed before its staged journal update", async () => {
+    const f = fixture();
+    const saved = await plan(f);
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }, {
+      afterPhase: (phase) => {
+        if (phase === "cache_ready") throw new Error("crash before transfer journal update");
+      },
+    })).rejects.toThrow("crash before transfer journal update");
+    const moved = simulateMovedPendingTransfer(f, saved);
+    expect(existsSync(moved.source)).toBe(false);
+    expect(existsSync(moved.destination)).toBe(true);
+
+    const resumed = await applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved });
+
+    expect(resumed.outcome).toBe("migrated");
+    expect(existsSync(historicalWorkspaceMigrationJournalPath(f.rollHome, saved.workspaceId))).toBe(false);
+  });
+
+  it("rolls back a pending move whose bytes already reached staging", async () => {
+    const f = fixture();
+    const saved = await plan(f);
+    await expect(applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }, {
+      afterPhase: (phase) => {
+        if (phase === "cache_ready") throw new Error("crash before transfer journal update");
+      },
+    })).rejects.toThrow("crash before transfer journal update");
+    const moved = simulateMovedPendingTransfer(f, saved);
+    const movedBytes = readFileSync(moved.destination, "utf8");
+
+    expect(rollbackHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }).outcome)
+      .toBe("rolled_back");
+    expect(readFileSync(moved.source, "utf8")).toBe(movedBytes);
+    expect(existsSync(moved.destination)).toBe(false);
   });
 
   it("serializes rollback against an in-flight apply transaction", async () => {

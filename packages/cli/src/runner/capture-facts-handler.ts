@@ -16,19 +16,20 @@ import {
   type CycleCommand,
   type CycleContext,
 } from "@roll/core";
-import { parseEventLine, type CycleRepositoryExecutionContext, type RollEvent } from "@roll/spec";
+import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
 import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
-import { acMapPath, runAcMapSelfHeal, type DraftEvidence } from "./attest-remediation.js";
+import { acMapPath, runAcMapSelfHeal } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { writeEvaluatorArtifact } from "./execution-profile.js";
 import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js";
 import { buildPairScorePrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairScore } from "./pairing-gate.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
+import { collectDraftEvidence, workspaceChangedFiles, workspaceCycleDiff, workspaceDiffStat } from "./capture-diff-evidence.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
@@ -764,106 +765,4 @@ export async function executeCaptureFactsCommand(
           ...(mainDirty ? { mainDirty: true } : {}),
         },
       };
-}
-
-function workspaceWritableRepositories(execution: CycleRepositoryExecutionContext) {
-  return Object.values(execution.repositories)
-    .filter((repository) => repository.access === "write")
-    .sort((left, right) => left.alias.localeCompare(right.alias));
-}
-
-async function workspaceCycleDiff(execution: CycleRepositoryExecutionContext): Promise<string> {
-  const sections: string[] = [];
-  for (const repository of workspaceWritableRepositories(execution)) {
-    try {
-      const { stdout } = await execFileAsync(
-        "git",
-        ["diff", `${repository.baseSha}...HEAD`],
-        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
-      );
-      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
-    } catch {
-      /* one unreadable leg must not erase the remaining review input */
-    }
-  }
-  return sections.join("\n").slice(0, 60_000);
-}
-
-async function workspaceChangedFiles(execution: CycleRepositoryExecutionContext): Promise<string[]> {
-  const files: string[] = [];
-  for (const repository of workspaceWritableRepositories(execution)) {
-    try {
-      const { stdout } = await execFileAsync(
-        "git",
-        ["diff", "--name-only", `${repository.baseSha}...HEAD`],
-        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
-      );
-      files.push(
-        ...stdout.split("\n")
-          .map((path) => path.trim())
-          .filter((path) => path !== "")
-          .map((path) => `${repository.alias}/${path}`),
-      );
-    } catch {
-      /* best-effort; repository verification remains the fail-loud authority */
-    }
-  }
-  return files;
-}
-
-async function workspaceDiffStat(execution: CycleRepositoryExecutionContext): Promise<string> {
-  const sections: string[] = [];
-  for (const repository of workspaceWritableRepositories(execution)) {
-    try {
-      const { stdout } = await execFileAsync(
-        "git",
-        ["diff", "--stat", `${repository.baseSha}...HEAD`],
-        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
-      );
-      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
-    } catch {
-      /* summary degrades without weakening repository verification */
-    }
-  }
-  return sections.join("\n").slice(0, 4_000);
-}
-
-/**
- * FIX-912 — collect the git evidence the ac-map draft generator needs.
- * Three cheap git calls in the worktree; each has a hard cap so they never
- * stall the cycle (a single cycle's worth of commits + diff is small).
- * Best-effort: on ANY failure returns an empty evidence structure (the draft
- * generator then produces an all-`needs-confirmation` skeleton). The cap
- * values are generous for a normal cycle but bounded for safety.
- *
- * E4: `repoCwd` (the EXECUTION repo root) resolves the diff baseline — a submodule
- * cycle diffs against the SUBMODULE's own integration branch, not the
- * superproject's origin/main. Absent/superproject ⇒ resolveIntegrationBranch
- * defaults to origin/main (byte-identical to the prior hardcode).
- */
-async function collectDraftEvidence(worktreeCwd: string, repoCwd: string): Promise<DraftEvidence> {
-  const empty: DraftEvidence = { commitLines: [], diffStatLines: [], changedFilenames: [] };
-  const base = resolveIntegrationBranch(repoCwd);
-  try {
-    const [commits, diffStat, changedFiles] = await Promise.all([
-      execFileAsync("git", ["log", "--oneline", `${base}..HEAD`, "-n", "50"], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--stat", `${base}...HEAD`], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--name-only", `${base}...HEAD`], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-    ]);
-    return { commitLines: commits, diffStatLines: diffStat, changedFilenames: changedFiles };
-  } catch {
-    return empty;
-  }
 }

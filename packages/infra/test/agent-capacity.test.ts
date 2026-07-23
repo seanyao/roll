@@ -65,6 +65,20 @@ function writeBrokerLock(root: string, owner: {
   }));
 }
 
+function writeBrokerReclaimMarker(root: string, token: string, owner: {
+  readonly host: string;
+  readonly pid: number;
+  readonly processStartedAtMs: number;
+}): void {
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, `.broker-reclaim.${token}.json`), JSON.stringify({
+    schema: "roll-agent-capacity-broker-lock/v1",
+    ownerToken: token,
+    acquiredAtMs: 1,
+    ...owner,
+  }));
+}
+
 describe("NodeAgentCapacityBroker", () => {
   it("uses the inspected process start identity for broker lock ownership", () => {
     let inspected = false;
@@ -124,6 +138,28 @@ describe("NodeAgentCapacityBroker", () => {
       lockWaitMs: 0,
     }).acquire(request("blocked"))).toThrow("agent_capacity_broker_lock_busy");
     expect(existsSync(join(liveRoot, "broker.lock"))).toBe(true);
+  });
+
+  it("does not replace a stale broker lock while another live reclaimer owns the recovery guard", () => {
+    const root = tempDir("capacity-live-reclaimer");
+    writeBrokerLock(root, { host: hostname(), pid: 2000, processStartedAtMs: 500 });
+    writeBrokerReclaimMarker(root, "live-reclaimer", {
+      host: hostname(),
+      pid: 3000,
+      processStartedAtMs: 700,
+    });
+
+    expect(() => new NodeAgentCapacityBroker({
+      root,
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processIdentity: (pid) => pid === 3000
+        ? { alive: true, startedAtMs: 700 }
+        : { alive: false },
+      lockWaitMs: 0,
+    }).acquire(request("guarded"))).toThrow("agent_capacity_broker_lock_busy");
+    expect(existsSync(join(root, "broker.lock"))).toBe(true);
   });
 
   it("serializes a real concurrent broker transaction before claiming", async () => {

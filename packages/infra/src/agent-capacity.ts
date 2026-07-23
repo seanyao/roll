@@ -92,6 +92,7 @@ function leaseFileName(leaseId: string): string {
 }
 
 const BROKER_LOCK_OWNER_FILE = "owner.json";
+const BROKER_RECLAIM_PREFIX = ".broker-reclaim.";
 
 function brokerLockPath(root: string): string {
   return join(root, "broker.lock");
@@ -110,6 +111,15 @@ function isBrokerLock(value: unknown): value is AgentCapacityBrokerLock {
 function readBrokerLock(root: string): AgentCapacityBrokerLock | undefined {
   try {
     const value = JSON.parse(readFileSync(join(brokerLockPath(root), BROKER_LOCK_OWNER_FILE), "utf8")) as unknown;
+    return isBrokerLock(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readBrokerOwnerFile(path: string): AgentCapacityBrokerLock | undefined {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
     return isBrokerLock(value) ? value : undefined;
   } catch {
     return undefined;
@@ -257,7 +267,7 @@ export class NodeAgentCapacityBroker {
     }
     if (inspection.state === "active") return { kind: "blocked", reason: "lock_active" };
     if (inspection.state === "stale_live_or_foreign") return { kind: "blocked", reason: "foreign_owner" };
-    return this.#isolateStaleBrokerLock(inspection.owner.ownerToken)
+    return this.#reclaimStaleBrokerLock(inspection.owner.ownerToken)
       ? { kind: "cleaned" }
       : { kind: "blocked", reason: "lock_unreadable_or_unknown_schema" };
   }
@@ -281,6 +291,7 @@ export class NodeAgentCapacityBroker {
   }
 
   #tryAcquireBrokerLock(): string | undefined {
+    if (this.#reclaimGuardBlocked()) return undefined;
     const ownerToken = randomUUID();
     const temporary = join(this.#root, `.broker-lock.${process.pid}.${ownerToken}.tmp`);
     mkdirSync(temporary);
@@ -313,6 +324,98 @@ export class NodeAgentCapacityBroker {
     const owner = readBrokerLock(this.#root);
     if (owner?.ownerToken !== ownerToken) return;
     rmSync(this.#lockPath, { recursive: true, force: true });
+  }
+
+  #reclaimMarkerPath(ownerToken: string): string {
+    return join(this.#root, `${BROKER_RECLAIM_PREFIX}${ownerToken}.json`);
+  }
+
+  #writeReclaimMarker(ownerToken: string): string {
+    const path = this.#reclaimMarkerPath(ownerToken);
+    const temporary = `${path}.tmp.${process.pid}.${randomUUID()}`;
+    const owner: AgentCapacityBrokerLock = {
+      schema: AGENT_CAPACITY_BROKER_LOCK_SCHEMA,
+      ownerToken,
+      host: this.#host,
+      pid: process.pid,
+      processStartedAtMs: this.#processStartedAtMs,
+      acquiredAtMs: this.#clockMs(),
+    };
+    try {
+      writeFileSync(temporary, `${JSON.stringify(owner)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(temporary, path);
+      return path;
+    } finally {
+      rmSync(temporary, { force: true });
+    }
+  }
+
+  /** Reclaim markers are unique immutable paths. Removing a proven-dead marker
+   * cannot delete a replacement owner, which makes stale-guard cleanup safe. */
+  #liveReclaimMarkers(): readonly AgentCapacityBrokerLock[] | undefined {
+    const live: AgentCapacityBrokerLock[] = [];
+    let names: string[];
+    try {
+      names = readdirSync(this.#root)
+        .filter((name) => name.startsWith(BROKER_RECLAIM_PREFIX) && name.endsWith(".json"))
+        .sort();
+    } catch {
+      return [];
+    }
+    for (const name of names) {
+      const path = join(this.#root, name);
+      const owner = readBrokerOwnerFile(path);
+      if (owner === undefined || owner.host !== this.#host) return undefined;
+      if (owner.pid === process.pid && owner.processStartedAtMs === this.#processStartedAtMs) {
+        live.push(owner);
+        continue;
+      }
+      const identity = this.#processIdentity(owner.pid);
+      if (!identity.alive || (identity.startedAtMs !== undefined && identity.startedAtMs !== owner.processStartedAtMs)) {
+        try {
+          unlinkSync(path);
+        } catch {
+          return undefined;
+        }
+        continue;
+      }
+      live.push(owner);
+    }
+    return live;
+  }
+
+  #reclaimGuardBlocked(ownerToken?: string): boolean {
+    const live = this.#liveReclaimMarkers();
+    if (live === undefined) return true;
+    if (live.length === 0) return false;
+    if (ownerToken === undefined) return true;
+    return live.length !== 1 || live[0]?.ownerToken !== ownerToken;
+  }
+
+  #reclaimStaleBrokerLock(staleOwnerToken: string): boolean {
+    const reclaimerToken = randomUUID();
+    let marker: string;
+    try {
+      marker = this.#writeReclaimMarker(reclaimerToken);
+    } catch {
+      return false;
+    }
+    try {
+      if (this.#reclaimGuardBlocked(reclaimerToken)) return false;
+      const inspection = inspectAgentCapacityBrokerLock({
+        root: this.#root,
+        host: this.#host,
+        processIdentity: this.#processIdentity,
+      });
+      if (inspection.state !== "stale_owned_dead" || inspection.owner.ownerToken !== staleOwnerToken) return false;
+      return this.#isolateStaleBrokerLock(staleOwnerToken);
+    } finally {
+      try {
+        unlinkSync(marker);
+      } catch {
+        /* a missing own marker only delays contenders until their stale scan */
+      }
+    }
   }
 
   #isolateStaleBrokerLock(ownerToken: string): boolean {

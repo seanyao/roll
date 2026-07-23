@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -388,6 +388,7 @@ defaults:
         kind: fixed
         agent: reasonix
 `);
+    rmSync(join(f.root, ".roll"), { recursive: true, force: true });
     const spawned: string[] = [];
     const agentSpawn: AgentSpawn = vi.fn(async (agent, options) => {
       spawned.push(agent);
@@ -424,6 +425,9 @@ defaults:
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(runtimeEvents).toContainEqual(expect.objectContaining({ type: "pair:score", peer: "pi", score: 9 }));
     expect(runtimeEvents).toContainEqual(expect.objectContaining({ type: "attest:gate", verdict: "produced" }));
+    expect(existsSync(join(evidenceRunDir, "ac-map.json"))).toBe(true);
+    expect(existsSync(join(evidenceRunDir, "US-WS-012-report.html"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(evidenceRunDir, "ac-map.json"), "utf8"))).toHaveLength(3);
     expect(readFileSync(join(evidenceRunDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8"))
       .toContain("- 9 (good)");
     expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("gateBlocked");

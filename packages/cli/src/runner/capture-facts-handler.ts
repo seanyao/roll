@@ -37,6 +37,7 @@ import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import { executeRepositoryCaptureFactsCommand } from "./repository-verification.js";
+import { writeWorkspaceAcceptanceArtifacts } from "./workspace-acceptance.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,6 +53,9 @@ export async function executeCaptureFactsCommand(
       const repositoryCapture = workspaceExecution === undefined
         ? undefined
         : await executeRepositoryCaptureFactsCommand(ports, ctx);
+      const workspaceAcceptance = workspaceExecution === undefined
+        ? undefined
+        : writeWorkspaceAcceptanceArtifacts(ctx);
       // E4: the agent built/committed inside the EXECUTION worktree (the submodule
       // cycle worktree when the story declared a target_submodule, else the
       // superproject worktree). Every git OBSERVATION of the agent's delivery
@@ -609,9 +613,11 @@ export async function executeCaptureFactsCommand(
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
         if (workspaceExecution !== undefined) {
-          attestBlocked = repositoryFacts?.repositoryVerificationPending === true;
+          attestBlocked = repositoryFacts?.repositoryVerificationPending === true || workspaceAcceptance?.produced !== true;
           attestVerdict = attestBlocked ? "skipped" : "produced";
-          attestReasons = attestBlocked ? ["repository_verification_pending"] : [];
+          attestReasons = repositoryFacts?.repositoryVerificationPending === true
+            ? ["repository_verification_pending"]
+            : workspaceAcceptance?.reasons ?? ["workspace_acceptance_artifacts_missing"];
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "attest:gate",
             cycleId: ctx.cycleId ?? "",

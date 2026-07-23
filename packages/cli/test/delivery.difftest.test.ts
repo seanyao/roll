@@ -440,6 +440,27 @@ describe("US-WS-015 roll delivery surface", () => {
     }
   });
 
+  it("fails before projection when a declared Requirement canonical directory is absent", async () => {
+    const f = fixture();
+    const workspace = createWorkspace(f, "ws-requirement-directory-missing");
+    const storyId = "US-REQ-DIR";
+    createDeliveredIssue(workspace, storyId);
+    const requirementPath = captureRequirement(workspace, storyId, "WS-88");
+    const backlogPath = join(workspace.root, "backlog", "index.md");
+    const backlogBefore = readFileSync(backlogPath, "utf8");
+    rmSync(requirementPath, { recursive: true, force: true });
+
+    const result = await runCli([
+      "delivery", "reconcile", storyId,
+      "--workspace", workspace.workspaceId,
+      "--json",
+    ], f);
+
+    expect(result.status).toBe(1);
+    expect(JSON.parse(result.stderr).error.code).toBe("invalid_requirement");
+    expect(readFileSync(backlogPath, "utf8")).toBe(backlogBefore);
+  });
+
   it("ignores a valid declared Requirement that is not linked to the reconciled Story", async () => {
     const f = fixture();
     const workspace = createWorkspace(f, "ws-unlinked-requirement");

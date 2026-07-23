@@ -566,8 +566,9 @@ function requirementInputs(
   storyIds: ReadonlySet<string>,
 ): readonly { readonly provider: string; readonly requirementId: string; readonly attestPath: string }[] {
   const root = join(workspaceRoot, "requirements");
-  if (!existsSync(root)) return [];
   const workspace = readWorkspace(workspaceRoot);
+  if (workspace.requirements.length === 0) return [];
+  if (!existsSync(root)) throw new Error("invalid_requirement:requirements_root");
   const inputs: Array<{ readonly provider: string; readonly requirementId: string; readonly attestPath: string }> = [];
   for (const declared of workspace.requirements) {
     const normalized = normalizeRequirementSourceReference(declared.provider, declared.ref);
@@ -575,7 +576,7 @@ function requirementInputs(
     const { provider, requirementId, ref } = normalized.value;
     const providerRoot = join(root, provider);
     const requirementRoot = join(providerRoot, requirementId);
-    if (!existsSync(requirementRoot)) continue;
+    if (!existsSync(requirementRoot)) throw new Error(`invalid_requirement:${requirementId}`);
     const providerStat = lstatSync(providerRoot);
     const requirementStat = lstatSync(requirementRoot);
     if (

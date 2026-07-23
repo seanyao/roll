@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ISSUE_MANIFEST_V1,
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_MANIFEST_V1,
   integrationAcceptanceCommandDigest,
+  repositoryIdFromRemote,
 } from "@roll/spec";
 import {
   appendIssueIntegrationAcceptanceEvidence,
@@ -36,8 +39,26 @@ afterEach(() => {
 
 function workspace(): { readonly root: string; readonly target: ResolvedBacklogTarget } {
   const root = mkdtempSync(join(tmpdir(), "roll-delivery-parity-"));
+  const remote = "https://example.test/ws-parity/api.git";
+  const parsedRepoId = repositoryIdFromRemote(remote);
+  if (!parsedRepoId.ok) throw new Error("fixture remote must be valid");
   roots.push(root);
   mkdirSync(join(root, "backlog"), { recursive: true });
+  writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({
+    schema: WORKSPACE_MANIFEST_V1,
+    workspaceId: "ws-parity",
+    displayName: "ws-parity",
+    requirements: [],
+    repositories: [{
+      schema: REPOSITORY_BINDING_V1,
+      repoId: parsedRepoId.value,
+      alias: "api",
+      remote,
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    }],
+  }, null, 2)}\n`, "utf8");
   writeFileSync(join(root, "backlog", "index.md"), "| US-FAKE | false completion truth | ✅ Done |\n", "utf8");
   return {
     root,

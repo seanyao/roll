@@ -66,6 +66,23 @@ function writeBrokerLock(root: string, owner: {
 }
 
 describe("NodeAgentCapacityBroker", () => {
+  it("uses the inspected process start identity for broker lock ownership", () => {
+    let inspected = false;
+    new NodeAgentCapacityBroker({
+      root: tempDir("capacity-broker-process-identity"),
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processStartedAtMs: 999.75,
+      processIdentity: (pid) => {
+        if (pid === process.pid) inspected = true;
+        return { alive: true, startedAtMs: 500 };
+      },
+    });
+
+    expect(inspected).toBe(true);
+  });
+
   it("reclaims a stale same-host dead broker transaction lock", () => {
     const root = tempDir("capacity-stale-broker-lock");
     writeBrokerLock(root, { host: hostname(), pid: 2000, processStartedAtMs: 500 });

@@ -155,7 +155,9 @@ export class NodeAgentCapacityBroker {
     this.#clockMs = options.clockMs;
     this.#host = options.host;
     this.#processIdentity = options.processIdentity;
-    this.#processStartedAtMs = options.processStartedAtMs ?? Date.now() - process.uptime() * 1_000;
+    this.#processStartedAtMs = options.processIdentity(process.pid).startedAtMs ??
+      options.processStartedAtMs ??
+      Date.now() - process.uptime() * 1_000;
     this.#lockWaitMs = options.lockWaitMs ?? 2_000;
     this.#lockPollMs = options.lockPollMs ?? 10;
   }

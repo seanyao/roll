@@ -144,7 +144,17 @@ export function appendBacklogRow(
   content: string,
   row: { id: string; title: string; epic: string; dependsOn?: string[]; chainDepth?: number },
 ): { content: string; appended: boolean } {
-  if (content.includes(`| [${row.id}]`)) return { content, appended: false };
+  // FIX-1475: de-dup by an EXACT id-cell match, not `content.includes("| [id]")`.
+  // The substring form falsely treated ANOTHER row whose description opens with a
+  // link to `[<id>](...)` as an already-existing card, silently dropping the
+  // append (create / self-downgrade).
+  const alreadyPresent = content.split("\n").some((l) => {
+    if (!l.startsWith("|")) return false;
+    const cell = (l.split("|")[1] ?? "").trim();
+    const id = cell.replace(/^\[([^\]]+)\]\([^)]*\)$/, "$1").trim();
+    return id === row.id;
+  });
+  if (alreadyPresent) return { content, appended: false };
   const tags = [
     row.chainDepth !== undefined && row.chainDepth > 0 ? `chain_depth:${row.chainDepth}` : "",
     row.dependsOn !== undefined && row.dependsOn.length > 0 ? `depends-on:${row.dependsOn.join(",")}` : "",

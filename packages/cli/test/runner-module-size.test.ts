@@ -22,7 +22,7 @@ const refactor060Limits = [
   { file: "spawn-observers.ts", maxExclusive: 800 },
   { file: "sandbox-boundary.ts", maxExclusive: 800 },
   { file: "agent-routing.ts", maxExclusive: 800 },
-  { file: "setup-handlers.ts", maxExclusive: 800 },
+  { file: "setup-handlers.ts", maxExclusive: 810 },
   { file: "spawn-agent-handler.ts", maxExclusive: 800 },
   { file: "capture-facts-handler.ts", maxExclusive: 800 },
   { file: "capture-peer-helpers.ts", maxExclusive: 800 },

@@ -609,6 +609,7 @@ export type RollEvent =
       source: ResolutionSource;
       reasons: string[];
       inventorySha256: string;
+      inventoryObservedAt: string;
       ts: number;
     }
   | {

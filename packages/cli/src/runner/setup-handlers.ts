@@ -1,6 +1,7 @@
 import {
   assessBacklog,
   buildHasOpenPr,
+  claimStoryLease,
   cleanDeadLeases,
   decideClaimReconcile,
   hasMergedDelivery,
@@ -13,8 +14,8 @@ import {
   projectDeliveryLeases,
   readLeases,
   reconcileBranchName,
+  releaseStoryLease,
   runRowHasPublishedPr,
-  setLease,
   type BacklogItem,
   type CycleCommand,
   type CycleContext,
@@ -54,9 +55,9 @@ type SetupCommand = Extract<CycleCommand, { kind:
   | "resolve_route"
 }>;
 
-/** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
+/** FIX-1211: lease records live in a directory next to the events ledger. */
 function storyLeasePath(ports: Ports): string {
-  return join(dirname(ports.paths.eventsPath), "story-leases.json");
+  return join(dirname(ports.paths.eventsPath), "leases");
 }
 
 /**
@@ -120,7 +121,7 @@ function decideInProgressReclaim(
     }
     return { action: "reclaim", reason: `cycle lease for ${storyId} is dead (pid ${entry.pid})` };
   }
-  if (entry.source === "human" || entry.source === "supervisor") {
+  if (entry.source === "human" || entry.source === "supervisor" || entry.source === "host-delegation") {
     if (isHumanSoftLeaseActive(entry, nowMs)) {
       return { action: "keep", reason: `${entry.source} lease for ${storyId} is within 24h soft window` };
     }
@@ -551,17 +552,25 @@ export async function executeSetupCommand(
       // the moment the story is taken (owner观察: 行一直红着不动 = 此处之前
       // 写在 worktree 的虚空里，且真实 ports 从未绑定 markStatus).
       ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
-      // FIX-1211: stamp a live cycle lease so another loop instance (or a later
-      // preflight after a crash) can tell this claim is owned by a running cycle
-      // and not reclaim it until the cycle ends or the PID is proven dead.
+      // FIX-1211: atomically claim a cycle lease so another loop instance
+      // (or a host-delegation prepare) cannot claim the same story.
+      // Uses the single-truth claimStoryLease primitive — no-clobber.
+      // A claim failure here means another owner already holds the lease;
+      // the picker already filtered those, so this is a diagnostic guard.
       try {
-        setLease(storyLeasePath(ports), story.id, {
+        const claimResult = claimStoryLease(storyLeasePath(ports), story.id, {
           pid: process.pid,
           source: "cycle",
           claimedAt: Date.now(),
         });
+        if (claimResult.status !== "claimed") {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `[FIX-1211] claimStoryLease for ${story.id} returned ${claimResult.status} (source: ${claimResult.status === "exists" ? claimResult.existingSource : "?"}) — another owner holds the lease`,
+          );
+        }
       } catch {
-        /* lease is observability-only; a write failure must not block the pick */
+        /* lease claim is a safety guard; a write failure must not block the pick */
       }
       const evidenceRunDir = ports.evidence.openFrame(ports.repoCwd, story.id, ctx.cycleId);
       ports.events.appendEvent(ports.paths.eventsPath, {

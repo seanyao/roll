@@ -1,0 +1,45 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-DELTA-003 — delta CLI parser and help > roll delta help is localized to zh when ROLL_LANG=zh 1`] = `
+"用法：roll delta <prepare|validate|conclude|status|help>
+
+  宿主导引的委派生命周期命令（仅协议层；不启任何 agent）。
+
+  roll delta prepare <story-id> --trigger host-guided|loop-autonomous --topology solo|delta-team|full-delta-team --profile standard|verified|designed --preset <id> --resolution <path> [--json]
+    原子化申领委派帧与 host-delegation 租约。
+
+  roll delta validate --delegation <id> --stage designer|builder|evaluator|peer [--json]
+    经过协议校验边界验证角色阶段提交。
+
+  roll delta conclude --delegation <id> --delivery-disposition owner_continue|owner_hold|owner_redelegate [--json]
+    记录 owner 批准的终止绑定（Option C：handoff_ready/handoff_only）。
+
+  roll delta status [--story <id>|--delegation <id>] [--json]
+    从事件真相只读投影委派状态。
+
+  roll delta help
+    打印此帮助。
+"
+`;
+
+exports[`US-DELTA-003 — delta CLI parser and help > roll delta help prints EN usage with all subcommands and exits 0 1`] = `
+"Usage: roll delta <prepare|validate|conclude|status|help>
+
+  Host-guided delegation lifecycle commands (protocol-only; no agent spawning).
+
+  roll delta prepare <story-id> --trigger host-guided|loop-autonomous --topology solo|delta-team|full-delta-team --profile standard|verified|designed --preset <id> --resolution <path> [--json]
+    Atomically claim a delegation frame and host-delegation lease.
+
+  roll delta validate --delegation <id> --stage designer|builder|evaluator|peer [--json]
+    Validate a role-stage submission through the protocol-validator boundary.
+
+  roll delta conclude --delegation <id> --delivery-disposition owner_continue|owner_hold|owner_redelegate [--json]
+    Record owner-approved terminal binding (Option C: handoff_ready/handoff_only).
+
+  roll delta status [--story <id>|--delegation <id>] [--json]
+    Read-only delegation status projection from event truth.
+
+  roll delta help
+    Print this help.
+"
+`;

@@ -344,23 +344,27 @@ export function injectClaimOps(ops: ClaimStepOps | null): void {
 /**
  * Atomically claim a story lease using hardlink no-clobber.
  *
- * Protocol (plan §6.1 step 2, architecture adjudication):
- *   1. Check legacy for same-story conflict (read-only, never mutate legacy)
- *   2. Ensure canonical directory exists (mkdir idempotent)
- *   3. Write complete owner record to same-directory unique temp file
- *   4. fdatasync temp file (with FD cleanup on failure)
- *   5. linkSync(temp, final) — EEXIST means another owner won (no overwrite)
- *   6. fdatasync parent directory
- *   7. unlink temp file
+ * Protocol (plan §6.1, architecture adjudication):
+ *   0. Strictly validate ALL legacy entries before any side effect
+ *      (BLOCK-1: malformed unrelated entry throws, zero new canonical)
+ *   1. Check canonical record first (canonical precedence, BLOCK-2)
+ *   2. Check legacy for same-story only when canonical absent
+ *   3. Ensure canonical directory exists (mkdir idempotent)
+ *   4. Write complete owner record to same-directory unique temp file
+ *   5. fdatasync temp file (with FD cleanup on failure)
+ *   6. linkSync(temp, final) — EEXIST means another owner won (no overwrite)
+ *      Malformed canonical on EEXIST throws integrity error (BLOCK-2)
+ *   7. fdatasync parent directory (dir FD tracked & closed on fault, BLOCK-4)
+ *   8. unlink temp file
  *
  * No lock file. No JSON read-modify-write. The hardlink is the sole
  * mutual-exclusion primitive — EEXIST = conflict.
  *
  * Legacy `story-leases.json` is read-only exclusion input. It is NEVER
- * written, renamed, retired, migrated, or deleted. If legacy has a live
- * entry for the same storyId, the claim returns `exists` and no canonical
- * record is created. If legacy has different stories, the claim proceeds
- * normally; legacy remains byte-identical on disk.
+ * written, renamed, retired, migrated, or deleted. Every legacy entry
+ * is strictly decoded before any mkdir/temp/hardlink (BLOCK-1). If a
+ * valid legacy entry exists for the same storyId and no canonical record
+ * exists, the claim returns `exists` and no canonical record is created.
  *
  * Host-delegation claims MUST carry delegationId for match-only release.
  *
@@ -378,9 +382,13 @@ export function claimStoryLease(
     throw new Error("claimStoryLease: host-delegation source requires delegationId");
   }
 
-  // ═══ Step 1: Check legacy for same-story conflict (read-only, never mutate) ═══
+  // ═══ Step 0: Validate ALL legacy entries before any side effect ═══
+  // (BLOCK-1: every legacy entry must pass strict decode; any malformed
+  // unrelated entry throws with zero canonical dir/record/temp and
+  // unchanged legacy bytes.)
   const parentDir = dirname(dirPath);
   const legacyPath = join(parentDir, "story-leases.json");
+  const validatedLegacy: Record<string, LeaseEntry> = {};
   if (existsSync(legacyPath)) {
     let raw: string;
     try {
@@ -397,24 +405,56 @@ export function claimStoryLease(
       );
     }
     const legacyRoot = validateLegacyRoot(parsed);
-    if (legacyRoot[storyId] !== undefined) {
-      const existing = decodeEntryStrict(legacyRoot[storyId]);
+    for (const [id, entryRaw] of Object.entries(legacyRoot)) {
+      validatedLegacy[id] = decodeEntryStrict(entryRaw);
+    }
+  }
+
+  // ═══ Step 1: Check canonical directory first (canonical precedence) ═══
+  // (BLOCK-2: canonical wins over legacy; malformed canonical throws
+  // deterministic integrity error, never fabricates existingSource:"cycle".)
+  if (existsSync(dirPath)) {
+    const rp = recordPath(dirPath, storyId);
+    if (existsSync(rp)) {
+      let raw: string;
+      try {
+        raw = readFileSync(rp, "utf8");
+      } catch {
+        throw new Error(`Cannot read canonical lease record for ${storyId}`);
+      }
+      let parsedCanon: unknown;
+      try {
+        parsedCanon = JSON.parse(raw.trim());
+      } catch {
+        throw new Error(
+          `Malformed canonical lease record for ${storyId}: invalid JSON`,
+        );
+      }
+      const existing = decodeEntryStrict(parsedCanon);
       return {
         status: "exists",
         existingSource: existing.source,
         existingDelegationId: existing.delegationId,
       };
     }
-    // Legacy exists with different stories — fine, don't mutate it.
-    // Proceed with normal claim.
   }
 
-  // ═══ Step 2: Ensure canonical directory exists ═══
+  // ═══ Step 2: Check legacy for same-story conflict only when canonical absent ═══
+  if (validatedLegacy[storyId] !== undefined) {
+    const existing = validatedLegacy[storyId];
+    return {
+      status: "exists",
+      existingSource: existing.source,
+      existingDelegationId: existing.delegationId,
+    };
+  }
+
+  // ═══ Step 3: Ensure canonical directory exists ═══
   if (!existsSync(dirPath)) {
     mkdirSync(dirPath, { recursive: true });
   }
 
-  // ═══ Step 3-7: Hardlink no-clobber claim with temp lifecycle cleanup ═══
+  // ═══ Steps 4-8: Hardlink no-clobber claim with full FD lifecycle ═══
   const rp = recordPath(dirPath, storyId);
   const tmpPath = join(
     dirPath,
@@ -422,22 +462,23 @@ export function claimStoryLease(
   );
   const ops = claimOps();
 
-  // Adjudication mandatory change 4: wrap temp lifecycle in cleanup.
-  // On any pre-link failure, close the fd and unlink the temp so retries
-  // succeed. Post-link uncertainty is intentional — if hardLink succeeded,
-  // the lease is already claimed.
+  // Track all file descriptors and hardlink success for accurate cleanup.
+  // BLOCK-4: directory FD is tracked and closed on every post-link fault;
+  // pre-link vs post-link temp cleanup policies are enforced separately.
   let tmpFd = -1;
+  let dirFd = -1;
+  let hardLinkSucceeded = false;
   try {
-    // Step 3: Write complete owner record to unique temp file
+    // Step 4: Write complete owner record to unique temp file
     ops.writeTempFile(tmpPath, encodeEntry(entry));
 
-    // Step 4: fdatasync temp file
+    // Step 5: fdatasync temp file
     tmpFd = ops.openFile(tmpPath, "r+");
     ops.fsyncFile(tmpFd);
     ops.closeFile(tmpFd);
     tmpFd = -1; // descriptor closed successfully
 
-    // Step 5: Hardlink — EEXIST means someone beat us
+    // Step 6: Hardlink — EEXIST means someone beat us
     try {
       ops.hardLink(tmpPath, rp);
     } catch (err: unknown) {
@@ -446,48 +487,63 @@ export function claimStoryLease(
 
       const code = (err as { code?: string }).code;
       if (code === "EEXIST") {
-        // Another owner's hardlink exists — read their record for conflict info
+        // Another owner's hardlink exists — read their record for conflict info.
+        // BLOCK-2: malformed canonical record must throw deterministic integrity
+        // error, never fabricate existingSource:"cycle".
+        let rawExisting: string;
         try {
-          const existing = decodeEntryStrict(
-            JSON.parse(readFileSync(rp, "utf8").trim()),
-          );
-          return {
-            status: "exists",
-            existingSource: existing.source,
-            existingDelegationId: existing.delegationId,
-          };
+          rawExisting = readFileSync(rp, "utf8");
         } catch {
-          // Unreadable — treat as exists with unknown source
+          throw new Error(
+            `Cannot read canonical lease record for ${storyId}`,
+          );
         }
-        return { status: "exists", existingSource: "cycle" };
+        let parsedExisting: unknown;
+        try {
+          parsedExisting = JSON.parse(rawExisting.trim());
+        } catch {
+          throw new Error(
+            `Malformed canonical lease record for ${storyId}: invalid JSON`,
+          );
+        }
+        const existing = decodeEntryStrict(parsedExisting);
+        return {
+          status: "exists",
+          existingSource: existing.source,
+          existingDelegationId: existing.delegationId,
+        };
       }
       throw err;
     }
+    hardLinkSucceeded = true;
 
-    // Step 6: fdatasync parent directory
-    const dirFd = ops.openFile(dirPath, "r");
+    // Step 7: fdatasync parent directory
+    dirFd = ops.openFile(dirPath, "r");
     ops.fsyncFile(dirFd);
     ops.closeFile(dirFd);
+    dirFd = -1; // directory descriptor closed successfully
 
-    // Step 7: Remove temp file (best-effort — lease is already claimed)
+    // Step 8: Remove temp file (best-effort — lease is already claimed)
     try { ops.unlinkFile(tmpPath); } catch { /* best-effort */ }
 
     return { status: "claimed" };
   } catch (err) {
-    // Pre-link failure cleanup (adjudication mandatory change 4):
-    // close any open fd, unlink temp so retries succeed.
+    // Always close any open descriptors (BLOCK-4)
     if (tmpFd >= 0) {
-      try {
-        // Record close attempt for test assertion
-        ops.closeFile(tmpFd);
-      } catch {
-        // close itself failed — nothing more we can do
-      }
+      try { ops.closeFile(tmpFd); } catch { /* close itself failed */ }
     }
-    try {
-      if (existsSync(tmpPath)) ops.unlinkFile(tmpPath);
-    } catch {
-      // best-effort
+    if (dirFd >= 0) {
+      try { ops.closeFile(dirFd); } catch { /* close itself failed */ }
+    }
+
+    // Temp cleanup policy (BLOCK-4):
+    //   Pre-link (hardLinkSucceeded === false): unlink temp so retries succeed.
+    //   Post-link (hardLinkSucceeded === true):  lease IS already claimed;
+    //     temp cleanup is best-effort, NOT required for correctness.
+    if (!hardLinkSucceeded) {
+      try {
+        if (existsSync(tmpPath)) ops.unlinkFile(tmpPath);
+      } catch { /* best-effort */ }
     }
     throw err;
   }
@@ -632,45 +688,11 @@ export function isHumanSoftLeaseActive(entry: LeaseEntry, now: number): boolean 
  * Returns the list of storyIds whose dead leases were cleaned (for alerting).
  */
 export function cleanDeadLeases(dirPath: string): string[] {
+  // BLOCK-3: Under the read-only legacy contract, cleanDeadLeases cleans
+  // canonical records only. Legacy-only data is immutable — return no
+  // cleaned IDs and perform no write (never create canonical survivor
+  // copies, never mutate legacy bytes).
   if (!existsSync(dirPath)) {
-    // Try legacy fallback — but never mutate legacy file.
-    // Instead read legacy, clean dead entries from it, and persist survivors
-    // to canonical directory (never touch the legacy bytes).
-    const parentDir = dirname(dirPath);
-    const legacyPath = join(parentDir, "story-leases.json");
-    if (existsSync(legacyPath)) {
-      try {
-        const raw = readFileSync(legacyPath, "utf8");
-        const parsed = JSON.parse(raw);
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          return [];
-        }
-        const leases = parsed as LeaseMap;
-        const cleaned: string[] = [];
-        const survivors: LeaseMap = {};
-        for (const [id, entry] of Object.entries(leases)) {
-          if (
-            entry.pid !== undefined &&
-            entry.source !== "host-delegation" &&
-            !isPidAlive(entry.pid)
-          ) {
-            cleaned.push(id);
-          } else {
-            survivors[id] = entry;
-          }
-        }
-        if (cleaned.length > 0) {
-          // Write survivors to canonical directory (never mutate legacy)
-          mkdirSync(dirPath, { recursive: true });
-          for (const [id, sEntry] of Object.entries(survivors)) {
-            setLease(dirPath, id, sEntry);
-          }
-        }
-        return cleaned;
-      } catch {
-        return [];
-      }
-    }
     return [];
   }
 

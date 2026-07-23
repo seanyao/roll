@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -31,6 +31,7 @@ import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js"
 import { buildPairScorePrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairScore } from "./pairing-gate.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
+import { recordPeerPoolUnavailable } from "./capture-peer-unavailable.js";
 import { collectDraftEvidence, collectWorkspaceDiffEvidence } from "./capture-diff-evidence.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -306,53 +307,7 @@ export async function executeCaptureFactsCommand(
           peerBlocked = peerGate.blocked;
         }
         if (peerBlocked && retry.status === "timeout" && readPeerOnPoolTimeout(ports.repoCwd) === "degrade") {
-          // FIX-1234: the retry already rotated through EVERY hetero peer
-          // (FIX-331) and the pool still produced no evidence because the peers
-          // RAN but could not answer inside the timebox (timeout) — runtime-
-          // proven UNAVAILABILITY, a different fact from a peer REFUSING or
-          // ERRORING on the work. Blocking here left the delivery
-          // with no path at all (intel-radar 2026-07-07: a 2-agent pool whose
-          // only hetero peer timed out on every cycle deadlocked the project).
-          // Owner ruling stands — "self only when hetero is truly impossible" —
-          // so timebox-proven unavailability downgrades to the SAME recorded
-          // self-review fallback that install-time absence gets (peer-gate
-          // verdict `self-review-allowed`), with the unavailability written as
-          // first-class evidence for audit/release gates. `error` / `empty` /
-          // `none-available` keep the FIX-312 hard BLOCK (a misconfigured,
-          // crashing, or hollow-answering peer must stay loud, not be waived —
-          // only the timebox distinguishes true capacity unavailability), and
-          // the review QUALITY
-          // floor is untouched: the fresh-session Review Score gate still blocks
-          // a delivery nobody scored.
-          const how = retry.sameTypeFallback === true ? "same-type separate-session review" : "peer review";
-          const unavailableDir = join(runtimeDir, "peer-unavailable");
-          mkdirSync(unavailableDir, { recursive: true });
-          writeFileSync(
-            join(unavailableDir, `cycle-${cycleIdStr}.json`),
-            JSON.stringify(
-              {
-                cycleId: cycleIdStr,
-                status: retry.status,
-                how,
-                peer: retry.peer ?? null,
-                attempts: 2,
-                ts: eventTs(ports),
-              },
-              null,
-              2,
-            ),
-            "utf8",
-          );
-          ports.events.appendEvent(ports.paths.eventsPath, {
-            type: "peer:unavailable",
-            cycleId: cycleIdStr,
-            status: retry.status,
-            ts: eventTs(ports),
-          } as unknown as RollEvent);
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `peer gate (hard): peer pool unavailable after retry — the ${how} produced no evidence (${retry.status}) — cycle ${cycleIdStr} downgraded to recorded self-review fallback (peer_unavailable evidence written; Review Score gate still applies)`,
-          );
+          recordPeerPoolUnavailable({ ports, runtimeDir, cycleId: cycleIdStr, retry });
           peerGate = {
             ...peerGate,
             verdict: "self-review-allowed",

@@ -446,7 +446,7 @@ export async function executeTerminalCommand(
       // keep its soft-lease protection past this cycle's terminal (kimi review).
       if (terminalStoryId !== "") {
         try {
-          releaseStoryLease(join(dirname(ports.paths.eventsPath), "story-leases.json"), terminalStoryId, { source: "cycle", pid: process.pid });
+          releaseStoryLease(join(dirname(ports.paths.eventsPath), "leases"), terminalStoryId, { source: "cycle", pid: process.pid });
         } catch {
           /* lease cleanup must never block terminal */
         }

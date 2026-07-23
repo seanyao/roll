@@ -135,15 +135,17 @@ describe("backlog claim — FIX-1211", () => {
     expect(r.status).toBe(0);
     expect(statusOf("FIX-1211")).toBe("🔨 In Progress");
     expect(r.out).toContain("claimed FIX-1211");
-    const lease = JSON.parse(readFileSync(join(".roll", "loop", "story-leases.json"), "utf8"));
-    expect(lease["FIX-1211"]).toEqual({ source: "human", claimedAt: 1_700_000_000_000 });
+    const leaseDir = join(".roll", "loop", "leases");
+    const lease = JSON.parse(readFileSync(join(leaseDir, "FIX-1211.lease"), "utf8"));
+    expect(lease).toEqual({ source: "human", claimedAt: 1_700_000_000_000 });
   });
 
   it("can write a supervisor lease", () => {
     seedBacklog("| [FIX-1211](x) | lease aware | 📋 Todo |\n");
     const r = capture(() => backlogClaimCommand(["FIX-1211", "--source", "supervisor"], { nowMs: () => 1_700_000_000_000 }));
     expect(r.status).toBe(0);
-    expect(JSON.parse(readFileSync(join(".roll", "loop", "story-leases.json"), "utf8"))["FIX-1211"]).toEqual({
+    const leaseDir = join(".roll", "loop", "leases");
+    expect(JSON.parse(readFileSync(join(leaseDir, "FIX-1211.lease"), "utf8"))).toEqual({
       source: "supervisor",
       claimedAt: 1_700_000_000_000,
     });

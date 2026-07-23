@@ -26,7 +26,7 @@ import {
   type PrepareInput,
 } from "../lib/delta-allocation.js";
 import { loadLocalPresets } from "../lib/delta-artifacts.js";
-import { EventBus, projectDelegationStatus } from "@roll/core";
+import { EventBus, projectDelegationStatus, readLeases } from "@roll/core";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -858,22 +858,18 @@ function concludeCommand(args: string[]): number {
   // If the lease entry has a mismatched delegationId/runId, fail-loud with
   // non-zero exit and do NOT write terminal.
   const runId = (preparedEvent.runId as string) ?? `delta-${delegationId}`;
-  const slPath = join(cwd, ".roll", "loop", "story-leases.json");
-  if (existsSync(slPath)) {
-    try {
-      const leaseMap = JSON.parse(readFileSync(slPath, "utf8"));
-      const entry = leaseMap[storyId];
-      if (entry && entry.source === "host-delegation") {
-        if (entry.delegationId !== delegationId || entry.runId !== runId) {
-          if (json) {
-            process.stderr.write(JSON.stringify({ ok: false, error: "lease_mismatch", detail: `Lease identity mismatch: expected delegationId=${delegationId} runId=${runId}, found delegationId=${entry.delegationId} runId=${entry.runId}` }) + "\n");
-          } else {
-            process.stderr.write(`Conclude failed: lease identity mismatch for story ${storyId}\n`);
-          }
-          return 1;
-        }
+  const slDir = join(cwd, ".roll", "loop", "leases");
+  const leases = readLeases(slDir);
+  const leaseEntry = leases[storyId];
+  if (leaseEntry && leaseEntry.source === "host-delegation") {
+    if (leaseEntry.delegationId !== delegationId || leaseEntry.runId !== runId) {
+      if (json) {
+        process.stderr.write(JSON.stringify({ ok: false, error: "lease_mismatch", detail: `Lease identity mismatch: expected delegationId=${delegationId} runId=${runId}, found delegationId=${leaseEntry.delegationId} runId=${leaseEntry.runId}` }) + "\n");
+      } else {
+        process.stderr.write(`Conclude failed: lease identity mismatch for story ${storyId}\n`);
       }
-    } catch { /* best-effort — if lease file is unreadable, proceed with terminal */ }
+      return 1;
+    }
   }
 
   // Record delta:terminal with Option C binding

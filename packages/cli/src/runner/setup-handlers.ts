@@ -55,9 +55,9 @@ type SetupCommand = Extract<CycleCommand, { kind:
   | "resolve_route"
 }>;
 
-/** FIX-1211: lease file lives next to the events ledger (a gitignored runtime file). */
+/** FIX-1211: lease records live in a directory next to the events ledger. */
 function storyLeasePath(ports: Ports): string {
-  return join(dirname(ports.paths.eventsPath), "story-leases.json");
+  return join(dirname(ports.paths.eventsPath), "leases");
 }
 
 /**

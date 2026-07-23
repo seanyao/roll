@@ -6,9 +6,9 @@
  * recovery markers, and immutable artifact writing. Deep artifact validation
  * belongs to US-DELTA-004.
  *
- * Single-owner lease truth: `.roll/loop/story-leases.json`. No per-story
- * lease files. The lock file (`story-leases.json.lock`) is a short-life
- * synchronisation mechanism only — it is NOT a second state store.
+ * Single-owner lease truth: `.roll/loop/leases/<storyId>.lease` (per-story
+ * canonical records). No single JSON map file. No lock file. Hardlink
+ * no-clobber is the sole mutual-exclusion primitive.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -92,11 +92,11 @@ export function resolveExistingUniqueCardArchiveDir(
 // ── Lease operations ─────────────────────────────────────────────────────────
 
 /**
- * Shared story-leases.json path — the single lease truth for all sources
- * (cycle, human, supervisor, host-delegation).
+ * Shared story leases directory path — the single lease truth for all sources
+ * (cycle, human, supervisor, host-delegation). Each story gets its own `.lease` file.
  */
 export function storyLeasesPath(projectPath: string): string {
-  return join(projectPath, ".roll", "loop", "story-leases.json");
+  return join(projectPath, ".roll", "loop", "leases");
 }
 
 /**
@@ -118,8 +118,8 @@ export function hasLiveLease(projectPath: string, storyId: string): boolean {
 /**
  * Attempt to atomically claim a host-delegation lease for a story.
  *
- * Delegates to the core claimStoryLease primitive — the single no-clobber
- * atomic claim on the shared story-leases.json. No per-story files.
+ * Delegates to the core claimStoryLease primitive — hardlink no-clobber
+ * on per-story canonical record files. No lock, no JSON RMW.
  *
  * Returns "claimed" on success, "exists" if any lease already exists for
  * the story (cycle, human, supervisor, or another host-delegation).
@@ -131,12 +131,6 @@ export function claimHostDelegationLease(
   runId: string,
 ): "claimed" | "exists" {
   const path = storyLeasesPath(projectPath);
-
-  // Ensure loop directory exists for the lock file
-  const loopDir = dirname(path);
-  if (!existsSync(loopDir)) {
-    mkdirSync(loopDir, { recursive: true });
-  }
 
   // Host-delegation leases are persistent host protocol leases, not
   // short-lived CLI process leases. No pid — cleanDeadLeases must never

@@ -224,7 +224,7 @@ export function cycleSignalTeardown(
     const terminalStoryId = ctx.storyId ?? "";
     if (terminalStoryId !== "") {
       try {
-        releaseStoryLease(join(dirname(paths.eventsPath), "story-leases.json"), terminalStoryId, { source: "cycle", pid: process.pid });
+        releaseStoryLease(join(dirname(paths.eventsPath), "leases"), terminalStoryId, { source: "cycle", pid: process.pid });
       } catch {
         /* lease cleanup must never block signal teardown */
       }

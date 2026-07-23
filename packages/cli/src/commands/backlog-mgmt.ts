@@ -23,7 +23,7 @@ import { claimStoryLease, type LeaseSource } from "@roll/core";
 import { projectSlug, sharedRoot } from "./dashboard.js";
 
 const BACKLOG_PATH = ".roll/backlog.md";
-const LEASE_PATH = ".roll/loop/story-leases.json";
+const LEASE_PATH = ".roll/loop/leases";
 
 function lang(): Lang {
   return resolveLang({

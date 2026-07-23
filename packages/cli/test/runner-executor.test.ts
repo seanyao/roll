@@ -1749,6 +1749,13 @@ describe("executeCommand — command → executor mapping", () => {
         },
       });
       if (leaseContent !== undefined) {
+        // Write per-story lease files for backward compat with readLeases
+        const leaseDir = join(dir, "leases");
+        mkdirSync(leaseDir, { recursive: true });
+        for (const [storyId, entry] of Object.entries(leaseContent)) {
+          writeFileSync(join(leaseDir, `${storyId}.lease`), JSON.stringify(entry) + "\n", "utf8");
+        }
+        // Also write legacy for backward compat with direct reads
         writeFileSync(join(dir, "story-leases.json"), JSON.stringify(leaseContent, null, 2) + "\n", "utf8");
       }
       return { ports, calls, dir };
@@ -1844,15 +1851,16 @@ describe("executeCommand — command → executor mapping", () => {
       });
       const pick = await executeCommand({ kind: "pick_story" }, ports, CTX);
       expect(pick.event).toEqual({ type: "story_picked", storyId: "US-RUN-001" });
-      const leasePath = join(dir, "story-leases.json");
-      expect(existsSync(leasePath)).toBe(true);
-      const lease = JSON.parse(readFileSync(leasePath, "utf8"));
-      expect(lease["US-RUN-001"]).toMatchObject({ source: "cycle", pid: process.pid });
-      expect(typeof lease["US-RUN-001"].claimedAt).toBe("number");
+      const leaseDir = join(dir, "leases");
+      const leaseRecordPath = join(leaseDir, "US-RUN-001.lease");
+      expect(existsSync(leaseRecordPath)).toBe(true);
+      const lease = JSON.parse(readFileSync(leaseRecordPath, "utf8"));
+      expect(lease).toMatchObject({ source: "cycle", pid: process.pid });
+      expect(typeof lease.claimedAt).toBe("number");
 
       const terminal = await executeCommand({ kind: "append_run", cycleId: CTX.cycleId, status: "idle" }, ports, CTX);
       expect(terminal.event).toBeUndefined();
-      expect(existsSync(leasePath)).toBe(false);
+      expect(existsSync(leaseRecordPath)).toBe(false);
     });
   });
 

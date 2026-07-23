@@ -68,13 +68,21 @@ function backlogContentForRanking(projectCwd: string, items: readonly BacklogIte
   return items.map((row) => `| [${row.id}] | ${row.desc} | ${row.status} |`).join("\n");
 }
 
-function specPathFromBacklogLine(projectCwd: string, backlogContent: string, id: string): string | undefined {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`\\[${escaped}\\]\\(([^)]+)\\)`);
-  const line = backlogContent.split("\n").find((raw) => pattern.test(raw));
-  const link = line !== undefined ? pattern.exec(line)?.[1]?.trim() : undefined;
-  if (link === undefined || link === "") return undefined;
-  return link.startsWith("/") ? link : join(projectCwd, link);
+export function specPathFromBacklogLine(projectCwd: string, backlogContent: string, id: string): string | undefined {
+  // FIX-1475: read the link from the row whose FIRST id cell is EXACTLY
+  // `[id](link)` — never a whole-line match. The prior `\[id\]\(…\)` scan matched
+  // a link anywhere in a line, so a DIFFERENT row whose description linked to
+  // `[id](other.md)` (sorted first) fed the wrong spec into this card's ranking.
+  for (const raw of backlogContent.split("\n")) {
+    if (!raw.startsWith("|")) continue;
+    const cell = (raw.split("|")[1] ?? "").trim();
+    const m = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(cell);
+    if (m === null || m[1]?.trim() !== id) continue;
+    const link = m[2]?.trim();
+    if (link === undefined || link === "") return undefined;
+    return link.startsWith("/") ? link : join(projectCwd, link);
+  }
+  return undefined;
 }
 
 function readSpecFirstScreen(projectCwd: string, backlogContent: string, id: string): string {

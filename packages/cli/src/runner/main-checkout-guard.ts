@@ -232,7 +232,10 @@ function mainHeadBaselinePath(runtimeDir: string, cycleId: string): string {
 export function captureMainHeadBaseline(repoCwd: string, runtimeDir: string, cycleId: string): void {
   try {
     const head = git(repoCwd, ["rev-parse", "HEAD"]);
-    if (!/^[0-9a-f]{40}$/.test(head)) return;
+    // SHA-1 (40 hex) or SHA-256 (64 hex) — a sha256 repo's HEAD must not be
+    // rejected here, else the baseline is lost and a pre-existing ahead commit
+    // is misclassified as a cycle leak.
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(head)) return;
     const path = mainHeadBaselinePath(runtimeDir, cycleId);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${head}\n`, "utf8");
@@ -248,7 +251,8 @@ export function captureMainHeadBaseline(repoCwd: string, runtimeDir: string, cyc
 export function readMainHeadBaseline(runtimeDir: string, cycleId: string): string {
   try {
     const sha = readFileSync(mainHeadBaselinePath(runtimeDir, cycleId), "utf8").trim();
-    return /^[0-9a-f]{40}$/.test(sha) ? sha : "";
+    // SHA-1 (40 hex) or SHA-256 (64 hex).
+    return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha) ? sha : "";
   } catch {
     return "";
   }

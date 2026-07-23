@@ -188,7 +188,16 @@ export function extractAnnotation(cell: string): string | undefined {
   return undefined;
 }
 
-export function markStatus(content: string, pattern: string, newStatus: string): MarkResult {
+/**
+ * Rewrite the Status cell of every row whose id cell satisfies `matches`.
+ * Shared core of {@link markStatus} (bash-parity prefix matching) and
+ * {@link markStatusExact} (exact-id only).
+ */
+function markStatusWith(
+  content: string,
+  matches: (id: string) => boolean,
+  newStatus: string,
+): MarkResult {
   let count = 0;
   const lines = content.split("\n");
   const out = lines.map((raw) => {
@@ -198,11 +207,8 @@ export function markStatus(content: string, pattern: string, newStatus: string):
     if (!line.startsWith("|")) return raw;
     const parts = line.split("|");
     if (parts.length < 5) return raw;
-    // No family filter here — bash `_backlog_set_status` marks any row whose id
-    // cell matches, regardless of US/FIX/… prefix. The only intentional
-    // divergence from the oracle is ID-token anchoring (FIX-106).
     const id = stripLink((parts[1] ?? "").trim());
-    if (!idMatchesPattern(id, pattern)) return raw;
+    if (!matches(id)) return raw;
     const currentCell = (parts[parts.length - 2] ?? "").trim();
     // FIX-1219: preserve annotation text when rewriting Done status.
     // When the current cell already has a Done marker with trailing annotation
@@ -222,6 +228,25 @@ export function markStatus(content: string, pattern: string, newStatus: string):
     return hasCr ? `${rebuilt}\r` : rebuilt;
   });
   return { content: out.join("\n"), count };
+}
+
+export function markStatus(content: string, pattern: string, newStatus: string): MarkResult {
+  // No family filter here — bash `_backlog_set_status` marks any row whose id
+  // cell matches, regardless of US/FIX/… prefix. `idMatchesPattern` also marks
+  // `<id>-` descendants (bash parity). The only intentional divergence from the
+  // oracle is ID-token anchoring (FIX-106).
+  return markStatusWith(content, (id) => idMatchesPattern(id, pattern), newStatus);
+}
+
+/**
+ * FIX-1475: rewrite the Status cell of ONLY the row whose id EXACTLY equals
+ * `id` (case-insensitive). Unlike {@link markStatus}, this never touches
+ * `<id>-` descendant rows — a durable Done flip for `FIX-1475` must not also
+ * mark `FIX-1475-followup` Done.
+ */
+export function markStatusExact(content: string, id: string, newStatus: string): MarkResult {
+  const target = id.toUpperCase();
+  return markStatusWith(content, (rowId) => rowId.toUpperCase() === target, newStatus);
 }
 
 /** Store bound to a {@link FileStore} (Node-backed by default). */

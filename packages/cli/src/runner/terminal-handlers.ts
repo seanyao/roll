@@ -1,6 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   appendDelivery,
@@ -14,8 +12,8 @@ import {
   type RunKey,
 } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
-import { markStatus } from "@roll/core";
 import { prNumberFromUrl, resolvePublishMode, submoduleWorktreePath } from "@roll/infra";
+import { commitInRepoBacklog, isInRepoRollLayout } from "./in-repo-backlog.js";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { evaluateEvidenceGate, executeLocalPublish } from "./local-publish.js";
 import { markDoneGuarded } from "./done-guard.js";
@@ -696,137 +694,3 @@ export async function executeTerminalCommand(
   }
 }
 
-// ── FIX-1238: in-repo layout helpers ─────────────────────────────────────────
-
-/**
- * Detect whether `.roll` is part of the main repo (in-repo layout) rather than
- * its own independent git repo (nested roll-meta layout). For in-repo layout,
- * `commitRollMetadata` is a no-op — backlog.md changes must be committed to the
- * main repo and pushed to origin/main explicitly.
- */
-function isInRepoRollLayout(worktreePath: string): boolean {
-  try {
-    const rollDir = join(worktreePath, ".roll");
-    if (!existsSync(rollDir)) return false;
-    const top = execFileSync("git", ["-C", rollDir, "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (top === "") return false;
-    const topReal = realpathSync(top);
-    const rollReal = realpathSync(rollDir);
-    return topReal !== rollReal;
-  } catch {
-    return false;
-  }
-}
-
-/** A git object id — SHA-1 (40 hex) or SHA-256 (64 hex). */
-function isObjectId(value: string): boolean {
-  return /^[0-9a-f]{40}$/.test(value) || /^[0-9a-f]{64}$/.test(value);
-}
-
-/**
- * FIX-1238: for in-repo layout, make the backlog.md status flip durable on the
- * remote. FIX-1475: do it WITHOUT touching the shared main checkout AT ALL.
- *
- * The pre-FIX path committed the flip onto the shared checkout's HEAD and pushed
- * `HEAD:main`, advancing the local `main` ref — clobbering any owner WIP or
- * concurrent dispatch legitimately ahead of origin/main. Reading the flipped
- * WORKING TREE instead would still leave the shared tree dirty and risk
- * publishing an owner's unpushed backlog edits. So we never read or mutate the
- * shared tree: `markDoneGuarded` was given a capturing markStatus (the write was
- * suppressed for this layout), and here we recompute the transition from the
- * REMOTE backlog. We read `origin/main:.roll/backlog.md`, apply ONLY this
- * story's status transition in memory, assemble a tree = origin/main's tree with
- * only `.roll/backlog.md` replaced (a throwaway index — the checkout's real
- * index is untouched), `commit-tree` it onto origin/main, and push just that
- * object to `refs/heads/main`. The shared checkout's ref, HEAD, index, and
- * working tree stay byte-identical (FIX-1475) while the flip lands durably on
- * the remote (FIX-1238). A racing non-fast-forward push fails LOUD (alert) —
- * never a force-push, never a local reset; the reconciler re-derives Done from
- * the merged PR on a later tick.
- */
-async function commitInRepoBacklog(
-  ports: Ports,
-  ctx: CycleContext,
-  storyId: string,
-  doneStatus: string,
-): Promise<void> {
-  const msg = `chore: ${storyId} status update (cycle ${ctx.cycleId})`;
-  const backlogRel = join(".roll", "backlog.md");
-  try {
-    // Base the flip on the CURRENT remote tip so the pushed object is a clean
-    // fast-forward carrying only the backlog change on top of already-merged work.
-    execFileSync("git", ["fetch", "origin", "main"], { cwd: ports.repoCwd, stdio: "ignore" });
-    const base = execFileSync("git", ["rev-parse", "refs/remotes/origin/main"], {
-      cwd: ports.repoCwd,
-      encoding: "utf8",
-    }).trim();
-    if (!isObjectId(base)) {
-      ports.events.appendAlert(
-        ports.paths.alertsPath,
-        `FIX-1238/FIX-1475: in-repo backlog flip for ${storyId} (cycle ${ctx.cycleId}) skipped — could not resolve origin/main (got "${base}") — shared main untouched`,
-      );
-      return;
-    }
-    // Read the REMOTE backlog (never the shared working tree) and apply ONLY this
-    // story's transition in memory.
-    let originContent = "";
-    try {
-      originContent = execFileSync("git", ["show", `${base}:${backlogRel}`], {
-        cwd: ports.repoCwd,
-        encoding: "utf8",
-      });
-    } catch {
-      // origin/main carries no backlog at this path — nothing to flip durably.
-      return;
-    }
-    const { content: newContent, count } = markStatus(originContent, storyId, doneStatus);
-    // No matching row on the remote, or it already carries this status → no-op.
-    if (count === 0 || newContent === originContent) return;
-    // Hash the new content and assemble the tree in a throwaway index so the
-    // checkout's REAL index is never touched.
-    const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
-      cwd: ports.repoCwd,
-      input: newContent,
-      encoding: "utf8",
-    }).trim();
-    const idxPath = join(tmpdir(), `roll-backlog-idx-${ctx.cycleId ?? "nocycle"}-${process.pid}`);
-    const env = { ...process.env, GIT_INDEX_FILE: idxPath };
-    try {
-      execFileSync("git", ["read-tree", base], { cwd: ports.repoCwd, env, stdio: "ignore" });
-      execFileSync("git", ["update-index", "--add", "--cacheinfo", `100644,${blob},${backlogRel}`], {
-        cwd: ports.repoCwd,
-        env,
-        stdio: "ignore",
-      });
-      const tree = execFileSync("git", ["write-tree"], {
-        cwd: ports.repoCwd,
-        env,
-        encoding: "utf8",
-      }).trim();
-      const commit = execFileSync("git", ["commit-tree", tree, "-p", base, "-m", msg], {
-        cwd: ports.repoCwd,
-        encoding: "utf8",
-      }).trim();
-      // Push the OBJECT to the remote branch — the shared checkout is never
-      // checked out onto it, so refs/heads/main here stays put.
-      execFileSync("git", ["push", "origin", `${commit}:refs/heads/main`], {
-        cwd: ports.repoCwd,
-        stdio: "ignore",
-      });
-    } finally {
-      try {
-        if (existsSync(idxPath)) unlinkSync(idxPath);
-      } catch {
-        /* best-effort temp-index cleanup */
-      }
-    }
-  } catch (e) {
-    ports.events.appendAlert(
-      ports.paths.alertsPath,
-      `FIX-1238/FIX-1475: in-repo backlog flip push failed for ${storyId} (cycle ${ctx.cycleId}) — shared main left untouched — ${String(e)}`,
-    );
-  }
-}

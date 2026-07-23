@@ -21,6 +21,7 @@ import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
+import { evaluateReviewScoreGate } from "../lib/review-score.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
 import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
 import { acMapPath, runAcMapSelfHeal } from "./attest-remediation.js";
@@ -30,7 +31,7 @@ import { checkMainDirty, readMainDirtyBaseline } from "./main-checkout-guard.js"
 import { buildPairScorePrompt, diagnosePairScoreOutput, enabledPairingStages, retryPeerConsult, runPairing, runScorePairing, type PairEvent, type PairScore } from "./pairing-gate.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
-import { collectDraftEvidence, workspaceChangedFiles, workspaceCycleDiff, workspaceDiffStat } from "./capture-diff-evidence.js";
+import { collectDraftEvidence, collectWorkspaceDiffEvidence } from "./capture-diff-evidence.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
@@ -155,12 +156,19 @@ export async function executeCaptureFactsCommand(
         ...(workspaceExecution === undefined ? {} : { reviewCwd: execCwd }),
       });
       const { attributeBlockCause, savePeerRawOutput, peerAvailable, reviewPeer } = peerHelpers;
+      let workspaceDiffFailure: string | undefined;
+      const workspaceDiffEvidence = workspaceExecution === undefined
+        ? undefined
+        : await collectWorkspaceDiffEvidence(workspaceExecution).catch((error: unknown) => {
+          workspaceDiffFailure = error instanceof Error ? error.message : "workspace_diff_unavailable";
+          return undefined;
+        });
       const cycleDiff = workspaceExecution === undefined
         ? peerHelpers.cycleDiff
-        : async () => workspaceCycleDiff(workspaceExecution);
+        : async () => workspaceDiffEvidence?.diff ?? "";
       const changedFiles = workspaceExecution === undefined
         ? cycleChangedFiles
-        : async () => workspaceChangedFiles(workspaceExecution);
+        : async () => [...(workspaceDiffEvidence?.changedFiles ?? [])];
       // FIX-293 peer gate: agent-agnostic, runs in EVERY cycle's capture step.
       // High-complexity delivery (>3 files / cross-module / high-risk) WITHOUT
       // peer evidence → ALERT + `peer:gate` event AND, in the default HARD mode,
@@ -264,8 +272,22 @@ export async function executeCaptureFactsCommand(
       // and is NOT blocked. When pairing is OFF (no pairing.yaml) no evidence exists,
       // so the gate's own retryPeerConsult fallback runs (single-agent path, unchanged).
       let peerGate = await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+      if (workspaceDiffFailure !== undefined) {
+        peerGate = {
+          verdict: "skipped",
+          mode: peerGateMode,
+          reasons: [workspaceDiffFailure],
+          blocked: true,
+          heteroAvailable: peerHeteroAvailable,
+        };
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `Workspace review input blocked for ${ctx.storyId ?? ""}: ${workspaceDiffFailure} — cycle ${cycleIdStr}`,
+        );
+        peerGateSinks.event({ cycleId: cycleIdStr, verdict: "skipped", reasons: [workspaceDiffFailure] });
+      }
       let peerBlocked = peerGate.blocked;
-      if (peerGate.blocked) {
+      if (peerGate.blocked && workspaceDiffFailure === undefined) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
         const retryInstalled = peerGateInstalled.filter((a) => peerAvailable(a));
         const retry = await retryPeerConsult(execCwd, runtimeDir, cycleIdStr, {
@@ -358,6 +380,7 @@ export async function executeCaptureFactsCommand(
       // stage is never run) is never mis-flagged: needs_review is gated on
       // commitsAhead>0 anyway, so the default only matters when the stage ran.
       let scoreStatus: "none-available" | "scored" | "timeout" | "error" = "scored";
+      let scoreQualityFailure: string | undefined;
       // FIX-343 (step ③) pipeline order: peer-score → report render → attest gate
       // → terminal → teardown. The score stage runs BEFORE the report render so
       // the report embeds the FRESHLY-written peer score (never a stale one). A
@@ -367,7 +390,7 @@ export async function executeCaptureFactsCommand(
       // interest). When no peer can score (no candidate / timeout / error) NO note is
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
-      if (commitsAhead > 0 && storyId !== "") {
+      if (commitsAhead > 0 && storyId !== "" && workspaceDiffFailure === undefined) {
         // FIX-910 — emit a per-attempt score-stage failure event so every null
         // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
         // The cause distinguishes unparseable / timeout / auth-block / exit-error.
@@ -486,7 +509,7 @@ export async function executeCaptureFactsCommand(
           // resolveIntegrationBranch(ports.repoCwd) which defaults to origin/main —
           // byte-identical to the prior hardcode.
           if (workspaceExecution !== undefined) {
-            diffStat = await workspaceDiffStat(workspaceExecution);
+            diffStat = workspaceDiffEvidence?.diffStat ?? "";
           } else {
             const diffBase = resolveIntegrationBranch(execRepoCwd);
             const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
@@ -549,6 +572,15 @@ export async function executeCaptureFactsCommand(
           allowedAgents: peerGateAllowedAgents,
         });
         scoreStatus = scoreResult.status;
+        if (workspaceExecution !== undefined && scoreStatus === "scored") {
+          const quality = evaluateReviewScoreGate(
+            ports.repoCwd,
+            storyId,
+            ctx.builderSessionId ?? "",
+            ctx.cycleId ?? "",
+          );
+          if (quality.status !== "pass") scoreQualityFailure = quality.reason;
+        }
       }
       let attestRenderExitCode = 0;
       if (
@@ -626,11 +658,16 @@ export async function executeCaptureFactsCommand(
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
         if (workspaceExecution !== undefined) {
-          attestBlocked = repositoryFacts?.repositoryVerificationPending === true || workspaceAcceptance?.produced !== true;
+          attestBlocked = repositoryFacts?.repositoryVerificationPending === true || workspaceAcceptance?.produced !== true ||
+            workspaceDiffFailure !== undefined || scoreQualityFailure !== undefined;
           attestVerdict = attestBlocked ? "skipped" : "produced";
           attestReasons = repositoryFacts?.repositoryVerificationPending === true
             ? ["repository_verification_pending"]
-            : workspaceAcceptance?.reasons ?? ["workspace_acceptance_artifacts_missing"];
+            : [
+              ...(workspaceAcceptance?.reasons ?? ["workspace_acceptance_artifacts_missing"]),
+              ...(workspaceDiffFailure === undefined ? [] : [workspaceDiffFailure]),
+              ...(scoreQualityFailure === undefined ? [] : [scoreQualityFailure]),
+            ];
           ports.events.appendEvent(ports.paths.eventsPath, {
             type: "attest:gate",
             cycleId: ctx.cycleId ?? "",
@@ -731,7 +768,7 @@ export async function executeCaptureFactsCommand(
       // US-V4-005: a verified/designed cycle with an invalid Evaluator artifact is
       // gate-blocked (fail-closed) alongside the attest/peer gates.
       const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked ||
-        (workspaceExecution !== undefined && commitsAhead > 0 && scoreStatus !== "scored");
+        (workspaceExecution !== undefined && commitsAhead > 0 && (scoreStatus !== "scored" || scoreQualityFailure !== undefined));
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR

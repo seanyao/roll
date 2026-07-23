@@ -265,7 +265,9 @@ Cycle capture 的 repository verification 只是 Workspace 验收输入，不直
 exact-cycle repository evidence、`ac-map.json` 与 Review Page；`ac-map.json` 的条目必须来自
 Workspace backlog 中唯一 Story Contract 的真实 AC，repository/integration verification 只作为
 `partial` evidence binding，不能被包装成伪 AC 或直接宣告通过。Evaluator 同时读取这些真实 AC、
-evaluation contract 与 multi-repo diff 作独立语义判断。产物读回校验后才能记录
+evaluation contract 与每个 writable repository 都成功采集的 multi-repo diff 作独立语义判断；
+任一 diff leg 不可读、Review Score 为 `regression`，或 `ok` 分数不高于质量门限时均 fail-loud。
+产物读回校验后才能记录
 `attest:gate produced`。Evaluator score 写入 `issues/<story>/notes/`，不依赖或创建 legacy `.roll`；
 verified/designed profile 缺任一 score、ac-map、Review Page 或独立 Evaluator artifact 都 fail-loud。
 

@@ -12,58 +12,54 @@ function writableRepositories(execution: CycleRepositoryExecutionContext) {
     .sort((left, right) => left.alias.localeCompare(right.alias));
 }
 
-export async function workspaceCycleDiff(execution: CycleRepositoryExecutionContext): Promise<string> {
-  const sections: string[] = [];
-  for (const repository of writableRepositories(execution)) {
-    try {
-      const { stdout } = await execFileAsync("git", ["diff", `${repository.baseSha}...HEAD`], {
-        cwd: repository.worktreePath,
-        encoding: "utf8",
-        timeout: 15_000,
-      });
-      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
-    } catch {
-      /* one unreadable leg must not erase the remaining review input */
-    }
-  }
-  return sections.join("\n").slice(0, 60_000);
+export interface WorkspaceDiffEvidence {
+  readonly diff: string;
+  readonly changedFiles: readonly string[];
+  readonly diffStat: string;
 }
 
-export async function workspaceChangedFiles(execution: CycleRepositoryExecutionContext): Promise<string[]> {
-  const files: string[] = [];
+/** Collect reviewer input from every writable repository leg. Omitting one
+ * unreadable leg would let a scorer judge only a convenient subset. */
+export async function collectWorkspaceDiffEvidence(
+  execution: CycleRepositoryExecutionContext,
+): Promise<WorkspaceDiffEvidence> {
+  const diffSections: string[] = [];
+  const changedFiles: string[] = [];
+  const statSections: string[] = [];
   for (const repository of writableRepositories(execution)) {
     try {
-      const { stdout } = await execFileAsync("git", ["diff", "--name-only", `${repository.baseSha}...HEAD`], {
-        cwd: repository.worktreePath,
-        encoding: "utf8",
-        timeout: 15_000,
-      });
-      files.push(...stdout.split("\n")
+      const [diff, files, stat] = await Promise.all([
+        execFileAsync("git", ["diff", `${repository.baseSha}...HEAD`], {
+          cwd: repository.worktreePath,
+          encoding: "utf8",
+          timeout: 15_000,
+        }),
+        execFileAsync("git", ["diff", "--name-only", `${repository.baseSha}...HEAD`], {
+          cwd: repository.worktreePath,
+          encoding: "utf8",
+          timeout: 15_000,
+        }),
+        execFileAsync("git", ["diff", "--stat", `${repository.baseSha}...HEAD`], {
+          cwd: repository.worktreePath,
+          encoding: "utf8",
+          timeout: 15_000,
+        }),
+      ]);
+      if (diff.stdout.trim() !== "") diffSections.push(`Repository: ${repository.alias}\n${diff.stdout}`);
+      changedFiles.push(...files.stdout.split("\n")
         .map((path) => path.trim())
         .filter((path) => path !== "")
         .map((path) => `${repository.alias}/${path}`));
+      if (stat.stdout.trim() !== "") statSections.push(`Repository: ${repository.alias}\n${stat.stdout}`);
     } catch {
-      /* repository verification remains the fail-loud authority */
+      throw new Error(`workspace_diff_unavailable:${repository.alias}`);
     }
   }
-  return files;
-}
-
-export async function workspaceDiffStat(execution: CycleRepositoryExecutionContext): Promise<string> {
-  const sections: string[] = [];
-  for (const repository of writableRepositories(execution)) {
-    try {
-      const { stdout } = await execFileAsync("git", ["diff", "--stat", `${repository.baseSha}...HEAD`], {
-        cwd: repository.worktreePath,
-        encoding: "utf8",
-        timeout: 15_000,
-      });
-      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
-    } catch {
-      /* summary degrades without weakening repository verification */
-    }
-  }
-  return sections.join("\n").slice(0, 4_000);
+  return {
+    diff: diffSections.join("\n").slice(0, 60_000),
+    changedFiles,
+    diffStat: statSections.join("\n").slice(0, 4_000),
+  };
 }
 
 export async function collectDraftEvidence(worktreeCwd: string, repoCwd: string): Promise<DraftEvidence> {

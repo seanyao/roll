@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +39,19 @@ function repository(
 ): RepositoryExecutionContext {
   const worktreePath = join(root, alias);
   mkdirSync(worktreePath, { recursive: true });
+  execFileSync("git", ["init", "--quiet"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.name", "Roll Test"], { cwd: worktreePath });
+  execFileSync("git", ["config", "user.email", "roll-test@example.invalid"], { cwd: worktreePath });
+  writeFileSync(join(worktreePath, "base.txt"), `${alias} base\n`);
+  execFileSync("git", ["add", "base.txt"], { cwd: worktreePath });
+  execFileSync("git", ["commit", "--quiet", "-m", "base"], { cwd: worktreePath });
+  const baseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktreePath, encoding: "utf8" }).trim();
+  if (options.noChangeAllowed !== true) {
+    writeFileSync(join(worktreePath, "delivery.txt"), `${alias} delivery\n`);
+    execFileSync("git", ["add", "delivery.txt"], { cwd: worktreePath });
+    execFileSync("git", ["commit", "--quiet", "-m", "tcr: delivery"], { cwd: worktreePath });
+  }
+  const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: worktreePath, encoding: "utf8" }).trim();
   return {
     repoId,
     alias,
@@ -46,8 +60,8 @@ function repository(
     noChangePolicy: options.noChangeAllowed === true ? "no_change_allowed" : "changes_required",
     ...(options.dependsOnRepo === undefined ? {} : { dependsOnRepo: options.dependsOnRepo }),
     worktreePath,
-    baseSha: `${alias}-base`,
-    headSha: `${alias}-setup-head`,
+    baseSha,
+    headSha,
     commands: {
       test: options.test ?? ["npm", "test"],
       integration: options.integration ?? [],
@@ -401,6 +415,28 @@ repositories:
     expect(existsSync(join(f.issueRoot, "evidence", "cycle-us-ws-012", "ac-map.json"))).toBe(false);
   });
 
+  it("blocks before scoring when any repository diff cannot be collected", async () => {
+    const f = fixture({ single: true });
+    rmSync(f.first.worktreePath, { recursive: true, force: true });
+    const scoreSpawn = vi.fn(async () => ({
+      stdout: "SCORE: 9\nVERDICT: good\nRATIONALE: should never run",
+      stderr: "",
+      exitCode: 0,
+      timedOut: false,
+    })) as unknown as AgentSpawn;
+    scoreSpawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
+    const ports = { ...f.ports, agentSpawn: scoreSpawn, installedAgents: () => ["claude", "pi"] };
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ gateBlocked: true }),
+    });
+    expect(scoreSpawn).not.toHaveBeenCalled();
+    expect(readFileSync(ports.paths.alertsPath, "utf8")).toContain("workspace_diff_unavailable:api");
+  });
+
   it("records command launch failures as blocked leg evidence instead of aborting capture", async () => {
     const f = fixture({ integration: ["./verify-sot-contract.sh"], secondCommandThrows: true });
 
@@ -519,5 +555,55 @@ defaults:
     expect(readFileSync(join(evidenceRunDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8"))
       .toContain("- 9 (good)");
     expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("gateBlocked");
+  });
+
+  it.each([
+    { score: 4, verdict: "ok", reason: "low review-score ok 4/10" },
+    { score: 9, verdict: "regression", reason: "review-score regression 9/10" },
+  ])("blocks Workspace delivery on $verdict evaluator quality", async ({ score, verdict, reason }) => {
+    const f = fixture({ single: true });
+    writeFileSync(join(f.root, "agents.yaml"), `schema: roll-agents/v1
+scope: workspace
+inherits: machine
+roles: {}
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: fixed
+        agent: pi
+`);
+    const agentSpawn: AgentSpawn = vi.fn(async (_agent, options) => options.skillBody.includes("SCORE:")
+      ? { stdout: `SCORE: ${score}\nVERDICT: ${verdict}\nRATIONALE: quality finding`, stderr: "", exitCode: 0, timedOut: false }
+      : { stdout: "VERDICT: agree", stderr: "", exitCode: 0, timedOut: false });
+    agentSpawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
+    const evidenceRunDir = join(f.issueRoot, "evidence", "cycle-us-ws-012");
+    mkdirSync(evidenceRunDir, { recursive: true });
+    const ctx: CycleContext = {
+      ...f.ctx,
+      selectedProfile: "verified",
+      evidenceRunDir,
+      builderSessionId: "cycle-us-ws-012:build:claude:a1",
+    };
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, {
+      ...f.ports,
+      agentSpawn,
+      installedAgents: () => ["claude", "pi"],
+    }, ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ gateBlocked: true }),
+    });
+    const runtimeEvents = readFileSync(f.ports.paths.eventsPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(runtimeEvents).toContainEqual(expect.objectContaining({
+      type: "attest:gate",
+      verdict: "skipped",
+      reasons: expect.arrayContaining([expect.stringContaining(reason)]),
+    }));
   });
 });

@@ -63,6 +63,90 @@ function tmpLeaseDir(): string {
   return dir;
 }
 
+// ─── Module-level ClaimStepOps spy (occurrence-specific injection) ──────────
+
+function createClaimOpsSpy(): {
+  ops: ClaimStepOps;
+  calls: Array<{ op: string; path: string; flags?: string }>;
+  throwAtOp: (op: string, occurrence?: number) => void;
+  clearThrow: () => void;
+  opCounts: () => Record<string, number>;
+} {
+  const calls: Array<{ op: string; path: string; flags?: string }> = [];
+  const throwSpecs: Array<{ op: string; occurrence: number }> = [];
+  const opCounts: Record<string, number> = {};
+
+  const realWriteTempFile = (p: string, d: string) => writeFileSync(p, d, "utf8");
+  const realOpenFile = (p: string, f: string) => openSync(p, f);
+  const realFsyncFile = (fd: number) => fdatasyncSync(fd);
+  const realCloseFile = (fd: number) => closeSync(fd);
+  const realHardLink = (s: string, d: string) => linkSync(s, d);
+  const realUnlinkFile = (p: string) => unlinkSync(p);
+  const realMkdir = (p: string) => mkdirSync(p, { recursive: true });
+  const realRenameFile = (o: string, n: string) => renameSync(o, n);
+
+  function checkThrow(op: string): void {
+    opCounts[op] = (opCounts[op] ?? 0) + 1;
+    const occurrence = opCounts[op]!;
+    for (const spec of throwSpecs) {
+      if (spec.op === op && spec.occurrence === occurrence) {
+        throw new Error(`injected ${op} failure at occurrence ${occurrence}`);
+      }
+    }
+  }
+
+  return {
+    ops: {
+      writeTempFile(path, data) {
+        checkThrow("writeTempFile");
+        calls.push({ op: "writeTempFile", path });
+        realWriteTempFile(path, data);
+      },
+      openFile(path, flags) {
+        checkThrow("openFile");
+        calls.push({ op: "openFile", path, flags });
+        return realOpenFile(path, flags);
+      },
+      fsyncFile(fd) {
+        checkThrow("fsyncFile");
+        calls.push({ op: "fsyncFile", path: `fd:${fd}` });
+        realFsyncFile(fd);
+      },
+      closeFile(fd) {
+        checkThrow("closeFile");
+        calls.push({ op: "closeFile", path: `fd:${fd}` });
+        realCloseFile(fd);
+      },
+      hardLink(src, dest) {
+        checkThrow("hardLink");
+        calls.push({ op: "hardLink", path: dest });
+        realHardLink(src, dest);
+      },
+      unlinkFile(path) {
+        checkThrow("unlinkFile");
+        calls.push({ op: "unlinkFile", path });
+        realUnlinkFile(path);
+      },
+      mkdir(path) {
+        checkThrow("mkdir");
+        calls.push({ op: "mkdir", path });
+        realMkdir(path);
+      },
+      renameFile(oldPath, newPath) {
+        checkThrow("renameFile");
+        calls.push({ op: "renameFile", path: `${oldPath} -> ${newPath}` });
+        realRenameFile(oldPath, newPath);
+      },
+    },
+    calls,
+    throwAtOp(op: string, occurrence?: number) {
+      throwSpecs.push({ op, occurrence: occurrence ?? 1 });
+    },
+    clearThrow() { throwSpecs.length = 0; },
+    opCounts: () => ({ ...opCounts }),
+  };
+}
+
 // ─── readLeases / writeLeases / setLease / removeLease ──────────────────────
 
 describe("readLeases / writeLeases / setLease / removeLease", () => {
@@ -623,62 +707,7 @@ describe("claimStoryLease — hardlink no-clobber (US-DELTA-003)", () => {
 
   // ─── Production hardlink sequence proof via fs ops seam (BLOCK-3) ──────────
 
-  /** Build a ClaimStepOps spy that records { op, path, flags } for each call
-   *  and delegates to real fs. Supports throwAt(op) for crash injection. */
-  function createClaimOpsSpy(): {
-    ops: ClaimStepOps;
-    calls: Array<{ op: string; path: string; flags?: string }>;
-    throwAtOp: (op: string) => void;
-    clearThrow: () => void;
-  } {
-    const calls: Array<{ op: string; path: string; flags?: string }> = [];
-    let throwOp: string | null = null;
 
-    const realWriteTempFile = (p: string, d: string) => writeFileSync(p, d, "utf8");
-    const realOpenFile = (p: string, f: string) => openSync(p, f);
-    const realFsyncFile = (fd: number) => fdatasyncSync(fd);
-    const realCloseFile = (fd: number) => closeSync(fd);
-    const realHardLink = (s: string, d: string) => linkSync(s, d);
-    const realUnlinkFile = (p: string) => unlinkSync(p);
-
-    return {
-      ops: {
-        writeTempFile(path, data) {
-          if (throwOp === "writeTempFile") throw new Error("injected write failure");
-          calls.push({ op: "writeTempFile", path });
-          realWriteTempFile(path, data);
-        },
-        openFile(path, flags) {
-          if (throwOp === "openFile") throw new Error("injected open failure");
-          calls.push({ op: "openFile", path, flags });
-          return realOpenFile(path, flags);
-        },
-        fsyncFile(fd) {
-          if (throwOp === "fsyncFile") throw new Error("injected fsync failure");
-          calls.push({ op: "fsyncFile", path: `fd:${fd}` });
-          realFsyncFile(fd);
-        },
-        closeFile(fd) {
-          if (throwOp === "closeFile") throw new Error("injected close failure");
-          calls.push({ op: "closeFile", path: `fd:${fd}` });
-          realCloseFile(fd);
-        },
-        hardLink(src, dest) {
-          if (throwOp === "hardLink") throw new Error("injected link failure");
-          calls.push({ op: "hardLink", path: dest });
-          realHardLink(src, dest);
-        },
-        unlinkFile(path) {
-          if (throwOp === "unlinkFile") throw new Error("injected unlink failure");
-          calls.push({ op: "unlinkFile", path });
-          realUnlinkFile(path);
-        },
-      },
-      calls,
-      throwAtOp(op: string) { throwOp = op; },
-      clearThrow() { throwOp = null; },
-    };
-  }
 
   it("BLOCK-3: ops spy proves ordered protocol with exact paths, file vs directory fsync", () => {
     const dir = tmpLeaseDir();
@@ -1613,8 +1642,9 @@ describe("legacy story-leases.json compatibility", () => {
       expect(leases["US-NEW"]).toBeDefined();
       expect(leases["US-NEW"]!.source).toBe("host-delegation");
 
-      // Legacy file preserved (read-only reference)
-      expect(existsSync(legacyPath)).toBe(true);
+      // Legacy file retired (renamed to .retired backup, not active authority)
+      expect(existsSync(legacyPath)).toBe(false);
+      expect(existsSync(legacyPath + ".retired")).toBe(true);
 
       // Verify canonical files on disk for migrated entries
       expect(existsSync(join(leasesDir, "FIX-LEGACY-A.lease"))).toBe(true);
@@ -1691,15 +1721,14 @@ describe("legacy story-leases.json compatibility", () => {
       // Must NOT succeed — legacy+canonical coexistence is a split-brain
       expect(r.status).toBe("exists");
 
-      // readLeases must see both sources: canonical entries + legacy entries
+      // readLeases: canonical is sole authority when dir exists.
+      // Legacy entries are NOT merged (prevents resurrection on release).
       const leases = readLeases(leasesDir);
       // US-OTHER from canonical must be visible
       expect(leases["US-OTHER"]).toBeDefined();
       expect(leases["US-OTHER"]!.source).toBe("cycle");
-      // US-SPLIT from legacy must also be visible (not hidden)
-      expect(leases["US-SPLIT"]).toBeDefined();
-      expect(leases["US-SPLIT"]!.source).toBe("cycle");
-      expect(leases["US-SPLIT"]!.pid).toBe(55555);
+      // US-SPLIT is only in legacy, NOT visible via readLeases when canonical exists
+      expect(leases["US-SPLIT"]).toBeUndefined();
     } finally {
       try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
     }
@@ -1731,11 +1760,11 @@ describe("legacy story-leases.json compatibility", () => {
         delegationId: "deleg-newc", runId: "delta-deleg-newc",
       })).toThrow(/coexists with canonical/);
 
-      // readLeases must see both canonical and legacy entries
+      // readLeases: canonical is sole authority. Legacy entries not merged.
       const leases = readLeases(leasesDir);
       expect(leases["US-CANON"]).toBeDefined();
-      expect(leases["US-LEGACY-ONLY"]).toBeDefined();
-      expect(leases["US-LEGACY-ONLY"]!.source).toBe("human");
+      // US-LEGACY-ONLY is only in legacy — NOT visible when canonical dir exists
+      expect(leases["US-LEGACY-ONLY"]).toBeUndefined();
     } finally {
       try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
     }
@@ -1774,7 +1803,7 @@ describe("legacy story-leases.json compatibility", () => {
     }
   });
 
-  it("BLOCK-1: readLeases detects legacy+canonical coexistence and loads both sources", () => {
+  it("BLOCK-1: readLeases with canonical dir does NOT read legacy — sole authority", () => {
     const baseDir = mkdtempSync(join(tmpdir(), "read-coexist-"));
     const loopDir = join(baseDir, "loop");
     mkdirSync(loopDir, { recursive: true });
@@ -1793,11 +1822,11 @@ describe("legacy story-leases.json compatibility", () => {
 
     try {
       const leases = readLeases(leasesDir);
-      // Both sources are visible — no silent hiding
+      // Canonical is sole authority — only canonical entries visible
       expect(leases["US-CAN"]).toBeDefined();
       expect(leases["US-CAN"]!.source).toBe("cycle");
-      expect(leases["US-LEG"]).toBeDefined();
-      expect(leases["US-LEG"]!.source).toBe("human");
+      // Legacy entry is NOT visible (prevents resurrection on release)
+      expect(leases["US-LEG"]).toBeUndefined();
     } finally {
       try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
     }
@@ -1860,6 +1889,633 @@ describe("legacy story-leases.json compatibility", () => {
       }
     } finally {
       try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── BLOCK-1: post-migration semantics ─────────────────────────────────
+
+  it("BLOCK-1: after successful migration, subsequent claim works (no coexistence error)", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "post-mig-claim-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    try {
+      writeFileSync(legacyPath, JSON.stringify({
+        "OLD-STORY": { pid: 111, claimedAt: NOW - 1000, source: "cycle" },
+      }, null, 2) + "\n", "utf8");
+
+      const r1 = claimStoryLease(leasesDir, "NEW-STORY-1", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+      expect(existsSync(legacyPath)).toBe(false);
+      expect(existsSync(legacyPath + ".retired")).toBe(true);
+
+      const r2 = claimStoryLease(leasesDir, "NEW-STORY-2", {
+        pid: 22222, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "deleg-post", runId: "delta-deleg-post",
+      });
+      expect(r2.status).toBe("claimed");
+
+      const leases = readLeases(leasesDir);
+      expect(leases["NEW-STORY-1"]).toBeDefined();
+      expect(leases["NEW-STORY-2"]).toBeDefined();
+      expect(leases["OLD-STORY"]).toBeDefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-1: release of migrated canonical lease does NOT resurrect from .retired backup", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "no-resurrect-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    try {
+      writeFileSync(legacyPath, JSON.stringify({
+        "US-RESURRECT": { claimedAt: NOW - 1000, source: "host-delegation", delegationId: "deleg-old", runId: "delta-old" },
+      }, null, 2) + "\n", "utf8");
+
+      const r1 = claimStoryLease(leasesDir, "US-OTHER", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+
+      expect(existsSync(legacyPath)).toBe(false);
+      expect(existsSync(join(leasesDir, "US-RESURRECT.lease"))).toBe(true);
+
+      const released = releaseStoryLease(leasesDir, "US-RESURRECT", {
+        source: "host-delegation", delegationId: "deleg-old", runId: "delta-old",
+      });
+      expect(released).toBe(true);
+      expect(existsSync(join(leasesDir, "US-RESURRECT.lease"))).toBe(false);
+
+      const leases = readLeases(leasesDir);
+      expect(leases["US-RESURRECT"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-1: canonical-only dir ignores .retired backup on release", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "canon-only-rel-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const leasesDir = join(loopDir, "leases");
+    writeFileSync(join(loopDir, "story-leases.json.retired"), JSON.stringify({
+      "US-IGNORED": { claimedAt: NOW - 5000, source: "human" },
+    }) + "\n", "utf8");
+    try {
+      claimStoryLease(leasesDir, "US-LIVE", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-live", runId: "delta-live",
+      });
+      releaseStoryLease(leasesDir, "US-LIVE", {
+        source: "host-delegation", delegationId: "deleg-live", runId: "delta-live",
+      });
+      const leases = readLeases(leasesDir);
+      expect(leases["US-LIVE"]).toBeUndefined();
+      expect(leases["US-IGNORED"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── BLOCK-2: malformed legacy coexistence — canonical dir exists ───────
+
+  it("BLOCK-2: canonical dir exists + legacy null → fail-loud, zero new claim effects", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-null-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, "null", "utf8");
+    try {
+      const beforeLeases = readLeases(leasesDir);
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/not a valid JSON object/);
+      expect(readLeases(leasesDir)).toEqual(beforeLeases);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: canonical dir exists + legacy string scalar → fail-loud, no claim", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-scalar-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, '"just a string"', "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/not a valid JSON object/);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: canonical dir exists + legacy array → fail-loud, no claim", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-array-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, "[1, 2, 3]", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/invalid entry.*not an object/);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: canonical dir exists + legacy with null entry → fail-loud", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-null-entry-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, JSON.stringify({ "US-X": null }) + "\n", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/invalid entry.*not an object/);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: canonical dir exists + legacy entry missing source → fail-loud", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-no-src-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, JSON.stringify({ "US-X": { claimedAt: 1000 } }) + "\n", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/missing source/);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: canonical dir exists + legacy entry missing claimedAt → fail-loud", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "coexist-no-ts-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    mkdirSync(leasesDir, { recursive: true });
+    writeFileSync(legacyPath, JSON.stringify({ "US-X": { source: "cycle" } }) + "\n", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/missing claimedAt/);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── BLOCK-2: malformed legacy in migration path (canonical dir absent) ─
+
+  it("BLOCK-2: migration path — legacy null root → fail-loud, no canonical dir created", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "mig-null-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    writeFileSync(legacyPath, "null", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/not a valid JSON object/);
+      expect(existsSync(leasesDir)).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: migration path — legacy array root → fail-loud, no canonical dir", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "mig-array-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    writeFileSync(legacyPath, "[1,2]", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/invalid entry.*not an object/);
+      expect(existsSync(leasesDir)).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-2: migration path — legacy with null entry → fail-loud, no canonical dir", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "mig-null-entry-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    writeFileSync(legacyPath, JSON.stringify({ "US-X": null }) + "\n", "utf8");
+    try {
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/invalid entry.*not an object/);
+      expect(existsSync(leasesDir)).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── BLOCK-3: migration atomicity via ops seam — rollback at each boundary ─
+
+  function setupMigrationFixture(): { baseDir: string; loopDir: string; legacyPath: string; leasesDir: string } {
+    const baseDir = mkdtempSync(join(tmpdir(), "mig-atomic-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    writeFileSync(legacyPath, JSON.stringify({
+      "OLD-A": { pid: 111, claimedAt: NOW - 1000, source: "cycle" },
+      "OLD-B": { claimedAt: NOW - 2000, source: "human" },
+    }, null, 2) + "\n", "utf8");
+    return { baseDir, loopDir, legacyPath, leasesDir };
+  }
+
+  it("BLOCK-3: migration writeTempFile failure → rollback, legacy-only authority", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("writeTempFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected writeTempFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["OLD-B"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-3: migration fsyncFile (temp) failure → rollback, legacy-only", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("fsyncFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected fsyncFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-3: migration hardLink (first entry) failure → rollback, no canonical records, legacy active", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("hardLink", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected hardLink/);
+      injectClaimOps(null);
+
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      if (existsSync(leasesDir)) {
+        for (const e of readdirSync(leasesDir)) {
+          expect(e).not.toMatch(/\.lease$/);
+        }
+      }
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-3: migration hardLink (second entry) failure → rollback, no canonical records, legacy active", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("hardLink", 2);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected hardLink/);
+      injectClaimOps(null);
+
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      if (existsSync(leasesDir)) {
+        for (const e of readdirSync(leasesDir)) {
+          expect(e).not.toMatch(/\.lease$/);
+        }
+      }
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-3: migration directory fsync failure → rollback (post-link), legacy active", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("fsyncFile", 3);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected fsyncFile.*occurrence 3/);
+      injectClaimOps(null);
+
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      if (existsSync(leasesDir)) {
+        for (const e of readdirSync(leasesDir)) {
+          expect(e).not.toMatch(/\.lease$/);
+        }
+      }
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-3: migration renameFile (legacy retire) failure → rollback, legacy-only authority", () => {
+    const { baseDir, legacyPath, leasesDir } = setupMigrationFixture();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("renameFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected renameFile/);
+      injectClaimOps(null);
+
+      // Rollback: canonical dir removed, legacy still active
+      expect(existsSync(legacyPath)).toBe(true);
+      expect(existsSync(legacyPath + ".retired")).toBe(false);
+      // readLeases falls back to legacy (canonical dir absent after rollback)
+      const leases = readLeases(leasesDir);
+      expect(leases["OLD-A"]).toBeDefined();
+      expect(leases["OLD-B"]).toBeDefined();
+      expect(leases["US-NEW"]).toBeUndefined();
+
+      // Next attempt re-migrates
+      const r2 = claimStoryLease(leasesDir, "US-NEXT", {
+        pid: 99999, claimedAt: NOW + 1, source: "cycle",
+      });
+      // Same-story check: US-NEXT is not in legacy, so migration+claim succeeds
+      expect(r2.status).toBe("claimed");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  // ─── BLOCK-4: occurrence-specific claim ops failures ────────────────────
+
+  it("BLOCK-4: writeTempFile failure → throws, no record, no temp residue", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("writeTempFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-WF", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected writeTempFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-WF.lease"))).toBe(false);
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: openFile (temp, first) failure → throws, no record", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("openFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-OF", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected openFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-OF.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: fsyncFile (temp, first) failure → throws, no record", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("fsyncFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-FSYNC1", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected fsyncFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-FSYNC1.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: closeFile (temp, first) failure → throws, record not yet linked", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("closeFile", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-CLOSE", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected closeFile/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-CLOSE.lease"))).toBe(false);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: hardLink non-EEXIST failure → throws, temp cleaned", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("hardLink", 1);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-HLNK", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected hardLink/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-HLNK.lease"))).toBe(false);
+      for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: openFile (directory, second) failure → record exists, temp residue", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("openFile", 2);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-DIROPEN", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected openFile.*occurrence 2/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-DIROPEN.lease"))).toBe(true);
+      expect(readLeases(dir)["US-DIROPEN"]).toBeDefined();
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: fsyncFile (directory, second) failure → record exists, owner visible, temp residue frozen", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("fsyncFile", 2);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-DIRFSYNC", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected fsyncFile.*occurrence 2/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-DIRFSYNC.lease"))).toBe(true);
+      const leases = readLeases(dir);
+      expect(leases["US-DIRFSYNC"]).toBeDefined();
+      expect(leases["US-DIRFSYNC"]!.source).toBe("cycle");
+
+      const temps = readdirSync(dir).filter(e => e.endsWith(".tmp"));
+      expect(temps.length).toBeGreaterThanOrEqual(1);
+
+      const r2 = claimStoryLease(dir, "US-DIRFSYNC", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d2", runId: "rd2",
+      });
+      expect(r2.status).toBe("exists");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: closeFile (directory, second) failure → record exists, owner visible", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("closeFile", 2);
+      injectClaimOps(spy.ops);
+
+      expect(() => claimStoryLease(dir, "US-DIRCLOSE", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow(/injected closeFile.*occurrence 2/);
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-DIRCLOSE.lease"))).toBe(true);
+      const leases = readLeases(dir);
+      expect(leases["US-DIRCLOSE"]).toBeDefined();
+      expect(leases["US-DIRCLOSE"]!.source).toBe("cycle");
+
+      const r2 = claimStoryLease(dir, "US-DIRCLOSE", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d3", runId: "rd3",
+      });
+      expect(r2.status).toBe("exists");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("BLOCK-4: unlinkFile (temp) failure → claim succeeds, record exists, temp residue", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("unlinkFile", 1);
+      injectClaimOps(spy.ops);
+
+      const r1 = claimStoryLease(dir, "US-UNLINK", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+      injectClaimOps(null);
+
+      expect(existsSync(join(dir, "US-UNLINK.lease"))).toBe(true);
+      expect(readLeases(dir)["US-UNLINK"]).toBeDefined();
+
+      const temps = readdirSync(dir).filter(e => e.endsWith(".tmp"));
+      expect(temps.length).toBeGreaterThanOrEqual(1);
+
+      const r2 = claimStoryLease(dir, "US-UNLINK", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d4", runId: "rd4",
+      });
+      expect(r2.status).toBe("exists");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
 });

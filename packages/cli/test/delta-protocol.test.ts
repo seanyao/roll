@@ -1165,14 +1165,14 @@ describe("US-DELTA-003 — conclude", () => {
     expect(err.error).toBe("lease_release_failed");
   });
 
-  // ─── Fix #7: prepare event append failure seam ──────────────────────────
+  // ─── Fix #7: prepare post-append crash seam ────────────────────────────
 
-  it("prepare event append failure seam prevents success output", () => {
+  it("prepare post-append crash seam (after-append throw) prevents success output", () => {
     const dir = setupMinimalProject("US-DELTA-PREP-SEAM", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-PREP-SEAM", "local-preset");
 
-    // Inject event append failure that fires after delta:prepared write
-    injectEventAppendFailure(() => { throw new Error("simulated append failure"); });
+    // Inject a post-append crash that fires after delta:prepared write
+    injectEventAppendFailure(() => { throw new Error("simulated after-append crash"); });
 
     const r = tsRunCwd([
       "prepare", "US-DELTA-PREP-SEAM",
@@ -1289,12 +1289,16 @@ describe("US-DELTA-003 — conclude", () => {
       const sl = readLeases(slPath);
       expect(sl["US-DELTA-BUSB"]).toBeDefined();
 
-      // prepared event exists (first append succeeded)
+      // prepared event exists (first append succeeded), role_resolved absent
       const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
       expect(existsSync(eventsPath)).toBe(true);
       const evtLines = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l);
-      const hasPrepared = evtLines.some(l => { try { return JSON.parse(l).type === "delta:prepared"; } catch { return false; }});
-      expect(hasPrepared).toBe(true);
+      const parsedEvents = evtLines.map(l => JSON.parse(l));
+      const preparedCount = parsedEvents.filter((e: any) => e.type === "delta:prepared").length;
+      const roleCount = parsedEvents.filter((e: any) => e.type === "delta:role_resolved").length;
+      // BLOCK-D: precise event count assertion — prepared=1, role=0
+      expect(preparedCount).toBe(1);
+      expect(roleCount).toBe(0);
     } finally {
       injectEventBus(null);
     }

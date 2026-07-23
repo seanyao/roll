@@ -279,52 +279,65 @@ function prepareCommand(args: string[]): number {
       _prepareInterruptAfterWrite();
     }
 
-    // Append events
-    const bus = new EventBus();
-    const now = Date.now();
+    // Append events (with its own try/catch so EventBus I/O failures
+    // are caught gracefully while _prepareInterruptAfterWrite throws still propagate)
+    try {
+      const bus = getEventBus();
+      const now = Date.now();
 
-    // delta:prepared
-    bus.appendEvent(result.eventsPath, {
-      type: "delta:prepared",
-      delegationId: result.delegationId,
-      runId: result.runId,
-      storyId,
-      trigger: input.trigger,
-      topology: input.topology,
-      qualityProfile: input.qualityProfile,
-      presetId: input.presetId,
-      presetSha256: input.presetSha256,
-      hostId: resolvedHostId,
-      ts: now,
-    });
-    if (_eventAppendFailure) {
-      try { _eventAppendFailure({ type: "delta:prepared" }); } catch {
-        if (json) process.stderr.write(JSON.stringify({ ok: false, error: "event_append_failure", detail: "Event append failure after delta:prepared" }) + "\n");
-        else process.stderr.write("Prepare failed: event append failure\n");
-        return 1;
+      // delta:prepared
+      bus.appendEvent(result.eventsPath, {
+        type: "delta:prepared",
+        delegationId: result.delegationId,
+        runId: result.runId,
+        storyId,
+        trigger: input.trigger,
+        topology: input.topology,
+        qualityProfile: input.qualityProfile,
+        presetId: input.presetId,
+        presetSha256: input.presetSha256,
+        hostId: resolvedHostId,
+        ts: now,
+      });
+      if (_eventAppendFailure) {
+        try { _eventAppendFailure({ type: "delta:prepared" }); } catch {
+          if (json) process.stderr.write(JSON.stringify({ ok: false, error: "event_append_failure", detail: "Event append failure after delta:prepared" }) + "\n");
+          else process.stderr.write("Prepare failed: event append failure\n");
+          return 1;
+        }
       }
-    }
 
-    // delta:role_resolved for each role
-    const roles = (input.resolutionTemplate as unknown as Record<string, unknown>).roles;
-    if (Array.isArray(roles)) {
-      for (const role of roles) {
-        const r = role as Record<string, unknown>;
-        bus.appendEvent(result.eventsPath, {
-          type: "delta:role_resolved",
-          delegationId: result.delegationId,
-          storyId,
-          role: r.role as DeltaRole,
-          roleInstanceId: r.roleInstanceId as string,
-          hostId: r.hostId as string,
-          modelId: r.modelId as string,
-          source: r.source as "user-pin" | "preset-preference" | "availability-fallback",
-          reasons: r.reasons as string[],
-          inventorySha256: hostInventorySha256 ?? "",
-          inventoryObservedAt: hostInventoryObservedAt ?? "",
-          ts: now,
-        });
+      // delta:role_resolved for each role
+      const roles = (input.resolutionTemplate as unknown as Record<string, unknown>).roles;
+      if (Array.isArray(roles)) {
+        for (const role of roles) {
+          const r = role as Record<string, unknown>;
+          bus.appendEvent(result.eventsPath, {
+            type: "delta:role_resolved",
+            delegationId: result.delegationId,
+            storyId,
+            role: r.role as DeltaRole,
+            roleInstanceId: r.roleInstanceId as string,
+            hostId: r.hostId as string,
+            modelId: r.modelId as string,
+            source: r.source as "user-pin" | "preset-preference" | "availability-fallback",
+            reasons: r.reasons as string[],
+            inventorySha256: hostInventorySha256 ?? "",
+            inventoryObservedAt: hostInventoryObservedAt ?? "",
+            ts: now,
+          });
+        }
       }
+    } catch (eventErr) {
+      // EventBus I/O failure — fail-loud but not a crash.
+      // Allocation (lease + frame) already persisted; events may be partial.
+      const msg = eventErr instanceof Error ? eventErr.message : String(eventErr);
+      if (json) {
+        process.stderr.write(JSON.stringify({ ok: false, error: "event_append_failure", detail: msg }) + "\n");
+      } else {
+        process.stderr.write(`Prepare failed: ${msg}\n`);
+      }
+      return 1;
     }
 
     if (json) {
@@ -354,6 +367,7 @@ function prepareCommand(args: string[]): number {
       }
       return 1;
     }
+    // _prepareInterruptAfterWrite and other unexpected errors — re-throw
     throw err;
   }
 }
@@ -418,9 +432,25 @@ export function injectPrepareInterrupt(fn: (() => void) | null): void {
   _prepareInterruptAfterWrite = fn;
 }
 
-// ── Event append failure seam (test-only) ─────────────────────────────────────
+// ── EventBus injection seam (test-only) ──────────────────────────────────────
 
-/** Seam: if set, EventBus.appendEvent calls this after real append; if it throws, the test can simulate an append failure. */
+/** Seam: if set, all commands use this EventBus instead of creating a new one.
+ *  Tests inject an EventBus with a throwing EventStore to simulate real
+ *  append I/O failures (BLOCK-A). */
+let _injectedEventBus: EventBus | null = null;
+
+/** Inject an EventBus for testing append failures. Call with null to reset. */
+export function injectEventBus(bus: EventBus | null): void {
+  _injectedEventBus = bus;
+}
+
+function getEventBus(): EventBus {
+  return _injectedEventBus ?? new EventBus();
+}
+
+// ── Event append failure seam (test-only, retained for backward compat) ───────
+
+/** Seam: if set, EventBus.appendEvent calls this after real append; if it throws, the test can simulate a post-append crash. */
 let _eventAppendFailure: ((event: Record<string, unknown>) => void) | null = null;
 
 /** Inject an event append failure for testing. Call with null to reset. */
@@ -504,7 +534,7 @@ function validateCommand(args: string[]): number {
 
   // Load delegation events
   const cwd = process.cwd();
-  const bus = new EventBus();
+  const bus = getEventBus();
   const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
   const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
 
@@ -795,7 +825,7 @@ function concludeCommand(args: string[]): number {
 
   // Load delegation events
   const cwd = process.cwd();
-  const bus = new EventBus();
+  const bus = getEventBus();
   const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
   const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
 
@@ -996,7 +1026,7 @@ function statusCommand(args: string[]): number {
   }
 
   const cwd = process.cwd();
-  const bus = new EventBus();
+  const bus = getEventBus();
   const eventsPath = join(cwd, ".roll", "loop", "events.ndjson");
 
   // Read events for projection

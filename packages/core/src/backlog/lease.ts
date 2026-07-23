@@ -236,15 +236,46 @@ export type ClaimResult =
   | { status: "conflict"; existingSource: LeaseSource }
   | { status: "exists"; existingSource: LeaseSource; existingDelegationId?: string };
 
-/** Steps in the claim protocol — observable by injected tracer. */
-export type ClaimStep = "before-temp-write" | "after-temp-write" | "after-temp-fsync" | "after-link" | "after-parent-fsync" | "before-temp-unlink";
+// ─── Filesystem operations seam (BLOCK-3: operation-level product proof) ──
 
-/** Production-default seam: called at each step of claimStoryLease. May throw to simulate crash. */
-let _claimStepHook: ((step: ClaimStep, context: { storyId: string; dirPath: string }) => void) | null = null;
+/** Narrow filesystem operations used by the claim protocol.
+ *  Each maps to exactly one durable step in the hardlink no-clobber sequence.
+ *  Production default uses real node:fs. Tests inject a spy that records
+ *  operations + paths and can throw at any step to simulate I/O failure. */
+export interface ClaimStepOps {
+  /** Write complete owner record to a unique temp file. */
+  writeTempFile(path: string, data: string): void;
+  /** Open a file or directory for fsync. flags: "r+" for file, "r" for dir. */
+  openFile(path: string, flags: string): number;
+  /** fdatasync an open file descriptor. */
+  fsyncFile(fd: number): void;
+  /** Close an open file descriptor. */
+  closeFile(fd: number): void;
+  /** Hard-link temp to final record path (no-clobber; EEXIST = conflict). */
+  hardLink(existingPath: string, newPath: string): void;
+  /** Remove a temp file after successful claim or on conflict cleanup. */
+  unlinkFile(path: string): void;
+}
 
-/** Inject a step hook for testing the claim protocol sequence and crash points. Call with null to reset. */
-export function injectClaimStepHook(hook: ((step: ClaimStep, context: { storyId: string; dirPath: string }) => void) | null): void {
-  _claimStepHook = hook;
+const defaultClaimOps: ClaimStepOps = {
+  writeTempFile: (path, data) => writeFileSync(path, data, "utf8"),
+  openFile: (path, flags) => openSync(path, flags),
+  fsyncFile: (fd) => fdatasyncSync(fd),
+  closeFile: (fd) => closeSync(fd),
+  hardLink: (src, dest) => linkSync(src, dest),
+  unlinkFile: (path) => unlinkSync(path),
+};
+
+let _injectedClaimOps: ClaimStepOps | null = null;
+
+function claimOps(): ClaimStepOps {
+  return _injectedClaimOps ?? defaultClaimOps;
+}
+
+/** Inject a filesystem operations seam for testing the claim protocol.
+ *  Call with null to reset to production defaults. */
+export function injectClaimOps(ops: ClaimStepOps | null): void {
+  _injectedClaimOps = ops;
 }
 
 /**
@@ -358,24 +389,22 @@ export function claimStoryLease(
 
   const rp = recordPath(dirPath, storyId);
   const tmpPath = join(dirPath, `${storyId}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);
+  const ops = claimOps();
 
   // Step 1: Write complete owner record to unique temp file
-  _claimStepHook?.("before-temp-write", { storyId, dirPath });
-  writeFileSync(tmpPath, encodeEntry(entry), "utf8");
-  _claimStepHook?.("after-temp-write", { storyId, dirPath });
+  ops.writeTempFile(tmpPath, encodeEntry(entry));
 
-  // Step 2: fdatasync temp
-  const tmpFd = openSync(tmpPath, "r+");
-  fdatasyncSync(tmpFd);
-  closeSync(tmpFd);
-  _claimStepHook?.("after-temp-fsync", { storyId, dirPath });
+  // Step 2: fdatasync temp file (open with "r+" → file fsync, not directory)
+  const tmpFd = ops.openFile(tmpPath, "r+");
+  ops.fsyncFile(tmpFd);
+  ops.closeFile(tmpFd);
 
   // Step 3: Hardlink — EEXIST means someone beat us
   try {
-    linkSync(tmpPath, rp);
+    ops.hardLink(tmpPath, rp);
   } catch (err: unknown) {
     // Clean up temp on any error
-    try { unlinkSync(tmpPath); } catch { /* best-effort */ }
+    try { ops.unlinkFile(tmpPath); } catch { /* best-effort */ }
 
     const code = (err as { code?: string }).code;
     if (code === "EEXIST") {
@@ -396,17 +425,14 @@ export function claimStoryLease(
     }
     throw err;
   }
-  _claimStepHook?.("after-link", { storyId, dirPath });
 
-  // Step 4: fdatasync parent directory
-  const dirFd = openSync(dirPath, "r");
-  fdatasyncSync(dirFd);
-  closeSync(dirFd);
-  _claimStepHook?.("after-parent-fsync", { storyId, dirPath });
+  // Step 4: fdatasync parent directory (open with "r" → directory fsync)
+  const dirFd = ops.openFile(dirPath, "r");
+  ops.fsyncFile(dirFd);
+  ops.closeFile(dirFd);
 
   // Step 5: Remove temp file
-  _claimStepHook?.("before-temp-unlink", { storyId, dirPath });
-  try { unlinkSync(tmpPath); } catch { /* best-effort — the lease is already claimed */ }
+  try { ops.unlinkFile(tmpPath); } catch { /* best-effort — the lease is already claimed */ }
 
   return { status: "claimed" };
 }

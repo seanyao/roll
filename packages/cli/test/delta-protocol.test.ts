@@ -5,14 +5,14 @@
  * conclude, status. Uses real filesystem with temp dirs, no external engines.
  */
 import { describe, expect, it, afterEach, beforeAll } from "vitest";
-import { mkdirSync, writeFileSync, rmSync, unlinkSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, unlinkSync, existsSync, readFileSync, readdirSync, appendFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath, atomicWriteJson, PrepareError } from "../src/lib/delta-allocation.js";
-import { claimStoryLease, releaseStoryLease, readLeases, setLease, writeLeases } from "@roll/core";
-import { deltaCommand, injectValidator, injectPrepareInterrupt, injectEventAppendFailure } from "../src/commands/delta.js";
+import { claimStoryLease, releaseStoryLease, readLeases, setLease, writeLeases, EventBus } from "@roll/core";
+import { deltaCommand, injectValidator, injectPrepareInterrupt, injectEventAppendFailure, injectEventBus } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
 
@@ -467,6 +467,55 @@ describe("US-DELTA-003 — prepare atomic allocation", () => {
     expect(r.code).toBe(1);
     // Error about missing or ambiguous card
     expect(r.stderr).toBeTruthy();
+  });
+
+  // ─── BLOCK-B: malformed resolution zero side effect ────────────────────
+
+  it("BLOCK-B: malformed resolution JSON → resolution_parse_error, zero lease/frame/events", () => {
+    const dir = setupMinimalProject("US-DELTA-MALFORM", "delta-team");
+    // Write invalid JSON as the resolution file
+    const malformedPath = join(dir, "bad-resolution.json");
+    writeFileSync(malformedPath, "this is not valid json {{{", "utf8");
+
+    // Snapshot filesystem state before
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const slPath = storyLeasesPath(dir);
+    const eventsBefore = existsSync(eventsPath);
+    const leaseBefore = existsSync(slPath);
+    const leaseMapBefore = existsSync(slPath) ? readLeases(slPath) : {};
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-MALFORM",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", malformedPath, "--json",
+    ], dir);
+
+    // Must fail with resolution_parse_error
+    expect(r.code).toBe(1);
+    const err = JSON.parse(r.stderr);
+    expect(err.error).toBe("resolution_parse_error");
+
+    // Zero side effects: no new events file (if didn't exist) or no new lines
+    if (!eventsBefore) {
+      expect(existsSync(eventsPath)).toBe(false);
+    }
+
+    // Zero side effects: no new lease entries
+    if (leaseBefore) {
+      const leaseMapAfter = readLeases(slPath);
+      expect(leaseMapAfter).toEqual(leaseMapBefore);
+    } else {
+      // No lease directory should have been created
+      expect(existsSync(slPath)).toBe(false);
+    }
+
+    // No frame directory should exist for this story
+    const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-MALFORM");
+    const deltaDirs = existsSync(cardDir)
+      ? readdirSync(cardDir, { withFileTypes: true }).filter(e => e.isDirectory() && e.name.startsWith("delta-"))
+      : [];
+    expect(deltaDirs.length).toBe(0);
   });
 });
 
@@ -1139,6 +1188,116 @@ describe("US-DELTA-003 — conclude", () => {
     const err = JSON.parse(r.stderr);
     expect(err.ok).toBe(false);
     expect(err.error).toBe("event_append_failure");
+  });
+
+  // ─── BLOCK-A: actual EventBus append failure (before/during append) ───
+
+  it("BLOCK-A: EventBus throws on delta:prepared → fail-loud, stdout empty, lease held, zero events", () => {
+    const dir = setupMinimalProject("US-DELTA-BUSA", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-BUSA", "local-preset");
+
+    // Inject an EventBus whose appendEvent throws on delta:prepared.
+    // Successful appends use real filesystem so events.ndjson exists.
+    let appendCalled = 0;
+    const throwingBus = new EventBus({
+      exists: (p: string) => existsSync(p),
+      ensureFile: (p: string) => { if (!existsSync(p)) writeFileSync(p, "", "utf8"); },
+      readText: (p: string) => existsSync(p) ? readFileSync(p, "utf8") : "",
+      appendLine: (p: string, line: string) => {
+        appendCalled++;
+        if (line.includes('"delta:prepared"')) throw new Error("simulated I/O append failure");
+        appendFileSync(p, line, { encoding: "utf8", flag: "a" });
+      },
+      writeText: (p: string, d: string) => writeFileSync(p, d, "utf8"),
+      size: () => 0,
+    });
+    injectEventBus(throwingBus);
+
+    try {
+      const r = tsRunCwd([
+        "prepare", "US-DELTA-BUSA",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+
+      expect(r.code).toBe(1);
+      expect(r.stdout).toBe("");
+      // Error must be on stderr
+      expect(r.stderr).toBeTruthy();
+      expect(appendCalled).toBeGreaterThanOrEqual(1);
+
+      // Lease must still be held (allocation succeeded before append)
+      const slPath = storyLeasesPath(dir);
+      const sl = readLeases(slPath);
+      expect(sl["US-DELTA-BUSA"]).toBeDefined();
+      expect(sl["US-DELTA-BUSA"].source).toBe("host-delegation");
+
+      // Frame must exist (allocation succeeded before append)
+      const cardDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-BUSA");
+      const deltaDirs = readdirSync(cardDir, { withFileTypes: true }).filter(e => e.isDirectory() && e.name.startsWith("delta-"));
+      expect(deltaDirs.length).toBeGreaterThanOrEqual(1);
+
+      // But events must be empty/absent (append threw before writing)
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      if (existsSync(eventsPath)) {
+        const evts = readFileSync(eventsPath, "utf8").trim();
+        expect(evts).toBe("");
+      }
+    } finally {
+      injectEventBus(null);
+    }
+  });
+
+  it("BLOCK-A: EventBus throws on delta:role_resolved after prepared → fail-loud, prepared event exists, lease held", () => {
+    const dir = setupMinimalProject("US-DELTA-BUSB", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-BUSB", "local-preset");
+
+    // Inject an EventBus that throws on the SECOND append (first role_resolved).
+    // The first append (delta:prepared) succeeds and actually writes.
+    let appendCount = 0;
+    const throwingBus = new EventBus({
+      exists: (p: string) => existsSync(p),
+      ensureFile: (p: string) => { if (!existsSync(p)) writeFileSync(p, "", "utf8"); },
+      readText: (p: string) => existsSync(p) ? readFileSync(p, "utf8") : "",
+      appendLine: (p: string, line: string) => {
+        appendCount++;
+        if (line.includes('"delta:role_resolved"') && appendCount > 1) {
+          throw new Error("simulated I/O failure on role_resolved");
+        }
+        appendFileSync(p, line, { encoding: "utf8", flag: "a" });
+      },
+      writeText: (p: string, d: string) => writeFileSync(p, d, "utf8"),
+      size: () => 0,
+    });
+    injectEventBus(throwingBus);
+
+    try {
+      const r = tsRunCwd([
+        "prepare", "US-DELTA-BUSB",
+        "--trigger", "host-guided", "--topology", "delta-team",
+        "--profile", "standard", "--preset", "local-preset",
+        "--resolution", resPath, "--json",
+      ], dir);
+
+      expect(r.code).toBe(1);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toBeTruthy();
+
+      // Lease held
+      const slPath = storyLeasesPath(dir);
+      const sl = readLeases(slPath);
+      expect(sl["US-DELTA-BUSB"]).toBeDefined();
+
+      // prepared event exists (first append succeeded)
+      const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+      expect(existsSync(eventsPath)).toBe(true);
+      const evtLines = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l);
+      const hasPrepared = evtLines.some(l => { try { return JSON.parse(l).type === "delta:prepared"; } catch { return false; }});
+      expect(hasPrepared).toBe(true);
+    } finally {
+      injectEventBus(null);
+    }
   });
 });
 
@@ -2145,6 +2304,106 @@ describe("US-DELTA-003 — orphan status human + JSON snapshots", () => {
     } finally {
       if (prev !== undefined) process.env["ROLL_LANG"] = prev;
       else delete process.env["ROLL_LANG"];
+    }
+  });
+
+  // ─── BLOCK-C: orphan negative classification ───────────────────────────
+
+  it("BLOCK-C: marker-only orphan (no lease) → hasMatchingLease: false", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPH-NOLEASE", "delta-team");
+
+    // Create marker without any lease
+    const delegationId = randomUUID();
+    const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPH-NOLEASE", `delta-${delegationId}`);
+    mkdirSync(frameDir, { recursive: true });
+    writeFileSync(
+      join(frameDir, "delegation-open.json"),
+      JSON.stringify({ schema: "roll-delta-delegation-open/v1", delegationId, storyId: "US-DELTA-ORPH-NOLEASE", createdAt: new Date().toISOString() }),
+      "utf8",
+    );
+
+    // Ensure no lease for this story
+    const slPath = storyLeasesPath(dir);
+    if (existsSync(slPath)) {
+      const sl = readLeases(slPath);
+      delete sl["US-DELTA-ORPH-NOLEASE"];
+      // Must not exist
+      expect(sl["US-DELTA-ORPH-NOLEASE"]).toBeUndefined();
+    }
+
+    const r = tsRunCwd(["status", "--story", "US-DELTA-ORPH-NOLEASE", "--json"], dir);
+    expect(r.code).toBe(0);
+    const parsed = JSON.parse(r.stdout);
+    expect(parsed.uncommittedFrames).toBeDefined();
+    expect(parsed.uncommittedFrames.length).toBe(1);
+    const orphan = parsed.uncommittedFrames[0];
+    expect(orphan.delegationId).toBe(delegationId);
+    expect(orphan.hasMatchingLease).toBe(false);
+    expect(orphan.status).toBe("unknown: uncommitted_delegation_frame");
+  });
+
+  it("BLOCK-C: marker + wrong delegation lease → hasMatchingLease: false", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPH-WRONG", "delta-team");
+
+    // Create marker for delegation A
+    const delegationId = randomUUID();
+    const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPH-WRONG", `delta-${delegationId}`);
+    mkdirSync(frameDir, { recursive: true });
+    writeFileSync(
+      join(frameDir, "delegation-open.json"),
+      JSON.stringify({ schema: "roll-delta-delegation-open/v1", delegationId, storyId: "US-DELTA-ORPH-WRONG", createdAt: new Date().toISOString() }),
+      "utf8",
+    );
+
+    // Create a lease for the SAME story but DIFFERENT delegationId
+    const wrongDelegationId = randomUUID();
+    claimHostDelegationLease(dir, "US-DELTA-ORPH-WRONG", wrongDelegationId, `delta-${wrongDelegationId}`);
+
+    try {
+      const r = tsRunCwd(["status", "--story", "US-DELTA-ORPH-WRONG", "--json"], dir);
+      expect(r.code).toBe(0);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.uncommittedFrames).toBeDefined();
+      expect(parsed.uncommittedFrames.length).toBe(1);
+      const orphan = parsed.uncommittedFrames[0];
+      expect(orphan.delegationId).toBe(delegationId);
+      // hasMatchingLease must be false because lease is for different delegation
+      expect(orphan.hasMatchingLease).toBe(false);
+      // Status is plain uncommitted (no "lease held" since lease doesn't match this delegation)
+      expect(orphan.status).toBe("unknown: uncommitted_delegation_frame");
+    } finally {
+      releaseHostDelegationLease(dir, "US-DELTA-ORPH-WRONG", wrongDelegationId, `delta-${wrongDelegationId}`);
+    }
+  });
+
+  it("BLOCK-C: marker + matching delegation lease → hasMatchingLease: true (existing contract)", () => {
+    const dir = setupMinimalProject("US-DELTA-ORPH-MATCH", "delta-team");
+
+    // Create marker for delegation A
+    const delegationId = randomUUID();
+    const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPH-MATCH", `delta-${delegationId}`);
+    mkdirSync(frameDir, { recursive: true });
+    writeFileSync(
+      join(frameDir, "delegation-open.json"),
+      JSON.stringify({ schema: "roll-delta-delegation-open/v1", delegationId, storyId: "US-DELTA-ORPH-MATCH", createdAt: new Date().toISOString() }),
+      "utf8",
+    );
+
+    // Create a matching lease (same delegationId)
+    claimHostDelegationLease(dir, "US-DELTA-ORPH-MATCH", delegationId, `delta-${delegationId}`);
+
+    try {
+      const r = tsRunCwd(["status", "--story", "US-DELTA-ORPH-MATCH", "--json"], dir);
+      expect(r.code).toBe(0);
+      const parsed = JSON.parse(r.stdout);
+      expect(parsed.uncommittedFrames).toBeDefined();
+      expect(parsed.uncommittedFrames.length).toBe(1);
+      const orphan = parsed.uncommittedFrames[0];
+      expect(orphan.delegationId).toBe(delegationId);
+      expect(orphan.hasMatchingLease).toBe(true);
+      expect(orphan.status).toBe("unknown: uncommitted_delegation_frame (lease held)");
+    } finally {
+      releaseHostDelegationLease(dir, "US-DELTA-ORPH-MATCH", delegationId, `delta-${delegationId}`);
     }
   });
 });

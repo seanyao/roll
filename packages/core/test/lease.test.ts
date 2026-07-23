@@ -16,7 +16,7 @@ import {
   buildClaimedByOther,
   claimStoryLease,
   cleanDeadLeases,
-  injectClaimStepHook,
+  injectClaimOps,
   isHumanSoftLeaseActive,
   isLeaseAlive,
   isPidAlive,
@@ -30,13 +30,16 @@ import {
   leaseDirPath,
   reconcileExpiredClaims,
   type LeaseMap,
-  type ClaimStep,
+  type ClaimStepOps,
 } from "../src/index.js";
 import {
+  closeSync,
   existsSync,
+  fdatasyncSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -618,89 +621,207 @@ describe("claimStoryLease — hardlink no-clobber (US-DELTA-003)", () => {
     }
   });
 
-  // ─── Production hardlink sequence tracer (Fix #3/#4: tests real claimStoryLease, not manual linkSync) ──
+  // ─── Production hardlink sequence proof via fs ops seam (BLOCK-3) ──────────
 
-  it("tracer proves claimStoryLease follows ordered protocol: before-temp-write → after-temp-write → after-temp-fsync → after-link → after-parent-fsync → before-temp-unlink", () => {
+  /** Build a ClaimStepOps spy that records { op, path, flags } for each call
+   *  and delegates to real fs. Supports throwAt(op) for crash injection. */
+  function createClaimOpsSpy(): {
+    ops: ClaimStepOps;
+    calls: Array<{ op: string; path: string; flags?: string }>;
+    throwAtOp: (op: string) => void;
+    clearThrow: () => void;
+  } {
+    const calls: Array<{ op: string; path: string; flags?: string }> = [];
+    let throwOp: string | null = null;
+
+    const realWriteTempFile = (p: string, d: string) => writeFileSync(p, d, "utf8");
+    const realOpenFile = (p: string, f: string) => openSync(p, f);
+    const realFsyncFile = (fd: number) => fdatasyncSync(fd);
+    const realCloseFile = (fd: number) => closeSync(fd);
+    const realHardLink = (s: string, d: string) => linkSync(s, d);
+    const realUnlinkFile = (p: string) => unlinkSync(p);
+
+    return {
+      ops: {
+        writeTempFile(path, data) {
+          if (throwOp === "writeTempFile") throw new Error("injected write failure");
+          calls.push({ op: "writeTempFile", path });
+          realWriteTempFile(path, data);
+        },
+        openFile(path, flags) {
+          if (throwOp === "openFile") throw new Error("injected open failure");
+          calls.push({ op: "openFile", path, flags });
+          return realOpenFile(path, flags);
+        },
+        fsyncFile(fd) {
+          if (throwOp === "fsyncFile") throw new Error("injected fsync failure");
+          calls.push({ op: "fsyncFile", path: `fd:${fd}` });
+          realFsyncFile(fd);
+        },
+        closeFile(fd) {
+          if (throwOp === "closeFile") throw new Error("injected close failure");
+          calls.push({ op: "closeFile", path: `fd:${fd}` });
+          realCloseFile(fd);
+        },
+        hardLink(src, dest) {
+          if (throwOp === "hardLink") throw new Error("injected link failure");
+          calls.push({ op: "hardLink", path: dest });
+          realHardLink(src, dest);
+        },
+        unlinkFile(path) {
+          if (throwOp === "unlinkFile") throw new Error("injected unlink failure");
+          calls.push({ op: "unlinkFile", path });
+          realUnlinkFile(path);
+        },
+      },
+      calls,
+      throwAtOp(op: string) { throwOp = op; },
+      clearThrow() { throwOp = null; },
+    };
+  }
+
+  it("BLOCK-3: ops spy proves ordered protocol with exact paths, file vs directory fsync", () => {
     const dir = tmpLeaseDir();
-    const steps: string[] = [];
+    const spy = createClaimOpsSpy();
     try {
-      injectClaimStepHook((step: ClaimStep) => { steps.push(step); });
+      injectClaimOps(spy.ops);
 
-      const result = claimStoryLease(dir, "US-TRACE", {
+      const result = claimStoryLease(dir, "US-TRACE2", {
         pid: process.pid, claimedAt: NOW, source: "cycle",
       });
       expect(result.status).toBe("claimed");
-      expect(steps).toEqual([
-        "before-temp-write",
-        "after-temp-write",
-        "after-temp-fsync",
-        "after-link",
-        "after-parent-fsync",
-        "before-temp-unlink",
+
+      const opNames = spy.calls.map(c => c.op);
+      expect(opNames).toEqual([
+        "writeTempFile",
+        "openFile",     // temp file: flags "r+"
+        "fsyncFile",
+        "closeFile",
+        "hardLink",
+        "openFile",     // parent dir: flags "r"
+        "fsyncFile",
+        "closeFile",
+        "unlinkFile",
       ]);
-      // No temp residue
+
+      // Verify file vs directory fsync: first openFile uses "r+" (file), second uses "r" (dir)
+      expect(spy.calls[1]!.flags).toBe("r+");  // temp file fsync
+      expect(spy.calls[5]!.flags).toBe("r");   // parent directory fsync
+
+      // Verify temp path is in same directory as leases dir
+      const tempPath = spy.calls[0]!.path;
+      expect(tempPath).toContain(dir);
+      expect(tempPath).toMatch(/\.tmp$/);
+
+      // Verify hardLink dest is the final .lease file
+      const linkDest = spy.calls[4]!.path;
+      expect(linkDest).toBe(join(dir, "US-TRACE2.lease"));
+
+      // Verify unlinkFile cleans up the temp
+      expect(spy.calls[8]!.path).toBe(tempPath);
+
+      // No temp residue on real fs
       for (const e of readdirSync(dir)) expect(e).not.toMatch(/\.tmp$/);
     } finally {
-      injectClaimStepHook(null);
+      injectClaimOps(null);
       try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
 
-  it("tracer proves EEXIST stops before after-link: second claim ends at after-temp-fsync, no overwrite", () => {
+  it("BLOCK-3: EEXIST stops with hardLink then unlinkFile cleanup, no overwrite", () => {
     const dir = tmpLeaseDir();
-    const stepsB: string[] = [];
     try {
-      claimStoryLease(dir, "US-NW", { pid: process.pid, claimedAt: NOW, source: "cycle" });
+      claimStoryLease(dir, "US-NW2", { pid: process.pid, claimedAt: NOW, source: "cycle" });
 
-      injectClaimStepHook((step: ClaimStep) => { stepsB.push(step); });
-      const r2 = claimStoryLease(dir, "US-NW", { pid: 99999, claimedAt: NOW + 1, source: "host-delegation", delegationId: "d2", runId: "rd2" });
+      const spy = createClaimOpsSpy();
+      injectClaimOps(spy.ops);
+      const r2 = claimStoryLease(dir, "US-NW2", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d2b", runId: "rd2b",
+      });
+      injectClaimOps(null);
+
       expect(r2.status).toBe("exists");
-      expect(stepsB).toEqual(["before-temp-write", "after-temp-write", "after-temp-fsync"]);
+      const opNames = spy.calls.map(c => c.op);
+      expect(opNames).toEqual(["writeTempFile", "openFile", "fsyncFile", "closeFile", "hardLink", "unlinkFile"]);
       // First claim preserved
-      expect(readLeases(dir)["US-NW"]!.source).toBe("cycle");
+      expect(readLeases(dir)["US-NW2"]!.source).toBe("cycle");
     } finally {
-      injectClaimStepHook(null);
+      injectClaimOps(null);
       try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
 
-  // ─── Crash points: each step, verify no second owner / no overwrite (Fix #4) ──
+  // ─── Crash points via fs ops seam — each step, verify no second owner ─────
 
-  function crashTest(step: ClaimStep, expectWinner: boolean) {
+  function crashTestOp(throwOnOp: string, expectWinner: boolean) {
     const dir = tmpLeaseDir();
     try {
-      injectClaimStepHook((s: ClaimStep) => { if (s === step) throw new Error("crash at " + step); });
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp(throwOnOp);
+      injectClaimOps(spy.ops);
 
-      expect(() => claimStoryLease(dir, "US-CR", { pid: process.pid, claimedAt: NOW, source: "cycle" })).toThrow();
+      expect(() => claimStoryLease(dir, "US-CR2", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      })).toThrow();
+      injectClaimOps(null);
 
       if (expectWinner) {
-        expect(existsSync(join(dir, "US-CR.lease"))).toBe(true);
+        expect(existsSync(join(dir, "US-CR2.lease"))).toBe(true);
       } else {
-        expect(existsSync(join(dir, "US-CR.lease"))).toBe(false);
+        expect(existsSync(join(dir, "US-CR2.lease"))).toBe(false);
       }
 
-      // Retry without crash — must succeed and be sole owner
-      injectClaimStepHook(null);
-      const r2 = claimStoryLease(dir, "US-CR", { pid: 99999, claimedAt: NOW + 1, source: "host-delegation", delegationId: "d4", runId: "rd4" });
+      const r2 = claimStoryLease(dir, "US-CR2", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d5", runId: "rd5",
+      });
       if (expectWinner) {
         expect(r2.status).toBe("exists");
-        expect(readLeases(dir)["US-CR"]!.pid).toBe(process.pid);
+        expect(readLeases(dir)["US-CR2"]!.pid).toBe(process.pid);
       } else {
         expect(r2.status).toBe("claimed");
-        expect(readLeases(dir)["US-CR"]!.pid).toBe(99999);
+        expect(readLeases(dir)["US-CR2"]!.pid).toBe(99999);
       }
     } finally {
-      injectClaimStepHook(null);
+      injectClaimOps(null);
       try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
     }
   }
 
-  it("crash at before-temp-write: no record, retry wins", () => crashTest("before-temp-write", false));
-  it("crash at after-temp-write: temp residue, no winner, retry wins", () => crashTest("after-temp-write", false));
-  it("crash at after-temp-fsync: no final record, retry wins", () => crashTest("after-temp-fsync", false));
-  it("crash at after-link: record exists (link durable), winner established, retry blocked", () => crashTest("after-link", true));
-  it("crash at after-parent-fsync: winner established, retry blocked", () => crashTest("after-parent-fsync", true));
-  it("crash at before-temp-unlink: winner established, retry blocked", () => crashTest("before-temp-unlink", true));
+  it("crash at writeTempFile: no record, retry wins", () => crashTestOp("writeTempFile", false));
+  it("crash at openFile (temp file): no record, retry wins", () => crashTestOp("openFile", false));
+  it("crash at fsyncFile: no record, retry wins", () => crashTestOp("fsyncFile", false));
+  it("crash at hardLink (before link): no record, retry wins", () => crashTestOp("hardLink", false));
+  it("crash at unlinkFile: unlink is best-effort, claim succeeds, retry blocked", () => {
+    const dir = tmpLeaseDir();
+    try {
+      const spy = createClaimOpsSpy();
+      spy.throwAtOp("unlinkFile");
+      injectClaimOps(spy.ops);
+
+      // unlinkFile is try/catch in production — the claim still succeeds
+      const r1 = claimStoryLease(dir, "US-CR3", {
+        pid: process.pid, claimedAt: NOW, source: "cycle",
+      });
+      expect(r1.status).toBe("claimed");
+      injectClaimOps(null);
+
+      // Record exists (hardlink was durable)
+      expect(existsSync(join(dir, "US-CR3.lease"))).toBe(true);
+
+      // Retry blocked — record already claimed
+      const r2 = claimStoryLease(dir, "US-CR3", {
+        pid: 99999, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "d6", runId: "rd6",
+      });
+      expect(r2.status).toBe("exists");
+      expect(readLeases(dir)["US-CR3"]!.pid).toBe(process.pid);
+    } finally {
+      injectClaimOps(null);
+      try { const { rmSync } = require("fs"); rmSync(dirname(dir), { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
 });
 
 // ─── Concurrent subprocess claim (real process isolation, Fix #5) ─────────────

@@ -140,57 +140,55 @@ export function deltaCommand(args: string[]): number {
 
 function prepareCommand(args: string[]): number {
   const { positional, flags } = parseArgs(args);
-
-  // --json flag
   const json = flags["json"] === true;
 
-  // --cycle rejection
   if ("cycle" in flags) {
     const msg = T("delta.error.cycle_rejected");
-    if (json) {
-      process.stderr.write(JSON.stringify({ ok: false, error: "cycle_rejected", detail: msg }) + "\n");
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "cycle_rejected", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
     return 1;
   }
 
-  // Check for unknown flags
   const knownFlags = new Set(["trigger", "topology", "profile", "preset", "resolution", "json"]);
+  const dupFlag = detectDuplicateFlags(args, knownFlags);
+  if (dupFlag) {
+    const msg = T("delta.error.duplicate_flag", `--${dupFlag}`);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "duplicate_flag", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
+  if (positional.length > 1) {
+    const msg = T("delta.error.unexpected_positional", positional[1]!);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "unexpected_positional", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
   for (const k of Object.keys(flags)) {
     if (!knownFlags.has(k)) {
       const msg = T("delta.error.unknown_flag", `--${k}`);
-      if (json) {
-        process.stderr.write(JSON.stringify({ ok: false, error: "unknown_flag", detail: msg }) + "\n");
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      if (json) process.stderr.write(JSON.stringify({ ok: false, error: "unknown_flag", detail: msg }) + "\n");
+      else process.stderr.write(`${msg}\n`);
       return 1;
     }
   }
 
-  // Story ID is required
   const storyId = positional[0];
   if (!storyId) {
     const msg = T("delta.error.missing_story");
-    if (json) {
-      process.stderr.write(JSON.stringify({ ok: false, error: "missing_story", detail: msg }) + "\n");
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "missing_story", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
     return 1;
   }
 
-  // Validate required flags
   const required = ["trigger", "topology", "profile", "preset", "resolution"];
   for (const r of required) {
-    if (flags[r] === undefined) {
-      const msg = T("delta.error.missing_required", `--${r}`);
-      if (json) {
-        process.stderr.write(JSON.stringify({ ok: false, error: "missing_required", detail: msg, flag: r }) + "\n");
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+    const v = flags[r];
+    if (v === undefined || v === true) {
+      const msg = v === true ? T("delta.error.missing_value", `--${r}`) : T("delta.error.missing_required", `--${r}`);
+      if (json) process.stderr.write(JSON.stringify({ ok: false, error: v === true ? "missing_value" : "missing_required", detail: msg, flag: r }) + "\n");
+      else process.stderr.write(`${msg}\n`);
       return 1;
     }
   }
@@ -443,16 +441,27 @@ function validateCommand(args: string[]): number {
   const { positional, flags } = parseArgs(args);
   const json = flags["json"] === true;
 
-  // Check for unknown flags
   const knownFlags = new Set(["delegation", "stage", "json"]);
+  const dupFlag = detectDuplicateFlags(args, knownFlags);
+  if (dupFlag) {
+    const msg = T("delta.error.duplicate_flag", `--${dupFlag}`);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "duplicate_flag", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
+  if (positional.length > 0) {
+    const msg = T("delta.error.unexpected_positional", positional[0]!);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "unexpected_positional", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
   for (const k of Object.keys(flags)) {
     if (!knownFlags.has(k)) {
       const msg = T("delta.error.unknown_flag", `--${k}`);
-      if (json) {
-        process.stderr.write(JSON.stringify({ ok: false, error: "unknown_flag", detail: msg }) + "\n");
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      if (json) process.stderr.write(JSON.stringify({ ok: false, error: "unknown_flag", detail: msg }) + "\n");
+      else process.stderr.write(`${msg}\n`);
       return 1;
     }
   }
@@ -919,21 +928,33 @@ function statusCommand(args: string[]): number {
   const { positional, flags } = parseArgs(args);
   const json = flags["json"] === true;
 
+  const knownFlags = new Set(["story", "delegation", "json"]);
+  const dupFlag = detectDuplicateFlags(args, knownFlags);
+  if (dupFlag) {
+    const msg = T("delta.error.duplicate_flag", `--${dupFlag}`);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "duplicate_flag", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
+  if (positional.length > 0) {
+    const msg = T("delta.error.unexpected_positional", positional[0]!);
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "unexpected_positional", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
+    return 1;
+  }
+
   const storyId = flags["story"];
   const delegationId = flags["delegation"];
 
   if (!storyId && !delegationId) {
     const msg = T("delta.error.status_selector");
-    if (json) {
-      process.stderr.write(JSON.stringify({ ok: false, error: "status_selector", detail: msg }) + "\n");
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    if (json) process.stderr.write(JSON.stringify({ ok: false, error: "status_selector", detail: msg }) + "\n");
+    else process.stderr.write(`${msg}\n`);
     return 1;
   }
 
   // Check for unknown flags
-  const knownFlags = new Set(["story", "delegation", "json"]);
   for (const k of Object.keys(flags)) {
     if (!knownFlags.has(k)) {
       const msg = T("delta.error.unknown_flag", `--${k}`);

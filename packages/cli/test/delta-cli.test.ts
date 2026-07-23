@@ -172,6 +172,92 @@ describe("US-DELTA-003 — delta CLI parser and help", () => {
     expect(err.error.length).toBeGreaterThan(0);
     expect(err.detail.length).toBeGreaterThan(0);
   });
+
+  // ─── Fix #6: CLI parser consistency — duplicate, unexpected positional, missing value ──
+
+  it("prepare rejects duplicate --trigger flag", () => {
+    const r = tsRun(["prepare", "US-TEST", "--trigger", "host-guided", "--trigger", "loop-autonomous"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("duplicate");
+    expect(r.stdout).toBe("");
+  });
+
+  it("validate rejects duplicate --stage flag", () => {
+    const r = tsRun(["validate", "--delegation", "d-123", "--stage", "designer", "--stage", "builder"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("duplicate");
+  });
+
+  it("status rejects duplicate --story flag", () => {
+    const r = tsRun(["status", "--story", "US-X", "--story", "US-Y"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).toContain("duplicate");
+  });
+
+  it("prepare rejects missing value for --trigger (flag set to true)", () => {
+    const r = tsRun(["prepare", "US-TEST", "--trigger", "--topology", "delta-team"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+  });
+
+  it("validate rejects missing value for --stage (flag set to true)", () => {
+    const r = tsRun(["validate", "--delegation", "d-123", "--stage", "--json"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+  });
+
+  it("conclude rejects unexpected positional arg", () => {
+    const r = tsRun(["conclude", "extra-arg", "--delegation", "d-123"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).toContain("unexpected");
+  });
+
+  it("validate rejects unexpected positional arg", () => {
+    const r = tsRun(["validate", "extra-arg", "--delegation", "d-123", "--stage", "designer"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).toContain("unexpected");
+  });
+
+  it("status rejects unexpected positional arg", () => {
+    const r = tsRun(["status", "extra-arg", "--story", "US-X"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).toContain("unexpected");
+  });
+
+  it("prepare rejects unexpected positional arg beyond story-id", () => {
+    const r = tsRun(["prepare", "US-TEST", "extra"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toBe("");
+    expect(r.stderr).toContain("unexpected");
+  });
+
+  it("status --story + --delegation is allowed (delegation priority per Architecture adjudication)", () => {
+    // This test verifies that the command does NOT reject the combination.
+    // It will likely fail to find the delegation (no frame exists), but it must NOT be a parser error.
+    const r = tsRun(["status", "--story", "US-X", "--delegation", "d-Y", "--json"]);
+    // Must NOT be a parser/flag-combination error (which would produce error on stderr)
+    // It may be 0 with a note or >0 with a delegation_not_found, but never a flag-rejection.
+    const stderr = r.stderr;
+    expect(stderr).not.toContain("status_selector");
+    expect(stderr).not.toContain("unknown_flag");
+    expect(stderr).not.toContain("duplicate");
+  });
+
+  it("status with unknown flag rejects", () => {
+    const r = tsRun(["status", "--story", "US-X", "--unknown-flag"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("unknown");
+  });
+
+  it("validate with unknown flag rejects", () => {
+    const r = tsRun(["validate", "--delegation", "d-123", "--stage", "designer", "--unknown-flag"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("unknown");
+  });
 });
 
 // ── Import closure audit helper fixture tests ────────────────────────────────

@@ -987,6 +987,10 @@ export const v3Catalog: Catalog = {
     en: "roll delta: missing required flag '%s'",
     zh: "roll delta：缺少必需标志 '%s'",
   },
+  "delta.error.missing_value": {
+    en: "roll delta: missing value for '%s'",
+    zh: "roll delta：'%s' 缺少值",
+  },
   "delta.error.invalid_value": {
     en: "roll delta: invalid value '%s' for '%s'. Expected: %s",
     zh: "roll delta：值 '%s' 对 '%s' 无效。应为：%s",

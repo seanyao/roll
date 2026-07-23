@@ -1205,4 +1205,127 @@ describe("legacy story-leases.json compatibility", () => {
       try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
     }
   });
+
+  // ─── Legacy migration conflict (Fix #2): same-story → fail-loud; different → migrate ──
+
+  it("claim fails when legacy has same-story lease (no dual ownership)", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "legacy-conflict-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    // Canonical dir MUST NOT exist
+    expect(existsSync(leasesDir)).toBe(false);
+    try {
+      writeFileSync(legacyPath, JSON.stringify({
+        "US-LEGACY": { pid: 55555, claimedAt: NOW, source: "cycle" },
+      }, null, 2) + "\n", "utf8");
+
+      // Claim same story — must fail-loud
+      const r = claimStoryLease(leasesDir, "US-LEGACY", {
+        pid: process.pid, claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "deleg-new", runId: "delta-deleg-new",
+      });
+      expect(r.status).toBe("exists");
+      if (r.status === "exists") {
+        expect(r.existingSource).toBe("cycle");
+      }
+
+      // No canonical directory was created (no split-brain)
+      // Legacy file remains the sole authority
+      const legacyContent = JSON.parse(readFileSync(legacyPath, "utf8"));
+      expect(legacyContent["US-LEGACY"]).toBeDefined();
+      expect(legacyContent["US-LEGACY"].pid).toBe(55555);
+      expect(legacyContent["US-LEGACY"].source).toBe("cycle");
+
+      // readLeases still sees only the legacy lease
+      const leases = readLeases(leasesDir);
+      expect(leases["US-LEGACY"]).toBeDefined();
+      expect(leases["US-LEGACY"]!.pid).toBe(55555);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("claim succeeds on different story when legacy has other story — legacy preserved AND migrated", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "legacy-migrate-new-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    expect(existsSync(leasesDir)).toBe(false);
+    try {
+      writeFileSync(legacyPath, JSON.stringify({
+        "FIX-LEGACY-A": { pid: 111, claimedAt: NOW - 1000, source: "cycle" },
+        "FIX-LEGACY-B": { claimedAt: NOW - 2000, source: "human" },
+      }, null, 2) + "\n", "utf8");
+
+      // Claim a DIFFERENT story — must succeed
+      const r = claimStoryLease(leasesDir, "US-NEW", {
+        pid: process.pid, claimedAt: NOW, source: "host-delegation",
+        delegationId: "deleg-mig", runId: "delta-deleg-mig",
+      });
+      expect(r.status).toBe("claimed");
+
+      // Canonical directory created
+      expect(existsSync(leasesDir)).toBe(true);
+
+      // Legacy entries are now visible via canonical records (migrated)
+      const leases = readLeases(leasesDir);
+      expect(leases["FIX-LEGACY-A"]).toBeDefined();
+      expect(leases["FIX-LEGACY-A"]!.source).toBe("cycle");
+      expect(leases["FIX-LEGACY-A"]!.pid).toBe(111);
+      expect(leases["FIX-LEGACY-B"]).toBeDefined();
+      expect(leases["FIX-LEGACY-B"]!.source).toBe("human");
+
+      // New claim also visible
+      expect(leases["US-NEW"]).toBeDefined();
+      expect(leases["US-NEW"]!.source).toBe("host-delegation");
+
+      // Legacy file preserved (read-only reference)
+      expect(existsSync(legacyPath)).toBe(true);
+
+      // Verify canonical files on disk for migrated entries
+      expect(existsSync(join(leasesDir, "FIX-LEGACY-A.lease"))).toBe(true);
+      expect(existsSync(join(leasesDir, "FIX-LEGACY-B.lease"))).toBe(true);
+      expect(existsSync(join(leasesDir, "US-NEW.lease"))).toBe(true);
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
+
+  it("legacy same-story block works for all claim sources (cycle, human, host-delegation)", () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "legacy-all-src-"));
+    const loopDir = join(baseDir, "loop");
+    mkdirSync(loopDir, { recursive: true });
+    const legacyPath = join(loopDir, "story-leases.json");
+    const leasesDir = join(loopDir, "leases");
+    try {
+      // Legacy has a cycle lease
+      writeFileSync(legacyPath, JSON.stringify({
+        "US-X": { pid: 77777, claimedAt: NOW, source: "cycle" },
+      }, null, 2) + "\n", "utf8");
+
+      // Host-delegation claim must fail
+      const r1 = claimStoryLease(leasesDir, "US-X", {
+        claimedAt: NOW + 1, source: "host-delegation",
+        delegationId: "deleg-hd", runId: "delta-deleg-hd",
+      });
+      expect(r1.status).toBe("exists");
+
+      // Cycle claim with different pid must fail
+      const r2 = claimStoryLease(leasesDir, "US-X", {
+        pid: 88888, claimedAt: NOW + 2, source: "cycle",
+      });
+      expect(r2.status).toBe("exists");
+
+      // Human claim must fail
+      const r3 = claimStoryLease(leasesDir, "US-X", {
+        claimedAt: NOW + 3, source: "human",
+      });
+      expect(r3.status).toBe("exists");
+    } finally {
+      try { const { rmSync } = require("fs"); rmSync(baseDir, { recursive: true, force: true }); } catch { /* ok */ }
+    }
+  });
 });

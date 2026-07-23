@@ -260,8 +260,60 @@ export function claimStoryLease(
     throw new Error("claimStoryLease: host-delegation source requires delegationId");
   }
 
-  // Ensure lease directory exists
-  if (!existsSync(dirPath)) mkdirSync(dirPath, { recursive: true });
+  // ═══ Legacy migration: when canonical dir is absent, check legacy first ═══
+  // One-time controlled migration: if legacy exists, either reject (same-story)
+  // or migrate all entries to canonical records (different stories). This
+  // prevents dual-ownership when a legacy lease exists for the same story.
+  if (!existsSync(dirPath)) {
+    const parentDir = dirname(dirPath);
+    const legacyPath = join(parentDir, "story-leases.json");
+    if (existsSync(legacyPath)) {
+      try {
+        const raw = readFileSync(legacyPath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === "object" && parsed !== null) {
+          const legacyMap = parsed as LeaseMap;
+
+          // Check for same-story conflict FIRST
+          if (legacyMap[storyId] !== undefined) {
+            const existing = legacyMap[storyId] as LeaseEntry;
+            return {
+              status: "exists",
+              existingSource: existing.source,
+              existingDelegationId: existing.delegationId,
+            };
+          }
+
+          // Different stories: one-time migration of ALL legacy entries
+          // to canonical directory before claiming the new story.
+          mkdirSync(dirPath, { recursive: true });
+          for (const [legacyStoryId, legacyEntry] of Object.entries(legacyMap)) {
+            const entry = legacyEntry as LeaseEntry;
+            const legacyTmpPath = join(dirPath, `${legacyStoryId}.migrate.${randomUUID().slice(0, 8)}.tmp`);
+            writeFileSync(legacyTmpPath, encodeEntry(entry), "utf8");
+            const tmpFd = openSync(legacyTmpPath, "r+");
+            fdatasyncSync(tmpFd);
+            closeSync(tmpFd);
+            try {
+              linkSync(legacyTmpPath, recordPath(dirPath, legacyStoryId));
+            } catch {
+              // If link fails for a migrated entry, skip it (best-effort migration)
+            }
+            try { unlinkSync(legacyTmpPath); } catch { /* best-effort */ }
+          }
+          // fsync migrated directory
+          const dirFd = openSync(dirPath, "r");
+          fdatasyncSync(dirFd);
+          closeSync(dirFd);
+        }
+      } catch {
+        // Unreadable legacy — proceed with fresh canonical directory
+        mkdirSync(dirPath, { recursive: true });
+      }
+    } else {
+      mkdirSync(dirPath, { recursive: true });
+    }
+  }
 
   const rp = recordPath(dirPath, storyId);
   const tmpPath = join(dirPath, `${storyId}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`);

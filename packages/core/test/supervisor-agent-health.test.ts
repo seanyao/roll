@@ -80,10 +80,10 @@ describe("classifyAgentToolchainSignal", () => {
 });
 
 describe("recommendAgentHealthAction", () => {
-  it("routes setup/skill-root pollution to delta team via create_fix", () => {
+  it("routes setup/skill-root pollution to delivery team via create_fix", () => {
     expect(recommendAgentHealthAction("setup_skill_root_pollution")).toEqual({
       action: "create_fix",
-      routing: "delta_team",
+      routing: "delivery_team",
     });
   });
 
@@ -136,7 +136,7 @@ describe("gatherAgentToolchainIssues", () => {
       agent: "reasonix",
       classification: "setup_skill_root_pollution",
       action: "create_fix",
-      routing: "delta_team",
+      routing: "delivery_team",
     });
   });
 

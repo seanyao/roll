@@ -21,7 +21,7 @@
 import { TRUTH_ANCHORS } from "./truth.js";
 
 /** Which persisted surface a field lives on. */
-export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal" | "delivery" | "browser";
+export type TruthSurface = "runs" | "event:cycle:terminal" | "event:release:gate" | "event:release:waiver" | "goal" | "delivery" | "browser" | "event:delta" | "artifact:delta";
 
 export interface RegisteredField {
   /** The literal key as persisted (e.g. "cost_usd"). */
@@ -158,6 +158,50 @@ export const TRUTH_FIELD_REGISTRY: readonly RegisteredField[] = [
   { field: "diagnosticOnly", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
   { field: "failure", surface: "browser", anchor: "browser_diagnostic", writer: "BrowserOperationLedger", kind: "authoritative" },
   { field: "captureRequestId", surface: "browser", anchor: "browser_capture_link", writer: "CaptureBridge", kind: "authoritative" },
+
+  // ── US-DELTA-001 — Delegation event fields (event:delta surface) ──────────
+  { field: "type", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta commands", kind: "authoritative" },
+  { field: "ts", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta commands", kind: "authoritative" },
+  { field: "delegationId", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "storyId", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  // delta:prepared fields
+  { field: "runId", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "cycleId", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "trigger", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "topology", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "qualityProfile", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "presetId", surface: "event:delta", anchor: "delegation_provenance", writer: "roll delta prepare", kind: "authoritative" },
+  { field: "presetSha256", surface: "event:delta", anchor: "delegation_provenance", writer: "roll delta prepare", kind: "authoritative" },
+  // delta:role_resolved fields — host's resolved-assignment CLAIM, not proof
+  { field: "role", surface: "event:delta", anchor: "delegation_provenance", writer: "roll delta prepare (role_resolved)", kind: "authoritative" },
+  { field: "roleInstanceId", surface: "event:delta", anchor: "delegation_provenance", writer: "host skill (opaque token)", kind: "authoritative" },
+  { field: "hostId", surface: "event:delta", anchor: "delegation_provenance", writer: "host skill (opaque claim)", kind: "authoritative" },
+  { field: "modelId", surface: "event:delta", anchor: "delegation_provenance", writer: "host skill (opaque claim, not execution proof)", kind: "authoritative" },
+  { field: "source", surface: "event:delta", anchor: "delegation_provenance", writer: "host resolution algorithm", kind: "authoritative" },
+  { field: "reasons", surface: "event:delta", anchor: "delegation_provenance", writer: "host resolution algorithm", kind: "authoritative" },
+  { field: "inventorySha256", surface: "event:delta", anchor: "delegation_provenance", writer: "host resolution algorithm", kind: "authoritative" },
+  // delta:role_started fields — accepted structural protocol fact
+  { field: "sessionId", surface: "event:delta", anchor: "delegation_provenance", writer: "host skill (opaque claim)", kind: "authoritative" },
+  { field: "identityProvenance", surface: "event:delta", anchor: "delegation_provenance", writer: "roll delta validate", kind: "authoritative" },
+  { field: "worktreeAccess", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate", kind: "authoritative" },
+  // delta:artifact_published fields
+  { field: "path", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate", kind: "authoritative" },
+  { field: "sha256", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate", kind: "authoritative" },
+  { field: "manifestPath", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate", kind: "authoritative" },
+  // delta:terminal fields
+  { field: "outcome", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta conclude", kind: "authoritative" },
+  { field: "terminalBinding", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta conclude", kind: "authoritative" },
+  { field: "deliveryDisposition", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta conclude", kind: "authoritative" },
+  // delta:blocked fields
+  { field: "reason", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate / conclude", kind: "authoritative" },
+  { field: "detail", surface: "event:delta", anchor: "delegation_lifecycle", writer: "roll delta validate / conclude", kind: "authoritative" },
+
+  // ── US-DELTA-001 — Delta v2 manifest/attestation fields (artifact:delta surface) ──
+  // These are derived-cache evidence/provenance claims, rebuilt from events.
+  { field: "schemaVersion", surface: "artifact:delta", anchor: "delegation_lifecycle", writer: "role artifact author (host/adapter)", kind: "derived-cache", rebuild: "cross-check against event authority" },
+  { field: "executionIdentity", surface: "artifact:delta", anchor: "delegation_provenance", writer: "role artifact author (host/adapter)", kind: "derived-cache", rebuild: "cross-check identity tokens against delta:role_resolved + delta:role_started events" },
+  { field: "hostAttestation", surface: "artifact:delta", anchor: "delegation_provenance", writer: "host skill (self-attestation)", kind: "derived-cache", rebuild: "structural validation only (non-empty/unique tokens) — never proof of host behavior" },
+  { field: "createdAt", surface: "artifact:delta", anchor: "delegation_lifecycle", writer: "role artifact author", kind: "derived-cache", rebuild: "cross-check artifact timestamp against event ts window" },
 ];
 
 /** Pre-guardrail history, listed not judged (AC: grandfather with a clear list):

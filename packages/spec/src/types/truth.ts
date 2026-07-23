@@ -38,7 +38,7 @@ export interface DriftFixture {
 }
 
 /** One field-level truth declaration (AC2's six attributes + grace + fixtures). */
-export type TruthAggregate = "story" | "cycle" | "release" | "view-meta" | "goal";
+export type TruthAggregate = "story" | "cycle" | "release" | "view-meta" | "goal" | "delegation";
 
 export interface TruthAnchor {
   /** Registry key — stable snake_case fact name. */
@@ -310,6 +310,29 @@ export const TRUTH_ANCHORS: readonly TruthAnchor[] = [
     conflictPolicy: "the CaptureBridge record is authoritative; a dossier that shows capture but no bridge record is drift(fail).",
     unknownPolicy: "a passed browser run with no capture link is legitimate (not every operation needs visual AC).",
     rebuildability: "append-only",
+  },
+  // ── US-DELTA-001 — Delegation aggregate anchors ───────────────────────────
+  {
+    field: "delegation_lifecycle",
+    aggregate: "delegation",
+    description: "The Delegation protocol lifecycle: prepared → role/artifact transitions → delta:terminal / blocked.",
+    authoritativeSource: "events.ndjson — the append-only delegation event stream",
+    writer: "roll delta prepare / roll delta validate / roll delta conclude commands",
+    derivedViews: ["roll delta status projection", "Supervisor Live Delta view"],
+    conflictPolicy: "the event stream is authoritative; an artifact or manifest that disagrees with event facts is drift(fail).",
+    unknownPolicy: "a delegation with no matching events is unknown — not assumed terminal.",
+    rebuildability: "rebuildable",
+  },
+  {
+    field: "delegation_provenance",
+    aggregate: "delegation",
+    description: "Resolution + identity-attestation correspondence: which host/model/role claims were recorded and whether they are structurally valid. Never asserts external host execution as a fact.",
+    authoritativeSource: "delegation resolution evidence + events.ndjson (delta:role_resolved, delta:role_started, delta:artifact_published)",
+    writer: "roll delta prepare (resolution) + host skill (attestation) + roll delta validate (structural cross-check)",
+    derivedViews: ["roll delta status provenance display", "Supervisor Live role trace"],
+    conflictPolicy: "the events are authoritative for accepted protocol facts; host-attested and adapter-observed are provenance labels, NOT verdicts about session freshness or model execution. A mismatch between event, manifest, and attestation → drift(fail).",
+    unknownPolicy: "host-attested provenance is structurally unverifiable beyond non-empty/unique opaque tokens; claims may be structurally valid but unproven — cost is always ? (host_unobservable).",
+    rebuildability: "rebuildable",
   },
 ];
 

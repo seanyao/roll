@@ -1,3 +1,4 @@
+export * from "./types/delta-team.js";
 export * from "./i18n/index.js";
 export * from "./i18n/catalog.js";
 export * from "./i18n/catalog-v3.js";

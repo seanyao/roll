@@ -5,6 +5,18 @@
  */
 import type { AgentId, AgentToolchainClassification, ArtifactRef, ExecutionProfile } from "./agent.js";
 import type { CycleCost, CyclePhase } from "./cycle.js";
+import type {
+  DelegationTrigger,
+  DeliveryTopology,
+  QualityProfile,
+  DeltaRole,
+  ResolutionSource,
+  IdentityProvenance,
+  DeltaBlockReason,
+  DeltaTerminalOutcome,
+  TerminalBinding,
+  DeliveryDisposition,
+} from "./delta-team.js";
 import type { GoalReviewMode, GoalSafetyGate, GoalScope, GoalStatus, GoalTransitionActor } from "./goal.js";
 import type { LoopType } from "./loop.js";
 import type { BlockCause, FailureClass, TerminalEvent, TerminalOutcome } from "./terminal.js";
@@ -647,7 +659,79 @@ export type RollEvent =
   // US-TRUTH-001 — the versioned complete-or-reasoned terminal record. One per
   // cycle from schema v1 on; events older than the switch are GRANDFATHERED
   // (read under legacy rules, never retro-rewritten).
-  | TerminalEvent;
+  | TerminalEvent
+  // ── US-DELTA-001 — Delegation aggregate events ────────────────────────────
+  | {
+      type: "delta:prepared";
+      delegationId: string;
+      runId: string;
+      storyId: string;
+      cycleId?: string;
+      trigger: DelegationTrigger;
+      topology: DeliveryTopology;
+      qualityProfile: QualityProfile;
+      presetId: string;
+      presetSha256: string;
+      hostId: string;
+      ts: number;
+    }
+  | {
+      type: "delta:role_resolved";
+      delegationId: string;
+      storyId: string;
+      role: DeltaRole;
+      roleInstanceId: string;
+      hostId: string;
+      modelId: string;
+      source: ResolutionSource;
+      reasons: string[];
+      inventorySha256: string;
+      ts: number;
+    }
+  | {
+      type: "delta:role_started";
+      delegationId: string;
+      storyId: string;
+      role: DeltaRole;
+      sessionId: string;
+      roleInstanceId: string;
+      hostId: string;
+      modelId: string;
+      identityProvenance: IdentityProvenance;
+      worktreeAccess: "read-only" | "builder-write";
+      ts: number;
+    }
+  | {
+      type: "delta:artifact_published";
+      delegationId: string;
+      storyId: string;
+      role: DeltaRole;
+      path: string;
+      sha256: string;
+      manifestPath: string;
+      sessionId: string;
+      roleInstanceId: string;
+      identityProvenance: IdentityProvenance;
+      ts: number;
+    }
+  | {
+      type: "delta:terminal";
+      delegationId: string;
+      storyId: string;
+      outcome: DeltaTerminalOutcome;
+      terminalBinding: TerminalBinding;
+      deliveryDisposition?: DeliveryDisposition;
+      ts: number;
+    }
+  | {
+      type: "delta:blocked";
+      delegationId: string;
+      storyId: string;
+      role?: DeltaRole;
+      reason: DeltaBlockReason;
+      detail: string;
+      ts: number;
+    };
 
 /** Supervisor journal action kinds (US-OBS-048). */
 export const SUPERVISOR_JOURNAL_ACTIONS = ["decide", "verify", "rescue", "escalate", "note"] as const;

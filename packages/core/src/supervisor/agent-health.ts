@@ -84,7 +84,7 @@ export function classifyAgentToolchainSignal(
 
 export interface AgentHealthRecommendation {
   readonly action: AgentHealthAction;
-  readonly routing: "delta_team" | "owner" | "none";
+  readonly routing: "delivery_team" | "owner" | "none";
 }
 
 /**
@@ -100,7 +100,7 @@ export function recommendAgentHealthAction(
 ): AgentHealthRecommendation {
   switch (classification) {
     case "setup_skill_root_pollution":
-      return { action: "create_fix", routing: "delta_team" };
+      return { action: "create_fix", routing: "delivery_team" };
     case "auth_block":
     case "worktree_permission_failure":
       return { action: "pause_for_owner", routing: "owner" };

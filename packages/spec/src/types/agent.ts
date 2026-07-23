@@ -572,7 +572,7 @@ export interface AgentHealthIssue {
   readonly reason: string;
   readonly detail: string;
   readonly source: string;
-  readonly routing: "delta_team" | "owner" | "none";
+  readonly routing: "delivery_team" | "owner" | "none";
 }
 
 /** US-V4-004 — the risk signals that drive execution-profile selection (arch §12).

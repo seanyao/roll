@@ -985,7 +985,7 @@ defaults:
       classification: "setup_skill_root_pollution",
       severity: "warning",
       action: "create_fix",
-      routing: "delta_team",
+      routing: "delivery_team",
     });
   });
 

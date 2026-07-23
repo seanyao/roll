@@ -177,7 +177,7 @@ function fakeGithub(): Ports["github"] {
 describe("FIX-1475 — the supervised path never moves the shared main ref", () => {
   it("AC1/AC2/AC3: a shared checkout with local ahead commits survives a supervised cycle byte-identically, and the cycle runs isolated off origin/main", async () => {
     const cycleId = "20260720-010101-f1475";
-    const { repo } = makeFixture("ahead", cycleId);
+    const { repo, remote } = makeFixture("ahead", cycleId);
     const originHead = git(repo, ["rev-parse", "origin/main"]);
 
     // Pre-existing LOCAL ahead commit on the shared main checkout (unpushed owner WIP).
@@ -228,12 +228,30 @@ describe("FIX-1475 — the supervised path never moves the shared main ref", () 
     expect(git(repo, ["rev-parse", "main"])).toBe(aheadHead);
     expect(git(repo, ["rev-parse", "HEAD"])).toBe(aheadHead);
     expect(readFileSync(join(repo, "owner-wip.txt"), "utf8")).toBe("owner work in progress\n");
+    // The owner's non-`.roll` work is byte-clean. `.roll` is excluded because the
+    // loop legitimately tracks status in the tracked working-tree backlog
+    // (setup marks In Progress, terminal marks Done) in the in-repo layout — that
+    // is by design, not a FIX-1475 leak. The FIX-1475 guarantee is that the main
+    // ref never moves and owner work is untouched (asserted above), and that Done
+    // lands durably on the REMOTE without moving local main (asserted below).
     expect(git(repo, ["status", "--porcelain", "--", ".", ":(exclude).roll"])).toBe("");
 
     // No quarantine ref was created for the ahead commits (nothing was moved).
     expect(git(repo, ["branch", "--list", "rescue/*"])).toBe("");
     const events = readEvents(p.eventsPath);
     expect(events.some((e) => e.type === "sandbox:quarantined" && e.reason === "ahead")).toBe(false);
+
+    // FIX-1238 durability (evaluator gap): the flip landed on the REMOTE as a
+    // single commit parented on the pre-cycle origin/main tip, whose backlog
+    // marks the story Done — and it is NOT on local main (which stayed at the
+    // owner's WIP). Read the bare remote directly so we see the pushed object.
+    const remoteMain = git(remote, ["rev-parse", "refs/heads/main"]);
+    expect(remoteMain).not.toBe(originHead);
+    expect(git(remote, ["rev-parse", `${remoteMain}^`])).toBe(originHead);
+    const remoteBacklog = git(remote, ["show", `${remoteMain}:.roll/backlog.md`]);
+    expect(remoteBacklog).toMatch(/US-RUN-001[^\n]*✅ Done/);
+    // The flip is remote-only: local main carries the owner's WIP, not the flip.
+    expect(git(repo, ["show", "main:.roll/backlog.md"])).toMatch(/US-RUN-001[^\n]*📋 Todo/);
   });
 
   it("AC3: a dirty AND ahead main checkout keeps its ahead commits byte-identically; only the dirt is quarantined (US-LOOP-089 semantics preserved)", async () => {

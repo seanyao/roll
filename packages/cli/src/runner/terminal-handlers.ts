@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readFileSync, realpathSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
   type RunKey,
 } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
+import { markStatus } from "@roll/core";
 import { prNumberFromUrl, resolvePublishMode, submoduleWorktreePath } from "@roll/infra";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { evaluateEvidenceGate, executeLocalPublish } from "./local-publish.js";
@@ -454,6 +455,16 @@ export async function executeTerminalCommand(
         }
       }
       let terminalMerged = false;
+      // FIX-1475: in the in-repo layout (`.roll` tracked by the product repo, not
+      // its own nested git), the pre-FIX path made the Done flip durable by
+      // committing it onto the shared checkout's HEAD and pushing `HEAD:main` —
+      // which advanced the local `main` ref and clobbered owner WIP / concurrent
+      // dispatch. `markDoneGuarded` still writes Done into the shared working-tree
+      // backlog (the loop legitimately tracks status there; setup already marked
+      // it In Progress), but durability is now pushed as an ORIGIN-BASED object
+      // (see commitInRepoBacklog) so the shared main ref/HEAD/index never move.
+      const inRepoLayout = isInRepoRollLayout(ports.paths.worktreePath);
+      let inRepoDurableFlip: { id: string; status: string } | null = null;
       if (
         (cmd.status === "done" || cmd.status === "published") &&
         terminalStoryId !== "" &&
@@ -495,10 +506,20 @@ export async function executeTerminalCommand(
               );
             }
           }
-          markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
+          const doneResult = markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
             markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
             alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
           });
+          // FIX-1475: when the guard actually marked Done, mirror the EXACT status
+          // it wrote (Done vs Done · evidence_debt) onto the remote as an
+          // origin-based object — the durable-commit trigger. Skipped when the
+          // guard rejected the flip (missing evidence): nothing to make durable.
+          if (doneResult.ok && inRepoLayout) {
+            const durableStatus = doneResult.debt
+              ? `${STATUS_MARKER.done} · evidence_debt`
+              : STATUS_MARKER.done;
+            inRepoDurableFlip = { id: terminalStoryId, status: durableStatus };
+          }
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
           // gh down), yet the agent may have ALREADY flipped this row ✅ Done in
@@ -648,8 +669,8 @@ export async function executeTerminalCommand(
       // FIX-1238: for in-repo layout (`.roll` tracked by main repo, not its own
       // git), commitRollMetadata is a no-op. Commit and push the backlog.md flip
       // to origin/main so the Done status is durable on the remote.
-      if (terminalStoryId !== "" && isInRepoRollLayout(ports.paths.worktreePath)) {
-        await commitInRepoBacklog(ports, ctx, terminalStoryId, terminalMerged);
+      if (terminalStoryId !== "" && inRepoLayout && inRepoDurableFlip !== null) {
+        await commitInRepoBacklog(ports, ctx, inRepoDurableFlip.id, inRepoDurableFlip.status);
       }
       // US-OBS-032: best-effort cycle role summary from the event stream
       if (ctx.cycleId !== undefined) {
@@ -700,45 +721,57 @@ function isInRepoRollLayout(worktreePath: string): boolean {
   }
 }
 
+/** A git object id — SHA-1 (40 hex) or SHA-256 (64 hex). */
+function isObjectId(value: string): boolean {
+  return /^[0-9a-f]{40}$/.test(value) || /^[0-9a-f]{64}$/.test(value);
+}
+
 /**
  * FIX-1238: for in-repo layout, make the backlog.md status flip durable on the
- * remote. FIX-1475: do it WITHOUT moving the shared main checkout.
+ * remote. FIX-1475: do it WITHOUT touching the shared main checkout AT ALL.
  *
- * The old path committed the flip onto the shared checkout's HEAD and pushed
- * `HEAD:main`, which advanced the local `main` ref — clobbering any owner WIP or
- * concurrent dispatch that legitimately sits ahead of origin/main, and breaking
- * the shared checkout for the next cycle. Instead we build the flip as a git
- * OBJECT parented on the current origin/main (via a throwaway index and
- * `commit-tree`) and push only that object to `refs/heads/main`. The shared
- * checkout's ref, HEAD, index, and working tree are never touched: durability on
- * the remote (FIX-1238) with the shared main left exactly where it was
- * (FIX-1475). A racing non-fast-forward push fails LOUD (alert) — never a
- * force-push, never a silent local reset.
+ * The pre-FIX path committed the flip onto the shared checkout's HEAD and pushed
+ * `HEAD:main`, advancing the local `main` ref — clobbering any owner WIP or
+ * concurrent dispatch legitimately ahead of origin/main. Reading the flipped
+ * WORKING TREE instead would still leave the shared tree dirty and risk
+ * publishing an owner's unpushed backlog edits. So we never read or mutate the
+ * shared tree: `markDoneGuarded` was given a capturing markStatus (the write was
+ * suppressed for this layout), and here we recompute the transition from the
+ * REMOTE backlog. We read `origin/main:.roll/backlog.md`, apply ONLY this
+ * story's status transition in memory, assemble a tree = origin/main's tree with
+ * only `.roll/backlog.md` replaced (a throwaway index — the checkout's real
+ * index is untouched), `commit-tree` it onto origin/main, and push just that
+ * object to `refs/heads/main`. The shared checkout's ref, HEAD, index, and
+ * working tree stay byte-identical (FIX-1475) while the flip lands durably on
+ * the remote (FIX-1238). A racing non-fast-forward push fails LOUD (alert) —
+ * never a force-push, never a local reset; the reconciler re-derives Done from
+ * the merged PR on a later tick.
  */
 async function commitInRepoBacklog(
   ports: Ports,
   ctx: CycleContext,
   storyId: string,
-  terminalMerged: boolean,
+  doneStatus: string,
 ): Promise<void> {
-  void terminalMerged;
   const msg = `chore: ${storyId} status update (cycle ${ctx.cycleId})`;
   const backlogRel = join(".roll", "backlog.md");
-  const backlogAbs = join(ports.repoCwd, backlogRel);
   try {
-    if (!existsSync(backlogAbs)) return;
     // Base the flip on the CURRENT remote tip so the pushed object is a clean
-    // fast-forward and carries only the backlog change on top of already-merged
-    // work.
+    // fast-forward carrying only the backlog change on top of already-merged work.
     execFileSync("git", ["fetch", "origin", "main"], { cwd: ports.repoCwd, stdio: "ignore" });
     const base = execFileSync("git", ["rev-parse", "refs/remotes/origin/main"], {
       cwd: ports.repoCwd,
       encoding: "utf8",
     }).trim();
-    if (!/^[0-9a-f]{40}$/.test(base)) return;
-    // The flipped backlog content lives in the shared checkout's working tree.
-    const flipped = readFileSync(backlogAbs, "utf8");
-    // No-op when the remote already carries this exact content.
+    if (!isObjectId(base)) {
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `FIX-1238/FIX-1475: in-repo backlog flip for ${storyId} (cycle ${ctx.cycleId}) skipped — could not resolve origin/main (got "${base}") — shared main untouched`,
+      );
+      return;
+    }
+    // Read the REMOTE backlog (never the shared working tree) and apply ONLY this
+    // story's transition in memory.
     let originContent = "";
     try {
       originContent = execFileSync("git", ["show", `${base}:${backlogRel}`], {
@@ -746,18 +779,20 @@ async function commitInRepoBacklog(
         encoding: "utf8",
       });
     } catch {
-      originContent = "";
+      // origin/main carries no backlog at this path — nothing to flip durably.
+      return;
     }
-    if (flipped === originContent) return;
-    // Hash the flipped content and assemble a tree = origin/main's tree with ONLY
-    // .roll/backlog.md replaced, inside a throwaway index so the checkout's real
-    // index is untouched.
+    const { content: newContent, count } = markStatus(originContent, storyId, doneStatus);
+    // No matching row on the remote, or it already carries this status → no-op.
+    if (count === 0 || newContent === originContent) return;
+    // Hash the new content and assemble the tree in a throwaway index so the
+    // checkout's REAL index is never touched.
     const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
       cwd: ports.repoCwd,
-      input: flipped,
+      input: newContent,
       encoding: "utf8",
     }).trim();
-    const idxPath = join(tmpdir(), `roll-backlog-idx-${ctx.cycleId}-${process.pid}`);
+    const idxPath = join(tmpdir(), `roll-backlog-idx-${ctx.cycleId ?? "nocycle"}-${process.pid}`);
     const env = { ...process.env, GIT_INDEX_FILE: idxPath };
     try {
       execFileSync("git", ["read-tree", base], { cwd: ports.repoCwd, env, stdio: "ignore" });
@@ -791,7 +826,7 @@ async function commitInRepoBacklog(
   } catch (e) {
     ports.events.appendAlert(
       ports.paths.alertsPath,
-      `FIX-1238/FIX-1475: in-repo backlog flip push failed for ${storyId} (cycle ${ctx.cycleId}) — shared main ref left untouched — ${String(e)}`,
+      `FIX-1238/FIX-1475: in-repo backlog flip push failed for ${storyId} (cycle ${ctx.cycleId}) — shared main left untouched — ${String(e)}`,
     );
   }
 }

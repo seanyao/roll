@@ -33,6 +33,7 @@ function repository(
     readonly integration?: readonly string[];
     readonly dependsOnRepo?: string;
     readonly test?: readonly string[];
+    readonly noChangeAllowed?: boolean;
   } = {},
 ): RepositoryExecutionContext {
   const worktreePath = join(root, alias);
@@ -42,7 +43,7 @@ function repository(
     alias,
     access: "write",
     requiredDelivery: true,
-    noChangePolicy: "changes_required",
+    noChangePolicy: options.noChangeAllowed === true ? "no_change_allowed" : "changes_required",
     ...(options.dependsOnRepo === undefined ? {} : { dependsOnRepo: options.dependsOnRepo }),
     worktreePath,
     baseSha: `${alias}-base`,
@@ -62,6 +63,7 @@ function fixture(options: {
   readonly backstopToolchains?: boolean;
   readonly firstCommitsAhead?: number;
   readonly ownerExemptsFirst?: boolean;
+  readonly firstNoChangeAllowed?: boolean;
   readonly secondCommandThrows?: boolean;
   readonly integrationThrows?: boolean;
   readonly secondHeadThrows?: boolean;
@@ -75,6 +77,7 @@ function fixture(options: {
   mkdirSync(runtimeRoot, { recursive: true });
   const first = repository(issueRoot, "repo-aaaaaaaaaaaa", "api", {
     integration: options.integration,
+    noChangeAllowed: options.firstNoChangeAllowed,
     ...(options.backstopToolchains ? { test: [] } : {}),
   });
   const second = repository(issueRoot, "repo-bbbbbbbbbbbb", "web", {
@@ -321,6 +324,23 @@ describe("US-WS-012 repository capture verification", () => {
     expect(issueEvents(f.issueRoot).filter((event) => event["type"] === "repository:publish_planned")).toEqual([
       expect.objectContaining({ repoId: f.second.repoId }),
     ]);
+  });
+
+  it("attests a declared no-change leg without requiring an owner exemption", async () => {
+    const f = fixture({
+      single: true,
+      firstCommitsAhead: 0,
+      firstNoChangeAllowed: true,
+    });
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.not.objectContaining({ gateBlocked: true }),
+    });
+    expect(readFileSync(join(f.issueRoot, "evidence", "cycle-us-ws-012", "ac-map.json"), "utf8"))
+      .toContain("repository:api:verification");
   });
 
   it("records command launch failures as blocked leg evidence instead of aborting capture", async () => {

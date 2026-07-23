@@ -107,7 +107,8 @@ export function writeWorkspaceAcceptanceArtifacts(ctx: CycleContext): WorkspaceA
     const exemption = [...events].reverse().find((event) =>
       event.type === "issue:repository_no_change_exempted" && event.repoId === repository.repoId && event["approved"] === true,
     );
-    const acceptedNoChange = verification?.status === "not_run" && observed?.["commitsAhead"] === 0 && exemption !== undefined;
+    const acceptedNoChange = verification?.status === "not_run" && observed?.["commitsAhead"] === 0 &&
+      (repository.noChangePolicy === "no_change_allowed" || exemption !== undefined);
     if ((verification?.status !== "pass" && !acceptedNoChange) || typeof verification.headSha !== "string" || verification.headSha === "") {
       gaps.push(`repository_verification_missing:${repository.alias}`);
       continue;

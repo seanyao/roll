@@ -1080,6 +1080,66 @@ describe("US-DELTA-003 — conclude", () => {
     const err = JSON.parse(r.stderr);
     expect(err.error).toBe("delegation_not_found");
   });
+
+  // ─── Fix #7: conclude release failure must not output success ───────────
+
+  it("conclude does not output success when lease release fails (already released)", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-FAIL", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-FAIL", "local-preset");
+
+    const prep = tsRunCwd([
+      "prepare", "US-DELTA-CONC-FAIL",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(prep.code).toBe(0);
+    const delegationId = JSON.parse(prep.stdout).delegationId;
+
+    // Manually release the lease BEFORE conclude
+    const released = releaseHostDelegationLease(dir, "US-DELTA-CONC-FAIL", delegationId, `delta-${delegationId}`);
+    expect(released).toBe(true);
+
+    // Now conclude should fail because lease is already released
+    const r = tsRunCwd([
+      "conclude", "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue", "--json",
+    ], dir);
+    expect(r.code).toBe(1);
+    // Must NOT output success on stdout
+    const stdout = r.stdout;
+    expect(stdout).toBe("");
+    // Must have failure message on stderr
+    expect(r.stderr).not.toBe("");
+    const err = JSON.parse(r.stderr);
+    expect(err.ok).toBe(false);
+    expect(err.error).toBe("lease_release_failed");
+  });
+
+  // ─── Fix #7: prepare event append failure seam ──────────────────────────
+
+  it("prepare event append failure seam prevents success output", () => {
+    const dir = setupMinimalProject("US-DELTA-PREP-SEAM", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-PREP-SEAM", "local-preset");
+
+    // Inject event append failure that fires after delta:prepared write
+    injectEventAppendFailure(() => { throw new Error("simulated append failure"); });
+
+    const r = tsRunCwd([
+      "prepare", "US-DELTA-PREP-SEAM",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+
+    injectEventAppendFailure(null);
+
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    const err = JSON.parse(r.stderr);
+    expect(err.ok).toBe(false);
+    expect(err.error).toBe("event_append_failure");
+  });
 });
 
 // ── Snapshot tests ──────────────────────────────────────────────────────────
@@ -2823,12 +2883,17 @@ describe("US-DELTA-003 — conclude event append failure seam", () => {
     });
 
     try {
-      expect(() => {
-        tsRunCwd([
-          "conclude", "--delegation", delegationId,
-          "--delivery-disposition", "owner_continue", "--json",
-        ], dir);
-      }).toThrow("simulated event append failure");
+      const r2 = tsRunCwd([
+        "conclude", "--delegation", delegationId,
+        "--delivery-disposition", "owner_continue", "--json",
+      ], dir);
+
+      // Must NOT output success — code non-zero, stdout empty
+      expect(r2.code).toBe(1);
+      expect(r2.stdout).toBe("");
+      const err = JSON.parse(r2.stderr);
+      expect(err.ok).toBe(false);
+      expect(err.error).toBe("event_append_failure");
 
       // Lease must be retained (not released) — the failure prevents release
       const slPath = storyLeasesPath(dir);
@@ -3354,12 +3419,17 @@ describe("US-DELTA-003 — conclude append-failure lease retention (BLOCK #5)", 
     });
 
     try {
-      expect(() => {
-        tsRunCwd([
-          "conclude", "--delegation", delegationId,
-          "--delivery-disposition", "owner_continue", "--json",
-        ], dir);
-      }).toThrow("simulated event append failure");
+      const r2 = tsRunCwd([
+        "conclude", "--delegation", delegationId,
+        "--delivery-disposition", "owner_continue", "--json",
+      ], dir);
+
+      // Must NOT output success
+      expect(r2.code).toBe(1);
+      expect(r2.stdout).toBe("");
+      const errObj = JSON.parse(r2.stderr);
+      expect(errObj.ok).toBe(false);
+      expect(errObj.error).toBe("event_append_failure");
 
       // Lease MUST be retained (not released) — the failure prevents release
       const slPath = storyLeasesPath(dir);

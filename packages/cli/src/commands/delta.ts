@@ -297,6 +297,13 @@ function prepareCommand(args: string[]): number {
       hostId: resolvedHostId,
       ts: now,
     });
+    if (_eventAppendFailure) {
+      try { _eventAppendFailure({ type: "delta:prepared" }); } catch {
+        if (json) process.stderr.write(JSON.stringify({ ok: false, error: "event_append_failure", detail: "Event append failure after delta:prepared" }) + "\n");
+        else process.stderr.write("Prepare failed: event append failure\n");
+        return 1;
+      }
+    }
 
     // delta:role_resolved for each role
     const roles = (input.resolutionTemplate as unknown as Record<string, unknown>).roles;
@@ -897,11 +904,32 @@ function concludeCommand(args: string[]): number {
   // If the seam throws, the terminal event IS written but the caller must
   // preserve the lease and not report success.
   if (_eventAppendFailure) {
-    _eventAppendFailure(terminalEvent as Record<string, unknown>);
+    try {
+      _eventAppendFailure(terminalEvent as Record<string, unknown>);
+    } catch {
+      // The seam threw — terminal event is on disk, but we must NOT release
+      // the lease or report success. Return fail-loud.
+      if (json) {
+        process.stderr.write(JSON.stringify({ ok: false, error: "event_append_failure", detail: "Event append failed after terminal write" }) + "\n");
+      } else {
+        process.stderr.write("Conclude failed: event append failure\n");
+      }
+      return 1;
+    }
   }
 
   // Release host-delegation lease (identity match requires delegationId + runId)
-  releaseHostDelegationLease(cwd, storyId, delegationId, runId);
+  const released = releaseHostDelegationLease(cwd, storyId, delegationId, runId);
+  if (!released) {
+    // Lease release failed — terminal event already written, but the lease
+    // remains. Fail-loud so the caller knows the state is split.
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "lease_release_failed", detail: `Failed to release host-delegation lease for story ${storyId}` }) + "\n");
+    } else {
+      process.stderr.write(`Conclude warning: terminal recorded but lease release failed for story ${storyId}\n`);
+    }
+    return 1;
+  }
 
   if (json) {
     process.stdout.write(JSON.stringify({

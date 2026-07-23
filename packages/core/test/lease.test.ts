@@ -28,10 +28,10 @@ import {
   removeLease,
   legacyLeasePath,
   leaseDirPath,
-  reconcileExpiredClaims,
   type LeaseMap,
   type ClaimStepOps,
-} from "../src/index.js";
+} from "../src/backlog/lease.js";
+import { reconcileExpiredClaims } from "../src/reconcile/engine.js";
 import {
   closeSync,
   existsSync,

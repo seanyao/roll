@@ -693,4 +693,3 @@ export async function executeTerminalCommand(
     }
   }
 }
-

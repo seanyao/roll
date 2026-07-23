@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { hostname, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseWorkspaceInitConfig } from "@roll/core";
+import { normalizeAgentScopeConfig, parseWorkspaceInitConfig } from "@roll/core";
 import {
   applyWorkspaceInitialization,
   inspectWorkspaceInitialization,
@@ -86,6 +86,9 @@ describe("Workspace filesystem transaction", () => {
     expect(first.outcome).toBe("created");
     expect(first.plan.steps.at(-1)).toMatchObject({ kind: "registry", target: "ws-demo" });
     expect(JSON.parse(readFileSync(join(f.root, "workspace.yaml"), "utf8"))).toMatchObject({ workspaceId: "ws-demo" });
+    const agentScope = normalizeAgentScopeConfig(readFileSync(join(f.root, "agents.yaml"), "utf8"));
+    expect(agentScope.errors).toEqual([]);
+    expect(agentScope.config).toMatchObject({ scope: "workspace", inherits: "machine" });
     expect(tree(f.root).map((row) => row.split(":").slice(0, 2).join(":"))).toEqual(expect.arrayContaining([
       "f:agents.yaml",
       "f:backlog/index.md",

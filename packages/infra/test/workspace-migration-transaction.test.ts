@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { planHistoricalWorkspaceMigration } from "@roll/core";
+import { normalizeAgentScopeConfig, planHistoricalWorkspaceMigration } from "@roll/core";
 import type { HistoricalMigrationPlan } from "@roll/spec";
 import {
   applyHistoricalWorkspaceMigration,
@@ -122,6 +122,9 @@ describe("US-WS-019a historical Workspace migration transaction", () => {
     expect(readFileSync(join(workspace, "backlog", "index.md"), "utf8")).toBe("# Backlog\n");
     expect(readFileSync(join(workspace, "backlog", "legacy", "US-1", "spec.md"), "utf8")).toBe("# US-1\n");
     expect(readFileSync(join(workspace, "runtime", "legacy-import", "loop", "runs.jsonl"), "utf8")).toBe("{}\n");
+    const agentScope = normalizeAgentScopeConfig(readFileSync(join(workspace, "agents.yaml"), "utf8"));
+    expect(agentScope.errors).toEqual([]);
+    expect(agentScope.config).toMatchObject({ scope: "workspace", inherits: "machine" });
     expect(existsSync(join(workspace, "primary"))).toBe(false);
     expect(existsSync(join(f.rollHome, "repos", `${saved.repository.repoId}.git`))).toBe(true);
     expect(JSON.parse(readFileSync(workspaceRegistryPath(f.rollHome), "utf8"))).toMatchObject({

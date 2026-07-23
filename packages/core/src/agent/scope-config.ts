@@ -199,6 +199,11 @@ function parseModels(node: YamlValue | undefined): Record<ModelId, AgentScopeMod
 const WORKSPACE_TOP_LEVEL_KEYS = new Set(["schema", "scope", "inherits", "roles", "defaults"]);
 const WORKSPACE_DEFAULT_SCOPES = new Set(["story", "skill"]);
 
+/** Canonical closed Workspace casting scope used by every Workspace creator. */
+export function renderDefaultWorkspaceAgentScope(): string {
+  return `schema: ${AGENT_SCOPE_SCHEMA}\nscope: workspace\ninherits: machine\n\nroles: {}\n`;
+}
+
 function validateWorkspaceTopLevel(root: YamlMap, errors: string[]): void {
   for (const key of Object.keys(root)) {
     if (!WORKSPACE_TOP_LEVEL_KEYS.has(key)) errors.push(`workspace: key '${key}' is not allowed`);

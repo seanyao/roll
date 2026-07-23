@@ -13,6 +13,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   buildWorkspaceInitPlan,
+  renderDefaultWorkspaceAgentScope,
   type WorkspaceInitConfig,
   type WorkspaceInitPlan,
   type WorkspaceInitPlanStep,
@@ -86,7 +87,7 @@ function expectedFiles(config: WorkspaceInitConfig): Readonly<Record<string, str
   return {
     [join(config.root, "workspace.yaml")]: manifestText(config),
     [join(config.root, "charter.md")]: `# ${config.manifest.displayName}\n\nWorkspace charter.\n`,
-    [join(config.root, "agents.yaml")]: "schema: roll.workspace-agents/v1\nagents: {}\n",
+    [join(config.root, "agents.yaml")]: renderDefaultWorkspaceAgentScope(),
     [join(config.root, "policy.yaml")]: "schema: roll.workspace-policy/v1\n",
     [join(config.root, "backlog", "index.md")]: "# Backlog\n",
   };

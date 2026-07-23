@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { planHistoricalWorkspaceMigration } from "@roll/core";
+import { planHistoricalWorkspaceMigration, renderDefaultWorkspaceAgentScope } from "@roll/core";
 import {
   REPOSITORY_BINDING_V1,
   WORKSPACE_MANIFEST_V1,
@@ -556,7 +556,7 @@ function createBaseLayout(journal: MigrationJournal): void {
   const texts: Readonly<Record<string, string>> = {
     "workspace.yaml": `${JSON.stringify(workspaceManifest(journal), null, 2)}\n`,
     "charter.md": `# ${journal.plan.workspaceId}\n\nMigrated Workspace charter.\n`,
-    "agents.yaml": "schema: roll.workspace-agents/v1\nagents: {}\n",
+    "agents.yaml": renderDefaultWorkspaceAgentScope(),
     "policy.yaml": "schema: roll.workspace-policy/v1\n",
     "migration-manifest.json": `${JSON.stringify(baseManifest(journal, "staging"), null, 2)}\n`,
   };

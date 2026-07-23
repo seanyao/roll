@@ -144,7 +144,9 @@ Workspace runtime 固定解析 `machine -> workspace -> story -> skill`。其中
 身份的 lease；全局上限统计所有 lease，per-agent 上限跨 model/context 聚合。容量不足
 产生显式 `waiting_capacity`：不 spawn、不换 agent、不计 Story 失败或 no-progress，释放
 Story claim 后留待后续 tick。心跳或 release 的 exact ownership 丢失会立即终止未授权
-进程并 fail loud；只有同主机且确认死进程的 stale lease 可在 broker lock 内回收。
+进程并 fail loud；只有同主机且确认死进程的 stale lease 可在 broker lock 内回收。broker transaction
+lock 记录 host、PID 与 process-start identity；进程崩溃或 PID 复用时可自动回收，也可通过
+`roll workspace doctor` 输出的 typed repair 清理，foreign、live 或不可解析 owner 一律保持阻塞。
 
 **Role**：Canonical user-facing role model is **Supervisor / Designer / Builder / Evaluator**。
 

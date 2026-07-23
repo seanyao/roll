@@ -7,7 +7,8 @@ export type WorkspaceDoctorRepairKind =
   | "rebuild_cache"
   | "repair_requirement_projection"
   | "recreate_clean_worktree"
-  | "cleanup_stale_owned_lease";
+  | "cleanup_stale_owned_lease"
+  | "cleanup_stale_capacity_broker_lock";
 
 export interface WorkspaceDoctorRepairAction {
   readonly kind: WorkspaceDoctorRepairKind;
@@ -57,13 +58,19 @@ export interface RuntimeLockDoctorProbe extends DoctorProbeBase {
   readonly state: "active" | "stale_owned_dead" | "stale_live_or_foreign" | "unreadable" | "unsupported_schema";
 }
 
+export interface CapacityBrokerLockDoctorProbe extends DoctorProbeBase {
+  readonly kind: "capacity_broker_lock";
+  readonly state: "active" | "stale_owned_dead" | "stale_live_or_foreign" | "unreadable";
+}
+
 export type WorkspaceDoctorProbe =
   | RegistryDoctorProbe
   | CacheDoctorProbe
   | RequirementProjectionDoctorProbe
   | IssueDoctorProbe
   | LeaseDoctorProbe
-  | RuntimeLockDoctorProbe;
+  | RuntimeLockDoctorProbe
+  | CapacityBrokerLockDoctorProbe;
 
 export type WorkspaceDoctorFindingCode =
   | "registry_stale_path"
@@ -89,6 +96,9 @@ export type WorkspaceDoctorFindingCode =
   | "lease_stale_live_or_foreign"
   | "lease_unreadable"
   | "lease_unsupported_schema"
+  | "capacity_broker_lock_stale_owned"
+  | "capacity_broker_lock_stale_live_or_foreign"
+  | "capacity_broker_lock_unreadable"
   | "runtime_lock_stale_owned"
   | "runtime_lock_stale_live_or_foreign"
   | "runtime_lock_unreadable"
@@ -130,7 +140,8 @@ const KIND_ORDER: Readonly<Record<WorkspaceDoctorProbe["kind"], number>> = {
   requirement_projection: 2,
   issue: 3,
   runtime_lock: 4,
-  lease: 5,
+  capacity_broker_lock: 5,
+  lease: 6,
 };
 
 const STATUS_ORDER: Readonly<Record<WorkspaceDoctorStatus, number>> = {
@@ -224,12 +235,24 @@ function classifyRuntimeLock(probe: RuntimeLockDoctorProbe): WorkspaceDoctorFind
   return finding(probe, "runtime_lock_unsupported_schema", "blocked");
 }
 
+function classifyCapacityBrokerLock(probe: CapacityBrokerLockDoctorProbe): WorkspaceDoctorFinding | undefined {
+  if (probe.state === "active") return undefined;
+  if (probe.state === "stale_owned_dead") {
+    return finding(probe, "capacity_broker_lock_stale_owned", "repairable", "cleanup_stale_capacity_broker_lock");
+  }
+  if (probe.state === "stale_live_or_foreign") {
+    return finding(probe, "capacity_broker_lock_stale_live_or_foreign", "blocked");
+  }
+  return finding(probe, "capacity_broker_lock_unreadable", "blocked");
+}
+
 function classify(probe: WorkspaceDoctorProbe): WorkspaceDoctorFinding | undefined {
   if (probe.kind === "registry") return classifyRegistry(probe);
   if (probe.kind === "cache") return classifyCache(probe);
   if (probe.kind === "requirement_projection") return classifyRequirement(probe);
   if (probe.kind === "issue") return classifyIssue(probe);
   if (probe.kind === "lease") return classifyLease(probe);
+  if (probe.kind === "capacity_broker_lock") return classifyCapacityBrokerLock(probe);
   return classifyRuntimeLock(probe);
 }
 

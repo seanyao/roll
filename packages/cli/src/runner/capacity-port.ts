@@ -72,6 +72,7 @@ export function createNodeAgentCapacityPort(opts: {
     clockMs: () => opts.clock() * 1_000,
     host,
     processIdentity,
+    processStartedAtMs: controllerStartedAtMs,
   });
   let currentLease: import("@roll/spec").AgentCapacityLease | undefined;
 

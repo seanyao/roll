@@ -1,18 +1,10 @@
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  AGENT_CAPACITY_BROKER_LOCK_SCHEMA,
   AGENT_CAPACITY_LEASE_SCHEMA,
+  type AgentCapacityBrokerLock,
   type AgentCapacityAcquireRequest,
   type AgentCapacityAcquireResult,
   type AgentCapacityLease,
@@ -32,6 +24,7 @@ export interface NodeAgentCapacityBrokerOptions {
   readonly clockMs: () => number;
   readonly host: string;
   readonly processIdentity: (pid: number) => ProcessIdentity;
+  readonly processStartedAtMs?: number;
   /** Bounded real-time wait for another broker transaction to finish. */
   readonly lockWaitMs?: number;
   /** Poll cadence while the machine broker lock is held elsewhere. */
@@ -44,6 +37,22 @@ export type AgentCapacityCleanupResult =
   | {
       readonly kind: "blocked";
       readonly reason: "lease_unreadable_or_unknown_schema" | "lease_active" | "foreign_owner" | "owner_process_alive";
+    };
+
+export type AgentCapacityBrokerLockCleanupResult =
+  | { readonly kind: "cleaned" }
+  | { readonly kind: "already_clean" }
+  | {
+      readonly kind: "blocked";
+      readonly reason: "lock_unreadable_or_unknown_schema" | "lock_active" | "foreign_owner";
+    };
+
+export type AgentCapacityBrokerLockInspection =
+  | { readonly state: "absent" }
+  | { readonly state: "unreadable" }
+  | {
+      readonly state: "active" | "stale_owned_dead" | "stale_live_or_foreign";
+      readonly owner: AgentCapacityBrokerLock;
     };
 
 interface LeaseRead {
@@ -82,6 +91,48 @@ function leaseFileName(leaseId: string): string {
   return `${createHash("sha256").update(leaseId).digest("hex")}.json`;
 }
 
+const BROKER_LOCK_OWNER_FILE = "owner.json";
+
+function brokerLockPath(root: string): string {
+  return join(root, "broker.lock");
+}
+
+function isBrokerLock(value: unknown): value is AgentCapacityBrokerLock {
+  return isRecord(value) &&
+    value["schema"] === AGENT_CAPACITY_BROKER_LOCK_SCHEMA &&
+    typeof value["ownerToken"] === "string" && value["ownerToken"] !== "" &&
+    typeof value["host"] === "string" && value["host"] !== "" &&
+    typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 &&
+    typeof value["processStartedAtMs"] === "number" && Number.isFinite(value["processStartedAtMs"]) &&
+    typeof value["acquiredAtMs"] === "number" && Number.isFinite(value["acquiredAtMs"]);
+}
+
+function readBrokerLock(root: string): AgentCapacityBrokerLock | undefined {
+  try {
+    const value = JSON.parse(readFileSync(join(brokerLockPath(root), BROKER_LOCK_OWNER_FILE), "utf8")) as unknown;
+    return isBrokerLock(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function inspectAgentCapacityBrokerLock(options: {
+  readonly root: string;
+  readonly host: string;
+  readonly processIdentity: (pid: number) => ProcessIdentity;
+}): AgentCapacityBrokerLockInspection {
+  const path = brokerLockPath(options.root);
+  if (!existsSync(path)) return { state: "absent" };
+  const owner = readBrokerLock(options.root);
+  if (owner === undefined) return { state: "unreadable" };
+  if (owner.host !== options.host) return { state: "stale_live_or_foreign", owner };
+  const identity = options.processIdentity(owner.pid);
+  if (!identity.alive || (identity.startedAtMs !== undefined && identity.startedAtMs !== owner.processStartedAtMs)) {
+    return { state: "stale_owned_dead", owner };
+  }
+  return { state: "active", owner };
+}
+
 /** Filesystem-backed machine broker. The broker lock covers the entire
  * read/prune/count/claim transaction and is never held while an agent runs. */
 export class NodeAgentCapacityBroker {
@@ -92,6 +143,7 @@ export class NodeAgentCapacityBroker {
   readonly #clockMs: () => number;
   readonly #host: string;
   readonly #processIdentity: (pid: number) => ProcessIdentity;
+  readonly #processStartedAtMs: number;
   readonly #lockWaitMs: number;
   readonly #lockPollMs: number;
 
@@ -103,6 +155,7 @@ export class NodeAgentCapacityBroker {
     this.#clockMs = options.clockMs;
     this.#host = options.host;
     this.#processIdentity = options.processIdentity;
+    this.#processStartedAtMs = options.processStartedAtMs ?? Date.now() - process.uptime() * 1_000;
     this.#lockWaitMs = options.lockWaitMs ?? 2_000;
     this.#lockPollMs = options.lockPollMs ?? 10;
   }
@@ -190,29 +243,97 @@ export class NodeAgentCapacityBroker {
     });
   }
 
+  cleanupStaleBrokerLock(): AgentCapacityBrokerLockCleanupResult {
+    const inspection = inspectAgentCapacityBrokerLock({
+      root: this.#root,
+      host: this.#host,
+      processIdentity: this.#processIdentity,
+    });
+    if (inspection.state === "absent") return { kind: "already_clean" };
+    if (inspection.state === "unreadable") {
+      return { kind: "blocked", reason: "lock_unreadable_or_unknown_schema" };
+    }
+    if (inspection.state === "active") return { kind: "blocked", reason: "lock_active" };
+    if (inspection.state === "stale_live_or_foreign") return { kind: "blocked", reason: "foreign_owner" };
+    return this.#isolateStaleBrokerLock(inspection.owner.ownerToken)
+      ? { kind: "cleaned" }
+      : { kind: "blocked", reason: "lock_unreadable_or_unknown_schema" };
+  }
+
   #withLock<T>(operation: () => T): T {
     mkdirSync(this.#leasesDir, { recursive: true });
     const deadline = Date.now() + this.#lockWaitMs;
-    let fd: number | undefined;
-    while (fd === undefined) {
+    let ownerToken: string | undefined;
+    while (ownerToken === undefined) {
+      ownerToken = this.#tryAcquireBrokerLock();
+      if (ownerToken !== undefined) break;
+      if (this.cleanupStaleBrokerLock().kind === "cleaned") continue;
+      if (Date.now() >= deadline) throw new Error("agent_capacity_broker_lock_busy");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, this.#lockPollMs);
+    }
+    try {
+      return operation();
+    } finally {
+      this.#releaseBrokerLock(ownerToken);
+    }
+  }
+
+  #tryAcquireBrokerLock(): string | undefined {
+    const ownerToken = randomUUID();
+    const temporary = join(this.#root, `.broker-lock.${process.pid}.${ownerToken}.tmp`);
+    mkdirSync(temporary);
+    try {
+      const owner: AgentCapacityBrokerLock = {
+        schema: AGENT_CAPACITY_BROKER_LOCK_SCHEMA,
+        ownerToken,
+        host: this.#host,
+        pid: process.pid,
+        processStartedAtMs: this.#processStartedAtMs,
+        acquiredAtMs: this.#clockMs(),
+      };
+      writeFileSync(join(temporary, BROKER_LOCK_OWNER_FILE), `${JSON.stringify(owner)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
       try {
-        fd = openSync(this.#lockPath, "wx", 0o600);
+        renameSync(temporary, this.#lockPath);
+        return ownerToken;
       } catch (error) {
         const code = typeof error === "object" && error !== null && "code" in error
           ? String((error as { code?: unknown }).code ?? "")
           : "";
-        if (code !== "EEXIST") throw new Error(`agent_capacity_broker_lock_failed:${code || "unknown"}`);
-        if (Date.now() >= deadline) throw new Error("agent_capacity_broker_lock_busy");
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, this.#lockPollMs);
+        if (["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"].includes(code)) return undefined;
+        throw new Error(`agent_capacity_broker_lock_failed:${code || "unknown"}`, { cause: error });
       }
-    }
-    try {
-      writeFileSync(fd, JSON.stringify({ schema: "roll-agent-capacity-broker-lock/v1", host: this.#host }));
-      return operation();
     } finally {
-      closeSync(fd);
-      if (existsSync(this.#lockPath)) unlinkSync(this.#lockPath);
+      rmSync(temporary, { recursive: true, force: true });
     }
+  }
+
+  #releaseBrokerLock(ownerToken: string): void {
+    const owner = readBrokerLock(this.#root);
+    if (owner?.ownerToken !== ownerToken) return;
+    rmSync(this.#lockPath, { recursive: true, force: true });
+  }
+
+  #isolateStaleBrokerLock(ownerToken: string): boolean {
+    const isolated = join(this.#root, `.broker-lock.stale.${ownerToken}.${randomUUID()}`);
+    try {
+      renameSync(this.#lockPath, isolated);
+    } catch {
+      return false;
+    }
+    const isolatedOwner = (() => {
+      try {
+        const value = JSON.parse(readFileSync(join(isolated, BROKER_LOCK_OWNER_FILE), "utf8")) as unknown;
+        return isBrokerLock(value) ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
+    if (isolatedOwner?.ownerToken !== ownerToken) {
+      if (!existsSync(this.#lockPath)) renameSync(isolated, this.#lockPath);
+      return false;
+    }
+    rmSync(isolated, { recursive: true, force: true });
+    return true;
   }
 
   #readAndPrune(now: number): LeaseRead[] {

@@ -372,6 +372,35 @@ describe("US-WS-018 roll workspace doctor", () => {
     expect(JSON.parse(repeated.stdout)).toMatchObject({ outcome: "reused", report: { status: "healthy" } });
   });
 
+  it("diagnoses and cleans a stale same-host dead capacity broker lock", async () => {
+    const f = await fixture();
+    const lockPath = join(f.rollHome, "locks", "capacity", "broker.lock");
+    mkdirSync(lockPath, { recursive: true });
+    writeFileSync(join(lockPath, "owner.json"), `${JSON.stringify({
+      schema: "roll-agent-capacity-broker-lock/v1",
+      ownerToken: "dead-broker-owner",
+      host: hostname(),
+      pid: 999999,
+      processStartedAtMs: 1,
+      acquiredAtMs: 1,
+    })}\n`, "utf8");
+    const action = "cleanup_stale_capacity_broker_lock:broker-lock";
+
+    const diagnosis = await run(["workspace", "doctor", "ws-demo", "--json"], f);
+    expect(JSON.parse(diagnosis.stdout)).toMatchObject({
+      status: "repairable",
+      findings: [{
+        code: "capacity_broker_lock_stale_owned",
+        repairAction: { kind: "cleanup_stale_capacity_broker_lock", targetId: "broker-lock" },
+      }],
+    });
+
+    const repaired = await run(["workspace", "doctor", "ws-demo", "--repair", action, "--json"], f);
+    expect(repaired).toMatchObject({ status: 0, stderr: "" });
+    expect(JSON.parse(repaired.stdout)).toMatchObject({ outcome: "repaired", report: { status: "healthy" } });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
   it("blocks a stale foreign machine lease without leaking owner identity or credentials", async () => {
     const f = await fixture();
     const leaseRoot = join(f.rollHome, "locks", "capacity", "leases");

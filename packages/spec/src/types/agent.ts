@@ -341,6 +341,16 @@ export interface NormalizedAgentCapacityPolicy {
 }
 
 export const AGENT_CAPACITY_LEASE_SCHEMA = "roll-agent-capacity-lease/v1" as const;
+export const AGENT_CAPACITY_BROKER_LOCK_SCHEMA = "roll-agent-capacity-broker-lock/v1" as const;
+
+export interface AgentCapacityBrokerLock {
+  readonly schema: typeof AGENT_CAPACITY_BROKER_LOCK_SCHEMA;
+  readonly ownerToken: string;
+  readonly host: string;
+  readonly pid: number;
+  readonly processStartedAtMs: number;
+  readonly acquiredAtMs: number;
+}
 
 export interface AgentCapacityKey {
   readonly agent: AgentId;

@@ -46,6 +46,23 @@ describe("US-WS-018 Workspace doctor classification", () => {
     expect(report.nextAction).toEqual({ kind: "repair", action: { kind: "update_registry_path", targetId: "ws-demo" } });
   });
 
+  it("offers a typed repair for a stale owned capacity broker lock", () => {
+    const probe = {
+      kind: "capacity_broker_lock",
+      state: "stale_owned_dead",
+      evidencePath: "locks/capacity/broker.lock",
+      targetId: "broker-lock",
+    } as unknown as WorkspaceDoctorFacts["probes"][number];
+
+    expect(diagnose([probe])).toMatchObject({
+      status: "repairable",
+      findings: [{
+        code: "capacity_broker_lock_stale_owned",
+        repairAction: { kind: "cleanup_stale_capacity_broker_lock", targetId: "broker-lock" },
+      }],
+    });
+  });
+
   it.each([
     ["healthy archive permits drift repair", "drift", "healthy", "repairable", "repair_requirement_projection"],
     ["healthy archive permits interrupted repair resume", "pending_journal", "healthy", "repairable", "repair_requirement_projection"],

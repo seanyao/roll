@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -50,7 +50,65 @@ function broker(root: string, now = 1_000) {
   });
 }
 
+function writeBrokerLock(root: string, owner: {
+  readonly host: string;
+  readonly pid: number;
+  readonly processStartedAtMs: number;
+}): void {
+  const lock = join(root, "broker.lock");
+  mkdirSync(lock, { recursive: true });
+  writeFileSync(join(lock, "owner.json"), JSON.stringify({
+    schema: "roll-agent-capacity-broker-lock/v1",
+    ownerToken: "stale-owner",
+    acquiredAtMs: 1,
+    ...owner,
+  }));
+}
+
 describe("NodeAgentCapacityBroker", () => {
+  it("reclaims a stale same-host dead broker transaction lock", () => {
+    const root = tempDir("capacity-stale-broker-lock");
+    writeBrokerLock(root, { host: hostname(), pid: 2000, processStartedAtMs: 500 });
+
+    const result = new NodeAgentCapacityBroker({
+      root,
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processIdentity: () => ({ alive: false }),
+      lockWaitMs: 0,
+    }).acquire(request("after-crash"));
+
+    expect(result.kind).toBe("acquired");
+    expect(existsSync(join(root, "broker.lock"))).toBe(false);
+  });
+
+  it("reclaims a broker lock after PID reuse but preserves the live exact owner", () => {
+    const reusedRoot = tempDir("capacity-reused-broker-lock");
+    writeBrokerLock(reusedRoot, { host: hostname(), pid: 2000, processStartedAtMs: 500 });
+    const reclaimed = new NodeAgentCapacityBroker({
+      root: reusedRoot,
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processIdentity: () => ({ alive: true, startedAtMs: 999 }),
+      lockWaitMs: 0,
+    }).acquire(request("after-pid-reuse"));
+    expect(reclaimed.kind).toBe("acquired");
+
+    const liveRoot = tempDir("capacity-live-broker-lock");
+    writeBrokerLock(liveRoot, { host: hostname(), pid: 2000, processStartedAtMs: 500 });
+    expect(() => new NodeAgentCapacityBroker({
+      root: liveRoot,
+      policy: POLICY,
+      clockMs: () => 1_000,
+      host: hostname(),
+      processIdentity: () => ({ alive: true, startedAtMs: 500 }),
+      lockWaitMs: 0,
+    }).acquire(request("blocked"))).toThrow("agent_capacity_broker_lock_busy");
+    expect(existsSync(join(liveRoot, "broker.lock"))).toBe(true);
+  });
+
   it("serializes a real concurrent broker transaction before claiming", async () => {
     const root = tempDir("capacity-lock-contention");
     const child = spawn(process.execPath, [

@@ -21,6 +21,7 @@ import {
   ensureRepositoryCache,
   git,
   inspectRepositoryCache,
+  inspectAgentCapacityBrokerLock,
   inspectIssueInitJournal,
   inspectRequirementProjection,
   issueWorktreeIdentity,
@@ -86,6 +87,7 @@ const REPAIR_KINDS = new Set<WorkspaceDoctorRepairKind>([
   "repair_requirement_projection",
   "recreate_clean_worktree",
   "cleanup_stale_owned_lease",
+  "cleanup_stale_capacity_broker_lock",
 ]);
 
 function parseRepairAction(value: string): WorkspaceDoctorRepairAction | undefined {
@@ -494,6 +496,21 @@ function capacityLeaseProbes(rollHome: string, workspaceId: string): WorkspaceDo
   return probes;
 }
 
+function capacityBrokerLockProbes(rollHome: string): WorkspaceDoctorProbe[] {
+  const inspection = inspectAgentCapacityBrokerLock({
+    root: join(rollHome, "locks", "capacity"),
+    host: hostname(),
+    processIdentity: (pid) => ({ alive: pidAlive(pid) }),
+  });
+  if (inspection.state === "absent") return [];
+  return [{
+    kind: "capacity_broker_lock",
+    state: inspection.state,
+    targetId: "broker-lock",
+    evidencePath: "locks/capacity/broker.lock",
+  }];
+}
+
 function machineCapacityPolicy(rollHome: string): NormalizedAgentCapacityPolicy | undefined {
   const path = join(rollHome, "agents.yaml");
   if (!existsSync(path)) {
@@ -527,6 +544,7 @@ async function diagnose(rollHome: string, entry: InspectedWorkspace): Promise<Wo
   probes.push(...requirementProbes(entry.root, workspace));
   probes.push(...await issueProbes(rollHome, entry.root, workspace));
   probes.push(...runtimeLockProbes(entry.root));
+  probes.push(...capacityBrokerLockProbes(rollHome));
   probes.push(...capacityLeaseProbes(rollHome, entry.workspaceId));
   return diagnoseWorkspace({ workspaceId: entry.workspaceId, probes });
 }
@@ -721,6 +739,31 @@ function cleanupLease(
   throw new WorkspaceDoctorRepairError(result.reason);
 }
 
+function cleanupCapacityBrokerLock(
+  rollHome: string,
+  action: WorkspaceDoctorRepairAction,
+  report: WorkspaceDoctorReport,
+): "repaired" | "reused" {
+  const lockPath = join(rollHome, "locks", "capacity", "broker.lock");
+  if (!repairOffered(report, action)) {
+    if (!existsSync(lockPath)) return "reused";
+    throw new WorkspaceDoctorRepairError("capacity_broker_lock_repair_not_offered");
+  }
+  const policy = machineCapacityPolicy(rollHome);
+  if (policy === undefined) throw new WorkspaceDoctorRepairError("capacity_policy_invalid");
+  const broker = new NodeAgentCapacityBroker({
+    root: join(rollHome, "locks", "capacity"),
+    policy,
+    clockMs: Date.now,
+    host: hostname(),
+    processIdentity: (pid) => ({ alive: pidAlive(pid) }),
+  });
+  const result = broker.cleanupStaleBrokerLock();
+  if (result.kind === "cleaned") return "repaired";
+  if (result.kind === "already_clean") return "reused";
+  throw new WorkspaceDoctorRepairError(result.reason);
+}
+
 async function executeRepair(
   rollHome: string,
   entry: InspectedWorkspace,
@@ -733,6 +776,7 @@ async function executeRepair(
   if (action.kind === "rebuild_cache") return repairCache(rollHome, workspace, action, report);
   if (action.kind === "repair_requirement_projection") return repairProjection(entry.root, workspace, action, report);
   if (action.kind === "recreate_clean_worktree") return repairIssue(rollHome, entry, workspace, action, report);
+  if (action.kind === "cleanup_stale_capacity_broker_lock") return cleanupCapacityBrokerLock(rollHome, action, report);
   return cleanupLease(rollHome, action, report);
 }
 

@@ -128,8 +128,8 @@ export const v3Catalog: Catalog = {
   "workspace.migrate.rollback.outcome.rolled_back": { en: "rolled back", zh: "已回滚" },
   "workspace.migrate.rollback.outcome.absent": { en: "no pending transaction", zh: "无待处理事务" },
   "workspace.doctor.usage": {
-    en: "Usage: roll workspace doctor <id> [--json] [--repair <typed-action>] [--path <new-workspace-path>]\n  Diagnosis is read-only. Repair accepts only an action emitted by the latest diagnosis.\n  Actions: update_registry_path:<workspace-id> (requires absolute --path), rebuild_cache:<repo-id>, repair_requirement_projection:<requirement-id>, recreate_clean_worktree:<story-id>, cleanup_stale_owned_lease:<lease-id>.\n",
-    zh: "用法：roll workspace doctor <ID> [--json] [--repair <类型化动作>] [--path <工作区新路径>]\n  诊断只读。修复仅接受最新诊断输出的动作。\n  动作：update_registry_path:<工作区ID>（必须提供绝对 --path）、rebuild_cache:<仓库ID>、repair_requirement_projection:<需求ID>、recreate_clean_worktree:<Story ID>、cleanup_stale_owned_lease:<lease ID>。\n",
+    en: "Usage: roll workspace doctor <id> [--json] [--repair <typed-action>] [--path <new-workspace-path>]\n  Diagnosis is read-only. Repair accepts only an action emitted by the latest diagnosis.\n  Actions: update_registry_path:<workspace-id> (requires absolute --path), rebuild_cache:<repo-id>, repair_requirement_projection:<requirement-id>, recreate_clean_worktree:<story-id>, cleanup_stale_owned_lease:<lease-id>, cleanup_stale_capacity_broker_lock:broker-lock.\n",
+    zh: "用法：roll workspace doctor <ID> [--json] [--repair <类型化动作>] [--path <工作区新路径>]\n  诊断只读。修复仅接受最新诊断输出的动作。\n  动作：update_registry_path:<工作区ID>（必须提供绝对 --path）、rebuild_cache:<仓库ID>、repair_requirement_projection:<需求ID>、recreate_clean_worktree:<Story ID>、cleanup_stale_owned_lease:<lease ID>、cleanup_stale_capacity_broker_lock:broker-lock。\n",
   },
   "workspace.doctor.title": { en: "Workspace %s doctor: %s", zh: "工作区 %s doctor：%s" },
   "workspace.doctor.header": { en: "Status\tFinding\tEvidence\tNext action", zh: "状态\t发现\t证据\t下一步" },

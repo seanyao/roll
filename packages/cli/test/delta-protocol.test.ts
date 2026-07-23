@@ -85,8 +85,10 @@ function tsRunCwd(argv: string[], cwd: string): { stdout: string; stderr: string
 
 function scrubId(s: string): string {
   return s
+    // delta- prefixed UUIDs = delegation IDs
     .replace(/delta-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "delta-<DELEGATION_ID>")
-    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<DELEGATION_ID>")
+    // Plain UUIDs (project temp IDs, random IDs) = distinct from delegation IDs
+    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<UUID>")
     .replace(/[a-f0-9]{64}/gi, "<SHA256>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "<TS>")
     .replace(/\b\d{13}\b/g, "<TS>");

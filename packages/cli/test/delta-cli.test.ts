@@ -40,8 +40,10 @@ function tsRun(argv: string[]): { stdout: string; stderr: string; code: number }
 function scrub(output: string): string {
   return output
     .replace(/\/[^\s:"']*\/delta-[a-f0-9-]+/g, "<PROJECT>/delta-<DELEGATION_ID>")
+    // delta- prefixed UUIDs = delegation IDs
     .replace(/delta-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "delta-<DELEGATION_ID>")
-    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<DELEGATION_ID>")
+    // Plain UUIDs = project dynamic IDs, distinct from delegation IDs
+    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<UUID>")
     .replace(/[a-f0-9]{64}/gi, "<SHA256>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "<TS>")
     .replace(/\b\d{13}\b/g, "<TS>")
@@ -182,6 +184,7 @@ describe("US-DELTA-003 — import audit", () => {
 
     const filesToCheck = [
       path.join(deltaDir, "delta.ts"),
+      path.join(deltaDir, "index.ts"),
       path.join(libDir, "delta-allocation.ts"),
       path.join(libDir, "delta-artifacts.ts"),
     ];
@@ -191,6 +194,12 @@ describe("US-DELTA-003 — import audit", () => {
       if (!fs.existsSync(file)) {
         throw new Error(`Audit FAIL-CLOSED: required file missing: ${file}`);
       }
+    }
+
+    // Verify commands/index.ts registers delta command
+    const indexContent = fs.readFileSync(filesToCheck[1]!, "utf8");
+    if (!indexContent.includes("deltaCommand") || !indexContent.includes('registerPorted("delta"')) {
+      throw new Error("Audit FAIL-CLOSED: commands/index.ts must import and register deltaCommand");
     }
 
     const forbidden = [
@@ -207,7 +216,7 @@ describe("US-DELTA-003 — import audit", () => {
       "artifact-protocol",
     ];
 
-    for (const file of filesToCheck) {
+    for (const file of [filesToCheck[0]!, filesToCheck[2]!, filesToCheck[3]!]) {
       const content = fs.readFileSync(file, "utf8");
       for (const pattern of forbidden) {
         const lines = content.split("\n");
@@ -218,6 +227,44 @@ describe("US-DELTA-003 — import audit", () => {
         });
         if (offending.length > 0) {
           throw new Error(`Audit FAIL-CLOSED: ${file} contains forbidden pattern "${pattern}"`);
+        }
+      }
+    }
+  });
+
+  it("delta source files reject dynamic import/require and unsupported syntax (fail-closed)", () => {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = require("node:path") as typeof import("node:path");
+
+    const deltaFile = path.resolve(__dirname, "..", "src", "commands", "delta.ts");
+    const allocFile = path.resolve(__dirname, "..", "src", "lib", "delta-allocation.ts");
+    const artifactsFile = path.resolve(__dirname, "..", "src", "lib", "delta-artifacts.ts");
+
+    const filesToAudit = [deltaFile, allocFile, artifactsFile];
+
+    for (const file of filesToAudit) {
+      if (!fs.existsSync(file)) {
+        throw new Error(`Audit FAIL-CLOSED: required file missing: ${file}`);
+      }
+      const content = fs.readFileSync(file, "utf8");
+      const lines = content.split("\n");
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed === "*") continue;
+
+        // Reject dynamic import() calls — but NOT TypeScript type annotations
+        // (e.g. "as import(\"@roll/spec\").Type" which are type-only, not runtime imports)
+        // Dynamic import is "import(" used as a call expression, not after "as" or ":"
+        if (/\bimport\s*\(/.test(trimmed)) {
+          // Allow type annotation patterns: "as import(", ": import(", "typeof import("
+          if (!/\b(as|typeof)\s+import\s*\(/.test(trimmed) && !/:\s*import\s*\(/.test(trimmed)) {
+            throw new Error(`Audit FAIL-CLOSED: ${file} contains dynamic import(): ${trimmed.trim()}`);
+          }
+        }
+        // Reject require() calls (CommonJS dynamic require)
+        if (/\brequire\s*\(/.test(trimmed) && !trimmed.includes("node:")) {
+          throw new Error(`Audit FAIL-CLOSED: ${file} contains dynamic require(): ${trimmed.trim()}`);
         }
       }
     }

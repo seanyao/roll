@@ -46,6 +46,22 @@ exports[`US-DELTA-003 — orphan status human + JSON snapshots > orphan frame sh
 "
 `;
 
+exports[`US-DELTA-003 — status human output with provenance > status after validate shows host-attested provenance, frozen in human + JSON snapshots 1`] = `
+"Delegation: <DELEGATION_ID>
+  Story: US-DELTA-HPROV2
+  Status: in_progress
+  Mode: delta-team
+  Trigger: host-guided
+  Topology: delta-team
+  Profile: standard
+  Cost: ? (host_unobservable)
+  Roles:
+    designer: artifact_published [pi/claude] (host-attested) cost=? (host_unobservable)
+    builder: resolved [pi/claude] cost=? (host_unobservable)
+    evaluator: resolved [pi/claude] cost=? (host_unobservable)
+"
+`;
+
 exports[`US-DELTA-003 — status human output with provenance > status human output includes trigger, topology, profile, roles with host-attested 1`] = `
 "Delegation: <DELEGATION_ID>
   Story: US-DELTA-HSTATUS

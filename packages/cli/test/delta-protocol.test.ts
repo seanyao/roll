@@ -1332,10 +1332,52 @@ describe("US-DELTA-003 — status human output with provenance", () => {
     // Must never use "verified"
     const statusStr = JSON.stringify(statusOut);
     expect(statusStr).not.toContain("verified");
+    // Must never use "adapter-observed"
+    expect(statusStr).not.toContain("adapter-observed");
     // Trigger, topology, profile must be present
     expect(statusOut.trigger).toBe("host-guided");
     expect(statusOut.topology).toBe("delta-team");
     expect(statusOut.qualityProfile).toBe("standard");
+  });
+
+  it("status after validate shows host-attested provenance, frozen in human + JSON snapshots", () => {
+    const dir = setupMinimalProject("US-DELTA-HPROV2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-HPROV2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-HPROV2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Validate to produce artifact_published with host-attested provenance
+    const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-HPROV2",
+      `delta-${delegationId}`, "role-artifacts", "designer");
+    mkdirSync(stageDir, { recursive: true });
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    const rVal = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
+    expect(rVal.code).toBe(0);
+
+    // JSON status with host-attested frozen
+    const rJson = tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
+    expect(rJson.code).toBe(0);
+    const jsonOut = JSON.parse(rJson.stdout);
+    // Must contain host-attested
+    expect(JSON.stringify(jsonOut)).toContain("host-attested");
+    expect(JSON.stringify(jsonOut)).not.toContain("verified");
+    expect(JSON.stringify(jsonOut)).not.toContain("adapter-observed");
+
+    // Human status snapshot
+    const rHuman = tsRunCwd(["status", "--delegation", delegationId], dir);
+    expect(rHuman.code).toBe(0);
+    expect(rHuman.stdout).toContain("host-attested");
+    expect(rHuman.stdout).not.toContain("verified");
+
+    const scrubbedHuman = scrubAll(rHuman.stdout, dir, delegationId);
+    expect(scrubbedHuman).toMatchSnapshot();
   });
 });
 

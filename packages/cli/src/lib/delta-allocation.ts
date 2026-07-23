@@ -197,7 +197,8 @@ export function readHostDelegationLease(
 
 // ── Atomic file write (temp + fsync + rename) ────────────────────────────────
 
-function atomicWriteJson(filePath: string, data: unknown): void {
+/** Atomic no-clobber JSON write. Exported for test adequacy verification. */
+export function atomicWriteJson(filePath: string, data: unknown): void {
   // No-overwrite invariant: target must not already exist (immutable evidence)
   if (existsSync(filePath)) {
     throw new PrepareError(

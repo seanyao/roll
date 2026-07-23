@@ -39,10 +39,11 @@ function tsRun(argv: string[]): { stdout: string; stderr: string; code: number }
 
 function scrub(output: string): string {
   return output
-    .replace(/\/[^\s:"']*\/delta-[a-f0-9-]+/g, "<PROJECT>/delta-<DELEGATION_ID>")
-    // delta- prefixed UUIDs = delegation IDs
+    // delta- prefixed UUIDs → delta-<DELEGATION_ID>
     .replace(/delta-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "delta-<DELEGATION_ID>")
-    // Plain UUIDs = project dynamic IDs, distinct from delegation IDs
+    // Generic path segments with delta- prefix and dash-suffix
+    .replace(/\/[^\s:"']*\/delta-[a-f0-9-]+/g, "<PROJECT>/delta-<DELEGATION_ID>")
+    // Plain UUIDs = remaining random IDs only
     .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<UUID>")
     .replace(/[a-f0-9]{64}/gi, "<SHA256>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "<TS>")
@@ -174,99 +175,134 @@ describe("US-DELTA-003 — delta CLI parser and help", () => {
 
 // ── Architectural negative guard ────────────────────────────────────────────
 
-describe("US-DELTA-003 — import audit", () => {
-  it("delta CLI files exist and do not import agentSpawn, cycle, or host API (fail-closed)", () => {
+describe("US-DELTA-003 — import closure audit (fail-closed recursive)", () => {
+  it("recursive import closure from commands/index.ts: no forbidden patterns, fail-closed on missing files", () => {
+    // Use dynamic ESM import for node modules in this audit
     const fs = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
 
-    const deltaDir = path.resolve(__dirname, "..", "src", "commands");
-    const libDir = path.resolve(__dirname, "..", "src", "lib");
+    // Entry: commands/index.ts (the dispatch registration point)
+    const entryFile = path.resolve(__dirname, "..", "src", "commands", "index.ts");
 
-    const filesToCheck = [
-      path.join(deltaDir, "delta.ts"),
-      path.join(deltaDir, "index.ts"),
-      path.join(libDir, "delta-allocation.ts"),
-      path.join(libDir, "delta-artifacts.ts"),
-    ];
-
-    // FAIL-CLOSED: every required file must exist
-    for (const file of filesToCheck) {
-      if (!fs.existsSync(file)) {
-        throw new Error(`Audit FAIL-CLOSED: required file missing: ${file}`);
-      }
+    // FAIL-CLOSED: entry must exist
+    if (!fs.existsSync(entryFile)) {
+      throw new Error(`Audit FAIL-CLOSED: entry file missing: ${entryFile}`);
     }
 
-    // Verify commands/index.ts registers delta command
-    const indexContent = fs.readFileSync(filesToCheck[1]!, "utf8");
+    // Verify index.ts registers delta
+    const indexContent = fs.readFileSync(entryFile, "utf8");
     if (!indexContent.includes("deltaCommand") || !indexContent.includes('registerPorted("delta"')) {
       throw new Error("Audit FAIL-CLOSED: commands/index.ts must import and register deltaCommand");
     }
 
-    const forbidden = [
-      "agentSpawn",
-      "@anthropic",
-      "openai",
-      "cycleAllocator",
-      "allocCycle",
-      "runs.jsonl",
-      "createPR",
-      "DeliveryRecord",
-      "cycle:terminal",
-      "upsertRun",
-      "artifact-protocol",
-    ];
-
-    for (const file of [filesToCheck[0]!, filesToCheck[2]!, filesToCheck[3]!]) {
-      const content = fs.readFileSync(file, "utf8");
-      for (const pattern of forbidden) {
-        const lines = content.split("\n");
-        const offending = lines.filter((l: string) => {
-          const t = l.trim();
-          if (t.startsWith("//") || t.startsWith("*") || t === "*") return false;
-          return l.includes(pattern);
-        });
-        if (offending.length > 0) {
-          throw new Error(`Audit FAIL-CLOSED: ${file} contains forbidden pattern "${pattern}"`);
-        }
-      }
-    }
-  });
-
-  it("delta source files reject dynamic import/require and unsupported syntax (fail-closed)", () => {
-    const fs = require("node:fs") as typeof import("node:fs");
-    const path = require("node:path") as typeof import("node:path");
-
-    const deltaFile = path.resolve(__dirname, "..", "src", "commands", "delta.ts");
+    // Collect all files in the Delta CLI closure starting from delta.ts
+    const deltaEntry = path.resolve(__dirname, "..", "src", "commands", "delta.ts");
     const allocFile = path.resolve(__dirname, "..", "src", "lib", "delta-allocation.ts");
     const artifactsFile = path.resolve(__dirname, "..", "src", "lib", "delta-artifacts.ts");
 
-    const filesToAudit = [deltaFile, allocFile, artifactsFile];
+    // Required files must exist
+    for (const f of [deltaEntry, allocFile, artifactsFile]) {
+      if (!fs.existsSync(f)) throw new Error(`Audit FAIL-CLOSED: required file missing: ${f}`);
+    }
 
-    for (const file of filesToAudit) {
-      if (!fs.existsSync(file)) {
-        throw new Error(`Audit FAIL-CLOSED: required file missing: ${file}`);
+    const forbiddenTokens = [
+      "agentSpawn", "@anthropic", "openai",
+      "cycleAllocator", "allocCycle",
+      "runs.jsonl", "createPR", "DeliveryRecord", "cycle:terminal", "upsertRun",
+      "artifact-protocol", "attestation", "role-access", "manifest-v2",
+    ];
+
+    // Recursively resolve local relative imports
+    const seen = new Set<string>();
+    const queue = [deltaEntry, allocFile, artifactsFile];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (seen.has(current)) continue;
+      seen.add(current);
+
+      // FAIL-CLOSED: file must exist
+      if (!fs.existsSync(current)) {
+        throw new Error(`Audit FAIL-CLOSED: file not found during traversal: ${current}`);
       }
-      const content = fs.readFileSync(file, "utf8");
-      const lines = content.split("\n");
 
-      for (const line of lines) {
+      const content = fs.readFileSync(current, "utf8");
+      const dir = path.dirname(current);
+
+      // Check for forbidden tokens (non-comment lines only)
+      for (const line of content.split("\n")) {
         const trimmed = line.trim();
         if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed === "*") continue;
-
-        // Reject dynamic import() calls — but NOT TypeScript type annotations
-        // (e.g. "as import(\"@roll/spec\").Type" which are type-only, not runtime imports)
-        // Dynamic import is "import(" used as a call expression, not after "as" or ":"
-        if (/\bimport\s*\(/.test(trimmed)) {
-          // Allow type annotation patterns: "as import(", ": import(", "typeof import("
-          if (!/\b(as|typeof)\s+import\s*\(/.test(trimmed) && !/:\s*import\s*\(/.test(trimmed)) {
-            throw new Error(`Audit FAIL-CLOSED: ${file} contains dynamic import(): ${trimmed.trim()}`);
+        for (const pattern of forbiddenTokens) {
+          if (trimmed.includes(pattern)) {
+            throw new Error(`Audit FAIL-CLOSED: ${current} contains forbidden token "${pattern}"`);
           }
         }
-        // Reject require() calls (CommonJS dynamic require)
+        // Reject dynamic import() (runtime, not type annotation)
+        if (/\bimport\s*\(/.test(trimmed) &&
+            !/\b(as|typeof)\s+import\s*\(/.test(trimmed) &&
+            !/:\s*import\s*\(/.test(trimmed)) {
+          throw new Error(`Audit FAIL-CLOSED: ${current} contains dynamic import(): ${trimmed}`);
+        }
+        // Reject dynamic require() (non-node:)
         if (/\brequire\s*\(/.test(trimmed) && !trimmed.includes("node:")) {
-          throw new Error(`Audit FAIL-CLOSED: ${file} contains dynamic require(): ${trimmed.trim()}`);
+          throw new Error(`Audit FAIL-CLOSED: ${current} contains dynamic require(): ${trimmed}`);
+        }
+      }
+
+      // Parse local relative imports/re-exports: from "...", import "...", export ... from "..."
+      // Match: from '<relative-path>', import '<relative-path>'
+      const importRe = /(?:from\s+["']|import\s+["'])(\.[^"']+)["']/g;
+      const exportFromRe = /export\s+(?:\{[^}]*\}\s+from\s+["']|\*\s+as\s+\w+\s+from\s+["'])(\.[^"']+)["']/g;
+
+      const resolveAndEnqueue = (relPath: string) => {
+        let resolved = relPath.replace(/\.js$/, ".ts");
+        const fullPath = path.resolve(dir, resolved);
+
+        // Check if the file exists; if not, try index.ts (directory resolution)
+        if (!fs.existsSync(fullPath)) {
+          const indexCandidate = path.resolve(dir, resolved, "index.ts");
+          if (fs.existsSync(indexCandidate)) {
+            if (!seen.has(indexCandidate)) queue.push(indexCandidate);
+            return;
+          }
+          // Only fail-closed for local (non-scoped) paths within cli/src
+          if (!resolved.startsWith("@") && fullPath.includes("/cli/src/")) {
+            throw new Error(`Audit FAIL-CLOSED: cannot resolve local import "${relPath}" from ${current}`);
+          }
+          return;
+        }
+        if (!seen.has(fullPath)) queue.push(fullPath);
+      };
+
+      let match;
+      const seenImports = new Set<string>();
+      while ((match = importRe.exec(content)) !== null) {
+        const relPath = match[1]!;
+        if (!seenImports.has(relPath)) {
+          seenImports.add(relPath);
+          // Only follow into cli/src (not node_modules, not ../../packages)
+          if (relPath.startsWith(".") && current.includes("/cli/src/")) {
+            resolveAndEnqueue(relPath);
+          }
+        }
+      }
+      while ((match = exportFromRe.exec(content)) !== null) {
+        const relPath = match[1]!;
+        if (!seenImports.has(relPath)) {
+          seenImports.add(relPath);
+          if (relPath.startsWith(".") && current.includes("/cli/src/")) {
+            resolveAndEnqueue(relPath);
+          }
         }
       }
     }
+
+    // Verify we traversed at least the entry files
+    expect(seen.size).toBeGreaterThanOrEqual(3);
+    // Must include all 3 core files
+    expect(seen.has(deltaEntry)).toBe(true);
+    expect(seen.has(allocFile)).toBe(true);
+    expect(seen.has(artifactsFile)).toBe(true);
   });
 });

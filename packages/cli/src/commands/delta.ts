@@ -1017,15 +1017,15 @@ function statusCommand(args: string[]): number {
       }
     }
     if (orphans.length > 0) {
-      process.stdout.write(`Uncommitted frames:\n`);
+      process.stdout.write(T("delta.status.orphan_header") + "\n");
       for (const o of orphans) {
-        process.stdout.write(`  ${o.delegationId}: unknown: uncommitted_delegation_frame\n`);
+        process.stdout.write(`  ${o.delegationId}: ${T("delta.status.orphan_status")}\n`);
         process.stdout.write(`    frame: ${o.frameDir}\n`);
-        process.stdout.write(`    recovery: release the host-delegation lease then re-prepare or remove the orphan frame\n`);
+        process.stdout.write(`    recovery: ${T("delta.status.orphan_recovery")}\n`);
       }
     }
     if (!statusView && delegationViews.length === 0 && orphans.length === 0) {
-      process.stdout.write("No delegation found.\n");
+      process.stdout.write(T("delta.status.no_delegation") + "\n");
     }
   }
 

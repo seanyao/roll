@@ -1,17 +1,17 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`US-DELTA-003 — CLI snapshots > conclude --json output is scrubbed and snapshotted 1`] = `
-"{"ok":true,"delegationId":"<UUID>","storyId":"US-DELTA-SNAP-4","outcome":"handoff_ready","terminalBinding":"handoff_only","deliveryDisposition":"owner_continue"}
+"{"ok":true,"delegationId":"<DELEGATION_ID>","storyId":"US-DELTA-SNAP-4","outcome":"handoff_ready","terminalBinding":"handoff_only","deliveryDisposition":"owner_continue"}
 "
 `;
 
 exports[`US-DELTA-003 — CLI snapshots > prepare --json output is scrubbed and snapshotted 1`] = `
-"{"ok":true,"delegationId":"<UUID>","runId":"delta-<DELEGATION_ID>","artifacts":{"frameDir":"<TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>","resolutionPath":"<TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/role-artifacts/delegation/delegation-resolution.json","markerPath":"<TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/delegation-open.json","preparationPath":"<TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/preparation.json"}}
+"{"ok":true,"delegationId":"<DELEGATION_ID>","runId":"delta-<DELEGATION_ID>","artifacts":{"frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>","resolutionPath":"<PROJECT>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/role-artifacts/delegation/delegation-resolution.json","markerPath":"<PROJECT>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/delegation-open.json","preparationPath":"<PROJECT>/.roll/features/delta-team/US-DELTA-SNAP-1/delta-<DELEGATION_ID>/preparation.json"}}
 "
 `;
 
 exports[`US-DELTA-003 — CLI snapshots > status --json after prepare is scrubbed and snapshotted 1`] = `
-"{"ok":true,"delegationId":"<UUID>","storyId":"US-DELTA-SNAP-2","status":"in_progress","visibleMode":"delta-team","trigger":"host-guided","topology":"delta-team","qualityProfile":"standard","roles":[{"role":"designer","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"},{"role":"builder","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"},{"role":"evaluator","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"}],"totalCost":"? (host_unobservable)"}
+"{"ok":true,"delegationId":"<DELEGATION_ID>","storyId":"US-DELTA-SNAP-2","status":"in_progress","visibleMode":"delta-team","trigger":"host-guided","topology":"delta-team","qualityProfile":"standard","roles":[{"role":"designer","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"},{"role":"builder","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"},{"role":"evaluator","status":"resolved","hostId":"pi","modelId":"claude","cost":"? (host_unobservable)"}],"totalCost":"? (host_unobservable)"}
 "
 `;
 
@@ -20,21 +20,34 @@ exports[`US-DELTA-003 — CLI snapshots > validate block on missing artifact is 
 "
 `;
 
+exports[`US-DELTA-003 — orphan status human + JSON snapshots > ZH orphan status human + JSON snapshot with CJK recovery action 1`] = `
+"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-ZH/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame"}]}
+"
+`;
+
+exports[`US-DELTA-003 — orphan status human + JSON snapshots > ZH orphan status human + JSON snapshot with CJK recovery action 2`] = `
+"未提交帧：
+  <DELEGATION_ID>: unknown: 未提交委派帧
+    frame: <PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-ZH/delta-<DELEGATION_ID>
+    recovery: 释放 host-delegation 租约后重新 prepare，或清理孤立帧
+"
+`;
+
 exports[`US-DELTA-003 — orphan status human + JSON snapshots > orphan frame shows exact unknown: uncommitted_delegation_frame with path and action 1`] = `
-"{"uncommittedFrames":[{"delegationId":"<UUID>","frameDir":"<TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame"}]}
+"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame"}]}
 "
 `;
 
 exports[`US-DELTA-003 — orphan status human + JSON snapshots > orphan frame shows exact unknown: uncommitted_delegation_frame with path and action 2`] = `
 "Uncommitted frames:
-  <UUID>: unknown: uncommitted_delegation_frame
-    frame: <TMP>/roll-delta-test-<UUID>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>
+  <DELEGATION_ID>: unknown: uncommitted_delegation_frame
+    frame: <PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>
     recovery: release the host-delegation lease then re-prepare or remove the orphan frame
 "
 `;
 
 exports[`US-DELTA-003 — status human output with provenance > status human output includes trigger, topology, profile, roles with host-attested 1`] = `
-"Delegation: <UUID>
+"Delegation: <DELEGATION_ID>
   Story: US-DELTA-HSTATUS
   Status: in_progress
   Mode: delta-team

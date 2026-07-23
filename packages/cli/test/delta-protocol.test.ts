@@ -10,7 +10,7 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath } from "../src/lib/delta-allocation.js";
+import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath, atomicWriteJson, PrepareError } from "../src/lib/delta-allocation.js";
 import { claimStoryLease, releaseStoryLease, readLeases } from "@roll/core";
 import { deltaCommand, injectValidator, injectPrepareInterrupt, injectEventAppendFailure } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
@@ -83,12 +83,19 @@ function tsRunCwd(argv: string[], cwd: string): { stdout: string; stderr: string
 
 // ── Scrubbing ────────────────────────────────────────────────────────────────
 
+const UUID_RE = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/;
+
+/** Scrub a known delegation identity: plain UUID → <DELEGATION_ID>, preserving referential identity. */
+function scrubDelegationIdentity(s: string, delegId: string): string {
+  return s.split(delegId).join("<DELEGATION_ID>");
+}
+
 function scrubId(s: string): string {
   return s
-    // delta- prefixed UUIDs = delegation IDs
+    // delta- prefixed UUIDs → delta-<DELEGATION_ID>
     .replace(/delta-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "delta-<DELEGATION_ID>")
-    // Plain UUIDs (project temp IDs, random IDs) = distinct from delegation IDs
-    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g, "<UUID>")
+    // Remaining plain UUIDs (only non-delegation random IDs after identity scrub)
+    .replace(UUID_RE, "<UUID>")
     .replace(/[a-f0-9]{64}/gi, "<SHA256>")
     .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, "<TS>")
     .replace(/\b\d{13}\b/g, "<TS>");
@@ -96,15 +103,27 @@ function scrubId(s: string): string {
 
 function scrubPaths(s: string, dir: string): string {
   let r = s;
-  // Scrub tmpdir first BEFORE scrubId — tmpdir contains UUIDs that scrubId would replace
   const tmp = tmpdir();
-  // macOS: realpath of tmpdir is /private/var/..., but tmpdir() returns /var/...
-  // MUST scrub the LONGER (/private) form first to avoid /private<TMP> artifacts
+  // Scrub project dir BEFORE tmpdir so the raw path matches before substitution.
+  r = r.split("/private" + dir).join("<PROJECT>");
+  r = r.split(dir).join("<PROJECT>");
+  // Scrub tmpdir AFTER project scrub, LONGER form first.
   r = r.split("/private" + tmp).join("<TMP>");
   r = r.split(tmp).join("<TMP>");
-  // Scrub project dir
+  return scrubId(r);
+}
+
+/** Full scrub: project, tmp, known delegation identity, then generic values. */
+function scrubAll(s: string, dir: string, delegId?: string): string {
+  let r = s;
+  const tmp = tmpdir();
+  r = r.split("/private" + dir).join("<PROJECT>");
   r = r.split(dir).join("<PROJECT>");
-  // Now scrub remaining dynamic values
+  r = r.split("/private" + tmp).join("<TMP>");
+  r = r.split(tmp).join("<TMP>");
+  if (delegId) {
+    r = scrubDelegationIdentity(r, delegId);
+  }
   return scrubId(r);
 }
 
@@ -1089,7 +1108,8 @@ describe("US-DELTA-003 — CLI snapshots", () => {
     ], dir);
     expect(r.code).toBe(0);
 
-    const scrubbed = scrubPaths(scrubId(r.stdout), dir);
+    const delegationId = JSON.parse(r.stdout).delegationId;
+    const scrubbed = scrubAll(r.stdout, dir, delegationId);
     expect(scrubbed).toMatchSnapshot();
   });
 
@@ -1109,7 +1129,7 @@ describe("US-DELTA-003 — CLI snapshots", () => {
     const r2 = tsRunCwd(["status", "--delegation", delegationId, "--json"], dir);
     expect(r2.code).toBe(0);
 
-    const scrubbed = scrubPaths(scrubId(r2.stdout), dir);
+    const scrubbed = scrubAll(r2.stdout, dir, delegationId);
     expect(scrubbed).toMatchSnapshot();
   });
 
@@ -1156,7 +1176,7 @@ describe("US-DELTA-003 — CLI snapshots", () => {
     ], dir);
     expect(r2.code).toBe(0);
 
-    const scrubbed = scrubPaths(scrubId(r2.stdout), dir);
+    const scrubbed = scrubAll(r2.stdout, dir, delegationId);
     expect(scrubbed).toMatchSnapshot();
   });
 });
@@ -1288,7 +1308,7 @@ describe("US-DELTA-003 — status human output with provenance", () => {
     // Must never say "verified"
     expect(r2.stdout).not.toContain("verified");
 
-    const scrubbed = scrubPaths(r2.stdout, dir);
+    const scrubbed = scrubAll(r2.stdout, dir, delegationId);
     expect(scrubbed).toMatchSnapshot();
   });
 
@@ -1992,7 +2012,7 @@ describe("US-DELTA-003 — orphan status human + JSON snapshots", () => {
     expect(parsed.uncommittedFrames[0].status).toBe("unknown: uncommitted_delegation_frame");
     expect(typeof parsed.uncommittedFrames[0].frameDir).toBe("string");
 
-    const scrubbedJson = scrubPaths(rJson.stdout, dir);
+    const scrubbedJson = scrubAll(rJson.stdout, dir, delegationId);
     expect(scrubbedJson).toMatchSnapshot();
 
     // Human status
@@ -2001,8 +2021,43 @@ describe("US-DELTA-003 — orphan status human + JSON snapshots", () => {
     expect(rHuman.stdout).toContain("uncommitted_delegation_frame");
     expect(rHuman.stdout).toContain("frame:");
 
-    const scrubbedHuman = scrubPaths(rHuman.stdout, dir);
+    const scrubbedHuman = scrubAll(rHuman.stdout, dir, delegationId);
     expect(scrubbedHuman).toMatchSnapshot();
+  });
+
+  it("ZH orphan status human + JSON snapshot with CJK recovery action", () => {
+    const prev = process.env["ROLL_LANG"];
+    try {
+      process.env["ROLL_LANG"] = "zh";
+      const dir = setupMinimalProject("US-DELTA-ORPHAN-ZH", "delta-team");
+      const delegationId = randomUUID();
+      const frameDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ORPHAN-ZH", `delta-${delegationId}`);
+      mkdirSync(frameDir, { recursive: true });
+      writeFileSync(
+        join(frameDir, "delegation-open.json"),
+        JSON.stringify({ schema: "roll-delta-delegation-open/v1", delegationId, storyId: "US-DELTA-ORPHAN-ZH", createdAt: new Date().toISOString() }),
+        "utf8",
+      );
+
+      // JSON status in zh locale
+      const rJson = tsRunCwd(["status", "--story", "US-DELTA-ORPHAN-ZH", "--json"], dir);
+      expect(rJson.code).toBe(0);
+      const scrubbedJson = scrubAll(rJson.stdout, dir, delegationId);
+      expect(scrubbedJson).toMatchSnapshot();
+
+      // Human status in zh locale — must contain CJK recovery action
+      const rHuman = tsRunCwd(["status", "--story", "US-DELTA-ORPHAN-ZH"], dir);
+      expect(rHuman.code).toBe(0);
+      // ZH output contains CJK status labels, not English
+      expect(rHuman.stdout).toContain("未提交");
+      expect(rHuman.stdout).toContain("frame:");
+      expect(/[\u4e00-\u9fff]/.test(rHuman.stdout)).toBe(true);
+      const scrubbedHuman = scrubAll(rHuman.stdout, dir, delegationId);
+      expect(scrubbedHuman).toMatchSnapshot();
+    } finally {
+      if (prev !== undefined) process.env["ROLL_LANG"] = prev;
+      else delete process.env["ROLL_LANG"];
+    }
   });
 });
 
@@ -2074,7 +2129,7 @@ describe("US-DELTA-003 — ZH locale error messages", () => {
   });
 });
 
-// ── Forbidden audit: fail-closed module-graph check (III.8) ──────────────────
+// ── Forbidden audit: fail-closed import closure check ──────────────────
 
 describe("US-DELTA-003 — forbidden import audit (fail-closed)", () => {
   it("delta.ts and delta-allocation.ts exist and have no forbidden imports", async () => {
@@ -2730,18 +2785,39 @@ describe("US-DELTA-003 — import closure audit (fail-closed recursive)", () => 
         }
       }
 
-      // Parse local relative imports (from "...") and add to queue
-      const importRe = /from\s+["'](\.[^"']+)["']/g;
+      // Parse local relative imports (from "..."), side-effect imports, and re-exports
+      const importRe = /(?:from\s+["']|import\s+["'])(\.[^"']+)["']/g;
+      const exportFromRe = /export\s+(?:\{[^}]*\}\s+from\s+["']|\*\s+as\s+\w+\s+from\s+["'])(\.[^"']+)["']/g;
+      const seenLocalImports = new Set<string>();
+
+      const resolveRelative = (relPath: string) => {
+        if (seenLocalImports.has(relPath)) return;
+        seenLocalImports.add(relPath);
+        let importPath = relPath.replace(/\.js$/, ".ts");
+        const resolved = path.resolve(dir, importPath);
+        // Try direct file first
+        if (fs.existsSync(resolved) && resolved.includes("/cli/src/") && !seen.has(resolved)) {
+          queue.push(resolved);
+          return;
+        }
+        // Directory/index resolution: try <path>/index.ts
+        const indexCandidate = path.resolve(dir, relPath.replace(/\.js$/, ""), "index.ts");
+        if (fs.existsSync(indexCandidate) && indexCandidate.includes("/cli/src/") && !seen.has(indexCandidate)) {
+          queue.push(indexCandidate);
+          return;
+        }
+        // FAIL-CLOSED: cannot resolve local relative dependency within cli/src
+        if (!relPath.startsWith("@") && resolved.includes("/cli/src/")) {
+          throw new Error(`Import audit FAIL-CLOSED: cannot resolve local import "${relPath}" from ${current}`);
+        }
+      };
+
       let match;
       while ((match = importRe.exec(content)) !== null) {
-        let importPath = match[1]!;
-        // Map .js → .ts for resolution
-        importPath = importPath.replace(/\.js$/, ".ts");
-        const resolved = path.resolve(dir, importPath);
-        // Only follow into cli/src (not node_modules, not ../../core etc. through re-exports)
-        if (resolved.includes("/cli/src/") && !seen.has(resolved)) {
-          queue.push(resolved);
-        }
+        resolveRelative(match[1]!);
+      }
+      while ((match = exportFromRe.exec(content)) !== null) {
+        resolveRelative(match[1]!);
       }
     }
 
@@ -3534,6 +3610,65 @@ describe("US-DELTA-003 — human/supervisor claim and release parameterized (BLO
 
     // Cleanup
     releaseStoryLease(slPath, "US-DELTA-HREL", { source: "human" });
+  });
+});
+
+// ── BLOCK #2: Direct atomicWriteJson artifact_exists proof ─────────────
+
+describe("US-DELTA-003 — atomicWriteJson direct artifact immutability (BLOCK #2)", () => {
+  it("atomicWriteJson throws artifact_exists when file pre-exists, bytes unchanged", () => {
+    const dir = makeProject();
+    const filePath = join(dir, "test-artifact.json");
+    const originalContent = JSON.stringify({ original: true }, null, 2) + "\n";
+
+    // Write a pre-existing file
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, originalContent, "utf8");
+    const originalBytes = readFileSync(filePath);
+
+    // atomicWriteJson must throw artifact_exists
+    expect(() => atomicWriteJson(filePath, { overwrite: "attempt" })).toThrow(PrepareError);
+    try {
+      atomicWriteJson(filePath, { overwrite: "attempt" });
+    } catch (err) {
+      expect(err instanceof PrepareError).toBe(true);
+      expect((err as PrepareError).code).toBe("artifact_exists");
+    }
+
+    // Original bytes unchanged
+    const afterBytes = readFileSync(filePath);
+    expect(Buffer.compare(originalBytes, afterBytes)).toBe(0);
+    expect(readFileSync(filePath, "utf8")).toBe(originalContent);
+  });
+
+  it("atomicWriteJson independently guards marker, resolution, preparation each", () => {
+    const dir = makeProject();
+    const markerPath = join(dir, "delegation-open.json");
+
+    // Pre-place marker
+    writeFileSync(markerPath, "pre-existing marker", "utf8");
+    const origMarker = readFileSync(markerPath);
+    expect(() => atomicWriteJson(markerPath, { attempt: "marker" })).toThrow(PrepareError);
+    expect(Buffer.compare(origMarker, readFileSync(markerPath))).toBe(0);
+
+    // Pre-place resolution (different path)
+    const resPath = join(dir, "role-artifacts", "delegation", "delegation-resolution.json");
+    mkdirSync(dirname(resPath), { recursive: true });
+    writeFileSync(resPath, "pre-existing resolution", "utf8");
+    const origRes = readFileSync(resPath);
+    expect(() => atomicWriteJson(resPath, { attempt: "resolution" })).toThrow(PrepareError);
+    expect(Buffer.compare(origRes, readFileSync(resPath))).toBe(0);
+
+    // Pre-place preparation (different path)
+    const prepPath = join(dir, "preparation.json");
+    writeFileSync(prepPath, "pre-existing preparation", "utf8");
+    const origPrep = readFileSync(prepPath);
+    expect(() => atomicWriteJson(prepPath, { attempt: "preparation" })).toThrow(PrepareError);
+    expect(Buffer.compare(origPrep, readFileSync(prepPath))).toBe(0);
+
+    // Other target files not modified
+    expect(Buffer.compare(origMarker, readFileSync(markerPath))).toBe(0);
+    expect(Buffer.compare(origRes, readFileSync(resPath))).toBe(0);
   });
 });
 

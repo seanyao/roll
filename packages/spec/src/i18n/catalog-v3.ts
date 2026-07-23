@@ -991,4 +991,20 @@ export const v3Catalog: Catalog = {
     en: "roll delta status: provide --story <id> or --delegation <id>",
     zh: "roll delta status：请提供 --story <id> 或 --delegation <id>",
   },
+  "delta.status.orphan_header": {
+    en: "Uncommitted frames:",
+    zh: "未提交帧：",
+  },
+  "delta.status.orphan_status": {
+    en: "unknown: uncommitted_delegation_frame",
+    zh: "unknown: 未提交委派帧",
+  },
+  "delta.status.orphan_recovery": {
+    en: "release the host-delegation lease then re-prepare or remove the orphan frame",
+    zh: "释放 host-delegation 租约后重新 prepare，或清理孤立帧",
+  },
+  "delta.status.no_delegation": {
+    en: "No delegation found.",
+    zh: "未找到委派。",
+  },
 };

@@ -1136,6 +1136,11 @@ export function readReviewScores(
  * cell tells the reviewer where the card sits right now. Lenient: missing
  * backlog / no matching row ⇒ {}.
  */
+/** A backlog id cell → its bare id (`[FIX-1](path)` → `FIX-1`, else trimmed). */
+function backlogRowId(cell: string): string {
+  return cell.replace(/^\[([^\]]+)\]\([^)]*\)$/, "$1").trim();
+}
+
 export function readBacklogRow(projectPath: string, storyId: string): { description?: string; status?: string } {
   const p = join(projectPath, ".roll", "backlog.md");
   if (!existsSync(p)) return {};
@@ -1146,10 +1151,14 @@ export function readBacklogRow(projectPath: string, storyId: string): { descript
     return {};
   }
   for (const line of text.split("\n")) {
-    if (!line.includes("|") || !line.includes(storyId)) continue;
+    if (!line.startsWith("|")) continue;
     const cells = line.split("|").map((c) => c.trim());
-    const idIdx = cells.findIndex((c) => c === storyId || c.includes(`${storyId}]`) || c.includes(`${storyId} `) || c === `[${storyId}]`);
-    const at = idIdx >= 0 ? idIdx : cells.findIndex((c) => c.includes(storyId));
+    // FIX-1475: select the row by an EXACT id-cell match (link-stripped) — never
+    // a substring. A prior `cells.findIndex(c => c.includes(storyId))` fallback
+    // picked `US-DEMO-001-legacy` when asked for `US-DEMO-001` (worse when the
+    // descendant row sorts first), feeding the wrong description/status into the
+    // attestation card context and the zero-TCR routing fallback.
+    const at = cells.findIndex((c) => backlogRowId(c) === storyId);
     if (at < 0) continue;
     const description = cells[at + 1];
     const status = cells[at + 2];

@@ -295,7 +295,7 @@ function markDeliveredBacklog(
         const backlogPath = join(projectCwd, ".roll", "backlog.md");
         const store = new BacklogStore();
         const snapshot = store.readBacklog(backlogPath);
-        store.mark(backlogPath, snapshot.hash, id, status);
+        store.markExact(backlogPath, snapshot.hash, id, status);
       },
       alert: (message) => bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
     });

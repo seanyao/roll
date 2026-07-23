@@ -1,5 +1,4 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
+import { lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   appendDelivery,
@@ -14,6 +13,7 @@ import {
 } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER, absent, present } from "@roll/spec";
 import { prNumberFromUrl, resolvePublishMode, submoduleWorktreePath } from "@roll/infra";
+import { commitInRepoBacklog, isInRepoRollLayout } from "./in-repo-backlog.js";
 import { writeCycleRoleSummaryBestEffort } from "./cycle-role-artifact-writer.js";
 import { evaluateEvidenceGate, executeLocalPublish } from "./local-publish.js";
 import { markDoneGuarded } from "./done-guard.js";
@@ -269,13 +269,14 @@ export async function executeTerminalCommand(
       return {};
     }
 
-    // FIX-903: save leaked main commits to a rescue ref, then reset main.
+    // FIX-903: save leaked main commits to a quarantine bundle for audit.
+    // FIX-1475: the shared main ref is NEVER reset — recovery is manual.
     case "rescue_leaked": {
       const refName = `rescue/leaked-${cmd.cycleId}`;
       const r = await ports.git.rescueLeaked(ports.repoCwd, refName);
       ports.events.appendAlert(
         ports.paths.alertsPath,
-        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; main reset ${r.code === 0 ? "ok" : "failed"}`,
+        `rescue_leaked ${cmd.cycleId}: saved ${r.rescuedSha.slice(0, 8)} to quarantine bundle ${refName}.bundle; shared main NOT reset (FIX-1475) — recover manually: git reset --hard origin/main`,
       );
       // FIX-903 AC3: emit an audit event so the rescue is observable.
       ports.events.appendEvent(ports.paths.eventsPath, {
@@ -452,6 +453,16 @@ export async function executeTerminalCommand(
         }
       }
       let terminalMerged = false;
+      // FIX-1475: in the in-repo layout (`.roll` tracked by the product repo, not
+      // its own nested git), the pre-FIX path made the Done flip durable by
+      // committing it onto the shared checkout's HEAD and pushing `HEAD:main` —
+      // which advanced the local `main` ref and clobbered owner WIP / concurrent
+      // dispatch. `markDoneGuarded` still writes Done into the shared working-tree
+      // backlog (the loop legitimately tracks status there; setup already marked
+      // it In Progress), but durability is now pushed as an ORIGIN-BASED object
+      // (see commitInRepoBacklog) so the shared main ref/HEAD/index never move.
+      const inRepoLayout = isInRepoRollLayout(ports.paths.worktreePath);
+      let inRepoDurableFlip: { id: string; status: string } | null = null;
       if (
         (cmd.status === "done" || cmd.status === "published") &&
         terminalStoryId !== "" &&
@@ -493,10 +504,20 @@ export async function executeTerminalCommand(
               );
             }
           }
-          markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
+          const doneResult = markDoneGuarded(ports.repoCwd, terminalStoryId, { mergedToMain: true }, {
             markStatus: (projectCwd, id, status) => ports.backlog.markStatus?.(projectCwd, id, status),
             alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
           });
+          // FIX-1475: when the guard actually marked Done, mirror the EXACT status
+          // it wrote (Done vs Done · evidence_debt) onto the remote as an
+          // origin-based object — the durable-commit trigger. Skipped when the
+          // guard rejected the flip (missing evidence): nothing to make durable.
+          if (doneResult.ok && inRepoLayout) {
+            const durableStatus = doneResult.debt
+              ? `${STATUS_MARKER.done} · evidence_debt`
+              : STATUS_MARKER.done;
+            inRepoDurableFlip = { id: terminalStoryId, status: durableStatus };
+          }
         } else {
           // FIX-304: done ≡ merged. The PR did NOT merge (still OPEN / closed /
           // gh down), yet the agent may have ALREADY flipped this row ✅ Done in
@@ -646,8 +667,8 @@ export async function executeTerminalCommand(
       // FIX-1238: for in-repo layout (`.roll` tracked by main repo, not its own
       // git), commitRollMetadata is a no-op. Commit and push the backlog.md flip
       // to origin/main so the Done status is durable on the remote.
-      if (terminalStoryId !== "" && isInRepoRollLayout(ports.paths.worktreePath)) {
-        await commitInRepoBacklog(ports, ctx, terminalStoryId, terminalMerged);
+      if (terminalStoryId !== "" && inRepoLayout && inRepoDurableFlip !== null) {
+        await commitInRepoBacklog(ports, ctx, inRepoDurableFlip.id, inRepoDurableFlip.status);
       }
       // US-OBS-032: best-effort cycle role summary from the event stream
       if (ctx.cycleId !== undefined) {
@@ -670,63 +691,5 @@ export async function executeTerminalCommand(
       const _exhaustive: never = cmd;
       throw new Error(`executeTerminalCommand: unmapped command ${JSON.stringify(_exhaustive)}`);
     }
-  }
-}
-
-// ── FIX-1238: in-repo layout helpers ─────────────────────────────────────────
-
-/**
- * Detect whether `.roll` is part of the main repo (in-repo layout) rather than
- * its own independent git repo (nested roll-meta layout). For in-repo layout,
- * `commitRollMetadata` is a no-op — backlog.md changes must be committed to the
- * main repo and pushed to origin/main explicitly.
- */
-function isInRepoRollLayout(worktreePath: string): boolean {
-  try {
-    const rollDir = join(worktreePath, ".roll");
-    if (!existsSync(rollDir)) return false;
-    const top = execFileSync("git", ["-C", rollDir, "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    if (top === "") return false;
-    const topReal = realpathSync(top);
-    const rollReal = realpathSync(rollDir);
-    return topReal !== rollReal;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * FIX-1238: for in-repo layout, commit backlog.md changes to the main checkout
- * and push to origin. This makes the backlog status flip durable on the remote.
- */
-async function commitInRepoBacklog(
-  ports: Ports,
-  ctx: CycleContext,
-  storyId: string,
-  terminalMerged: boolean,
-): Promise<void> {
-  const msg = `chore: ${storyId} status update (cycle ${ctx.cycleId})`;
-  const backlogRel = join(".roll", "backlog.md");
-  try {
-    if (!existsSync(join(ports.repoCwd, backlogRel))) return;
-    execFileSync("git", ["add", "--", backlogRel], { cwd: ports.repoCwd, stdio: "ignore" });
-    const dirty = execFileSync("git", ["status", "--porcelain", "--", backlogRel], {
-      cwd: ports.repoCwd,
-      encoding: "utf8",
-    }).trim();
-    if (dirty === "") return;
-    execFileSync("git", ["commit", "-m", msg], { cwd: ports.repoCwd, stdio: "ignore" });
-    execFileSync("git", ["push", "origin", "HEAD:refs/heads/main"], {
-      cwd: ports.repoCwd,
-      stdio: "ignore",
-    });
-  } catch (e) {
-    ports.events.appendAlert(
-      ports.paths.alertsPath,
-      `FIX-1238: in-repo backlog commit/push failed for ${storyId} (cycle ${ctx.cycleId}) — ${String(e)}`,
-    );
   }
 }

@@ -387,13 +387,21 @@ export interface OrphanFrameInfo {
   delegationId: string;
   frameDir: string;
   markerPath: string;
+  /** Whether a matching host-delegation lease exists for this delegation's story. */
+  hasMatchingLease: boolean;
 }
 
 /**
- * Detect uncommitted delegation frames (marker with no matching `delta:prepared` event).
- * Supply the event stream so committed delegations are not falsely reported.
+ * Detect uncommitted delegation frames (marker with no matching `delta:prepared` event)
+ * and classify by lease status. Supply the event stream AND lease data so committed
+ * delegations are not falsely reported and lease-matching is explicit.
  */
-export function detectOrphanFrames(cardDir: string, events: readonly { type: string; delegationId?: string }[]): OrphanFrameInfo[] {
+export function detectOrphanFrames(
+  cardDir: string,
+  events: readonly { type: string; delegationId?: string }[],
+  leases: Record<string, { source?: string; delegationId?: string }>,
+  storyId: string,
+): OrphanFrameInfo[] {
   if (!existsSync(cardDir)) return [];
 
   // Build the set of delegationIds that have a matching `delta:prepared` event
@@ -403,6 +411,11 @@ export function detectOrphanFrames(cardDir: string, events: readonly { type: str
       committedIds.add(ev.delegationId);
     }
   }
+
+  // Check if the story has a matching host-delegation lease
+  const storyLease = leases[storyId];
+  const hasLeaseForStory = storyLease?.source === "host-delegation" && !!storyLease?.delegationId;
+  const leaseDelegationId = hasLeaseForStory ? storyLease?.delegationId : undefined;
 
   const orphans: OrphanFrameInfo[] = [];
 
@@ -415,7 +428,8 @@ export function detectOrphanFrames(cardDir: string, events: readonly { type: str
 
       // Only report if marker exists AND no matching `delta:prepared` event
       if (existsSync(markerPath) && !committedIds.has(delegationId)) {
-        orphans.push({ delegationId, frameDir, markerPath });
+        const hasMatchingLease = leaseDelegationId === delegationId;
+        orphans.push({ delegationId, frameDir, markerPath, hasMatchingLease });
       }
     }
   } catch {

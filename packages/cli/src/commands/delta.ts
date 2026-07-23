@@ -1002,14 +1002,16 @@ function statusCommand(args: string[]): number {
   // Read events for projection
   const events = existsSync(eventsPath) ? bus.readEvents(eventsPath) : [];
 
-  // Detect orphan frames (folds events to avoid false positives)
-  const orphans: Array<{ delegationId: string; frameDir: string }> = [];
+  // Detect orphan frames (folds events AND leases to avoid false positives)
+  const orphans: Array<{ delegationId: string; frameDir: string; hasMatchingLease: boolean }> = [];
 
   if (storyId && typeof storyId === "string") {
     // Check for orphan frames for this story
     const cardDir = resolveExistingUniqueCardArchiveDir(cwd, storyId);
     if (cardDir) {
-      const detected = detectOrphanFrames(cardDir, events);
+      const slDir = join(cwd, ".roll", "loop", "leases");
+      const leases = readLeases(slDir);
+      const detected = detectOrphanFrames(cardDir, events, leases, storyId);
       orphans.push(...detected);
     }
   }
@@ -1067,7 +1069,10 @@ function statusCommand(args: string[]): number {
       output.uncommittedFrames = orphans.map((o) => ({
         delegationId: o.delegationId,
         frameDir: o.frameDir,
-        status: "unknown: uncommitted_delegation_frame",
+        status: o.hasMatchingLease
+          ? "unknown: uncommitted_delegation_frame (lease held)"
+          : "unknown: uncommitted_delegation_frame",
+        hasMatchingLease: o.hasMatchingLease,
       }));
     }
     if (!statusView && delegationViews.length === 0 && orphans.length === 0) {

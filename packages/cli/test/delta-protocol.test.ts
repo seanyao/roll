@@ -1623,7 +1623,8 @@ describe("US-DELTA-003 — prepare crash before delta:prepared", () => {
     expect(statusOut.uncommittedFrames.length).toBe(1);
     const orphan = statusOut.uncommittedFrames[0];
     expect(orphan.delegationId).toBe(delegationId);
-    expect(orphan.status).toBe("unknown: uncommitted_delegation_frame");
+    expect(orphan.status).toContain("uncommitted_delegation_frame");
+    expect(orphan.hasMatchingLease).toBe(true);
     expect(typeof orphan.frameDir).toBe("string");
 
     // Orphan status human + JSON snapshots

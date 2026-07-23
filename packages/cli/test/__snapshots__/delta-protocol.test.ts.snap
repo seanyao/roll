@@ -21,7 +21,7 @@ exports[`US-DELTA-003 — CLI snapshots > validate block on missing artifact is 
 `;
 
 exports[`US-DELTA-003 — orphan status human + JSON snapshots > ZH orphan status human + JSON snapshot with CJK recovery action 1`] = `
-"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-ZH/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame"}]}
+"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-ZH/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame","hasMatchingLease":false}]}
 "
 `;
 
@@ -34,7 +34,7 @@ exports[`US-DELTA-003 — orphan status human + JSON snapshots > ZH orphan statu
 `;
 
 exports[`US-DELTA-003 — orphan status human + JSON snapshots > orphan frame shows exact unknown: uncommitted_delegation_frame with path and action 1`] = `
-"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame"}]}
+"{"uncommittedFrames":[{"delegationId":"<DELEGATION_ID>","frameDir":"<PROJECT>/.roll/features/delta-team/US-DELTA-ORPHAN-SNAP/delta-<DELEGATION_ID>","status":"unknown: uncommitted_delegation_frame","hasMatchingLease":false}]}
 "
 `;
 

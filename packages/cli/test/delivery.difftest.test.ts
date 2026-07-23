@@ -1,8 +1,10 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +21,7 @@ import {
   WorkspaceRegistry,
   appendIssueIntegrationAcceptanceEvidence,
   appendRepositoryMergeEvidence,
+  captureRequirementSource,
 } from "@roll/infra";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
@@ -192,6 +195,30 @@ function createDeliveredIssue(workspace: WorkspaceFixture, storyId: string): voi
     artifactPath: "evidence/integration.txt",
     recordedAt: 22,
   });
+}
+
+function captureRequirement(workspace: WorkspaceFixture, storyId: string, ref: string): string {
+  const manifestPath = join(workspace.root, "workspace.yaml");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest["requirements"] = [{ provider: "jira", ref }];
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const backlogPath = join(workspace.root, "backlog", "index.md");
+  mkdirSync(join(workspace.root, "backlog"), { recursive: true });
+  writeFileSync(backlogPath, `| ${storyId} | requirement-linked delivery | 📋 Todo |\n`, "utf8");
+  mkdirSync(join(workspace.root, "backlog", storyId), { recursive: true });
+  writeFileSync(join(workspace.root, "backlog", storyId, "spec.md"), `# ${storyId}\n`, "utf8");
+  const bodyFile = join(workspace.root, `${storyId}.md`);
+  writeFileSync(bodyFile, `# ${storyId}\n`, "utf8");
+  return captureRequirementSource({
+    workspaceRoot: workspace.root,
+    provider: "jira",
+    ref,
+    revision: "1",
+    capturedAt: "2026-07-23T00:00:00.000Z",
+    bodyFile,
+    contextPaths: [],
+    storyIds: [storyId],
+  }).requirementPath;
 }
 
 async function runCli(argv: string[], f: Fixture, language: "en" | "zh" = "en"): Promise<Run> {
@@ -379,5 +406,67 @@ describe("US-WS-015 roll delivery surface", () => {
       "invalid_arguments",
       "invalid_arguments",
     ]);
+  });
+
+  it("fails before any projection write when a declared Requirement manifest is missing, corrupt or schema-invalid", async () => {
+    const cases = ["missing", "corrupt", "schema-invalid"] as const;
+    for (const [index, mode] of cases.entries()) {
+      const f = fixture();
+      const workspace = createWorkspace(f, `ws-requirement-${index}`);
+      const storyId = `US-REQ-${index}`;
+      createDeliveredIssue(workspace, storyId);
+      const requirementPath = captureRequirement(workspace, storyId, `WS-${index + 1}`);
+      const sourcePath = join(requirementPath, "source.yaml");
+      const attestPath = join(requirementPath, "attest.md");
+      const backlogPath = join(workspace.root, "backlog", "index.md");
+      const before = {
+        backlog: readFileSync(backlogPath, "utf8"),
+        attest: readFileSync(attestPath, "utf8"),
+      };
+      if (mode === "missing") unlinkSync(sourcePath);
+      if (mode === "corrupt") writeFileSync(sourcePath, "{not-json", "utf8");
+      if (mode === "schema-invalid") writeFileSync(sourcePath, `${JSON.stringify({ schema: "wrong" })}\n`, "utf8");
+
+      const result = await runCli([
+        "delivery", "reconcile", storyId,
+        "--workspace", workspace.workspaceId,
+        "--json",
+      ], f);
+
+      expect(result.status, mode).toBe(1);
+      expect(JSON.parse(result.stderr).error.code, mode).toBe("invalid_requirement");
+      expect(readFileSync(backlogPath, "utf8"), mode).toBe(before.backlog);
+      expect(readFileSync(attestPath, "utf8"), mode).toBe(before.attest);
+    }
+  });
+
+  it("ignores a valid declared Requirement that is not linked to the reconciled Story", async () => {
+    const f = fixture();
+    const workspace = createWorkspace(f, "ws-unlinked-requirement");
+    const targetStory = "US-TARGET";
+    const otherStory = "US-OTHER";
+    createDeliveredIssue(workspace, targetStory);
+    const requirementPath = captureRequirement(workspace, otherStory, "WS-99");
+    const attestPath = join(requirementPath, "attest.md");
+    const attestBefore = readFileSync(attestPath, "utf8");
+    const undeclared = join(workspace.root, "requirements", "jira", "misc-directory");
+    mkdirSync(undeclared, { recursive: true });
+    writeFileSync(join(undeclared, "source.yaml"), "{not-json", "utf8");
+    writeFileSync(
+      join(workspace.root, "backlog", "index.md"),
+      `| ${targetStory} | target delivery | 📋 Todo |\n| ${otherStory} | unrelated requirement | 📋 Todo |\n`,
+      "utf8",
+    );
+
+    const result = await runCli([
+      "delivery", "reconcile", targetStory,
+      "--workspace", workspace.workspaceId,
+      "--json",
+    ], f);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(attestPath, "utf8")).toBe(attestBefore);
+    expect(readFileSync(join(workspace.root, "backlog", "index.md"), "utf8"))
+      .toContain(`| ${targetStory} | target delivery | ✅ Done |`);
   });
 });

@@ -9,12 +9,14 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import {
   BacklogStore,
   deriveIssueCompletion,
+  normalizeRequirementSourceReference,
   validateStoryId,
 } from "@roll/core";
 import {
   IssueCompletionEvidenceError,
   rebuildRequirementAttest,
   readIssueCompletionEvidence,
+  readWorkspace,
 } from "@roll/infra";
 import {
   STATUS_MARKER,
@@ -373,7 +375,7 @@ function targetFromAggregate(entry: BacklogAggregateEntry): ResolvedBacklogTarge
 }
 
 function errorMessage(code: string): string {
-  if (code === "invalid_arguments" || code === "story_not_found" || code === "invalid_issue") {
+  if (code === "invalid_arguments" || code === "story_not_found" || code === "invalid_issue" || code === "invalid_requirement") {
     return msg(`delivery.error.${code}`);
   }
   return msg(`workspace.error.${code}`);
@@ -565,29 +567,48 @@ function requirementInputs(
 ): readonly { readonly provider: string; readonly requirementId: string; readonly attestPath: string }[] {
   const root = join(workspaceRoot, "requirements");
   if (!existsSync(root)) return [];
+  const workspace = readWorkspace(workspaceRoot);
   const inputs: Array<{ readonly provider: string; readonly requirementId: string; readonly attestPath: string }> = [];
-  for (const providerEntry of readdirSync(root, { withFileTypes: true })) {
-    if (!providerEntry.isDirectory() || providerEntry.isSymbolicLink()) continue;
-    const providerRoot = join(root, providerEntry.name);
-    for (const requirementEntry of readdirSync(providerRoot, { withFileTypes: true })) {
-      if (!requirementEntry.isDirectory() || requirementEntry.isSymbolicLink()) continue;
-      const requirementRoot = join(providerRoot, requirementEntry.name);
-      const sourcePath = join(requirementRoot, "source.yaml");
-      if (!existsSync(sourcePath)) continue;
-      let raw: unknown;
-      try {
-        raw = JSON.parse(readFileSync(sourcePath, "utf8"));
-      } catch {
-        continue;
-      }
-      const parsed = parseRequirementSourceManifest(raw);
-      if (!parsed.ok || !parsed.value.stories.some((storyId) => storyIds.has(storyId))) continue;
-      inputs.push({
-        provider: parsed.value.provider,
-        requirementId: parsed.value.requirementId,
-        attestPath: join(requirementRoot, "attest.md"),
-      });
+  for (const declared of workspace.requirements) {
+    const normalized = normalizeRequirementSourceReference(declared.provider, declared.ref);
+    if (!normalized.ok) throw new Error("invalid_requirement:declared_source");
+    const { provider, requirementId, ref } = normalized.value;
+    const providerRoot = join(root, provider);
+    const requirementRoot = join(providerRoot, requirementId);
+    if (!existsSync(requirementRoot)) continue;
+    const providerStat = lstatSync(providerRoot);
+    const requirementStat = lstatSync(requirementRoot);
+    if (
+      providerStat.isSymbolicLink() || !providerStat.isDirectory() ||
+      requirementStat.isSymbolicLink() || !requirementStat.isDirectory()
+    ) {
+      throw new Error(`invalid_requirement:${requirementId}`);
     }
+    const sourcePath = join(requirementRoot, "source.yaml");
+    if (!existsSync(sourcePath)) throw new Error(`invalid_requirement:${requirementId}`);
+    const sourceStat = lstatSync(sourcePath);
+    if (sourceStat.isSymbolicLink() || !sourceStat.isFile()) throw new Error(`invalid_requirement:${requirementId}`);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(sourcePath, "utf8"));
+    } catch {
+      throw new Error(`invalid_requirement:${requirementId}`);
+    }
+    const parsed = parseRequirementSourceManifest(raw);
+    if (
+      !parsed.ok ||
+      parsed.value.provider !== provider ||
+      parsed.value.requirementId !== requirementId ||
+      parsed.value.ref !== ref
+    ) {
+      throw new Error(`invalid_requirement:${requirementId}`);
+    }
+    if (!parsed.value.stories.some((storyId) => storyIds.has(storyId))) continue;
+    inputs.push({
+      provider,
+      requirementId,
+      attestPath: join(requirementRoot, "attest.md"),
+    });
   }
   return inputs.sort((left, right) => compareCodeUnits(
     `${left.provider}/${left.requirementId}`,
@@ -700,6 +721,9 @@ export function reconcileWorkspaceDeliveries(
       : `${msg("delivery.reconcile.title", decision.workspaceId, issues.length, dryRun ? msg("delivery.reconcile.dry_run") : msg("delivery.reconcile.applied"))}\n${renderList([{ workspaceId: decision.workspaceId, path: decision.canonicalRoot, issues }])}`);
     return 0;
   } catch (error) {
+    if (String(error).includes("invalid_requirement:")) {
+      return emitError("invalid_requirement", json);
+    }
     if (error instanceof IssueCompletionEvidenceError || String(error).includes("invalid_issue:")) {
       return emitError("invalid_issue", json);
     }

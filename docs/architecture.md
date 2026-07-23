@@ -270,6 +270,9 @@ required repository 的 PR/CI/merge facts、缺失 gate 与 exact-SHA Integratio
 `list --all` 只做跨 Workspace 聚合。`roll delivery reconcile` 重新折叠同一份 Issue events
 与 provider/main facts，先重建 Requirement attest projection，再把 backlog Done/Todo 更新为
 派生投影；它可以读取旧投影以进行安全、幂等更新，但绝不把 backlog Markdown 当成完成真相。
+写入前会完整预检 `workspace.yaml` 声明的 canonical Requirement manifests；缺失、损坏或
+schema/identity 不一致统一以 `invalid_requirement` fail-loud，且不会留下部分 attest/backlog
+更新。未声明的杂目录以及未关联本次 Story 的合法 Requirement 不参与本次 reconcile。
 它不创建 Delivery Set/store，也不把单仓 leg 描述为 Story Done。
 `roll loop reconcile` 仅保留为同一 Workspace-scoped reconcile 的 alias；旧的单仓 cycle
 reconciler 只供 runner 内部推进 PR/merge 事实，不能再从公共命令面恢复 repository-local 模式。

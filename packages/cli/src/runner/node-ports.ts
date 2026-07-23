@@ -400,7 +400,12 @@ export function nodePorts(opts: {
           if (!existsSync(p)) return;
           const store = new BacklogStore();
           const snap = store.readBacklog(p);
-          store.mark(p, snap.hash, id, status);
+          // FIX-1475: EXACT id match. Every runner caller passes a concrete story
+          // id (setup In Progress, terminal Done, resume, reconcile), so prefix
+          // matching would wrongly flip `<id>-` descendant rows (completing
+          // FIX-1475 must not mark FIX-1475-followup). The CLI `roll backlog`
+          // pattern commands still use BacklogStore.mark directly.
+          store.markExact(p, snap.hash, id, status);
         } catch {
           /* best-effort: reconcile owns the fallback */
         }

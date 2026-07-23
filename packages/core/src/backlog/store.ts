@@ -291,4 +291,24 @@ export class BacklogStore {
     });
     return { ...result, hash };
   }
+
+  /**
+   * FIX-1475: like {@link mark} but flips ONLY the row whose id EXACTLY equals
+   * `id` — never `<id>-` descendants. Use this when marking a single concrete
+   * story (e.g. a Done/In-Progress transition for one card), where prefix
+   * matching would wrongly flip sibling rows.
+   */
+  markExact(
+    path: string,
+    expectedHash: string,
+    id: string,
+    newStatus: string,
+  ): MarkResult & { hash: string } {
+    let result: MarkResult = { content: "", count: 0 };
+    const hash = this.writeBacklog(path, expectedHash, (content) => {
+      result = markStatusExact(content, id, newStatus);
+      return result.content;
+    });
+    return { ...result, hash };
+  }
 }

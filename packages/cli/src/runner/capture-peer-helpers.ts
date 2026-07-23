@@ -27,6 +27,7 @@ export function createCapturePeerHelpers(params: {
   ctx: CycleContext;
   commitsAhead: number;
   tcrCount: number;
+  reviewCwd?: string;
 }): {
   attributeBlockCause: (
     peer: string,
@@ -176,7 +177,7 @@ export function createCapturePeerHelpers(params: {
         ports.agentSpawn(peer, {
           // E4: the reviewer inspects the committed delivery, so it runs in the
           // execution worktree (submodule cycle worktree for a submodule story).
-          cwd: resolveExecutionCwd(ports, ctx),
+          cwd: params.reviewCwd ?? resolveExecutionCwd(ports, ctx),
           skillBody: prompt,
           timeoutMs,
           bare: true, // FIX-319: review-only framing, no worker autorun directive

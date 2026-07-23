@@ -16,7 +16,7 @@ import {
   type CycleCommand,
   type CycleContext,
 } from "@roll/core";
-import { parseEventLine, type RollEvent } from "@roll/spec";
+import { parseEventLine, type CycleRepositoryExecutionContext, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
@@ -32,7 +32,7 @@ import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
-import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import { executeRepositoryCaptureFactsCommand } from "./repository-verification.js";
@@ -47,9 +47,10 @@ export async function executeCaptureFactsCommand(
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
   void cmd;
-      if (ctx.repositoryExecution !== undefined) {
-        return executeRepositoryCaptureFactsCommand(ports, ctx);
-      }
+      const workspaceExecution = ctx.repositoryExecution;
+      const repositoryCapture = workspaceExecution === undefined
+        ? undefined
+        : await executeRepositoryCaptureFactsCommand(ports, ctx);
       // E4: the agent built/committed inside the EXECUTION worktree (the submodule
       // cycle worktree when the story declared a target_submodule, else the
       // superproject worktree). Every git OBSERVATION of the agent's delivery
@@ -58,8 +59,16 @@ export async function executeCaptureFactsCommand(
       // (spec/evidence/attest — `ports.paths.worktreePath`, where the loop `.roll`
       // is symlinked) are deliberately NOT routed: the submodule subdir has no
       // `.roll`. No targetSubmodule ⇒ both equal today's paths (zero regression).
-      const execCwd = resolveExecutionCwd(ports, ctx);
-      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      const representativeRepository = workspaceExecution === undefined
+        ? undefined
+        : Object.values(workspaceExecution.repositories)
+          .filter((repository) => repository.access === "write")
+          .sort((left, right) => left.alias.localeCompare(right.alias))[0];
+      if (workspaceExecution !== undefined && representativeRepository === undefined) {
+        throw new Error("missing_writable_repository");
+      }
+      const execCwd = representativeRepository?.worktreePath ?? resolveExecutionCwd(ports, ctx);
+      const execRepoCwd = representativeRepository?.worktreePath ?? resolveExecutionRepoCwd(ports, ctx);
       // E8: observe commits/TCR against the EXECUTION repo's integration branch,
       // NOT the hardwired origin/main. A submodule cycle worktree is a detached
       // `worktree add --detach` off the submodule's integration branch and has NO
@@ -71,13 +80,18 @@ export async function executeCaptureFactsCommand(
       // to origin/main again). No targetSubmodule ⇒ resolveIntegrationBranch(repoCwd)
       // → origin/main default, byte-identical to the prior hardcode.
       const observeBase = resolveIntegrationBranch(execRepoCwd);
-      await quarantineMainCheckoutForCycle(ports, ctx, "capture");
-      const commitsAhead = await ports.git.commitsAhead(execCwd, observeBase);
+      if (workspaceExecution === undefined) await quarantineMainCheckoutForCycle(ports, ctx, "capture");
+      const repositoryFacts = repositoryCapture?.event?.type === "facts_captured"
+        ? repositoryCapture.event.facts
+        : undefined;
+      const commitsAhead = repositoryFacts?.commitsAhead ?? await ports.git.commitsAhead(execCwd, observeBase);
       let mainAhead = 0;
-      try {
-        mainAhead = await ports.git.mainAhead(ports.repoCwd);
-      } catch {
-        /* drift probe is best-effort */
+      if (workspaceExecution === undefined) {
+        try {
+          mainAhead = await ports.git.mainAhead(ports.repoCwd);
+        } catch {
+          /* drift probe is best-effort */
+        }
       }
       // E10: symmetric completion of E7. The LIVE watchdog already diffs the
       // main checkout against a pre-spawn baseline so only dirt the BUILDER
@@ -93,40 +107,54 @@ export async function executeCaptureFactsCommand(
       // so this is a strict zero-regression widening). The protection is intact: a
       // builder that truly writes a NEW main-checkout path still yields a non-empty
       // newDirty → mainDirty:true.
-      const mainDirtyAll = await checkMainDirty(ports.repoCwd);
-      const mainDirtyBaseline = new Set(readMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? ""));
+      const mainDirtyAll = workspaceExecution === undefined ? await checkMainDirty(ports.repoCwd) : [];
+      const mainDirtyBaseline = new Set(
+        workspaceExecution === undefined ? readMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? "") : [],
+      );
       const mainDirtyFiles = mainDirtyAll.filter((path) => !mainDirtyBaseline.has(path));
       const mainDirty = mainDirtyFiles.length > 0;
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
-      let tcrCount = 0;
-      try {
-        // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
-        // on THIS path (the publish-path gates already treat 0 conservatively);
-        // the timeout teardown's measure_worktree is where unknown stays unknown.
-        tcrCount = (await ports.git.tcrCount(execCwd, observeBase)) ?? 0;
-      } catch {
-        /* count is best-effort; a git miss must not fail the cycle */
+      let tcrCount = repositoryCapture?.ctxPatch?.tcrCount ?? 0;
+      if (workspaceExecution === undefined) {
+        try {
+          // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
+          // on THIS path (the publish-path gates already treat 0 conservatively);
+          // the timeout teardown's measure_worktree is where unknown stays unknown.
+          tcrCount = (await ports.git.tcrCount(execCwd, observeBase)) ?? 0;
+        } catch {
+          /* count is best-effort; a git miss must not fail the cycle */
+        }
       }
       // FIX-1039: check whether the worktree has uncommitted/untracked files.
       // Best-effort → false on git error (the probe must never fail the cycle).
-      let worktreeDirty = false;
-      try {
-        const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
-          cwd: execCwd,
-          encoding: "utf8",
-        });
-        worktreeDirty = stdout.trim() !== "";
-      } catch {
-        /* probe is best-effort */
+      let worktreeDirty = repositoryFacts?.worktreeDirty === true;
+      if (workspaceExecution === undefined) {
+        try {
+          const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+            cwd: execCwd,
+            encoding: "utf8",
+          });
+          worktreeDirty = stdout.trim() !== "";
+        } catch {
+          /* probe is best-effort */
+        }
       }
-      const { attributeBlockCause, savePeerRawOutput, peerAvailable, reviewPeer, cycleDiff } = createCapturePeerHelpers({
+      const peerHelpers = createCapturePeerHelpers({
         ports,
         ctx,
         commitsAhead,
         tcrCount,
+        ...(workspaceExecution === undefined ? {} : { reviewCwd: execCwd }),
       });
+      const { attributeBlockCause, savePeerRawOutput, peerAvailable, reviewPeer } = peerHelpers;
+      const cycleDiff = workspaceExecution === undefined
+        ? peerHelpers.cycleDiff
+        : async () => workspaceCycleDiff(workspaceExecution);
+      const changedFiles = workspaceExecution === undefined
+        ? cycleChangedFiles
+        : async () => workspaceChangedFiles(workspaceExecution);
       // FIX-293 peer gate: agent-agnostic, runs in EVERY cycle's capture step.
       // High-complexity delivery (>3 files / cross-module / high-risk) WITHOUT
       // peer evidence → ALERT + `peer:gate` event AND, in the default HARD mode,
@@ -164,7 +192,7 @@ export async function executeCaptureFactsCommand(
             ts: eventTs(ports),
           }),
       };
-      const peerGateOpts = { heteroAvailable: peerHeteroAvailable };
+      const peerGateOpts = { heteroAvailable: peerHeteroAvailable, changedFiles };
       // FIX-362: the peer-gate EXECUTION moved to AFTER the pairing loop below. The
       // hetero pairing review (runPairing) is what WRITES the peer-evidence file the
       // gate reads (peerEvidencePresent), so the gate MUST run after it. Running it
@@ -210,7 +238,7 @@ export async function executeCaptureFactsCommand(
           isAvailable: peerAvailable,
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
-          changedFiles: cycleChangedFiles,
+          changedFiles,
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
@@ -451,9 +479,13 @@ export async function executeCaptureFactsCommand(
           // origin/main) and run it in the execution worktree. No targetSubmodule ⇒
           // resolveIntegrationBranch(ports.repoCwd) which defaults to origin/main —
           // byte-identical to the prior hardcode.
-          const diffBase = resolveIntegrationBranch(execRepoCwd);
-          const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
-          diffStat = stdout.slice(0, 4_000);
+          if (workspaceExecution !== undefined) {
+            diffStat = await workspaceDiffStat(workspaceExecution);
+          } else {
+            const diffBase = resolveIntegrationBranch(execRepoCwd);
+            const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
+            diffStat = stdout.slice(0, 4_000);
+          }
         } catch {
           /* summary degrades gracefully */
         }
@@ -501,7 +533,13 @@ export async function executeCaptureFactsCommand(
         scoreStatus = scoreResult.status;
       }
       let attestRenderExitCode = 0;
-      if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+      if (
+        workspaceExecution === undefined &&
+        commitsAhead > 0 &&
+        storyId !== "" &&
+        ctx.evidenceRunDir !== undefined &&
+        ctx.evidenceRunDir !== ""
+      ) {
         const remediationAgent = ctx.agent ?? "claude";
         const selfHeal = await runAcMapSelfHeal({
           // E4: the remediation agent inspects the delivery + collects git evidence
@@ -569,56 +607,56 @@ export async function executeCaptureFactsCommand(
       let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
-        const mode = readAttestGateMode(ports.repoCwd);
-        const res = runAttestGate(
-          ports.paths.worktreePath,
-          storyId,
-          ctx.cycleId ?? "",
-          mode,
-          ctx.startSec,
-          {
-            alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
-            event: (p) =>
-              ports.events.appendEvent(ports.paths.eventsPath, {
-                type: "attest:gate",
-                cycleId: p.cycleId,
-                verdict: p.verdict,
-                reasons: p.reasons,
-                ts: eventTs(ports),
-              }),
-          },
-          // FIX-343: read the peer score from the PERSISTENT .roll (repoCwd) —
-          // where runScorePairing wrote it — not the ephemeral worktree; thread
-          // the BUILDER SESSION ID (step ①) so the gate verifies the scorer's
-          // session ≠ the builder's session (an independent fresh session scored
-          // this, never the builder's own in-session/sub-agent grading). The
-          // vendor-name comparison is gone — a same-vendor fresh session is valid.
-          ports.repoCwd,
-          ctx.builderSessionId ?? "",
-          attestRenderExitCode,
-          // E9 (PR9): resolve the SPEC (design truth) from the LIVE `.roll`
-          // (ports.repoCwd), aligning attest with the picker/designer
-          // (`storySpecPath(ports.repoCwd, id)`). This is the spec-resolution cwd
-          // ONLY — evidence/score keep the worktree/scoreRepoCwd semantics above.
-          // A tracked-`.roll` project's uncommitted spec is otherwise invisible in
-          // the worktree snapshot (mis-read as "not found"); a non-tracked project's
-          // worktree `.roll` is symlinked to repoCwd's, so this is byte-identical.
-          ports.repoCwd,
-        );
-        if (res.verdict === "skipped") {
-          applyCorrectionAction({
-            projectPath: ports.repoCwd,
-            eventsPath: ports.paths.eventsPath,
-            alertsPath: ports.paths.alertsPath,
-            storyId,
+        if (workspaceExecution !== undefined) {
+          attestBlocked = repositoryFacts?.repositoryVerificationPending === true;
+          attestVerdict = attestBlocked ? "skipped" : "produced";
+          attestReasons = attestBlocked ? ["repository_verification_pending"] : [];
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "attest:gate",
             cycleId: ctx.cycleId ?? "",
-            reasons: res.reasons,
-            nowSec: ports.clock(),
+            verdict: attestVerdict,
+            reasons: [...attestReasons],
+            ts: eventTs(ports),
           });
+        } else {
+          const mode = readAttestGateMode(ports.repoCwd);
+          const res = runAttestGate(
+            ports.paths.worktreePath,
+            storyId,
+            ctx.cycleId ?? "",
+            mode,
+            ctx.startSec,
+            {
+              alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+              event: (p) =>
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "attest:gate",
+                  cycleId: p.cycleId,
+                  verdict: p.verdict,
+                  reasons: p.reasons,
+                  ts: eventTs(ports),
+                }),
+            },
+            ports.repoCwd,
+            ctx.builderSessionId ?? "",
+            attestRenderExitCode,
+            ports.repoCwd,
+          );
+          if (res.verdict === "skipped") {
+            applyCorrectionAction({
+              projectPath: ports.repoCwd,
+              eventsPath: ports.paths.eventsPath,
+              alertsPath: ports.paths.alertsPath,
+              storyId,
+              cycleId: ctx.cycleId ?? "",
+              reasons: res.reasons,
+              nowSec: ports.clock(),
+            });
+          }
+          attestBlocked = res.blocked;
+          attestVerdict = res.verdict;
+          attestReasons = res.reasons;
         }
-        attestBlocked = res.blocked;
-        attestVerdict = res.verdict;
-        attestReasons = res.reasons;
       }
       // US-V4-005: for verified/designed profiles, write the Evaluator artifact
       // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
@@ -634,7 +672,10 @@ export async function executeCaptureFactsCommand(
         commitsAhead > 0 &&
         storyId !== ""
       ) {
-        const blocking = attestBlocked || peerBlocked ? attestReasons : [];
+        const blocking = [
+          ...(attestBlocked || peerBlocked ? attestReasons : []),
+          ...(workspaceExecution !== undefined && scoreStatus !== "scored" ? ["missing_workspace_review_score"] : []),
+        ];
         const ev = writeEvaluatorArtifact(ports, ctx, { attestStatus: attestVerdict, blockingFindings: blocking });
         if (ev.written && !ev.valid) {
           evaluatorBlocked = true;
@@ -657,7 +698,7 @@ export async function executeCaptureFactsCommand(
       // no-output failure. Probe the cycle branch's PR state into the facts so
       // classifyCaptured can see it; a failed probe degrades to plain failed.
       let prState: string | undefined;
-      if (attestBlocked && commitsAhead > 0) {
+      if (workspaceExecution === undefined && attestBlocked && commitsAhead > 0) {
         prState = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => undefined);
       }
       // Hook 1 (productivity floor): reaching capture means an agent WAS spawned
@@ -669,7 +710,8 @@ export async function executeCaptureFactsCommand(
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
       // US-V4-005: a verified/designed cycle with an invalid Evaluator artifact is
       // gate-blocked (fail-closed) alongside the attest/peer gates.
-      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
+      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked ||
+        (workspaceExecution !== undefined && commitsAhead > 0 && scoreStatus !== "scored");
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR
@@ -683,7 +725,7 @@ export async function executeCaptureFactsCommand(
       // on a 0-commit / 0-tcr give-up — those stay `failed`/`gave_up`/`idle`.
       const missingRequiredArtifact =
         scoreStatus !== "scored" ||
-        (storyId !== "" && !verificationReportHasContent(ports.paths.worktreePath, storyId, ports.repoCwd));
+        (workspaceExecution === undefined && storyId !== "" && !verificationReportHasContent(ports.paths.worktreePath, storyId, ports.repoCwd));
       const needsReview =
         gateBlocked &&
         commitsAhead > 0 &&
@@ -692,6 +734,7 @@ export async function executeCaptureFactsCommand(
         prState !== "OPEN" &&
         prState !== "MERGED";
       const facts: CapturedFacts = {
+        ...repositoryFacts,
         usedWorktree: true,
         agentExecuted,
         // The real agent process exit code (from agent_exited), NOT the
@@ -713,7 +756,76 @@ export async function executeCaptureFactsCommand(
         ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
-      return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount, ...(mainDirty ? { mainDirty: true } : {}) } };
+      return {
+        event: { type: "facts_captured", facts },
+        ctxPatch: {
+          ...repositoryCapture?.ctxPatch,
+          tcrCount,
+          ...(mainDirty ? { mainDirty: true } : {}),
+        },
+      };
+}
+
+function workspaceWritableRepositories(execution: CycleRepositoryExecutionContext) {
+  return Object.values(execution.repositories)
+    .filter((repository) => repository.access === "write")
+    .sort((left, right) => left.alias.localeCompare(right.alias));
+}
+
+async function workspaceCycleDiff(execution: CycleRepositoryExecutionContext): Promise<string> {
+  const sections: string[] = [];
+  for (const repository of workspaceWritableRepositories(execution)) {
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", `${repository.baseSha}...HEAD`],
+        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
+      );
+      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
+    } catch {
+      /* one unreadable leg must not erase the remaining review input */
+    }
+  }
+  return sections.join("\n").slice(0, 60_000);
+}
+
+async function workspaceChangedFiles(execution: CycleRepositoryExecutionContext): Promise<string[]> {
+  const files: string[] = [];
+  for (const repository of workspaceWritableRepositories(execution)) {
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--name-only", `${repository.baseSha}...HEAD`],
+        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
+      );
+      files.push(
+        ...stdout.split("\n")
+          .map((path) => path.trim())
+          .filter((path) => path !== "")
+          .map((path) => `${repository.alias}/${path}`),
+      );
+    } catch {
+      /* best-effort; repository verification remains the fail-loud authority */
+    }
+  }
+  return files;
+}
+
+async function workspaceDiffStat(execution: CycleRepositoryExecutionContext): Promise<string> {
+  const sections: string[] = [];
+  for (const repository of workspaceWritableRepositories(execution)) {
+    try {
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--stat", `${repository.baseSha}...HEAD`],
+        { cwd: repository.worktreePath, encoding: "utf8", timeout: 15_000 },
+      );
+      if (stdout.trim() !== "") sections.push(`Repository: ${repository.alias}\n${stdout}`);
+    } catch {
+      /* summary degrades without weakening repository verification */
+    }
+  }
+  return sections.join("\n").slice(0, 4_000);
 }
 
 /**

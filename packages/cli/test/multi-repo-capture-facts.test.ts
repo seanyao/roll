@@ -67,6 +67,8 @@ function fixture(options: {
   readonly secondHeadThrows?: boolean;
 }) {
   const root = mkdtempSync(join(tmpdir(), "roll-us-ws-012-capture-"));
+  writeFileSync(join(root, "workspace.yaml"), "schema: roll-workspace/v1\nworkspace_id: ws-1\n");
+  mkdirSync(join(root, ".roll"), { recursive: true });
   const issueRoot = join(root, "issues", "US-WS-012");
   const runtimeRoot = join(root, "runtime");
   mkdirSync(issueRoot, { recursive: true });
@@ -182,6 +184,7 @@ function fixture(options: {
     second,
     testRuns,
     integrationRuns,
+    root,
   };
 }
 
@@ -361,5 +364,68 @@ describe("US-WS-012 repository capture verification", () => {
       (event) => event["type"] === "repository:verification" && event["repoId"] === f.second.repoId,
     )).toEqual(expect.objectContaining({ status: "fail", diagnostic: "head_observation_failed" }));
     expect(f.integrationRuns).toEqual([]);
+  });
+
+  it("runs Workspace evaluation with the Workspace evaluate casting after repository verification", async () => {
+    const f = fixture({ integration: ["./verify-sot-contract.sh"] });
+    writeFileSync(join(f.root, "agents.yaml"), `schema: roll-agents/v1
+scope: workspace
+inherits: machine
+roles: {}
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: fixed
+        agent: pi
+`);
+    writeFileSync(join(f.root, ".roll", "agents.yaml"), `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      evaluate:
+        kind: fixed
+        agent: reasonix
+`);
+    const spawned: string[] = [];
+    const agentSpawn: AgentSpawn = vi.fn(async (agent, options) => {
+      spawned.push(agent);
+      return options.skillBody.includes("SCORE:")
+        ? { stdout: "SCORE: 9\nVERDICT: good\nRATIONALE: repository-scoped verification is complete", stderr: "", exitCode: 0, timedOut: false }
+        : { stdout: "VERDICT: agree", stderr: "", exitCode: 0, timedOut: false };
+    });
+    agentSpawn.supportedPurposes = ["builder", "test_author", "implementer", "attacker"];
+    const ports = {
+      ...f.ports,
+      agentSpawn,
+      installedAgents: () => ["claude", "pi", "reasonix"],
+    };
+    const evidenceRunDir = join(f.issueRoot, "evidence", "cycle-us-ws-012");
+    mkdirSync(evidenceRunDir, { recursive: true });
+    const ctx: CycleContext = {
+      ...f.ctx,
+      selectedProfile: "verified",
+      evidenceRunDir,
+      builderSessionId: "cycle-us-ws-012:build:claude:a1",
+    };
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, ports, ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ repositoryPublishPending: true }),
+    });
+    expect(spawned).toContain("pi");
+    expect(spawned).not.toContain("reasonix");
+    const runtimeEvents = readFileSync(ports.paths.eventsPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(runtimeEvents).toContainEqual(expect.objectContaining({ type: "pair:score", peer: "pi", score: 9 }));
+    expect(runtimeEvents).toContainEqual(expect.objectContaining({ type: "attest:gate", verdict: "produced" }));
+    expect(readFileSync(join(evidenceRunDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8"))
+      .toContain("- 9 (good)");
+    expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("gateBlocked");
   });
 });

@@ -1194,12 +1194,15 @@ describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
    * Spawns a subprocess worker that uses a ready/go barrier for race tests.
    *
    * Returns { status, code, stderr }. Hard-fails on empty output or nonzero exit.
+   *
+   * US-DELTA-003 hermetic: worker imports claimStoryLease directly from the
+   * narrow production module (no barrel, no transitive @roll/spec dep).
    */
   const nodeExe = process.execPath;
-  // Resolve tracked TypeScript source and tsx ESM loader (both must exist before any spawn)
-  const coreSrcPath = join(__dirname, "..", "src", "index.ts");
+  // Resolve tracked narrow TypeScript source and tsx ESM loader (must exist before any spawn)
+  const leaseModulePath = join(__dirname, "..", "src", "backlog", "lease.ts");
   const tsxLoader = createRequire(import.meta.url).resolve("tsx/esm");
-  if (!existsSync(coreSrcPath)) throw new Error(`core source not found: ${coreSrcPath}`);
+  if (!existsSync(leaseModulePath)) throw new Error(`lease module not found: ${leaseModulePath}`);
   if (!existsSync(tsxLoader)) throw new Error(`tsx loader not found: ${tsxLoader}`);
 
   async function runWorker(args: {
@@ -1226,7 +1229,7 @@ describe("claimStoryLease — concurrent subprocess hardlink exclusion", () => {
     if (runId) entryObj.runId = runId;
 
     const scriptContent = `
-import { claimStoryLease } from ${JSON.stringify(coreSrcPath)};
+import { claimStoryLease } from ${JSON.stringify(leaseModulePath)};
 import { writeFileSync, existsSync } from "node:fs";
 
 const dirPath = ${JSON.stringify(dirPath)};

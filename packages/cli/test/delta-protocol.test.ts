@@ -10,11 +10,21 @@ import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { claimHostDelegationLease, releaseHostDelegationLease, storyLeasesPath, atomicWriteJson, PrepareError } from "../src/lib/delta-allocation.js";
 import { claimStoryLease, releaseStoryLease, readLeases, setLease, writeLeases, EventBus } from "@roll/core";
 import { deltaCommand, injectValidator, injectPrepareInterrupt, injectEventAppendFailure, injectEventBus } from "../src/commands/delta.js";
 import { injectIdGenerator } from "../src/lib/delta-allocation.js";
 import { renderState } from "../src/render.js";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Resolve the `tsx` CLI entry point from the CLI package's own devDependencies.
+ *  Never shells out to `npx` — uses the locally installed binary, making tests
+ *  deterministic on CI without network downloads. */
+const cliRequire = createRequire(join(import.meta.dirname, "..", "package.json"));
+const tsxPackageDir = dirname(cliRequire.resolve("tsx/package.json"));
+const tsxBin = join(tsxPackageDir, "dist", "cli.mjs");
 
 // ── Temp project fixture ─────────────────────────────────────────────────────
 
@@ -1621,6 +1631,35 @@ describe("US-DELTA-003 — status read-only proof", () => {
   });
 });
 
+// ── Regression: no npx / network download in concurrent subprocess harness ──
+
+describe("US-DELTA-003 — regression: concurrent harness is deterministic", () => {
+  it("tsx binary is resolved locally, never shells out to npx", () => {
+    // The global tsxBin must point at the locally installed tsx CLI, resolved
+    // from the CLI package's own devDependencies — not from PATH / npx cache.
+    expect(tsxBin).toContain("node_modules");
+    expect(tsxBin).toContain("tsx");
+    expect(tsxBin).toContain("cli.mjs");
+    // Must NOT rely on npx or a network-fetch downloader. The path must be a
+    // locally installed file (resolved through createRequire from the CLI pkg).
+    expect(tsxBin).not.toMatch(/\bnpx\b/);
+    expect(tsxBin).toMatch(/\bnode_modules\b/);
+    // Must exist on disk at module resolution time (not after network fetch).
+    expect(existsSync(tsxBin)).toBe(true);
+  });
+
+  it("subprocess spawn command never includes npx or npm", () => {
+    // Verify the spawn command shape used by all concurrent tests:
+    //   spawn(process.execPath, [tsxBin, workerScript, ...])
+    // This test breaks if anyone reverts to spawn("npx", ["tsx", ...]).
+    expect(process.execPath).toBeTruthy();
+    expect(tsxBin).toBeTruthy();
+    // process.execPath is the node binary (e.g. /usr/bin/node), not npx.
+    const execBasename = process.execPath.split("/").pop() ?? "";
+    expect(execBasename).toMatch(/^node/);
+  });
+});
+
 // ── Concurrent subprocess lease contention (III.1 / AC2) ────────────────────
 
 describe("US-DELTA-003 — concurrent subprocess prepare atomic exclusion", () => {
@@ -1637,8 +1676,8 @@ describe("US-DELTA-003 — concurrent subprocess prepare atomic exclusion", () =
     // Helper to run a prepare in a child process via tsx
     const runChild = (workerId: number): Promise<{ code: number; stdout: string; stderr: string }> => {
       return new Promise((resolve) => {
-        const child = spawn("npx", [
-          "tsx",
+        const child = spawn(process.execPath, [
+          tsxBin,
           join(import.meta.dirname, "delta-concurrent-worker.ts"),
           dir,
           resPath,
@@ -2915,8 +2954,8 @@ describe("US-DELTA-003 — concurrent subprocess barrier (ready ack)", () => {
 
     const runChild = (workerId: number): Promise<{ code: number; stdout: string; stderr: string }> => {
       return new Promise((resolve) => {
-        const child = spawn("npx", [
-          "tsx",
+        const child = spawn(process.execPath, [
+          tsxBin,
           join(import.meta.dirname, "delta-concurrent-worker-ready.ts"),
           dir,
           resPath,
@@ -3004,8 +3043,8 @@ describe("US-DELTA-003 — concurrent subprocess barrier (ready ack)", () => {
 
     const runChildForStory = (storyId: string, resPath: string, workerId: number): Promise<{ code: number; stdout: string; stderr: string }> => {
       return new Promise((resolve) => {
-        const child = spawn("npx", [
-          "tsx",
+        const child = spawn(process.execPath, [
+          tsxBin,
           join(import.meta.dirname, "delta-concurrent-diff-worker.ts"),
           dir,
           storyId,

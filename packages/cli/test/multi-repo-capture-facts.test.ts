@@ -70,6 +70,33 @@ function fixture(options: {
 }) {
   const root = mkdtempSync(join(tmpdir(), "roll-us-ws-012-capture-"));
   writeFileSync(join(root, "workspace.yaml"), "schema: roll-workspace/v1\nworkspace_id: ws-1\n");
+  const storySpecDir = join(root, "backlog", "workspace-orchestration", "US-WS-012");
+  mkdirSync(storySpecDir, { recursive: true });
+  writeFileSync(join(storySpecDir, "spec.md"), `---
+id: US-WS-012
+repositories:
+  - alias: api
+    access: write
+    required_delivery: true
+  - alias: web
+    access: write
+    required_delivery: true
+---
+
+# US-WS-012 Workspace delivery
+
+**AC:**
+- [ ] API and Web changes satisfy the shared contract.
+- [ ] Cross-repository integration passes against the exact delivered heads.
+
+**Evaluation contract:**
+- expected_evidence:
+  - kind: test
+    target: repository verification
+    proves: both repository legs pass
+- scorer_focus:
+  - Judge the shared contract and exact-head integration.
+`);
   mkdirSync(join(root, ".roll"), { recursive: true });
   const issueRoot = join(root, "issues", "US-WS-012");
   const runtimeRoot = join(root, "runtime");
@@ -340,7 +367,38 @@ describe("US-WS-012 repository capture verification", () => {
       facts: expect.not.objectContaining({ gateBlocked: true }),
     });
     expect(readFileSync(join(f.issueRoot, "evidence", "cycle-us-ws-012", "ac-map.json"), "utf8"))
-      .toContain("repository:api:verification");
+      .toContain("API and Web changes satisfy the shared contract.");
+  });
+
+  it("blocks instead of synthesizing repository-shaped ACs when the Workspace Story has no acceptance criteria", async () => {
+    const f = fixture({ single: true });
+    writeFileSync(join(f.root, "backlog", "workspace-orchestration", "US-WS-012", "spec.md"), `---
+id: US-WS-012
+repositories:
+  - alias: api
+    access: write
+    required_delivery: true
+---
+
+# US-WS-012 missing acceptance contract
+`);
+
+    const result = await executeCaptureFactsCommand({ kind: "capture_facts" }, f.ports, f.ctx);
+
+    expect(result.event).toEqual({
+      type: "facts_captured",
+      facts: expect.objectContaining({ gateBlocked: true }),
+    });
+    const runtimeEvents = readFileSync(f.ports.paths.eventsPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(runtimeEvents).toContainEqual(expect.objectContaining({
+      type: "attest:gate",
+      verdict: "skipped",
+      reasons: ["workspace_acceptance_criteria_missing"],
+    }));
+    expect(existsSync(join(f.issueRoot, "evidence", "cycle-us-ws-012", "ac-map.json"))).toBe(false);
   });
 
   it("records command launch failures as blocked leg evidence instead of aborting capture", async () => {
@@ -410,8 +468,10 @@ defaults:
 `);
     rmSync(join(f.root, ".roll"), { recursive: true, force: true });
     const spawned: string[] = [];
+    const scorePrompts: string[] = [];
     const agentSpawn: AgentSpawn = vi.fn(async (agent, options) => {
       spawned.push(agent);
+      if (options.skillBody.includes("SCORE:")) scorePrompts.push(options.skillBody);
       return options.skillBody.includes("SCORE:")
         ? { stdout: "SCORE: 9\nVERDICT: good\nRATIONALE: repository-scoped verification is complete", stderr: "", exitCode: 0, timedOut: false }
         : { stdout: "VERDICT: agree", stderr: "", exitCode: 0, timedOut: false };
@@ -447,7 +507,15 @@ defaults:
     expect(runtimeEvents).toContainEqual(expect.objectContaining({ type: "attest:gate", verdict: "produced" }));
     expect(existsSync(join(evidenceRunDir, "ac-map.json"))).toBe(true);
     expect(existsSync(join(evidenceRunDir, "US-WS-012-report.html"))).toBe(true);
-    expect(JSON.parse(readFileSync(join(evidenceRunDir, "ac-map.json"), "utf8"))).toHaveLength(3);
+    expect(JSON.parse(readFileSync(join(evidenceRunDir, "ac-map.json"), "utf8"))).toEqual([
+      expect.objectContaining({ ac: "API and Web changes satisfy the shared contract.", status: "partial" }),
+      expect.objectContaining({
+        ac: "Cross-repository integration passes against the exact delivered heads.",
+        status: "partial",
+      }),
+    ]);
+    expect(scorePrompts.join("\n")).toContain("API and Web changes satisfy the shared contract.");
+    expect(scorePrompts.join("\n")).toContain("Judge the shared contract and exact-head integration.");
     expect(readFileSync(join(evidenceRunDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8"))
       .toContain("- 9 (good)");
     expect(result.event?.type === "facts_captured" && result.event.facts).not.toHaveProperty("gateBlocked");

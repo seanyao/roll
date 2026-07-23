@@ -319,7 +319,8 @@ export interface RoutePort {
   };
 }
 
-/** Evidence frame facet — opens `.roll/features/<epic>/<ID>/<run-id>/`. */
+/** Evidence frame facet — opens the canonical per-cycle evidence directory for
+ * either a legacy project card or a Workspace Issue. */
 export interface EvidencePort {
   openFrame(projectCwd: string, storyId: string, runId: string): string;
 }

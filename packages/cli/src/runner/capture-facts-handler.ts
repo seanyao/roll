@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import {
   DEFAULT_MAX_REPAIR_ROUNDS,
   EventBus,
+  acForStory,
   agentsInstalled,
   cycleActivityFromEvents,
   decideRepair,
@@ -35,7 +36,7 @@ import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
 import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
-import { resolveIntegrationBranch } from "@roll/infra";
+import { resolveIntegrationBranch, resolveWorkspaceBacklogStorySpec } from "@roll/infra";
 import { executeRepositoryCaptureFactsCommand } from "./repository-verification.js";
 import { writeWorkspaceAcceptanceArtifacts } from "./workspace-acceptance.js";
 
@@ -500,12 +501,24 @@ export async function executeCaptureFactsCommand(
         // loop). Best-effort: a missing/unreadable spec degrades to the id-only line.
         let goalLine = "";
         let evalContractFormatted = "";
+        let acceptanceCriteriaFormatted = "";
         try {
-          const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
-          if (existsSync(specPath)) {
-            const specText = readFileSync(specPath, "utf8");
+          let specText: string | undefined;
+          if (workspaceExecution !== undefined) {
+            const workspaceRoot = dirname(dirname(workspaceExecution.issueRoot));
+            const resolved = resolveWorkspaceBacklogStorySpec(workspaceRoot, storyId);
+            if (resolved.ok) specText = resolved.text;
+          } else {
+            const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
+            if (existsSync(specPath)) specText = readFileSync(specPath, "utf8");
+          }
+          if (specText !== undefined) {
             const title = (/^title:\s*(.+)$/m.exec(specText)?.[1] ?? "").trim();
             if (title !== "") goalLine = `Goal: ${title}\n`;
+            const criteria = acForStory(specText, storyId, { fileOwned: workspaceExecution !== undefined });
+            if (criteria.length > 0) {
+              acceptanceCriteriaFormatted = `Acceptance criteria:\n${criteria.map((item) => `  - ${item.text}`).join("\n")}\n`;
+            }
             // US-SKILL-030: pass evaluation contract to scorer so it grades against
             // the story's intended evidence/focus, not just generic code quality.
             evalContractFormatted = formatEvaluationContractForScorer(parseEvaluationContract(specText));
@@ -513,7 +526,7 @@ export async function executeCaptureFactsCommand(
         } catch {
           /* best-effort — the scorer still gets the diff stat */
         }
-        const summary = `Story: ${storyId}\n${goalLine}Delivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
+        const summary = `Story: ${storyId}\n${goalLine}${acceptanceCriteriaFormatted}Delivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
         const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
         // Write to the PERSISTENT .roll (repoCwd) so the peer score note survives
         // worktree teardown and the gate (reading repoCwd) finds it. FIX-343: use

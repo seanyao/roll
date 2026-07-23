@@ -2,7 +2,10 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveWorkspaceBacklogStoryContract } from "../src/issue-story-contract.js";
+import {
+  resolveWorkspaceBacklogStoryContract,
+  resolveWorkspaceBacklogStorySpec,
+} from "../src/issue-story-contract.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -30,6 +33,16 @@ repositories:
 }
 
 describe("resolveWorkspaceBacklogStoryContract", () => {
+  it("returns the exact Workspace-owned Story spec text for acceptance consumers", () => {
+    const workspaceRoot = sandbox();
+    writeSpec(join(workspaceRoot, "backlog", "workspace-orchestration", "US-XX1"), "US-XX1");
+    const result = resolveWorkspaceBacklogStorySpec(workspaceRoot, "US-XX1");
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error("expected Workspace story spec");
+    expect(result.path).toBe(join(workspaceRoot, "backlog", "workspace-orchestration", "US-XX1", "spec.md"));
+    expect(result.text).toContain("# US-XX1 fixture");
+  });
+
   it("resolves a Story Contract found inside the Workspace backlog tree, at any depth", () => {
     const workspaceRoot = sandbox();
     writeSpec(join(workspaceRoot, "backlog", "workspace-orchestration", "US-XX1"), "US-XX1");

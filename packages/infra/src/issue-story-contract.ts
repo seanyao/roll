@@ -18,6 +18,10 @@ export type ResolveStoryContractResult =
   | { readonly ok: true; readonly value: IssueStoryContract }
   | { readonly ok: false; readonly code: ResolveStoryContractErrorCode; readonly matches?: readonly string[] };
 
+export type ResolveStorySpecResult =
+  | { readonly ok: true; readonly path: string; readonly text: string }
+  | { readonly ok: false; readonly code: ResolveStoryContractErrorCode; readonly matches?: readonly string[] };
+
 /** Bound recursion depth under a Workspace backlog tree — generous for any
  *  real epic/sub-epic nesting while refusing to walk unbounded structures. */
 const MAX_BACKLOG_DEPTH = 8;
@@ -85,10 +89,10 @@ function backlogStorySpecMatches(workspaceRoot: string, storyId: string): string
 /** Resolve the Runtime Story Contract from inside the SELECTED Workspace's own
  *  backlog tree (`backlog/**\/<story-id>/spec.md`) — never the caller cwd's
  *  `.roll/features`. Fails loud when a story id resolves to more than one spec. */
-export function resolveWorkspaceBacklogStoryContract(
+export function resolveWorkspaceBacklogStorySpec(
   workspaceRoot: string,
   storyId: string,
-): ResolveStoryContractResult {
+): ResolveStorySpecResult {
   const validated = validateStoryId(storyId);
   if (!validated.ok) return { ok: false, code: "invalid_story_id" };
   let matches: string[];
@@ -106,6 +110,20 @@ export function resolveWorkspaceBacklogStoryContract(
   } catch {
     return { ok: false, code: "story_not_found" };
   }
+  return { ok: true, path: matches[0]!, text: specText };
+}
+
+/** Parse the selected Workspace-owned Story spec into its runtime repository
+ * contract. Consumers that need the authored acceptance text use
+ * {@link resolveWorkspaceBacklogStorySpec} so both paths share identical
+ * uniqueness and symlink protections. */
+export function resolveWorkspaceBacklogStoryContract(
+  workspaceRoot: string,
+  storyId: string,
+): ResolveStoryContractResult {
+  const spec = resolveWorkspaceBacklogStorySpec(workspaceRoot, storyId);
+  if (!spec.ok) return spec;
+  const specText = spec.text;
   const parsed = parseIssueStoryContract(specText, { storyId });
   if (!parsed.ok) return { ok: false, code: (parsed.errors[0]?.code ?? "invalid_config") as ResolveStoryContractErrorCode };
   return { ok: true, value: parsed.value };

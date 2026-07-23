@@ -730,7 +730,10 @@ export function nodePorts(opts: {
       : { resolve: () => ({ agent: "claude", model: "" }) },
     evidence: {
       openFrame(projectCwd, storyId, runId) {
-        return openEvidenceFrame({ runDir: join(cardArchiveDir(projectCwd, storyId), runId) }).runDir;
+        const runDir = existsSync(join(projectCwd, "workspace.yaml"))
+          ? join(projectCwd, "issues", storyId, "evidence", runId)
+          : join(cardArchiveDir(projectCwd, storyId), runId);
+        return openEvidenceFrame({ runDir }).runDir;
       },
     },
     capture: {

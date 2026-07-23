@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { CycleContext } from "@roll/core";
+import { acForStory, type CycleContext } from "@roll/core";
+import { resolveWorkspaceBacklogStorySpec } from "@roll/infra";
 
 interface IssueEvent {
   readonly type?: unknown;
@@ -62,13 +63,13 @@ function validateArtifacts(runDir: string, storyId: string, expectedAcCount: num
     const valid = map.every((entry) => {
       if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
       const row = entry as Record<string, unknown>;
-      if (row["status"] !== "pass" || !Array.isArray(row["evidence"])) return false;
+      if (row["status"] !== "partial" || !Array.isArray(row["evidence"])) return false;
       return row["evidence"].some((item) =>
         typeof item === "object" && item !== null && !Array.isArray(item) &&
         (item as Record<string, unknown>)["textFile"] === "evidence/repository-verification.json",
       );
     });
-    return valid && readFileSync(reportPath, "utf8").includes('class="ac s-pass"');
+    return valid && readFileSync(reportPath, "utf8").includes('class="ac s-partial"');
   } catch {
     return false;
   }
@@ -123,21 +124,24 @@ export function writeWorkspaceAcceptanceArtifacts(ctx: CycleContext): WorkspaceA
   }
   if (gaps.length > 0) return { produced: false, runDir, reasons: gaps };
 
+  const workspaceRoot = dirname(dirname(execution.issueRoot));
+  const storySpec = resolveWorkspaceBacklogStorySpec(workspaceRoot, storyId);
+  if (!storySpec.ok) {
+    return { produced: false, runDir, reasons: [`workspace_story_spec_${storySpec.code}`] };
+  }
+  const acceptanceCriteria = acForStory(storySpec.text, storyId, { fileOwned: true });
+  if (acceptanceCriteria.length === 0) {
+    return { produced: false, runDir, reasons: ["workspace_acceptance_criteria_missing"] };
+  }
+
   const evidenceRef = "evidence/repository-verification.json";
-  const entries = writable.map((repository) => ({
-    ac: `repository:${repository.alias}:verification`,
-    status: "pass",
+  const entries = acceptanceCriteria.map((criterion) => ({
+    ac: criterion.text,
+    status: "partial",
     evidence: [{ kind: "text", textFile: evidenceRef }],
   }));
-  if (integrationRequired) {
-    entries.push({
-      ac: "workspace:integration-acceptance",
-      status: "pass",
-      evidence: [{ kind: "text", textFile: evidenceRef }],
-    });
-  }
   const sections = entries.map((entry) =>
-    `<section class="ac s-pass"><h2>${escapeHtml(entry.ac)}</h2><p>Verified from exact-cycle repository evidence.</p></section>`,
+    `<section class="ac s-partial"><h2>${escapeHtml(entry.ac)}</h2><p>Mapped to exact-cycle repository evidence for independent evaluation.</p></section>`,
   ).join("\n");
   const report = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(storyId)} Workspace Review</title></head><body><h1>${escapeHtml(storyId)}</h1>${sections}</body></html>\n`;
   try {

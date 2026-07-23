@@ -73,6 +73,11 @@ diff <(v2.0-bash <cmd>) <(v3-ts <cmd>)
 - **回收**：`roll loop gc` 按阈值清理陈旧 run（保最近 N 次 + M 天内，二者满足其一即留；只删「又旧又超额」的尾部）。阈值 `--keep-latest`（默认 10）/`--keep-days`（默认 30），`--dry-run` 预演。
 - **读取兼容**：迁移窗口内旧布局 `.roll/verification/<ID>/` 仍可读（attest gate、ac-map、报告解析都先查卡夹再回落旧树）；存量迁移与兼容代码移除由 US-META-002 收尾。
 
+Workspace 模式不写上述 legacy 卡夹：每个 cycle 的证据框固定落在
+`issues/<story>/evidence/<cycle>/`。其中 `ac-map.json` 逐条引用 Workspace backlog 的真实 Story AC，
+repository 与 integration verification 只提供 exact-cycle 证据绑定；AC 是否真正满足由独立
+Evaluator 结合 Story AC、evaluation contract 与多仓 diff 判断。
+
 ## 证据可见性模型（US-PHYSICAL-008）
 
 截图/图片类证据涉及隐私，因此在 `git add` 之前必须确认目标仓库的远程可见性：

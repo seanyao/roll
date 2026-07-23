@@ -669,6 +669,8 @@ describe("US-WS-016 Workspace scheduler contract", () => {
 
     expect(builderSpawned).toBe(true);
     expect(leaseObserved).toBe(true);
+    expect(existsSync(join(issue.issueRoot, "evidence"))).toBe(true);
+    expect(existsSync(join(root, ".roll", "features", "workspace-orchestration", storyId))).toBe(false);
     expect(JSON.parse(readFileSync(join(root, "runtime", "locks", "story-leases.json"), "utf8"))[storyId]).toEqual({
       source: "human",
       claimedAt: humanClaimedAt,

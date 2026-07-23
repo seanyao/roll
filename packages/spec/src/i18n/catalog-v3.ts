@@ -971,6 +971,14 @@ export const v3Catalog: Catalog = {
     en: "roll delta: <story-id> is required",
     zh: "roll delta：需要提供 <story-id>",
   },
+  "delta.error.duplicate_flag": {
+    en: "roll delta: duplicate flag '%s'",
+    zh: "roll delta：重复标志 '%s'",
+  },
+  "delta.error.unexpected_positional": {
+    en: "roll delta: unexpected positional argument '%s'",
+    zh: "roll delta：非预期的位置参数 '%s'",
+  },
   "delta.error.unknown_flag": {
     en: "roll delta: unknown flag '%s'",
     zh: "roll delta：未知标志 '%s'",

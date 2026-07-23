@@ -3609,6 +3609,147 @@ function fileSnapshot(root: string): Record<string, { hash: string; mtime: strin
   return result;
 }
 
+// ── Conclude parser edge cases: duplicate flags, unexpected positionals (BLOCK #5) ─
+
+describe("US-DELTA-003 — conclude parser edge cases", () => {
+  it("conclude duplicate --delegation flag is parser error, zero side effects", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-DUP", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-DUP", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-DUP",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    // Snapshot before
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    const slPath = storyLeasesPath(dir);
+    const slBefore = JSON.parse(readFileSync(slPath, "utf8"));
+
+    // Duplicate --delegation flag (parser error, zero side effects)
+    const r2 = tsRunCwd([
+      "conclude",
+      "--delegation", delegationId,
+      "--delegation", "other-id",
+      "--delivery-disposition", "owner_continue",
+      "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err2 = JSON.parse(r2.stderr);
+    expect(err2.error).toBe("duplicate_flag");
+
+    // Zero events appended
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length);
+
+    // Lease preserved unchanged
+    const slAfter = JSON.parse(readFileSync(slPath, "utf8"));
+    expect(slAfter["US-DELTA-CONC-DUP"]).toBeDefined();
+  });
+
+  it("conclude duplicate --delivery-disposition flag is parser error, zero side effects", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-DUP2", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-DUP2", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-DUP2",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    const r2 = tsRunCwd([
+      "conclude",
+      "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue",
+      "--delivery-disposition", "owner_hold",
+      "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err2 = JSON.parse(r2.stderr);
+    expect(err2.error).toBe("duplicate_flag");
+
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length);
+  });
+
+  it("conclude unexpected positional arg is parser error, zero side effects", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-POS", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-POS", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-POS",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    const r2 = tsRunCwd([
+      "conclude", "unexpected-positional",
+      "--delegation", delegationId,
+      "--delivery-disposition", "owner_continue",
+      "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err2 = JSON.parse(r2.stderr);
+    expect(err2.error).toBe("unexpected_positional");
+
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length);
+  });
+
+  it("conclude flag-without-value (--delivery-disposition bare) yields terminal_path_unselected, zero extra events", () => {
+    const dir = setupMinimalProject("US-DELTA-CONC-FLAGVAL", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-CONC-FLAGVAL", "local-preset");
+
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-CONC-FLAGVAL",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+
+    const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
+    const eventsBefore = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+
+    // --delivery-disposition without a value → flag is boolean true → treated as missing disposition
+    const r2 = tsRunCwd([
+      "conclude",
+      "--delegation", delegationId,
+      "--delivery-disposition",
+      "--json",
+    ], dir);
+    expect(r2.code).toBe(1);
+    const err2 = JSON.parse(r2.stderr);
+    // Flag-as-bool flows into missing-disposition domain check → terminal_path_unselected
+    expect(err2.error).toBe("terminal_path_unselected");
+
+    // Exactly one delta:blocked event appended (domain error, not parser error)
+    const eventsAfter = readFileSync(eventsPath, "utf8").trim().split("\n").filter(l => l.trim());
+    expect(eventsAfter.length).toBe(eventsBefore.length + 1);
+    const lastEvent = JSON.parse(eventsAfter[eventsAfter.length - 1]!);
+    expect(lastEvent.type).toBe("delta:blocked");
+    expect(lastEvent.reason).toBe("terminal_path_unselected");
+  });
+});
+
 function readdirRecursive(root: string): string[] {
   const result: string[] = [];
   const walk = (dir: string) => {

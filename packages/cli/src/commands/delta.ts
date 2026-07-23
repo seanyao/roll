@@ -82,6 +82,22 @@ function parseArgs(args: string[]): ParsedArgs {
   return { positional, flags };
 }
 
+/** Detect duplicate --flags in raw args. Returns first duplicate key or null. */
+function detectDuplicateFlags(rawArgs: string[], knownFlags: Set<string>): string | null {
+  const seen = new Set<string>();
+  for (let i = 0; i < rawArgs.length; i++) {
+    const a = rawArgs[i]!;
+    if (!a.startsWith("--")) continue;
+    const eqIdx = a.indexOf("=");
+    const key = eqIdx >= 0 ? a.slice(2, eqIdx) : a.slice(2);
+    if (knownFlags.has(key)) {
+      if (seen.has(key)) return key;
+      seen.add(key);
+    }
+  }
+  return null;
+}
+
 // ── Enum validation ──────────────────────────────────────────────────────────
 
 function checkEnumFlag(flags: Record<string, string | true>, key: string, allowed: readonly string[]): string | undefined {
@@ -712,8 +728,32 @@ function concludeCommand(args: string[]): number {
   const { positional, flags } = parseArgs(args);
   const json = flags["json"] === true;
 
+  // Reject duplicate flags (parser error → zero side effects)
+  const concludeKnownFlags = new Set(["delegation", "delivery-disposition", "json"]);
+  const dupFlag = detectDuplicateFlags(args, concludeKnownFlags);
+  if (dupFlag) {
+    const msg = T("delta.error.duplicate_flag", `--${dupFlag}`);
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "duplicate_flag", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  // Reject unexpected positional args (conclude takes no positionals)
+  if (positional.length > 0) {
+    const msg = T("delta.error.unexpected_positional", positional[0]!);
+    if (json) {
+      process.stderr.write(JSON.stringify({ ok: false, error: "unexpected_positional", detail: msg }) + "\n");
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
   // Check for unknown flags
-  const knownFlags = new Set(["delegation", "delivery-disposition", "json"]);
+  const knownFlags = concludeKnownFlags;
   for (const k of Object.keys(flags)) {
     if (!knownFlags.has(k)) {
       const msg = T("delta.error.unknown_flag", `--${k}`);

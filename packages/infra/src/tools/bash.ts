@@ -1,6 +1,7 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
+import { isCanonicalPathContained, resolveContainedExistingPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
 
 export interface BashInput {
   command: string;
@@ -47,18 +48,28 @@ export class BashTool {
   async execute(invocation: ToolInvocation<BashInput>, deps: ToolDeps): Promise<ToolResult<BashOutput>> {
     const startedAt = deps.now();
     const input = invocation.input;
-    const cwd = input.cwd ?? process.cwd();
+    const repository = resolveWorkspaceLocalRepository(invocation, "write");
+    if (!repository.ok) return contextFailure(invocation, startedAt, deps.now(), repository.code, repository.message);
+    const boundInvocation = invocation.repoId === undefined
+      ? { ...invocation, repoId: repository.repository.repoId }
+      : invocation;
+    const cwd = input.cwd === undefined
+      ? repository.canonicalWorktreePath
+      : resolveContainedExistingPath(repository.canonicalWorktreePath, input.cwd);
+    if (cwd === undefined) {
+      return contextFailure(boundInvocation, startedAt, deps.now(), "invalid_execution_context", "bash cwd is outside the selected Issue repository");
+    }
     const warnings = advisoryWarnings(input.command, invocation.policy.sandbox?.blockedCommands);
-    const allowResult = allowed(cwd, invocation.policy.sandbox?.allowedPaths);
+    const allowResult = allowed(cwd, repository.canonicalWorktreePath, invocation.policy.sandbox?.allowedPaths);
     if (!allowResult.ok) {
       return {
         ok: false,
         error: {
           code: "sandbox_denied",
-          message: `cwd is outside allowedPaths: ${cwd}`,
+          message: "bash cwd is outside allowedPaths",
           retryable: false,
         },
-        meta: meta(invocation, startedAt, deps.now()),
+        meta: meta(boundInvocation, startedAt, deps.now()),
         warnings,
       };
     }
@@ -77,16 +88,15 @@ export class BashTool {
         timeoutMs,
         maxOutputBytes,
       });
-    } catch (cause) {
+    } catch {
       return {
         ok: false,
         error: {
           code: "adapter_error",
           message: "bash execution failed",
           retryable: true,
-          detail: cause,
         },
-        meta: meta(invocation, startedAt, deps.now()),
+        meta: meta(boundInvocation, startedAt, deps.now()),
         warnings,
       };
     }
@@ -97,7 +107,7 @@ export class BashTool {
       stderr: redactAndTruncate(execResult.stderr, deps, maxOutputBytes),
       timedOut: execResult.timedOut,
     };
-    await writeDump(invocation, cwd, output, deps);
+    await writeDump(boundInvocation, output, deps);
 
     if (execResult.timedOut) {
       return {
@@ -108,7 +118,7 @@ export class BashTool {
           retryable: true,
           detail: execResult.signal,
         },
-        meta: meta(invocation, startedAt, deps.now()),
+        meta: meta(boundInvocation, startedAt, deps.now()),
         warnings,
       };
     }
@@ -116,7 +126,7 @@ export class BashTool {
     return {
       ok: true,
       output,
-      meta: meta(invocation, startedAt, deps.now()),
+      meta: meta(boundInvocation, startedAt, deps.now()),
       warnings: warnings.length > 0 ? warnings : undefined,
     };
   }
@@ -128,12 +138,11 @@ function timeoutFor(invocation: ToolInvocation<BashInput>): number | undefined {
   return invocation.policy.timeoutMs;
 }
 
-function allowed(cwd: string, allowedPaths: readonly string[] | undefined): { ok: true } | { ok: false } {
+function allowed(cwd: string, repositoryRoot: string, allowedPaths: readonly string[] | undefined): { ok: true } | { ok: false } {
   if (allowedPaths === undefined || allowedPaths.length === 0) return { ok: true };
-  const actual = resolve(cwd);
   for (const path of allowedPaths) {
-    const root = resolve(path);
-    if (actual === root || actual.startsWith(`${root}/`)) return { ok: true };
+    const root = resolveContainedExistingPath(repositoryRoot, path);
+    if (root !== undefined && isCanonicalPathContained(root, cwd)) return { ok: true };
   }
   return { ok: false };
 }
@@ -156,8 +165,9 @@ function redactAndTruncate(value: string, deps: ToolDeps, maxBytes: number | und
   return Buffer.from(redacted, "utf8").subarray(0, maxBytes).toString("utf8");
 }
 
-async function writeDump(invocation: ToolInvocation<BashInput>, cwd: string, output: BashOutput, deps: ToolDeps): Promise<void> {
-  const dir = join(cwd, ".roll", "tool-dumps");
+async function writeDump(invocation: ToolInvocation<BashInput>, output: BashOutput, deps: ToolDeps): Promise<void> {
+  const dir = invocation.context?.authorities.toolDumps;
+  if (dir === undefined) return;
   await deps.fs.mkdir(dir, { recursive: true });
   await deps.fs.writeFile(
     join(dir, `${invocation.invocationId}.log`),
@@ -183,5 +193,26 @@ function meta(invocation: ToolInvocation<BashInput>, startedAt: number, endedAt:
     startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - startedAt),
+    correlation: invocation.context === undefined
+      ? undefined
+      : {
+          workspaceId: invocation.context.workspace.workspaceId,
+          ...(invocation.context.issue?.storyId === undefined ? {} : { storyId: invocation.context.issue.storyId }),
+          ...(invocation.repoId === undefined ? {} : { repoId: invocation.repoId }),
+        },
+  };
+}
+
+function contextFailure(
+  invocation: ToolInvocation<BashInput>,
+  startedAt: number,
+  endedAt: number,
+  code: "missing_execution_context" | "invalid_execution_context",
+  message: string,
+): ToolResult<never> {
+  return {
+    ok: false,
+    error: { code, message, retryable: false },
+    meta: meta(invocation, startedAt, endedAt),
   };
 }

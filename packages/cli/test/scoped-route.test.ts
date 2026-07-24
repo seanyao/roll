@@ -3,9 +3,11 @@
  * visible and exposes an auditable route trace.
  */
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import {
   freezeWorkspaceCycleContext,
   mostRecentBuilder,
@@ -19,6 +21,7 @@ import {
   restorePersistedWorkspaceCycleContext,
   scopedExecuteRouteTrace,
   workspaceCycleContextPath,
+  type FrozenWorkspaceCycleContextResult,
 } from "../src/runner/scoped-route.js";
 import {
   REPOSITORY_BINDING_V1,
@@ -31,6 +34,43 @@ const dirs: string[] = [];
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
+
+const cliRequire = createRequire(join(import.meta.dirname, "..", "package.json"));
+const tsxPackageDir = dirname(cliRequire.resolve("tsx/package.json"));
+const tsxBin = join(tsxPackageDir, "dist", "cli.mjs");
+
+async function waitUntilReady(paths: readonly string[]): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!paths.every((path) => existsSync(path))) {
+    if (Date.now() >= deadline) throw new Error("workspace context persistence workers did not become ready");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function persistInChild(input: {
+  readonly runtimeDir: string;
+  readonly cycleId: string;
+  readonly contextPath: string;
+  readonly barrierPath: string;
+  readonly readyPath: string;
+}): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [
+      tsxBin,
+      join(import.meta.dirname, "workspace-cycle-context-persist-worker.ts"),
+      input.runtimeDir,
+      input.cycleId,
+      input.contextPath,
+      input.barrierPath,
+      input.readyPath,
+    ], { stdio: "pipe" });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+  });
+}
 
 const MACHINE = `schema: roll-agents/v1
 scope: machine
@@ -571,6 +611,68 @@ describe("US-WS-033 — frozen Workspace cycle route", () => {
     });
     expect(restorePersistedWorkspaceCycleContext(runtimeDir, "cycle-conflict")).toEqual(frozen);
   });
+
+  it("atomically fails closed when different snapshots race to create one cycle context", async () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-ws-033-cycle-race-"));
+    dirs.push(runtimeDir);
+    const { context, execution } = workspaceExecutionFixture();
+    const frozen = freezeWorkspaceCycleContext({ workspace: context, storyId: "US-WS-033", execution });
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+
+    const largeDetail = "x".repeat(16 * 1024 * 1024);
+    const first = {
+      ...frozen.context,
+      resolution: {
+        source: "requirement_discovery" as const,
+        evidence: [{
+          kind: "issue_exact" as const,
+          value: "US-WS-033",
+          hard: true,
+          score: 100,
+          source: "first",
+          provenance: "explicit_user" as const,
+          detail: largeDetail,
+        }],
+      },
+    };
+    const second = {
+      ...first,
+      resolution: {
+        ...first.resolution,
+        source: "explicit" as const,
+        evidence: [{ ...first.resolution.evidence[0]!, source: "second" }],
+      },
+    };
+    const firstPath = join(runtimeDir, "first.json");
+    const secondPath = join(runtimeDir, "second.json");
+    const barrierPath = join(runtimeDir, "barrier");
+    const readyPaths = [join(runtimeDir, "ready-first"), join(runtimeDir, "ready-second")];
+    writeFileSync(firstPath, JSON.stringify(first), "utf8");
+    writeFileSync(secondPath, JSON.stringify(second), "utf8");
+    writeFileSync(barrierPath, "wait", "utf8");
+
+    const children = [
+      persistInChild({ runtimeDir, cycleId: "cycle-race", contextPath: firstPath, barrierPath, readyPath: readyPaths[0]! }),
+      persistInChild({ runtimeDir, cycleId: "cycle-race", contextPath: secondPath, barrierPath, readyPath: readyPaths[1]! }),
+    ];
+    await waitUntilReady(readyPaths);
+    writeFileSync(barrierPath, "go", "utf8");
+    const results = await Promise.all(children);
+    expect(results.map((result) => result.code)).toEqual([0, 0]);
+    const persisted = results.map((result) => JSON.parse(result.stdout.trim()) as FrozenWorkspaceCycleContextResult);
+    expect(persisted.filter((result) => result.ok)).toHaveLength(1);
+    expect(persisted.find((result) => !result.ok)).toEqual({ ok: false, code: "execution_context_conflict" });
+
+    const restored = restorePersistedWorkspaceCycleContext(runtimeDir, "cycle-race");
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    const winner = persisted.find((result) => result.ok);
+    expect(winner?.ok).toBe(true);
+    if (!winner?.ok) return;
+    expect(restored.context.resolution.source).toBe(winner.context.resolution.source);
+    expect(restored.context.resolution.evidence[0]?.source).toBe(winner.context.resolution.evidence[0]?.source);
+  }, 30_000);
 
   it("requires an explicit repository for repository-required actions", () => {
     const { context, execution } = workspaceExecutionFixture();

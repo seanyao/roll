@@ -13,7 +13,8 @@
  * the executor and the route diagnostic command surface the same auditable
  * trace.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -590,25 +591,31 @@ export function persistWorkspaceCycleContext(
   if (!validated.ok) return validated;
   const path = workspaceCycleContextPath(runtimeDir, cycleId);
   const serialized = `${JSON.stringify(validated.context)}\n`;
+  let tempPath: string | undefined;
   try {
     mkdirSync(dirname(path), { recursive: true });
-    if (existsSync(path)) {
+    tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+    writeFileSync(tempPath, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    try {
+      // link(2) publishes the fully-written inode only when `path` is absent.
+      // Unlike rename(2), it cannot replace a winner that raced this writer.
+      linkSync(tempPath, path);
+      return validated;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error
+        ? (error as NodeJS.ErrnoException).code
+        : undefined;
+      if (code !== "EEXIST") return { ok: false, code: "execution_context_persist_failed" };
       const existing = restoreWorkspaceCycleContext(readFileSync(path, "utf8"));
       if (!existing.ok) return existing;
       return JSON.stringify(existing.context) === JSON.stringify(validated.context)
         ? existing
         : { ok: false, code: "execution_context_conflict" };
     }
-    const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      writeFileSync(tempPath, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      renameSync(tempPath, path);
-    } finally {
-      rmSync(tempPath, { force: true });
-    }
-    return validated;
   } catch {
     return { ok: false, code: "execution_context_persist_failed" };
+  } finally {
+    if (tempPath !== undefined) rmSync(tempPath, { force: true });
   }
 }
 

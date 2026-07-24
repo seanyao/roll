@@ -6,8 +6,10 @@ import {
   resolveWorkspaceTarget,
 } from "@roll/core";
 import {
+  applyWorkspaceEditPlan,
   collectWorkspaceMetadataReferenceIndex,
   readWorkspace,
+  WorkspaceEditTransactionError,
   WorkspaceReferenceIndexError,
   WorkspaceRegistry,
   WorkspaceRegistryError,
@@ -21,6 +23,7 @@ import {
 } from "./workspace-target.js";
 
 const WORKSPACE_EDIT_ERROR_V1 = "roll.workspace-edit-error/v1" as const;
+const WORKSPACE_EDIT_RESULT_V1 = "roll.workspace-edit-result/v1" as const;
 const MAX_EDIT_CONFIG_BYTES = 1024 * 1024;
 
 type WorkspaceEditErrorCode =
@@ -29,6 +32,12 @@ type WorkspaceEditErrorCode =
   | "target_missing"
   | "invalid_workspace"
   | "reference_index_invalid"
+  | "concurrent_edit"
+  | "manifest_changed"
+  | "edit_plan_changed"
+  | "metadata_referenced"
+  | "partial_apply_recovered"
+  | "io_failure"
   | "unknown_version"
   | "unknown_field"
   | "invalid_type"
@@ -42,6 +51,7 @@ interface ParsedArgs {
   readonly workspace: string;
   readonly configPath: string;
   readonly json: boolean;
+  readonly check: boolean;
 }
 
 function lang(): Lang {
@@ -88,19 +98,20 @@ function parseArgs(args: readonly string[]): ParsedArgs | undefined {
     if (arg === undefined || arg.startsWith("-")) return undefined;
     positional.push(arg);
   }
-  if (!check || configPath === undefined || positional.length !== 1 || positional[0] === undefined) return undefined;
-  return { workspace: positional[0], configPath, json };
+  if (configPath === undefined || positional.length !== 1 || positional[0] === undefined) return undefined;
+  return { workspace: positional[0], configPath, json, check };
 }
 
-function emitError(code: WorkspaceEditErrorCode, json: boolean, details: readonly unknown[] = []): number {
+function emitError(code: WorkspaceEditErrorCode, json: boolean, details: readonly unknown[] = [], action?: string): number {
   const message = msg(`workspace.edit.error.${code}`);
   if (json) {
     process.stderr.write(`${JSON.stringify({
       schema: WORKSPACE_EDIT_ERROR_V1,
-      error: { code, message, ...(details.length === 0 ? {} : { details }) },
+      error: { code, message, ...(details.length === 0 ? {} : { details }), ...(action === undefined ? {} : { action }) },
     }, null, 2)}\n`);
   } else {
     process.stderr.write(`${msg("workspace.edit.error.line", code, message)}\n`);
+    if (action !== undefined) process.stderr.write(`${msg("workspace.edit.recovery", action)}\n`);
   }
   return 1;
 }
@@ -141,7 +152,20 @@ function emitPlan(plan: WorkspaceEditPlan, json: boolean): number {
   return plan.outcome === "ready" ? 0 : 2;
 }
 
-export function workspaceEditCommand(args: readonly string[]): number {
+function emitResult(
+  result: { readonly outcome: "applied" | "reused"; readonly workspaceId: string; readonly beforeSha256: string; readonly afterSha256: string; readonly referenceIndexSha256: string },
+  manifestPath: string,
+  json: boolean,
+): number {
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ schema: WORKSPACE_EDIT_RESULT_V1, ...result, manifestPath }, null, 2)}\n`);
+  } else {
+    process.stdout.write(`${msg("workspace.edit.applied", result.workspaceId, msg(`workspace.edit.outcome.${result.outcome}`), result.afterSha256)}\n`);
+  }
+  return 0;
+}
+
+export async function workspaceEditCommand(args: readonly string[]): Promise<number> {
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
     process.stdout.write(workspaceEditUsage());
     return 0;
@@ -170,14 +194,34 @@ export function workspaceEditCommand(args: readonly string[]): number {
     if (!config.ok) return emitError(config.errors[0]?.code ?? "invalid_value", parsedArgs.json, config.errors);
     const current = readWorkspace(entry.root);
     const references = collectWorkspaceMetadataReferenceIndex({ workspaceRoot: entry.root });
-    return emitPlan(buildWorkspaceEditPlan({
+    const plan = buildWorkspaceEditPlan({
       config: config.value,
       current,
       references,
       manifestPath: join(entry.root, "workspace.yaml"),
       configPath: parsedArgs.configPath,
-    }), parsedArgs.json);
+    });
+    if (parsedArgs.check) return emitPlan(plan, parsedArgs.json);
+    const result = await applyWorkspaceEditPlan({
+      rollHome: workspaceRollHome(),
+      plan,
+      reloadCurrent: () => ({
+        manifest: readWorkspace(entry.root),
+        references: collectWorkspaceMetadataReferenceIndex({ workspaceRoot: entry.root }),
+      }),
+      rebuildPlan: (facts) => buildWorkspaceEditPlan({
+        config: config.value,
+        current: facts.manifest,
+        references: facts.references,
+        manifestPath: join(entry.root, "workspace.yaml"),
+        configPath: parsedArgs.configPath,
+      }),
+    });
+    return emitResult(result, plan.manifestPath, parsedArgs.json);
   } catch (error) {
+    if (error instanceof WorkspaceEditTransactionError) {
+      return emitError(error.code, parsedArgs.json, [], error.action);
+    }
     if (error instanceof WorkspaceReferenceIndexError) return emitError("reference_index_invalid", parsedArgs.json, [{ code: error.code }]);
     if (error instanceof WorkspaceRegistryError) return emitError("invalid_workspace", parsedArgs.json, [{ code: error.code }]);
     return emitError("invalid_workspace", parsedArgs.json);

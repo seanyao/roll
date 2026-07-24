@@ -193,7 +193,13 @@ function parseJournal(path: string): WorkspaceEditJournal | null {
 }
 
 function result(outcome: "applied" | "reused", journal: Pick<WorkspaceEditJournal, "workspaceId" | "beforeSha256" | "afterSha256" | "referenceIndexSha256">): WorkspaceEditTransactionResult {
-  return { outcome, ...journal };
+  return {
+    outcome,
+    workspaceId: journal.workspaceId,
+    beforeSha256: journal.beforeSha256,
+    afterSha256: journal.afterSha256,
+    referenceIndexSha256: journal.referenceIndexSha256,
+  };
 }
 
 function partial(workspaceId: string, message: string): WorkspaceEditTransactionError {
@@ -223,7 +229,7 @@ async function applyUnderLock(
   if (existing !== null) {
     if (
       existing.workspaceId !== preview.workspaceId || existing.manifestPath !== preview.manifestPath ||
-      existing.beforeSha256 !== preview.beforeSha256 || existing.afterSha256 !== preview.afterSha256
+      existing.afterSha256 !== preview.afterSha256
     ) throw partial(preview.workspaceId, "Workspace edit journal belongs to a different transaction");
     if (currentSha256 === existing.afterSha256) {
       removeDurably(journalPath);
@@ -232,6 +238,9 @@ async function applyUnderLock(
     }
     if (currentSha256 !== existing.beforeSha256) {
       throw partial(preview.workspaceId, "Workspace manifest matches neither the journal before nor after digest");
+    }
+    if (existing.beforeSha256 !== preview.beforeSha256) {
+      throw partial(preview.workspaceId, "Workspace edit preview does not match the pending transaction before digest");
     }
     if (existing.status === "committed") {
       throw partial(preview.workspaceId, "Committed Workspace edit journal conflicts with a restored before manifest");

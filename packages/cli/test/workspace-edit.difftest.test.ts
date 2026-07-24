@@ -300,7 +300,6 @@ describe("US-WS-025 roll workspace edit --check", () => {
   });
 
   it.each([
-    ["apply is not part of this Story", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--json"], "invalid_arguments"],
     ["unknown config field", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--check", "--json"], "unknown_field"],
     ["unknown config version", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--check", "--json"], "unknown_version"],
   ])("fails without writes when %s", async (name, rawArgs, code) => {

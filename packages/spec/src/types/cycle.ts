@@ -2,9 +2,7 @@
 import type { ToolCost } from "./tool.js";
 import type {
   IssueIdentity,
-  RepositoryExecutionMap,
   RepositoryIssueIdentity,
-  WorkspaceIdentity,
 } from "./workspace.js";
 
 export type CyclePhase =
@@ -43,12 +41,6 @@ export interface CycleCost {
   currency: string;
   /** US-TOOL-001: per-tool cost rows accumulated during this cycle. */
   toolCosts?: ToolCost[];
-}
-
-/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
-export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
-  readonly issueRoot: string;
-  readonly repositories: RepositoryExecutionMap;
 }
 
 /** Required identity envelope for every repository-specific Cycle fact. */

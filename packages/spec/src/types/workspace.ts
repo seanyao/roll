@@ -16,6 +16,7 @@ export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-re
 export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
 export const WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 = "roll.workspace-create-apply-authorization/v1" as const;
 export const WORKSPACE_CLARIFICATION_V1 = "roll.workspace-clarification/v1" as const;
+export const WORKSPACE_EXECUTION_CONTEXT_V1 = "roll.workspace-execution-context/v1" as const;
 
 export const REQUIREMENT_HINT_PROVENANCES = [
   "explicit_user",
@@ -333,7 +334,49 @@ export type WorkspaceContextScope =
   | "workspace_required_read"
   | "workspace_required_mutation"
   | "issue_required"
+  | "repository_required"
   | "legacy_migration_only";
+
+export type WorkspaceExecutionContextResolutionSource =
+  | "explicit"
+  | "environment"
+  | "cwd_manifest"
+  | "issue_manifest"
+  | "requirement_discovery";
+
+export interface WorkspaceExecutionAuthorityPaths {
+  readonly backlog: string;
+  readonly features: string;
+  readonly design: string;
+  readonly requirements: string;
+  readonly policy: string;
+  readonly evidence: string;
+  readonly toolDumps: string;
+  readonly events: string;
+  readonly runtime: string;
+  readonly locks: string;
+}
+
+export interface WorkspaceExecutionContextV1 {
+  readonly schema: typeof WORKSPACE_EXECUTION_CONTEXT_V1;
+  readonly workspace: {
+    readonly workspaceId: string;
+    readonly root: string;
+    readonly canonicalRoot: string;
+    readonly lifecycle: WorkspaceLifecycle;
+  };
+  readonly resolution: {
+    readonly source: WorkspaceExecutionContextResolutionSource;
+    readonly evidence: readonly WorkspaceMatchEvidence[];
+  };
+  readonly bindings: readonly RepositoryBinding[];
+  readonly issue?: {
+    readonly storyId: string;
+    readonly manifestPath: string;
+    readonly execution: CycleRepositoryExecutionContext;
+  };
+  readonly authorities: WorkspaceExecutionAuthorityPaths;
+}
 
 export interface WorkspaceIntentV1 {
   readonly schema: typeof WORKSPACE_INTENT_V1;
@@ -739,6 +782,12 @@ export interface RepositoryExecutionContext {
 /** The sole repository carrier for a Cycle. Keys are stable repoId values;
  * cardinality one and many intentionally share this exact contract. */
 export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecutionContext>>;
+
+/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
+export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
+  readonly issueRoot: string;
+  readonly repositories: RepositoryExecutionMap;
+}
 
 export interface IssueManifest {
   readonly schema: typeof ISSUE_MANIFEST_V1;

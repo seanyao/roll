@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -165,6 +166,30 @@ describe("US-WS-028 registry-bound Workspace discovery loader", () => {
         expect.objectContaining({ workspaceId: "mismatch", code: "identity_mismatch" }),
       ]),
     });
+  });
+
+  it("detects an authority file replaced by a symlink during the bounded read", () => {
+    const base = sandbox();
+    const rollHome = join(base, "home");
+    const fields = createWorkspace(join(base, "fields"), "fields");
+    register(rollHome, fields, "fields");
+    const manifestPath = join(realpathSync(fields), "workspace.yaml");
+    const movedPath = join(realpathSync(fields), "workspace-before.yaml");
+    let replaced = false;
+
+    const result = loadWorkspaceDiscovery({ rollHome }, {
+      afterAuthorityRead: (path) => {
+        if (path !== manifestPath || replaced) return;
+        replaced = true;
+        renameSync(path, movedPath);
+        symlinkSync(movedPath, path);
+      },
+    });
+
+    expect(result.workspaces).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ workspaceId: "fields", code: "symlink_escape", authorityPath: manifestPath }),
+    ]);
   });
 
   it("ignores archived authority unless a separate explicit-read path loads it", () => {

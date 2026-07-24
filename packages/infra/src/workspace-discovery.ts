@@ -8,7 +8,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
@@ -125,7 +124,10 @@ function safeAuthorityFile(
     }
     const bytes = readFileSync(path);
     dependencies.afterAuthorityRead?.(path);
-    const after = statSync(path);
+    const after = lstatSync(path);
+    if (after.isSymbolicLink()) {
+      throw new DiscoveryAuthorityError("symlink_escape", path, "Workspace discovery authority became a symlink during read");
+    }
     if (!sameFile(before, after) || bytes.length !== before.size) {
       throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority changed during read");
     }

@@ -2,6 +2,7 @@ import {
   existsSync,
   lstatSync,
   readFileSync,
+  realpathSync,
   readdirSync,
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -9,6 +10,7 @@ import {
   EventBus,
   createContextReadService,
   resolveWorkspaceTarget,
+  verifyContextSnapshot,
   type ContextReadService,
   type WorkspaceTargetFailureCode,
 } from "@roll/core";
@@ -89,6 +91,15 @@ export interface ContextCommandDeps {
   readonly writeSnapshot: (workspace: WorkspaceExecutionContextV1, result: ContextReadResultV1) => void;
   readonly recordAudit: (event: ContextCommandAuditEventV1, workspace: WorkspaceExecutionContextV1) => void;
   readonly now: () => number;
+}
+
+export interface ContextCommandRuntimeOptions {
+  readonly rollHome?: string;
+  readonly cwd?: () => string;
+  readonly now?: () => number;
+  readonly createReadService?: ContextCommandDeps["createReadService"];
+  readonly writeSnapshot?: ContextCommandDeps["writeSnapshot"];
+  readonly recordAudit?: ContextCommandDeps["recordAudit"];
 }
 
 interface ParsedStatusArgs {
@@ -320,7 +331,7 @@ function parseArgs(args: readonly string[]): ParsedContextArgs | undefined {
 }
 
 function issueStoryAtCwd(cwd: string, workspaceRoot: string, workspaceId: string): string | undefined {
-  const rel = relative(workspaceRoot, cwd);
+  const rel = relative(workspaceRoot, realpathSync(cwd));
   if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined;
   const parts = rel.split(sep);
   if (parts[0] !== "issues" || parts[1] === undefined) return undefined;
@@ -407,7 +418,10 @@ function latestSnapshot(workspace: WorkspaceExecutionContextV1): ContextReadResu
     if (!scope.isDirectory() || scope.isSymbolicLink()) throw new Error("snapshot_failure");
     for (const file of readdirSync(scopePath, { withFileTypes: true })) {
       if (!file.isFile() || file.isSymbolicLink() || !file.name.endsWith(".json")) throw new Error("snapshot_failure");
-      candidates.push(readContextSnapshot(workspace, join(scopePath, file.name)));
+      const artifactPath = join(scopePath, file.name);
+      const verification = verifyContextSnapshot(JSON.parse(readFileSync(artifactPath, "utf8")) as unknown);
+      if (!verification.valid || verification.reference.artifactPath !== artifactPath) throw new Error("snapshot_failure");
+      candidates.push(readContextSnapshot(workspace, verification.reference));
     }
   }
   return candidates.sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.snapshotId.localeCompare(left.snapshotId))[0];
@@ -429,21 +443,22 @@ function workspaceForStory(
   };
 }
 
-function realDeps(): ContextCommandDeps {
-  const rollHome = workspaceRollHome();
-  const now = Date.now;
+export function createContextCommandDeps(options: ContextCommandRuntimeOptions = {}): ContextCommandDeps {
+  const rollHome = options.rollHome ?? workspaceRollHome();
+  const cwd = options.cwd ?? process.cwd;
+  const now = options.now ?? Date.now;
   return {
-    resolveTarget: (selector) => resolveRealTarget(selector, process.cwd(), rollHome),
+    resolveTarget: (selector) => resolveRealTarget(selector, cwd(), rollHome),
     readRegistry: () => readRegistryFile(join(rollHome, "context-providers.yaml")),
     readLatestSnapshot: latestSnapshot,
-    createReadService: (input) => createContextReadService({
+    createReadService: options.createReadService ?? ((input) => createContextReadService({
       registry: input.registry,
       adapter: createContextReadAdapter({ rollHome, now, audit: input.audit }),
       now,
       authorizeRestrictedReference: (_request, file) => input.authorizeRestrictedReference(file),
-    }),
-    writeSnapshot: (workspace, result) => { writeContextSnapshot(workspace, result); },
-    recordAudit: (event, workspace) => { new EventBus().appendEvent(workspace.authorities.events, event); },
+    })),
+    writeSnapshot: options.writeSnapshot ?? ((workspace, result) => { writeContextSnapshot(workspace, result); }),
+    recordAudit: options.recordAudit ?? ((event, workspace) => { new EventBus().appendEvent(workspace.authorities.events, event); }),
     now,
   };
 }
@@ -682,7 +697,7 @@ async function runRead(args: ParsedReadArgs, deps: ContextCommandDeps): Promise<
   return readExit(result.outcome);
 }
 
-export async function contextCommand(args: string[], deps: ContextCommandDeps = realDeps()): Promise<number> {
+export async function contextCommand(args: string[], deps: ContextCommandDeps = createContextCommandDeps()): Promise<number> {
   const parsed = parseArgs(args);
   if (parsed === undefined) return emitError("invalid_arguments", args.includes("--json"));
   if (parsed.kind === "help") {

@@ -145,7 +145,7 @@ describe("US-WS-023 create-only CLI", () => {
         args: ["create", "--help"],
         prepare: prepareFresh,
         expectedStatus: 0,
-        verify: (result) => expect(result).toEqual({ status: 0, stderr: "", stdout: "Usage: roll workspace create <id> --config <file> [--check] [--json]\n" }),
+        verify: (result) => expect(result).toEqual({ status: 0, stderr: "", stdout: "Usage: roll workspace create <id> --config <file> [--authorization <file>] [--check] [--json]\n" }),
       },
       {
         name: "check",

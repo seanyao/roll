@@ -10,7 +10,17 @@ import { registerAll } from "../src/commands/index.js";
 
 interface Run { readonly status: number; readonly stdout: string; readonly stderr: string }
 interface CreateStep { readonly kind: "journal" | "directory" | "file" | "cache" | "registry"; readonly target: string; readonly action: "created" | "reused" | "repaired" | "rejected" }
-interface CreateResult { readonly schema: string; readonly mode: "check" | "apply"; readonly outcome: string; readonly workspaceId: string; readonly root: string; readonly steps: readonly CreateStep[] }
+interface CreateResult {
+  readonly schema: string;
+  readonly mode: "check" | "apply";
+  readonly outcome: string;
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly configSha256: string;
+  readonly planSha256: string;
+  readonly authorizationSource?: "direct_cli_apply" | "owner_after_preview";
+  readonly steps: readonly CreateStep[];
+}
 const roots: string[] = [];
 const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_LANG", "NO_COLOR"] as const;
 
@@ -135,6 +145,8 @@ describe("US-WS-006 roll workspace create", () => {
       mode: "check",
       outcome: "created",
       workspaceId: "ws-demo",
+      configSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      planSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
     expect(checkResult.steps).toEqual(expectedSteps(f, "created"));
     expect(tree(f.home)).toEqual(before);
@@ -142,7 +154,7 @@ describe("US-WS-006 roll workspace create", () => {
     const first = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(first.status, first.stderr).toBe(0);
     const firstResult = JSON.parse(first.stdout) as CreateResult;
-    expect(firstResult).toMatchObject({ mode: "apply", outcome: "created" });
+    expect(firstResult).toMatchObject({ mode: "apply", outcome: "created", authorizationSource: "direct_cli_apply" });
     expect(firstResult.steps).toEqual(expectedSteps(f, "created"));
     expect(existsSync(join(f.workspace, ".git"))).toBe(false);
     const cachePath = join(f.rollHome, "repos", `${f.repoId}.git`);
@@ -159,6 +171,72 @@ describe("US-WS-006 roll workspace create", () => {
     const secondIdentity = JSON.parse(readFileSync(identityPath, "utf8")) as Record<string, unknown>;
     expect(secondIdentity).toMatchObject({ repoId: f.repoId, remote: firstIdentity["remote"], cachePath });
     expect(readdirSync(join(f.rollHome, "repos")).filter((name) => name.endsWith(".git"))).toEqual([`${f.repoId}.git`]);
+  });
+
+  it("applies an exact owner-approved preview and rejects stale or non-owner authorization before writes", async () => {
+    const approved = fixture();
+    const preview = await run(["workspace", "create", "ws-demo", "--config", approved.config, "--check", "--json"], approved);
+    const previewResult = JSON.parse(preview.stdout) as CreateResult;
+    const authorizationPath = join(approved.home, "create-authorization.json");
+    writeFileSync(authorizationPath, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: previewResult.workspaceId,
+      configSha256: previewResult.configSha256,
+      planSha256: previewResult.planSha256,
+      source: "owner_after_preview",
+    }, null, 2)}\n`, "utf8");
+
+    const applied = await run([
+      "workspace", "create", "ws-demo", "--config", approved.config,
+      "--authorization", authorizationPath, "--json",
+    ], approved);
+    expect(applied.status, applied.stderr).toBe(0);
+    expect(JSON.parse(applied.stdout)).toMatchObject({
+      mode: "apply",
+      outcome: "created",
+      authorizationSource: "owner_after_preview",
+      configSha256: previewResult.configSha256,
+      planSha256: previewResult.planSha256,
+    });
+
+    const stale = fixture();
+    const staleAuthorization = join(stale.home, "stale-authorization.json");
+    writeFileSync(staleAuthorization, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: "ws-demo",
+      configSha256: "0".repeat(64),
+      planSha256: "f".repeat(64),
+      source: "owner_after_preview",
+    })}\n`, "utf8");
+    const staleBefore = tree(stale.home);
+    const rejected = await run([
+      "workspace", "create", "ws-demo", "--config", stale.config,
+      "--authorization", staleAuthorization, "--json",
+    ], stale);
+    expect(rejected.status).toBe(1);
+    expect(JSON.parse(rejected.stderr)).toMatchObject({
+      error: {
+        code: "apply_authorization_stale",
+        nextAction: "roll workspace create ws-demo --config <path> --check --json",
+      },
+    });
+    expect(tree(stale.home)).toEqual(staleBefore);
+
+    writeFileSync(staleAuthorization, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: "ws-demo",
+      configSha256: "0".repeat(64),
+      planSha256: "f".repeat(64),
+      source: "direct_cli_apply",
+    })}\n`, "utf8");
+    const nonOwnerBefore = tree(stale.home);
+    const nonOwner = await run([
+      "workspace", "create", "ws-demo", "--config", stale.config,
+      "--authorization", staleAuthorization, "--json",
+    ], stale);
+    expect(nonOwner.status).toBe(1);
+    expect(JSON.parse(nonOwner.stderr)).toMatchObject({ error: { code: "invalid_apply_authorization" } });
+    expect(tree(stale.home)).toEqual(nonOwnerBefore);
   });
 
   it("rejects identity mismatch and invalid arguments without any initialization writes", async () => {
@@ -224,10 +302,10 @@ describe("US-WS-006 roll workspace create", () => {
     const en = await run(["workspace", "--help"], f);
     const createEn = await run(["workspace", "create", "--help"], f, "en");
     const createZh = await run(["workspace", "create", "--help"], f, "zh");
-    expect(en.stdout).toContain("create <id> --config <file> [--check] [--json]");
+    expect(en.stdout).toContain("create <id> --config <file> [--authorization <file>] [--check] [--json]");
     expect(createEn).toMatchObject({ status: 0, stderr: "" });
-    expect(createEn.stdout).toContain("Usage: roll workspace create <id> --config <file> [--check] [--json]");
+    expect(createEn.stdout).toContain("Usage: roll workspace create <id> --config <file> [--authorization <file>] [--check] [--json]");
     expect(createZh).toMatchObject({ status: 0, stderr: "" });
-    expect(createZh.stdout).toContain("用法：roll workspace create <ID> --config <文件> [--check] [--json]");
+    expect(createZh.stdout).toContain("用法：roll workspace create <ID> --config <文件> [--authorization <文件>] [--check] [--json]");
   });
 });

@@ -88,7 +88,7 @@ exports[`US-WS-005 roll workspace lifecycle surface > freezes fail-loud ambiguit
 exports[`US-WS-005 roll workspace lifecycle surface > freezes locale-specific help without adjacent bilingual copy 1`] = `
 {
   "en": "Usage: roll workspace <create|edit|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [options]
-  \`create <id> --config <file> [--check] [--json]\`
+  \`create <id> --config <file> [--authorization <file>] [--check] [--json]\`
   \`edit <id|path> --config <file> --check [--json]\`
   \`issue init <story-id> --workspace <id> [--check] [--json]\`
   \`requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]\`
@@ -105,7 +105,7 @@ Alias: roll ws ... (canonical: roll workspace ...)
 Workspace selector alias: --ws <id|path> (canonical: --workspace <id|path>)
 ",
   "zh": "用法：roll workspace <create|edit|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [选项]
-  \`create <ID> --config <文件> [--check] [--json]\`
+  \`create <ID> --config <文件> [--authorization <文件>] [--check] [--json]\`
   \`edit <ID|路径> --config <文件> --check [--json]\`
   \`issue init <Story ID> --workspace <ID> [--check] [--json]\`
   \`requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]\`

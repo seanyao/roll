@@ -12,15 +12,17 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  buildWorkspaceCreateApplyAuthorization,
   buildWorkspaceCreatePlan,
   renderDefaultWorkspaceAgentScope,
+  validateWorkspaceCreateApplyAuthorization,
   type WorkspaceCreateConfig,
   type WorkspaceCreatePlan,
   type WorkspaceCreatePlanStep,
   type WorkspaceCreateProbe,
   type WorkspaceCreateState,
 } from "@roll/core";
-import type { RepositoryBinding } from "@roll/spec";
+import type { RepositoryBinding, WorkspaceCreateApplyAuthorizationV1 } from "@roll/spec";
 import {
   ensureRepositoryCache,
   inspectRepositoryCache,
@@ -35,7 +37,12 @@ import { acquireLock, releaseLock } from "./process.js";
 const JOURNAL_V1 = "roll.workspace-create-journal/v1" as const;
 
 export class WorkspaceCreationError extends Error {
-  constructor(readonly code: "rejected" | "concurrent_create" | "apply_failed", message: string, options?: ErrorOptions) {
+  constructor(
+    readonly code: "rejected" | "concurrent_create" | "apply_failed" | "apply_authorization_required" | "apply_authorization_stale",
+    message: string,
+    readonly nextAction?: string,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "WorkspaceCreationError";
   }
@@ -46,6 +53,7 @@ interface WorkspaceCreateDeps {
   readonly ensureCache?: (binding: RepositoryBinding, rollHome: string) => Promise<{ readonly action: "created" | "reused" | "repaired" }>;
   readonly afterStep?: (step: WorkspaceCreatePlanStep) => void;
   readonly renameFile?: (from: string, to: string) => void;
+  readonly authorization?: WorkspaceCreateApplyAuthorizationV1;
 }
 
 interface CreatedNode {
@@ -256,9 +264,18 @@ function mkdirTracked(path: string, created: CreatedNode[]): void {
 export async function applyWorkspaceCreation(
   config: WorkspaceCreateConfig,
   deps: WorkspaceCreateDeps = {},
-): Promise<{ readonly outcome: WorkspaceCreatePlan["outcome"]; readonly plan: WorkspaceCreatePlan }> {
+): Promise<{
+  readonly outcome: WorkspaceCreatePlan["outcome"];
+  readonly plan: WorkspaceCreatePlan;
+  readonly authorization: WorkspaceCreateApplyAuthorizationV1;
+}> {
   const initialPlan = await inspectWorkspaceCreation(config, deps);
   if (initialPlan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+  const authorization = deps.authorization ?? buildWorkspaceCreateApplyAuthorization(initialPlan, "direct_cli_apply");
+  const initialAuthorization = validateWorkspaceCreateApplyAuthorization(initialPlan, authorization);
+  if (!initialAuthorization.ok) {
+    throw new WorkspaceCreationError(initialAuthorization.code, "Workspace create apply authorization does not match the current preview", initialAuthorization.nextAction);
+  }
   const lockPath = workspaceCreateLockPath(config.rollHome, config.workspaceId);
   const lock = acquireLock(lockPath, process.pid, {
     cycleId: `workspace-create:${config.workspaceId}`,
@@ -270,6 +287,10 @@ export async function applyWorkspaceCreation(
   try {
     const plan = await inspectWorkspaceCreation(config, deps);
     if (plan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+    const lockedAuthorization = validateWorkspaceCreateApplyAuthorization(plan, authorization);
+    if (!lockedAuthorization.ok) {
+      throw new WorkspaceCreationError(lockedAuthorization.code, "Workspace create apply authorization became stale", lockedAuthorization.nextAction);
+    }
     const journalPath = workspaceCreateJournalPath(config.rollHome, config.workspaceId);
     const created: CreatedNode[] = [];
     const preservedCaches: string[] = [];
@@ -323,7 +344,7 @@ export async function applyWorkspaceCreation(
       registered = true;
       deps.afterStep?.(plan.steps.at(-1) as WorkspaceCreatePlanStep);
       rmSync(journalPath, { force: true });
-      return { outcome: plan.outcome, plan };
+      return { outcome: plan.outcome, plan, authorization };
     } catch (error) {
       const preserved = registered ? created.map((node) => node.path).sort() : rollback(created);
       journal = { ...journal, status: "repair_required", created: [...created], preserved, preservedCaches: [...preservedCaches] };

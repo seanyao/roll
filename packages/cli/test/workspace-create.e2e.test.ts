@@ -36,12 +36,12 @@ describe("US-WS-006 Workspace create E2E", () => {
     const en = runHelp("en");
     expect(en.status, en.stderr).toBe(0);
     expect(en.stderr).toBe("");
-    expect(en.stdout).toBe("Usage: roll workspace create <id> --config <file> [--check] [--json]\n");
+    expect(en.stdout).toBe("Usage: roll workspace create <id> --config <file> [--authorization <file>] [--check] [--json]\n");
 
     const zh = runHelp("zh");
     expect(zh.status, zh.stderr).toBe(0);
     expect(zh.stderr).toBe("");
-    expect(zh.stdout).toBe("用法：roll workspace create <ID> --config <文件> [--check] [--json]\n");
+    expect(zh.stdout).toBe("用法：roll workspace create <ID> --config <文件> [--authorization <文件>] [--check] [--json]\n");
   });
 
   it("previews, applies, and reuses one complete Workspace through the built CLI", () => {

@@ -1,13 +1,19 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { parseWorkspaceCreateConfig, type WorkspaceCreateParseError, type WorkspaceCreatePlan } from "@roll/core";
+import {
+  parseWorkspaceCreateApplyAuthorization,
+  parseWorkspaceCreateConfig,
+  type WorkspaceCreateParseError,
+  type WorkspaceCreatePlan,
+} from "@roll/core";
 import {
   WorkspaceCreationError,
   applyWorkspaceCreation,
   inspectWorkspaceCreation,
 } from "@roll/infra";
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
+import type { WorkspaceCreateApplyAuthorizationV1 } from "@roll/spec";
 import { configLang } from "./lang.js";
 
 const RESULT_V1 = "roll.workspace-create-result/v1" as const;
@@ -26,7 +32,12 @@ function msg(key: string, ...args: ReadonlyArray<string | number>): string {
   return t(v3Catalog, lang(), key, ...args);
 }
 
-function emitError(code: string, json: boolean, detail?: WorkspaceCreateParseError): number {
+interface ErrorDetail {
+  readonly conversions?: WorkspaceCreateParseError["conversions"];
+  readonly nextAction?: string;
+}
+
+function emitError(code: string, json: boolean, detail?: ErrorDetail): number {
   const message = msg(`workspace.create.error.${code}`);
   const error = {
     code,
@@ -54,19 +65,37 @@ function emitHelp(): number {
 }
 
 function parseArgs(args: readonly string[]):
-  | { readonly ok: true; readonly workspaceId: string; readonly configPath: string; readonly check: boolean; readonly json: boolean }
+  | {
+      readonly ok: true;
+      readonly workspaceId: string;
+      readonly configPath: string;
+      readonly authorizationPath?: string;
+      readonly check: boolean;
+      readonly json: boolean;
+    }
   | { readonly ok: false; readonly json: boolean } {
   const json = args.includes("--json");
-  const allowed = new Set(["--config", "--check", "--json"]);
+  const allowed = new Set(["--config", "--authorization", "--check", "--json"]);
   if (args.some((arg) => arg.startsWith("-") && !allowed.has(arg))) return { ok: false, json };
   const configIndex = args.indexOf("--config");
   if (configIndex < 0 || configIndex + 1 >= args.length) return { ok: false, json };
   const configPath = args[configIndex + 1];
   if (configPath === undefined || configPath.startsWith("-")) return { ok: false, json };
   const consumed = new Set([configIndex, configIndex + 1]);
+  const authorizationIndex = args.indexOf("--authorization");
+  let authorizationPath: string | undefined;
+  if (authorizationIndex >= 0) {
+    const value = args[authorizationIndex + 1];
+    if (value === undefined || value.startsWith("-") || args.lastIndexOf("--authorization") !== authorizationIndex) return { ok: false, json };
+    authorizationPath = resolve(value);
+    consumed.add(authorizationIndex);
+    consumed.add(authorizationIndex + 1);
+  }
   const positional = args.filter((arg, index) => !consumed.has(index) && arg !== "--check" && arg !== "--json");
   if (positional.length !== 1 || positional[0] === undefined) return { ok: false, json };
-  return { ok: true, workspaceId: positional[0], configPath: resolve(configPath), check: args.includes("--check"), json };
+  const check = args.includes("--check");
+  if (check && authorizationPath !== undefined) return { ok: false, json };
+  return { ok: true, workspaceId: positional[0], configPath: resolve(configPath), authorizationPath, check, json };
 }
 
 function renderPlan(plan: WorkspaceCreatePlan, mode: "check" | "apply"): string {
@@ -79,7 +108,12 @@ function renderPlan(plan: WorkspaceCreatePlan, mode: "check" | "apply"): string 
   return `${lines.join("\n")}\n`;
 }
 
-function emitResult(plan: WorkspaceCreatePlan, mode: "check" | "apply", json: boolean): number {
+function emitResult(
+  plan: WorkspaceCreatePlan,
+  mode: "check" | "apply",
+  json: boolean,
+  authorization?: WorkspaceCreateApplyAuthorizationV1,
+): number {
   if (json) {
     process.stdout.write(`${JSON.stringify({
       schema: RESULT_V1,
@@ -87,6 +121,9 @@ function emitResult(plan: WorkspaceCreatePlan, mode: "check" | "apply", json: bo
       outcome: plan.outcome,
       workspaceId: plan.workspaceId,
       root: plan.root,
+      configSha256: plan.configSha256,
+      planSha256: plan.planSha256,
+      ...(authorization === undefined ? {} : { authorizationSource: authorization.source }),
       steps: plan.steps,
     }, null, 2)}\n`);
   } else {
@@ -115,15 +152,29 @@ export async function workspaceCreateCommand(args: string[]): Promise<number> {
     const detail = parsed.errors[0];
     return emitError(detail?.code ?? "invalid_config", parsedArgs.json, detail);
   }
+  let authorization: WorkspaceCreateApplyAuthorizationV1 | undefined;
+  if (parsedArgs.authorizationPath !== undefined) {
+    let authorizationText: string;
+    try {
+      authorizationText = readFileSync(parsedArgs.authorizationPath, "utf8");
+    } catch {
+      return emitError("authorization_read_failed", parsedArgs.json);
+    }
+    const parsedAuthorization = parseWorkspaceCreateApplyAuthorization(authorizationText);
+    if (!parsedAuthorization.ok || parsedAuthorization.value.source !== "owner_after_preview") {
+      return emitError("invalid_apply_authorization", parsedArgs.json);
+    }
+    authorization = parsedAuthorization.value;
+  }
   try {
     if (parsedArgs.check) {
       const plan = await inspectWorkspaceCreation(parsed.value);
       return emitResult(plan, "check", parsedArgs.json);
     }
-    const result = await applyWorkspaceCreation(parsed.value);
-    return emitResult(result.plan, "apply", parsedArgs.json);
+    const result = await applyWorkspaceCreation(parsed.value, { authorization });
+    return emitResult(result.plan, "apply", parsedArgs.json, result.authorization);
   } catch (error) {
-    if (error instanceof WorkspaceCreationError) return emitError(error.code, parsedArgs.json);
+    if (error instanceof WorkspaceCreationError) return emitError(error.code, parsedArgs.json, { nextAction: error.nextAction });
     return emitError("apply_failed", parsedArgs.json);
   }
 }

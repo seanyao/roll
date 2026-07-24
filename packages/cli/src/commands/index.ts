@@ -197,6 +197,7 @@ export function registerAll(): void {
   registerPorted("workspace", workspaceCommand, {
     help: workspaceUsage,
     operations: [
+      cliMatchedOperation("workspace", "usage", [], (args) => args.length === 0),
       cliOperation("workspace", "create", ["create"]),
       cliMatchedSelectorOperation(
         "workspace",
@@ -212,7 +213,18 @@ export function registerAll(): void {
         ["requirement", "add", "--workspace", "roll"],
         (args) => args[0] === "requirement" && (args[1] === "add" || isHelp(args[1])),
       ),
-      cliOperation("workspace", "doctor", ["doctor"]),
+      cliMatchedOperation(
+        "workspace",
+        "doctor.read",
+        ["doctor"],
+        (args) => args[0] === "doctor" && !args.slice(1).includes("--repair"),
+      ),
+      cliMatchedOperation(
+        "workspace",
+        "doctor.repair",
+        ["doctor"],
+        (args) => args[0] === "doctor" && args.slice(1).includes("--repair"),
+      ),
       cliSelectorOperation("workspace", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
       cliOperation("workspace", "edit", ["edit"]),
       cliOperation("workspace", "list", ["list"]),
@@ -236,8 +248,11 @@ export function registerAll(): void {
   });
   registerPorted("delivery", deliveryCommand, {
     help: deliveryUsage,
-    operations: ["list", "show", "reconcile"].map((name) =>
-      cliSelectorOperation("delivery", name, [name], [name, "--workspace", "roll"])),
+    operations: [
+      cliMatchedOperation("delivery", "usage", [], (args) => args.length === 0),
+      ...["list", "show", "reconcile"].map((name) =>
+        cliSelectorOperation("delivery", name, [name], [name, "--workspace", "roll"])),
+    ],
   });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
@@ -695,9 +710,27 @@ export function registerAll(): void {
       ...[
         "eval", "story", "runs", "cycles", "cycle", "goal", "recover", "pardon-skip-list", "signals", "adversarial",
         "log", "events", "alert", "self-downgrade", "review-resize", "exhaustion-split", "fmt", "watch", "reconcile-pending",
-        "off", "fallback", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
+        "off", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
         "hotfix-head-context", "agent-routes", "monitor", "attach", "branches", "test-quality-check",
       ].map((name) => cliOperation("loop", name, [name])),
+      cliMatchedOperation(
+        "loop",
+        "fallback.status",
+        ["fallback"],
+        (args) => args[0] === "fallback" && (args[1] === undefined || args[1] === "status" || isHelp(args[1])),
+      ),
+      cliMatchedOperation(
+        "loop",
+        "fallback.start",
+        ["fallback"],
+        (args) => args[0] === "fallback" && args[1] === "start",
+      ),
+      cliMatchedOperation(
+        "loop",
+        "fallback.stop",
+        ["fallback"],
+        (args) => args[0] === "fallback" && args[1] === "stop",
+      ),
       cliMatchedSelectorOperation(
         "loop",
         "status",

@@ -152,17 +152,38 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     }
   });
 
-  it("canonicalizes the token for an unsupported family without granting selector semantics", async () => {
+  it("keeps bare workspace and delivery usage handlers reachable through the guard", async () => {
+    const workspace = await captureDispatch(["workspace"]);
+    const delivery = await captureDispatch(["delivery"]);
+    expect(workspace).toMatchObject({ status: 0, stderr: "" });
+    expect(workspace.stdout).toContain("Usage: roll workspace");
+    expect(delivery).toMatchObject({ status: 0, stderr: "" });
+    expect(delivery.stdout).toContain("Usage: roll delivery");
+  });
+
+  it.each(["--workspace", "--ws"])("rejects unsupported selector %s before the handler runs", async (selector) => {
     const unsupportedCalls: string[][] = [];
     registerPorted("status", (args) => {
       unsupportedCalls.push(args);
       return 9;
     });
 
-    const result = await captureDispatch(["status", "--ws"]);
+    const result = await captureDispatch(["status", selector, "roll"]);
 
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("does not accept --workspace");
+    expect(unsupportedCalls).toEqual([]);
+  });
+
+  it("does not treat a post-sentinel --workspace literal as a selector capability", async () => {
+    const unsupportedCalls: string[][] = [];
+    registerPorted("status", (args) => {
+      unsupportedCalls.push(args);
+      return 9;
+    });
+    const result = await captureDispatch(["status", "--", "--workspace", "roll"]);
     expect(result.status).toBe(9);
-    expect(unsupportedCalls).toEqual([["--workspace"]]);
+    expect(unsupportedCalls).toEqual([["--", "--workspace", "roll"]]);
   });
 
   it("fails closed before an unsupported public handler can consume canonical --workspace", async () => {
@@ -350,7 +371,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(aliasHelpDecision("status", LIVE_CLI_OPERATIONS)).toBeUndefined();
   });
 
-  it("normalizes aliases before guarded dispatch and canonicalizes ws to workspace", async () => {
+  it("rejects an unsupported selector alias before dispatch and canonicalizes ws to workspace", async () => {
     registerAll();
     const observed: string[][] = [];
     registerPorted("status", (args) => {
@@ -358,8 +379,10 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
       return 0;
     });
     const normalized = await captureDispatch(["status", "--ws", "roll"]);
-    expect(normalized.status).toBe(0);
-    expect(observed).toEqual([["--workspace", "roll"]]);
+    expect(normalized.status).toBe(1);
+    expect(normalized.stderr).toContain("does not accept --workspace");
+    expect(normalized.stderr).not.toMatch(/--ws(?=['"\s]|$)/u);
+    expect(observed).toEqual([]);
 
     const workspaceCalls: string[][] = [];
     registerPorted("workspace", (args) => {

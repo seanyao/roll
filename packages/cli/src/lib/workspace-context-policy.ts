@@ -33,15 +33,16 @@ const machine: PolicyShape = { scope: "machine_only" };
 const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
   "help:read": machine,
   "status:read": workspaceOptional, "status:ci": repository, "status:pulse": workspaceOptional,
+  "workspace:usage": machine,
   "workspace:create": { ...machine, allowsAmbientCwd: true, rationale: "Creation starts from an explicit config before the target Workspace exists." },
   "workspace:issue.init": workspaceMutation, "workspace:requirement.add": workspaceMutation,
-  "workspace:doctor": workspaceRead,
+  "workspace:doctor.read": workspaceRead, "workspace:doctor.repair": workspaceMutation,
   "workspace:migrate": { scope: "legacy_migration_only", allowsAmbientCwd: true, allowsLegacyRollPath: true, rationale: "Migration must inspect an explicitly selected legacy Roll project." },
   "workspace:edit": workspaceMutation, "workspace:list": machine, "workspace:show": workspaceRead,
   "workspace:register": { ...machine, allowsAmbientCwd: true, rationale: "Registration resolves an explicit existing Workspace path into the machine registry." },
   "workspace:activate": workspaceMutation, "workspace:pause": workspaceMutation, "workspace:archive": workspaceMutation,
   "context:usage": machine, "context:status": workspaceRead, "context:read": workspaceRead,
-  "delivery:list": workspaceRead, "delivery:show": workspaceRead, "delivery:reconcile": workspaceMutation,
+  "delivery:usage": machine, "delivery:list": workspaceRead, "delivery:show": workspaceRead, "delivery:reconcile": workspaceMutation,
   "agent:workspace": workspaceRead, "agent:view": machine, "agent:cast": workspaceOptional, "agent:list": machine,
   "agent:readiness": machine, "agent:disable": machine, "agent:enable": machine, "agent:migrate": machine,
   "agent:default": machine, "agent:set": machine, "agent:use": machine,
@@ -65,6 +66,7 @@ const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
 
 const LOOP_READ_OPERATIONS = new Set([
   "status", "eval", "story", "runs", "cycles", "cycle", "goal", "signals", "adversarial", "log", "events", "fmt", "watch",
+  "fallback.status",
 ]);
 const LOOP_MACHINE_OPERATIONS = new Set(["monitor", "attach", "branches", "test-quality-check"]);
 

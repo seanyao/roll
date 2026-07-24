@@ -166,6 +166,14 @@ function jsonFlag(args: readonly string[]): boolean {
   return false;
 }
 
+function hasCanonicalWorkspaceSelector(args: readonly string[]): boolean {
+  for (const arg of args) {
+    if (arg === "--") return false;
+    if (arg === "--workspace") return true;
+  }
+  return false;
+}
+
 function emitWorkspaceSelectorError(
   code: Extract<ParsedWorkspaceSelectorArgs, { readonly ok: false }>["code"],
   operation: WorkspaceSelectorOperationDecision,
@@ -283,13 +291,19 @@ export async function dispatch(
         process.stderr.write(rejected.message.endsWith("\n") ? rejected.message : `${rejected.message}\n`);
         return { status: 1 };
       }
-      if (operations.length > 0 && cliOperationForArgs(command, rest, operations) === undefined) {
+      const operation = cliOperationForArgs(command, rest, operations);
+      if (operations.length > 0 && operation === undefined) {
         const route = rest.slice(0, 2).join(" ") || "<root>";
         process.stderr.write(`roll ${command}: unknown or unregistered route '${route}'\n`);
         return { status: 1 };
       }
+      const hasWorkspaceSelector = hasCanonicalWorkspaceSelector(rest);
+      if (hasWorkspaceSelector && operation !== undefined && !operation.supportsWorkspaceSelector) {
+        process.stderr.write(`roll ${command}: operation '${operation.operation}' does not accept --workspace\n`);
+        return { status: 1 };
+      }
       const selectorOperation = workspaceSelectorOperation(command, rest, operations);
-      if (selectorOperation !== undefined) {
+      if (operation?.supportsWorkspaceSelector === true && selectorOperation !== undefined) {
         const parsed = parseCanonicalWorkspaceSelectorArgs(rest);
         if (!parsed.ok) return emitWorkspaceSelectorError(parsed.code, selectorOperation, rest);
       }

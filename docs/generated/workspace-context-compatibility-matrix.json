@@ -2,7 +2,7 @@
   "schema": "roll.workspace-context-compatibility-matrix/v1",
   "summary": {
     "cliFamilies": 19,
-    "cliOperations": 110,
+    "cliOperations": 115,
     "skillFamilies": 22,
     "skillOperations": 24,
     "toolAdapters": 8,
@@ -293,6 +293,14 @@
     },
     {
       "surface": "cli",
+      "id": "delivery",
+      "operation": "usage",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
       "id": "design",
       "operation": "design",
       "scope": "workspace_required_mutation",
@@ -475,7 +483,25 @@
     {
       "surface": "cli",
       "id": "loop",
-      "operation": "fallback",
+      "operation": "fallback.start",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
+      "operation": "fallback.status",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
+      "operation": "fallback.stop",
       "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
@@ -922,8 +948,17 @@
     {
       "surface": "cli",
       "id": "workspace",
-      "operation": "doctor",
+      "operation": "doctor.read",
       "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "workspace",
+      "operation": "doctor.repair",
+      "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
@@ -1003,6 +1038,14 @@
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace",
       "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "workspace",
+      "operation": "usage",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
     },
     {
       "surface": "skill",

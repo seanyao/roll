@@ -56,7 +56,7 @@ function canonicalAuthority(args: readonly string[], deps: StoryNewCommandDeps):
   return {
     projectPath: target.workspaceRoot,
     backlogPath: target.backlogPath,
-    featuresDir: target.storyRoot,
+    featuresDir: join(target.workspaceRoot, "features"),
     canonical: true,
   };
 }

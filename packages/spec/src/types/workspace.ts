@@ -13,10 +13,33 @@ export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
 export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
 export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" as const;
+export const REQUIREMENT_HINT_V1 = "roll.requirement-hint/v1" as const;
+export const WORKSPACE_INTENT_V1 = "roll.workspace-intent/v1" as const;
 export const WORKSPACE_MIGRATION_FACTS_V1 = "roll.workspace-migration-facts/v1" as const;
 export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as const;
+export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
+export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-reference-index/v1" as const;
+export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
+export const WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 = "roll.workspace-create-apply-authorization/v1" as const;
+
+export const REQUIREMENT_HINT_PROVENANCES = [
+  "explicit_user",
+  "cli_argument",
+  "issue_manifest",
+  "cwd_repository",
+  "deterministic_extraction",
+  "semantic_inference",
+] as const;
 
 export type Sha256Digest = string;
+
+export interface WorkspaceCreateApplyAuthorizationV1 {
+  readonly schema: typeof WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1;
+  readonly workspaceId: string;
+  readonly configSha256: Sha256Digest;
+  readonly planSha256: Sha256Digest;
+  readonly source: "direct_cli_apply" | "owner_after_preview";
+}
 
 export type HistoricalRemoteTruth =
   | {
@@ -259,6 +282,137 @@ export interface RequirementSourceReference {
 
 export type RequirementProvider = "jira" | "github_issue" | "local_file" | "user_input";
 
+export type RequirementHintProvenance = typeof REQUIREMENT_HINT_PROVENANCES[number];
+export type StructuredRequirementProvenance = Exclude<
+  RequirementHintProvenance,
+  "cwd_repository" | "semantic_inference"
+>;
+export type RepositoryHintProvenance = Exclude<RequirementHintProvenance, "semantic_inference">;
+
+export interface RequirementSourceKey {
+  readonly provider: RequirementProvider;
+  readonly ref: string;
+}
+
+export interface RequirementHintV1 {
+  readonly schema: typeof REQUIREMENT_HINT_V1;
+  readonly sources: readonly {
+    readonly key: RequirementSourceKey;
+    readonly provenance: StructuredRequirementProvenance;
+  }[];
+  readonly storyIds: readonly {
+    readonly storyId: string;
+    readonly provenance: StructuredRequirementProvenance;
+  }[];
+  readonly repositoryRemotes: readonly {
+    readonly remote: string;
+    readonly provenance: RepositoryHintProvenance;
+  }[];
+  readonly paths: readonly {
+    readonly path: string;
+    readonly provenance: RepositoryHintProvenance;
+  }[];
+  readonly semanticTerms?: readonly string[];
+}
+
+export type WorkspaceMatchEvidenceKind =
+  | "issue_exact"
+  | "requirement_source_exact"
+  | "repository_exact"
+  | "path_contained"
+  | "semantic_supported";
+
+export interface WorkspaceMatchEvidence {
+  readonly kind: WorkspaceMatchEvidenceKind;
+  readonly value: string;
+  readonly hard: boolean;
+  readonly score: number;
+  readonly source: string;
+  readonly provenance: RequirementHintProvenance;
+  readonly detail: string;
+}
+
+export type WorkspaceContextScope =
+  | "machine_only"
+  | "workspace_optional_read"
+  | "workspace_required_read"
+  | "workspace_required_mutation"
+  | "issue_required"
+  | "legacy_migration_only";
+
+export interface WorkspaceIntentV1 {
+  readonly schema: typeof WORKSPACE_INTENT_V1;
+  readonly operation: "read" | "mutation";
+  readonly interaction: "interactive" | "non_interactive";
+  readonly scope: WorkspaceContextScope;
+  readonly cwd: string;
+  readonly explicitSelector?: {
+    readonly workspaceId?: string;
+    readonly path?: string;
+  };
+  readonly requirement: RequirementHintV1;
+}
+
+export interface WorkspaceMatchCandidateV1 {
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly lifecycle: WorkspaceLifecycle;
+  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly hardMatch: boolean;
+  readonly score: number;
+}
+
+export type WorkspaceDiscoveryDiagnosticCode =
+  | "stale_registry"
+  | "identity_mismatch"
+  | "invalid_workspace_manifest"
+  | "invalid_issue_manifest"
+  | "symlink_escape"
+  | "discovery_io_failure";
+
+export interface WorkspaceDiscoveryDiagnosticV1 {
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly code: WorkspaceDiscoveryDiagnosticCode;
+  readonly authorityPath: string;
+  readonly message: string;
+}
+
+export type WorkspaceDiscoveryDecisionV1 = (
+  | {
+      readonly ok: true;
+      readonly kind: "selected";
+      readonly target: WorkspaceMatchCandidateV1;
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "choice_required";
+      readonly code: "requirement_match_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "create_required";
+      readonly code: "create_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "activation_required";
+      readonly code: "workspace_activation_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "conflict";
+      readonly code:
+        | "ambiguous_requirement_match"
+        | "invalid_requirement_hint"
+        | "workspace_discovery_incomplete";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+) & { readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[] };
+
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;
   readonly sha256: string;
@@ -343,6 +497,115 @@ export interface WorkspaceManifest {
   readonly requirements: readonly RequirementSourceReference[];
   readonly repositories: readonly RepositoryBinding[];
   readonly contexts?: WorkspaceContextsV1;
+}
+
+export interface WorkspaceEditRepositoryInput {
+  readonly alias: string;
+  readonly remote: string;
+  readonly provider: string;
+  readonly integrationBranch: string;
+  readonly branchPattern: string;
+  readonly requiredChecks: readonly string[];
+}
+
+export interface WorkspaceEditConfigV1 {
+  readonly schema: typeof WORKSPACE_EDIT_CONFIG_V1;
+  readonly workspaceId: string;
+  readonly expectedManifestSha256: Sha256Digest;
+  readonly displayName: string;
+  readonly requirements: readonly RequirementSourceReference[];
+  readonly repositories: readonly WorkspaceEditRepositoryInput[];
+}
+
+export interface WorkspaceMetadataIssueReference {
+  readonly storyId: string;
+  readonly manifestSha256: Sha256Digest;
+  readonly requirementKeys: readonly RequirementSourceReference[];
+  readonly repoIds: readonly string[];
+}
+
+export interface WorkspaceMetadataRequirementArchiveReference {
+  readonly requirementId: string;
+  readonly source: RequirementSourceReference;
+  readonly manifestSha256: Sha256Digest;
+}
+
+export interface WorkspaceMetadataAdditionalFact {
+  readonly kind: "delivery" | "runtime" | "event" | "migration";
+  readonly authorityPath: string;
+  readonly sha256: Sha256Digest;
+  readonly requirementKeys: readonly RequirementSourceReference[];
+  readonly repoIds: readonly string[];
+}
+
+export interface WorkspaceMetadataReferenceIndex {
+  readonly schema: typeof WORKSPACE_METADATA_REFERENCE_INDEX_V1;
+  readonly workspaceId: string;
+  readonly issues: readonly WorkspaceMetadataIssueReference[];
+  readonly requirementArchives: readonly WorkspaceMetadataRequirementArchiveReference[];
+  readonly additionalFacts: readonly WorkspaceMetadataAdditionalFact[];
+}
+
+export type WorkspaceEditChangeKind =
+  | "display_name"
+  | "requirement"
+  | "repository_identity"
+  | "repository_workflow"
+  | "repository";
+
+export interface WorkspaceEditChange {
+  readonly kind: WorkspaceEditChangeKind;
+  readonly path: string;
+  readonly operation: "added" | "removed" | "updated";
+  readonly before?: unknown;
+  readonly after?: unknown;
+  readonly safety: "safe" | "blocked";
+}
+
+export interface WorkspaceEditReference {
+  readonly kind: "issue_requirement" | "issue_repository" | "requirement_archive" | "additional_fact";
+  readonly authorityPath: string;
+  readonly storyId?: string;
+  readonly requirementId?: string;
+  readonly repoId?: string;
+}
+
+export type WorkspaceEditBlockerCode =
+  | "manifest_changed"
+  | "metadata_referenced"
+  | "normalization_failed"
+  | "reference_index_invalid";
+
+export interface WorkspaceEditBlocker {
+  readonly code: WorkspaceEditBlockerCode;
+  readonly path: string;
+  readonly message: string;
+  readonly references: readonly WorkspaceEditReference[];
+}
+
+export interface WorkspaceEditWarning {
+  readonly code: "requirement_capture_pending";
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface WorkspaceEditPlan {
+  readonly schema: typeof WORKSPACE_EDIT_PLAN_V1;
+  readonly outcome: "ready" | "blocked";
+  readonly workspaceId: string;
+  readonly manifestPath: string;
+  readonly beforeSha256: Sha256Digest;
+  readonly afterSha256: Sha256Digest;
+  readonly referenceIndexSha256: Sha256Digest;
+  readonly beforeManifest: WorkspaceManifest;
+  readonly afterManifest: WorkspaceManifest;
+  readonly changes: readonly WorkspaceEditChange[];
+  readonly blockers: readonly WorkspaceEditBlocker[];
+  readonly warnings: readonly WorkspaceEditWarning[];
+  readonly nextAction: {
+    readonly kind: "apply" | "blocked";
+    readonly command?: string;
+  };
 }
 
 export interface WorkspaceManifestExpectations {

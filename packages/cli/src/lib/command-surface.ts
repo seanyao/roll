@@ -50,6 +50,8 @@ export type CommandOwner =
 export interface CommandSurfaceDecision {
   /** The current command surface as a user types it today (e.g. `prices` or `loop monitor`). */
   readonly current: string;
+  /** Fixed parser aliases. They canonicalize to `current` and never appear as separate public commands. */
+  readonly aliases?: readonly string[];
   /** Where it should live (only meaningful for nested/internal moves); omitted for public commands that own themselves. */
   readonly target?: string;
   /** The public top-level command this surface belongs under. */
@@ -83,7 +85,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   { current: "setup", owner: "setup", audience: "human", disposition: "public", rationale: "Project/tooling setup lifecycle root." },
   { current: "status", owner: "status", audience: "human", disposition: "public", rationale: "Project health snapshot." },
   { current: "test", owner: "test", audience: "human", disposition: "public", rationale: "Run the project's tests; a core workflow verb." },
-  { current: "workspace", owner: "workspace", audience: "human", disposition: "public", rationale: "Inspect and control explicitly targeted Workspace lifecycle state." },
+  { current: "workspace", aliases: ["ws"], owner: "workspace", audience: "human", disposition: "public", rationale: "Inspect and control explicitly targeted Workspace lifecycle state." },
   { current: "update", owner: "update", audience: "human", disposition: "public", rationale: "Upgrade the global roll." },
 
   // ── Nested: useful capabilities that move under their owning command ──
@@ -124,11 +126,19 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
  */
 export function validateCommandSurface(decisions: readonly CommandSurfaceDecision[]): void {
   const seen = new Set<string>();
+  const aliases = new Set<string>();
+  const canonicalNames = new Set(decisions.map((decision) => decision.current));
   for (const d of decisions) {
     if (seen.has(d.current)) {
       throw new Error(`command-surface: duplicate decision for '${d.current}'`);
     }
     seen.add(d.current);
+    for (const alias of d.aliases ?? []) {
+      if (canonicalNames.has(alias) || aliases.has(alias)) {
+        throw new Error(`command-surface: duplicate alias '${alias}'`);
+      }
+      aliases.add(alias);
+    }
     if (d.disposition === "public") {
       if (d.owner !== d.current) {
         throw new Error(`command-surface: public '${d.current}' must own itself (owner='${d.owner}')`);
@@ -162,4 +172,145 @@ export function publicCommands(): string[] {
 /** Look up a single decision by its current surface name. */
 export function commandDecision(current: string): CommandSurfaceDecision | undefined {
   return COMMAND_SURFACE.find((d) => d.current === current);
+}
+
+/** Canonicalize one exact top-level token without creating a second command surface. */
+export function canonicalTopLevelCommand(command: string): string {
+  return COMMAND_SURFACE.find((decision) => decision.aliases?.includes(command) === true)?.current ?? command;
+}
+
+/** One current CLI leaf that already accepts the canonical Workspace selector. */
+export interface WorkspaceSelectorOperationDecision {
+  readonly id: string;
+  readonly command: string;
+  readonly route: readonly string[];
+  readonly canonicalCommand: string;
+  readonly exampleArgs: readonly string[];
+  readonly acceptsWorkspaceSelector: true;
+}
+
+/** The one fixed selector alias map consumed by normalization, help and tests. */
+export const WORKSPACE_SELECTOR_ALIAS = {
+  canonical: "--workspace",
+  aliases: ["--ws"],
+} as const;
+
+export function isWorkspaceSelectorAlias(
+  token: string,
+): token is typeof WORKSPACE_SELECTOR_ALIAS.aliases[number] {
+  return WORKSPACE_SELECTOR_ALIAS.aliases.some((alias) => alias === token);
+}
+
+/**
+ * Narrow selector capability source for US-WS-022. The closed cross-surface
+ * context-policy registry is delivered by US-WS-032; it consumes this list
+ * instead of inventing a second alias inventory.
+ */
+export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = [
+  { id: "agent.workspace", command: "agent", route: [], canonicalCommand: "roll agent", exampleArgs: ["--workspace", "roll"], acceptsWorkspaceSelector: true },
+  { id: "backlog.read", command: "backlog", route: [], canonicalCommand: "roll backlog", exampleArgs: ["--workspace", "roll"], acceptsWorkspaceSelector: true },
+  ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((operation) => ({
+    id: `backlog.${operation}`,
+    command: "backlog",
+    route: [operation],
+    canonicalCommand: `roll backlog ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+    acceptsWorkspaceSelector: true as const,
+  })),
+  ...["list", "show", "reconcile"].map((operation) => ({
+    id: `delivery.${operation}`,
+    command: "delivery",
+    route: [operation],
+    canonicalCommand: `roll delivery ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+    acceptsWorkspaceSelector: true as const,
+  })),
+  ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((operation) => ({
+    id: `loop.${operation}`,
+    command: "loop",
+    route: [operation],
+    canonicalCommand: `roll loop ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+    acceptsWorkspaceSelector: true as const,
+  })),
+  { id: "workspace.issue.init", command: "workspace", route: ["issue", "init"], canonicalCommand: "roll workspace issue init", exampleArgs: ["issue", "init", "US-WS-022", "--workspace", "roll"], acceptsWorkspaceSelector: true },
+  { id: "workspace.requirement.add", command: "workspace", route: ["requirement", "add"], canonicalCommand: "roll workspace requirement add", exampleArgs: ["requirement", "add", "--workspace", "roll"], acceptsWorkspaceSelector: true },
+  { id: "workspace.migrate", command: "workspace", route: ["migrate"], canonicalCommand: "roll workspace migrate", exampleArgs: ["migrate", "--workspace", "roll"], acceptsWorkspaceSelector: true },
+  ...["show", "activate", "pause", "archive"].map((operation) => ({
+    id: `workspace.${operation}`,
+    command: "workspace",
+    route: [operation],
+    canonicalCommand: `roll workspace ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+    acceptsWorkspaceSelector: true as const,
+  })),
+  ...["audit", "cleanup"].map((operation) => ({
+    id: `worktree.${operation}`,
+    command: "worktree",
+    route: [operation],
+    canonicalCommand: `roll worktree ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+    acceptsWorkspaceSelector: true as const,
+  })),
+];
+
+export function validateWorkspaceSelectorOperations(
+  operations: readonly WorkspaceSelectorOperationDecision[],
+): void {
+  const ids = new Set<string>();
+  const routes = new Set<string>();
+  for (const operation of operations) {
+    if (ids.has(operation.id)) throw new Error(`workspace-selector: duplicate id '${operation.id}'`);
+    ids.add(operation.id);
+    const route = `${operation.command}\0${operation.route.join("\0")}`;
+    if (routes.has(route)) throw new Error(`workspace-selector: duplicate route '${operation.canonicalCommand}'`);
+    routes.add(route);
+    if (operation.acceptsWorkspaceSelector !== true) {
+      throw new Error(`workspace-selector: '${operation.id}' must explicitly accept the selector`);
+    }
+    const canonicalCount = operation.exampleArgs.filter((arg) => arg === WORKSPACE_SELECTOR_ALIAS.canonical).length;
+    if (canonicalCount !== 1) {
+      throw new Error(`workspace-selector: '${operation.id}' example must contain one canonical selector`);
+    }
+    if (operation.exampleArgs.some(isWorkspaceSelectorAlias)) {
+      throw new Error(`workspace-selector: '${operation.id}' canonical example contains an alias`);
+    }
+  }
+}
+
+validateWorkspaceSelectorOperations(WORKSPACE_SELECTOR_OPERATIONS);
+
+export interface AliasHelpDecision {
+  readonly canonicalCommand: string;
+  readonly commandAliases: readonly string[];
+  readonly workspaceSelectorAliases: readonly string[];
+}
+
+/** Project visible alias notes from the same registries that drive dispatch. */
+export function aliasHelpDecision(command: string): AliasHelpDecision | undefined {
+  const commandAliases = commandDecision(command)?.aliases ?? [];
+  const acceptsWorkspaceSelector = WORKSPACE_SELECTOR_OPERATIONS.some((operation) => operation.command === command);
+  if (commandAliases.length === 0 && !acceptsWorkspaceSelector) return undefined;
+  return {
+    canonicalCommand: command,
+    commandAliases: [...commandAliases],
+    workspaceSelectorAliases: acceptsWorkspaceSelector ? [...WORKSPACE_SELECTOR_ALIAS.aliases] : [],
+  };
+}
+
+/** Resolve the leaf capability before its registered family handler dispatches. */
+export function workspaceSelectorOperation(
+  command: string,
+  args: readonly string[],
+): WorkspaceSelectorOperationDecision | undefined {
+  return WORKSPACE_SELECTOR_OPERATIONS
+    .filter((operation) => {
+      if (operation.command !== command) return false;
+      if (operation.route.length === 0) {
+        const first = args[0];
+        return first === undefined || first.startsWith("-");
+      }
+      return operation.route.every((token, index) => args[index] === token);
+    })
+    .sort((left, right) => right.route.length - left.route.length)[0];
 }

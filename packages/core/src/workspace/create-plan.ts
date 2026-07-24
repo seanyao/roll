@@ -1,60 +1,94 @@
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   REPOSITORY_BINDING_V1,
+  WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
   WORKSPACE_MANIFEST_V1,
   parseRepositoryBinding,
   repositoryIdFromRemote,
   type ContractErrorCode,
   type RepositoryBinding,
   type RequirementSourceReference,
+  type WorkspaceCreateApplyAuthorizationV1,
   type WorkspaceManifest,
 } from "@roll/spec";
 
-export const WORKSPACE_INIT_CONFIG_V1 = "roll.workspace-init/v1" as const;
+export const WORKSPACE_CREATE_CONFIG_V1 = "roll.workspace-create/v1" as const;
 
-export interface WorkspaceInitConfig {
-  readonly schema: typeof WORKSPACE_INIT_CONFIG_V1;
+export interface WorkspaceCreateConfig {
+  readonly schema: typeof WORKSPACE_CREATE_CONFIG_V1;
   readonly workspaceId: string;
   readonly root: string;
   readonly rollHome: string;
   readonly manifest: WorkspaceManifest;
 }
 
-export type WorkspaceInitState = "absent" | "compatible" | "repairable" | "conflict";
-export type WorkspaceInitAction = "created" | "reused" | "repaired" | "rejected";
+export type WorkspaceCreateState = "absent" | "compatible" | "repairable" | "conflict";
+export type WorkspaceCreateAction = "created" | "reused" | "repaired" | "rejected";
 
-export interface WorkspaceInitProbe {
-  readonly paths: Readonly<Record<string, WorkspaceInitState>>;
-  readonly caches: Readonly<Record<string, WorkspaceInitState>>;
-  readonly registry: { readonly state: WorkspaceInitState };
-  readonly journal: { readonly state: "absent" | "repairable" | "conflict" };
+export interface WorkspaceCreateProbe {
+  readonly paths: Readonly<Record<string, WorkspaceCreateState>>;
+  readonly caches: Readonly<Record<string, WorkspaceCreateState>>;
+  readonly registry: { readonly state: WorkspaceCreateState };
+  readonly journal: {
+    readonly state: "absent" | "repairable" | "conflict";
+    readonly target?: string;
+    readonly recovery?: WorkspaceCreateRecovery;
+  };
 }
 
-export interface WorkspaceInitPlanStep {
+export interface WorkspaceCreateRecovery {
+  readonly kind: "legacy_completed" | "legacy_rollback" | "legacy_recovery_required" | "journal_conflict";
+  readonly journalPath: string;
+  readonly nextAction?: string;
+}
+
+export interface WorkspaceCreatePlanStep {
   readonly kind: "journal" | "directory" | "file" | "cache" | "registry";
   readonly target: string;
-  readonly action: WorkspaceInitAction;
+  readonly action: WorkspaceCreateAction;
 }
 
-export interface WorkspaceInitPlan {
-  readonly schema: "roll.workspace-init-plan/v1";
+export interface WorkspaceCreatePlan {
+  readonly schema: "roll.workspace-create-plan/v1";
   readonly workspaceId: string;
   readonly root: string;
-  readonly outcome: WorkspaceInitAction;
-  readonly steps: readonly WorkspaceInitPlanStep[];
+  readonly outcome: WorkspaceCreateAction;
+  readonly configSha256: string;
+  readonly planSha256: string;
+  readonly recovery?: WorkspaceCreateRecovery;
+  readonly steps: readonly WorkspaceCreatePlanStep[];
 }
 
-export interface WorkspaceInitParseError {
-  readonly code: ContractErrorCode | "invalid_config" | "path_conflict";
+export type WorkspaceCreateApplyAuthorizationParseResult =
+  | { readonly ok: true; readonly value: WorkspaceCreateApplyAuthorizationV1 }
+  | { readonly ok: false; readonly code: "invalid_apply_authorization" };
+
+export type WorkspaceCreateApplyAuthorizationValidation =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: "apply_authorization_required" | "apply_authorization_stale";
+      readonly nextAction: string;
+    };
+
+export interface WorkspaceCreateParseError {
+  readonly code: ContractErrorCode | "invalid_config" | "path_conflict" | "legacy_create_config";
   readonly path: string;
   readonly message: string;
+  readonly conversions?: readonly {
+    readonly path: string;
+    readonly from: string;
+    readonly to: string;
+  }[];
+  readonly nextAction?: string;
 }
 
-export type WorkspaceInitParseResult =
-  | { readonly ok: true; readonly value: WorkspaceInitConfig }
-  | { readonly ok: false; readonly errors: readonly WorkspaceInitParseError[] };
+export type WorkspaceCreateParseResult =
+  | { readonly ok: true; readonly value: WorkspaceCreateConfig }
+  | { readonly ok: false; readonly errors: readonly WorkspaceCreateParseError[] };
 
-export interface ParseWorkspaceInitOptions {
+export interface ParseWorkspaceCreateOptions {
   readonly workspaceId: string;
   readonly configPath: string;
   readonly homeDir: string;
@@ -128,7 +162,7 @@ function assignPair(target: Record<string, unknown>, text: string): void {
   target[key] = parseScalar(value);
 }
 
-/** Parse only the closed roll.workspace-init/v1 YAML shape; JSON is accepted as YAML 1.2 input. */
+/** Parse only the closed roll.workspace-create/v1 YAML shape; JSON is accepted as YAML 1.2 input. */
 function parseConfigDocument(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -139,7 +173,7 @@ function parseConfigDocument(text: string): unknown {
   let section: "requirements" | "repositories" | null = null;
   let item: Record<string, unknown> | null = null;
   for (const raw of text.replace(/^\uFEFF/u, "").split(/\r?\n/u)) {
-    if (raw.includes("\t")) throw new Error("tabs are not supported in Workspace init YAML");
+    if (raw.includes("\t")) throw new Error("tabs are not supported in Workspace create YAML");
     const line = stripComment(raw).trimEnd();
     if (line.trim() === "") continue;
     const indent = line.length - line.trimStart().length;
@@ -184,6 +218,10 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): 
   return Object.keys(value).filter((key) => !allow.has(key));
 }
 
+function sha256(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "" && value === value.trim();
 }
@@ -197,13 +235,13 @@ function contains(parent: string, child: string): boolean {
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
-function resolveRoot(value: string, options: ParseWorkspaceInitOptions): string {
+function resolveRoot(value: string, options: ParseWorkspaceCreateOptions): string {
   if (value === "~") return resolve(options.homeDir);
   if (value.startsWith("~/")) return resolve(options.homeDir, value.slice(2));
   return resolve(isAbsolute(value) ? value : join(dirname(options.configPath), value));
 }
 
-function parseRequirements(value: unknown, errors: WorkspaceInitParseError[]): RequirementSourceReference[] {
+function parseRequirements(value: unknown, errors: WorkspaceCreateParseError[]): RequirementSourceReference[] {
   if (!Array.isArray(value)) {
     errors.push({ code: "invalid_type", path: "requirements", message: "requirements must be an array" });
     return [];
@@ -218,7 +256,7 @@ function parseRequirements(value: unknown, errors: WorkspaceInitParseError[]): R
   });
 }
 
-function parseRepositories(value: unknown, errors: WorkspaceInitParseError[]): RepositoryBinding[] {
+function parseRepositories(value: unknown, errors: WorkspaceCreateParseError[]): RepositoryBinding[] {
   if (!Array.isArray(value) || value.length === 0) {
     errors.push({ code: "invalid_type", path: "repositories", message: "repositories must be a non-empty array" });
     return [];
@@ -271,7 +309,7 @@ function parseRepositories(value: unknown, errors: WorkspaceInitParseError[]): R
   return repositories;
 }
 
-export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceInitOptions): WorkspaceInitParseResult {
+export function parseWorkspaceCreateConfig(text: string, options: ParseWorkspaceCreateOptions): WorkspaceCreateParseResult {
   let value: unknown;
   try {
     value = parseConfigDocument(text);
@@ -282,10 +320,22 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
     return { ok: false, errors: [{ code: "invalid_type", path: "config", message: "config must be an object" }] };
   }
   const raw = value as RawConfig;
-  const errors: WorkspaceInitParseError[] = [];
+  if (raw.schema === "roll.workspace-init/v1") {
+    return {
+      ok: false,
+      errors: [{
+        code: "legacy_create_config",
+        path: "schema",
+        message: "Legacy Workspace init config must be converted before create",
+        conversions: [{ path: "schema", from: "roll.workspace-init/v1", to: WORKSPACE_CREATE_CONFIG_V1 }],
+        nextAction: `roll workspace create ${options.workspaceId} --config <converted-path>`,
+      }],
+    };
+  }
+  const errors: WorkspaceCreateParseError[] = [];
   const unknown = exactKeys(value, ["schema", "id", "root", "display_name", "created_at", "requirements", "repositories"]);
   if (unknown.length > 0) errors.push({ code: "unknown_field", path: unknown[0] ?? "config", message: "unknown config field" });
-  if (raw.schema !== WORKSPACE_INIT_CONFIG_V1) errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_INIT_CONFIG_V1}` });
+  if (raw.schema !== WORKSPACE_CREATE_CONFIG_V1) errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_CREATE_CONFIG_V1}` });
   if (!nonEmptyString(raw.id)) errors.push({ code: "invalid_value", path: "id", message: "id is required" });
   else if (!safeWorkspaceId(raw.id)) {
     errors.push({ code: "invalid_value", path: "id", message: "Workspace ID contains unsafe characters" });
@@ -322,10 +372,10 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
     requirements,
     repositories,
   };
-  return { ok: true, value: { schema: WORKSPACE_INIT_CONFIG_V1, workspaceId, root, rollHome, manifest } };
+  return { ok: true, value: { schema: WORKSPACE_CREATE_CONFIG_V1, workspaceId, root, rollHome, manifest } };
 }
 
-function action(state: WorkspaceInitState): WorkspaceInitAction {
+function action(state: WorkspaceCreateState): WorkspaceCreateAction {
   if (state === "absent") return "created";
   if (state === "compatible") return "reused";
   if (state === "repairable") return "repaired";
@@ -351,12 +401,12 @@ function layout(root: string): readonly { readonly kind: "directory" | "file"; r
   ];
 }
 
-export function buildWorkspaceInitPlan(config: WorkspaceInitConfig, probe: WorkspaceInitProbe): WorkspaceInitPlan {
-  const journalAction: WorkspaceInitAction = probe.journal.state === "absent" ? "created" :
+export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: WorkspaceCreateProbe): WorkspaceCreatePlan {
+  const journalAction: WorkspaceCreateAction = probe.journal.state === "absent" ? "created" :
     probe.journal.state === "repairable" ? "repaired" : "rejected";
-  const steps: WorkspaceInitPlanStep[] = [{
+  const steps: WorkspaceCreatePlanStep[] = [{
     kind: "journal",
-    target: join(config.rollHome, "workspace-init", `${config.workspaceId}.pending.json`),
+    target: probe.journal.target ?? join(config.rollHome, "workspace-create", `${config.workspaceId}.pending.json`),
     action: journalAction,
   }];
   for (const entry of layout(config.root)) {
@@ -367,8 +417,87 @@ export function buildWorkspaceInitPlan(config: WorkspaceInitConfig, probe: Works
   }
   steps.push({ kind: "registry", target: config.workspaceId, action: action(probe.registry.state) });
   const businessActions = steps.filter((step) => step.kind !== "journal").map((step) => step.action);
-  const outcome: WorkspaceInitAction = steps.some((step) => step.action === "rejected") ? "rejected" :
+  const outcome: WorkspaceCreateAction = steps.some((step) => step.action === "rejected") ? "rejected" :
     journalAction === "repaired" || businessActions.includes("repaired") ? "repaired" :
     businessActions.includes("created") ? "created" : "reused";
-  return { schema: "roll.workspace-init-plan/v1", workspaceId: config.workspaceId, root: config.root, outcome, steps };
+  const configSha256 = sha256({
+    workspaceId: config.workspaceId,
+    root: config.root,
+    manifest: config.manifest,
+  });
+  const planSha256 = sha256({
+    schema: "roll.workspace-create-plan/v1",
+    workspaceId: config.workspaceId,
+    root: config.root,
+    outcome,
+    configSha256,
+    ...(probe.journal.recovery === undefined ? {} : { recovery: probe.journal.recovery }),
+    steps,
+  });
+  return {
+    schema: "roll.workspace-create-plan/v1",
+    workspaceId: config.workspaceId,
+    root: config.root,
+    outcome,
+    configSha256,
+    planSha256,
+    ...(probe.journal.recovery === undefined ? {} : { recovery: probe.journal.recovery }),
+    steps,
+  };
+}
+
+export function buildWorkspaceCreateApplyAuthorization(
+  plan: WorkspaceCreatePlan,
+  source: WorkspaceCreateApplyAuthorizationV1["source"],
+): WorkspaceCreateApplyAuthorizationV1 {
+  return {
+    schema: WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
+    workspaceId: plan.workspaceId,
+    configSha256: plan.configSha256,
+    planSha256: plan.planSha256,
+    source,
+  };
+}
+
+export function parseWorkspaceCreateApplyAuthorization(text: string): WorkspaceCreateApplyAuthorizationParseResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  if (!isRecord(value) || exactKeys(value, ["schema", "workspaceId", "configSha256", "planSha256", "source"]).length > 0) {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  if (value["schema"] !== WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 ||
+    !nonEmptyString(value["workspaceId"]) ||
+    typeof value["configSha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(value["configSha256"]) ||
+    typeof value["planSha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(value["planSha256"]) ||
+    (value["source"] !== "direct_cli_apply" && value["source"] !== "owner_after_preview")) {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
+      workspaceId: value["workspaceId"],
+      configSha256: value["configSha256"],
+      planSha256: value["planSha256"],
+      source: value["source"],
+    },
+  };
+}
+
+export function validateWorkspaceCreateApplyAuthorization(
+  plan: WorkspaceCreatePlan,
+  authorization: WorkspaceCreateApplyAuthorizationV1 | undefined,
+): WorkspaceCreateApplyAuthorizationValidation {
+  const nextAction = `roll workspace create ${plan.workspaceId} --config <path> --check --json`;
+  if (authorization === undefined) return { ok: false, code: "apply_authorization_required", nextAction };
+  if (authorization.workspaceId !== plan.workspaceId ||
+    authorization.configSha256 !== plan.configSha256 ||
+    authorization.planSha256 !== plan.planSha256) {
+    return { ok: false, code: "apply_authorization_stale", nextAction };
+  }
+  return { ok: true };
 }

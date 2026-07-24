@@ -30,11 +30,11 @@ Issue completion, merge evidence or integration acceptance.
 
 ## Create and activate a Workspace
 
-Write one versioned `roll.workspace-init/v1` config outside the target root,
+Write one versioned `roll.workspace-create/v1` config outside the target root,
 then preview the deterministic plan:
 
 ```bash
-roll workspace init ws-payments --config /absolute/path/workspace-init.yaml --check --json
+roll workspace create ws-payments --config /absolute/path/workspace-create.yaml --check --json
 ```
 
 `--check` is read-only. It validates identity, root, requirement bindings,
@@ -42,7 +42,7 @@ repository remotes, aliases, integration branches, cache decisions and existing
 content. Apply only the reviewed config:
 
 ```bash
-roll workspace init ws-payments --config /absolute/path/workspace-init.yaml --json
+roll workspace create ws-payments --config /absolute/path/workspace-create.yaml --json
 roll workspace activate ws-payments
 ```
 

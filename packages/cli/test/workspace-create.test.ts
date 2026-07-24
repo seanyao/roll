@@ -9,8 +9,18 @@ import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 
 interface Run { readonly status: number; readonly stdout: string; readonly stderr: string }
-interface InitStep { readonly kind: "journal" | "directory" | "file" | "cache" | "registry"; readonly target: string; readonly action: "created" | "reused" | "repaired" | "rejected" }
-interface InitResult { readonly schema: string; readonly mode: "check" | "apply"; readonly outcome: string; readonly workspaceId: string; readonly root: string; readonly steps: readonly InitStep[] }
+interface CreateStep { readonly kind: "journal" | "directory" | "file" | "cache" | "registry"; readonly target: string; readonly action: "created" | "reused" | "repaired" | "rejected" }
+interface CreateResult {
+  readonly schema: string;
+  readonly mode: "check" | "apply";
+  readonly outcome: string;
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly configSha256: string;
+  readonly planSha256: string;
+  readonly authorizationSource?: "direct_cli_apply" | "owner_after_preview";
+  readonly steps: readonly CreateStep[];
+}
 const roots: string[] = [];
 const ENV_KEYS = ["HOME", "ROLL_HOME", "ROLL_LANG", "NO_COLOR"] as const;
 
@@ -30,19 +40,19 @@ function materializeRemote(source: string, remote: string): void {
 }
 
 function fixture(options: { readonly createRemote?: boolean } = {}) {
-  const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-cli-"));
+  const home = mkdtempSync(join(tmpdir(), "roll-workspace-create-cli-"));
   roots.push(home);
   const source = join(home, "source");
   const remote = join(home, "product.git");
   if (options.createRemote !== false) materializeRemote(source, remote);
   const rollHome = join(home, ".roll");
   const workspace = join(home, "workspace");
-  const config = join(home, "workspace-init.yaml");
+  const config = join(home, "workspace-create.yaml");
   const remoteUrl = `file://${remote}`;
   const repoId = repositoryIdFromRemote(remoteUrl);
   if (!repoId.ok) throw new Error("fixture remote must be valid");
   writeFileSync(config, `
-schema: roll.workspace-init/v1
+schema: roll.workspace-create/v1
 id: ws-demo
 root: ${workspace}
 display_name: Demo Workspace
@@ -54,9 +64,9 @@ repositories:
   return { home, rollHome, workspace, config, source, remote, remoteUrl, repoId: repoId.value };
 }
 
-function expectedSteps(f: ReturnType<typeof fixture>, action: "created" | "reused"): readonly InitStep[] {
+function expectedSteps(f: ReturnType<typeof fixture>, action: "created" | "reused"): readonly CreateStep[] {
   return [
-    { kind: "journal", target: join(f.rollHome, "workspace-init", "ws-demo.pending.json"), action: "created" },
+    { kind: "journal", target: join(f.rollHome, "workspace-create", "ws-demo.pending.json"), action: "created" },
     { kind: "directory", target: f.workspace, action },
     ...["workspace.yaml", "charter.md", "agents.yaml", "policy.yaml"].map((name) => ({ kind: "file" as const, target: join(f.workspace, name), action })),
     { kind: "directory", target: join(f.workspace, "requirements"), action },
@@ -123,26 +133,28 @@ async function run(args: string[], f: ReturnType<typeof fixture>, language = "en
 beforeEach(() => registerAll());
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-describe("US-WS-006 roll workspace init", () => {
+describe("US-WS-006 roll workspace create", () => {
   it("runs check, first apply and idempotent second apply against one local file remote", async () => {
     const f = fixture();
     const before = tree(f.home);
-    const check = await run(["workspace", "init", "ws-demo", "--config", f.config, "--check", "--json"], f);
+    const check = await run(["workspace", "create", "ws-demo", "--config", f.config, "--check", "--json"], f);
     expect(check.status, check.stderr).toBe(0);
-    const checkResult = JSON.parse(check.stdout) as InitResult;
+    const checkResult = JSON.parse(check.stdout) as CreateResult;
     expect(checkResult).toMatchObject({
-      schema: "roll.workspace-init-result/v1",
+      schema: "roll.workspace-create-result/v1",
       mode: "check",
       outcome: "created",
       workspaceId: "ws-demo",
+      configSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      planSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
     expect(checkResult.steps).toEqual(expectedSteps(f, "created"));
     expect(tree(f.home)).toEqual(before);
 
-    const first = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    const first = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(first.status, first.stderr).toBe(0);
-    const firstResult = JSON.parse(first.stdout) as InitResult;
-    expect(firstResult).toMatchObject({ mode: "apply", outcome: "created" });
+    const firstResult = JSON.parse(first.stdout) as CreateResult;
+    expect(firstResult).toMatchObject({ mode: "apply", outcome: "created", authorizationSource: "direct_cli_apply" });
     expect(firstResult.steps).toEqual(expectedSteps(f, "created"));
     expect(existsSync(join(f.workspace, ".git"))).toBe(false);
     const cachePath = join(f.rollHome, "repos", `${f.repoId}.git`);
@@ -151,9 +163,9 @@ describe("US-WS-006 roll workspace init", () => {
     expect(firstIdentity).toMatchObject({ repoId: f.repoId, remote: f.remoteUrl.replace(/\.git$/u, ""), cachePath });
     expect(git(cachePath, ["remote", "get-url", "origin"])).toBe(f.remoteUrl.replace(/\.git$/u, ""));
 
-    const second = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    const second = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(second.status, second.stderr).toBe(0);
-    const secondResult = JSON.parse(second.stdout) as InitResult;
+    const secondResult = JSON.parse(second.stdout) as CreateResult;
     expect(secondResult).toMatchObject({ mode: "apply", outcome: "reused" });
     expect(secondResult.steps).toEqual(expectedSteps(f, "reused"));
     const secondIdentity = JSON.parse(readFileSync(identityPath, "utf8")) as Record<string, unknown>;
@@ -161,13 +173,79 @@ describe("US-WS-006 roll workspace init", () => {
     expect(readdirSync(join(f.rollHome, "repos")).filter((name) => name.endsWith(".git"))).toEqual([`${f.repoId}.git`]);
   });
 
+  it("applies an exact owner-approved preview and rejects stale or non-owner authorization before writes", async () => {
+    const approved = fixture();
+    const preview = await run(["workspace", "create", "ws-demo", "--config", approved.config, "--check", "--json"], approved);
+    const previewResult = JSON.parse(preview.stdout) as CreateResult;
+    const authorizationPath = join(approved.home, "create-authorization.json");
+    writeFileSync(authorizationPath, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: previewResult.workspaceId,
+      configSha256: previewResult.configSha256,
+      planSha256: previewResult.planSha256,
+      source: "owner_after_preview",
+    }, null, 2)}\n`, "utf8");
+
+    const applied = await run([
+      "workspace", "create", "ws-demo", "--config", approved.config,
+      "--authorization", authorizationPath, "--json",
+    ], approved);
+    expect(applied.status, applied.stderr).toBe(0);
+    expect(JSON.parse(applied.stdout)).toMatchObject({
+      mode: "apply",
+      outcome: "created",
+      authorizationSource: "owner_after_preview",
+      configSha256: previewResult.configSha256,
+      planSha256: previewResult.planSha256,
+    });
+
+    const stale = fixture();
+    const staleAuthorization = join(stale.home, "stale-authorization.json");
+    writeFileSync(staleAuthorization, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: "ws-demo",
+      configSha256: "0".repeat(64),
+      planSha256: "f".repeat(64),
+      source: "owner_after_preview",
+    })}\n`, "utf8");
+    const staleBefore = tree(stale.home);
+    const rejected = await run([
+      "workspace", "create", "ws-demo", "--config", stale.config,
+      "--authorization", staleAuthorization, "--json",
+    ], stale);
+    expect(rejected.status).toBe(1);
+    expect(JSON.parse(rejected.stderr)).toMatchObject({
+      error: {
+        code: "apply_authorization_stale",
+        nextAction: "roll workspace create ws-demo --config <path> --check --json",
+      },
+    });
+    expect(tree(stale.home)).toEqual(staleBefore);
+
+    writeFileSync(staleAuthorization, `${JSON.stringify({
+      schema: "roll.workspace-create-apply-authorization/v1",
+      workspaceId: "ws-demo",
+      configSha256: "0".repeat(64),
+      planSha256: "f".repeat(64),
+      source: "direct_cli_apply",
+    })}\n`, "utf8");
+    const nonOwnerBefore = tree(stale.home);
+    const nonOwner = await run([
+      "workspace", "create", "ws-demo", "--config", stale.config,
+      "--authorization", staleAuthorization, "--json",
+    ], stale);
+    expect(nonOwner.status).toBe(1);
+    expect(JSON.parse(nonOwner.stderr)).toMatchObject({ error: { code: "invalid_apply_authorization" } });
+    expect(tree(stale.home)).toEqual(nonOwnerBefore);
+  });
+
   it("rejects identity mismatch and invalid arguments without any initialization writes", async () => {
     const f = fixture();
     const before = tree(f.home);
-    const mismatch = await run(["workspace", "init", "ws-other", "--config", f.config, "--json"], f);
-    const invalid = await run(["workspace", "init", "ws-demo", "--config", f.config, "--unknown", "--json"], f);
+    const mismatch = await run(["workspace", "create", "ws-other", "--config", f.config, "--json"], f);
+    const invalid = await run(["workspace", "create", "ws-demo", "--config", f.config, "--unknown", "--json"], f);
     expect(mismatch.status).toBe(1);
-    expect(JSON.parse(mismatch.stderr)).toMatchObject({ schema: "roll.workspace-init-error/v1", error: { code: "identity_mismatch" } });
+    expect(JSON.parse(mismatch.stderr)).toMatchObject({ schema: "roll.workspace-create-error/v1", error: { code: "identity_mismatch" } });
     expect(invalid.status).toBe(1);
     expect(JSON.parse(invalid.stderr)).toMatchObject({ error: { code: "invalid_arguments" } });
     expect(tree(f.home)).toEqual(before);
@@ -175,25 +253,25 @@ describe("US-WS-006 roll workspace init", () => {
 
   it("reports a partial cache failure, previews repair without writes, and converges through the same CLI contract", async () => {
     const f = fixture({ createRemote: false });
-    const failed = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    const failed = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(failed.status).toBe(1);
     expect(JSON.parse(failed.stderr)).toMatchObject({
-      schema: "roll.workspace-init-error/v1",
+      schema: "roll.workspace-create-error/v1",
       error: { code: "apply_failed" },
     });
     expect(existsSync(f.workspace)).toBe(false);
     expect(existsSync(join(f.rollHome, "workspaces.json"))).toBe(false);
-    const journalPath = join(f.rollHome, "workspace-init", "ws-demo.pending.json");
+    const journalPath = join(f.rollHome, "workspace-create", "ws-demo.pending.json");
     expect(JSON.parse(readFileSync(journalPath, "utf8"))).toMatchObject({
-      schema: "roll.workspace-init-journal/v1",
+      schema: "roll.workspace-create-journal/v1",
       workspaceId: "ws-demo",
       status: "repair_required",
     });
 
     const beforeCheck = tree(f.home);
-    const check = await run(["workspace", "init", "ws-demo", "--config", f.config, "--check", "--json"], f);
+    const check = await run(["workspace", "create", "ws-demo", "--config", f.config, "--check", "--json"], f);
     expect(check.status, check.stderr).toBe(0);
-    const repairPlan = JSON.parse(check.stdout) as InitResult;
+    const repairPlan = JSON.parse(check.stdout) as CreateResult;
     expect(repairPlan).toMatchObject({ mode: "check", outcome: "repaired", workspaceId: "ws-demo" });
     expect(repairPlan.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "journal", action: "repaired" }),
@@ -203,7 +281,7 @@ describe("US-WS-006 roll workspace init", () => {
     expect(tree(f.home)).toEqual(beforeCheck);
 
     materializeRemote(f.source, f.remote);
-    const repaired = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    const repaired = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(repaired.status, repaired.stderr).toBe(0);
     expect(JSON.parse(repaired.stdout)).toMatchObject({ mode: "apply", outcome: "repaired" });
     expect(existsSync(join(f.workspace, "workspace.yaml"))).toBe(true);
@@ -214,20 +292,20 @@ describe("US-WS-006 roll workspace init", () => {
       cachePath: join(f.rollHome, "repos", `${f.repoId}.git`),
     });
 
-    const reused = await run(["workspace", "init", "ws-demo", "--config", f.config, "--json"], f);
+    const reused = await run(["workspace", "create", "ws-demo", "--config", f.config, "--json"], f);
     expect(reused.status, reused.stderr).toBe(0);
     expect(JSON.parse(reused.stdout)).toMatchObject({ mode: "apply", outcome: "reused" });
   });
 
-  it("exposes init in locale-specific Workspace help", async () => {
+  it("exposes create in locale-specific Workspace help", async () => {
     const f = fixture();
     const en = await run(["workspace", "--help"], f);
-    const initEn = await run(["workspace", "init", "--help"], f, "en");
-    const initZh = await run(["workspace", "init", "--help"], f, "zh");
-    expect(en.stdout).toContain("init <id> --config <file> [--check] [--json]");
-    expect(initEn).toMatchObject({ status: 0, stderr: "" });
-    expect(initEn.stdout).toContain("Usage: roll workspace init <id> --config <file> [--check] [--json]");
-    expect(initZh).toMatchObject({ status: 0, stderr: "" });
-    expect(initZh.stdout).toContain("用法：roll workspace init <ID> --config <文件> [--check] [--json]");
+    const createEn = await run(["workspace", "create", "--help"], f, "en");
+    const createZh = await run(["workspace", "create", "--help"], f, "zh");
+    expect(en.stdout).toContain("create <id> --config <file> [--authorization <file>] [--check] [--json]");
+    expect(createEn).toMatchObject({ status: 0, stderr: "" });
+    expect(createEn.stdout).toContain("Usage: roll workspace create <id> --config <file> [--authorization <file>] [--check] [--json]");
+    expect(createZh).toMatchObject({ status: 0, stderr: "" });
+    expect(createZh.stdout).toContain("用法：roll workspace create <ID> --config <文件> [--authorization <文件>] [--check] [--json]");
   });
 });

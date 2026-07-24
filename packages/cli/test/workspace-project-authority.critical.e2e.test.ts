@@ -6,7 +6,7 @@
  * registry selection before a command reads or mutates project data.
  */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -155,6 +155,55 @@ describe("US-WS-034 public Workspace project-data authority", () => {
       "[IDEA-001](../features/backlog-lifecycle/IDEA-001/spec.md)",
     );
     expect(existsSync(join(f.outsideCwd, ".roll"))).toBe(false);
+  });
+
+  it("rejects an internal features symlink before roll idea can write outside the Workspace", () => {
+    const f = fixture("idea-feature-symlink");
+    const outsideEpic = join(f.outsideCwd, "outside-backlog-lifecycle");
+    mkdirSync(outsideEpic, { recursive: true });
+    symlinkSync(outsideEpic, join(f.workspaceRoot, "features", "backlog-lifecycle"), "dir");
+    const before = readFileSync(join(f.workspaceRoot, "backlog", "index.md"), "utf8");
+
+    const result = runRoll(f.outsideCwd, [
+      "idea", "improve workspace backlog", "--workspace", f.workspaceId, "--no-color",
+    ], f.env);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("authority_symlink");
+    expect(readFileSync(join(f.workspaceRoot, "backlog", "index.md"), "utf8")).toBe(before);
+    expect(existsSync(join(outsideEpic, "IDEA-001", "spec.md"))).toBe(false);
+  });
+
+  it("rejects capture repair when the canonical evidence authority is an external symlink", () => {
+    const f = fixture("capture-evidence-symlink");
+    const outsideEvidence = join(f.outsideCwd, "outside-evidence");
+    const healthDir = join(outsideEvidence, "_health");
+    const healthPath = join(healthDir, "US-EVIDENCE-LINK.json");
+    mkdirSync(healthDir, { recursive: true });
+    const health = `${JSON.stringify({
+      surfaceId: "http://localhost:3000/team",
+      delivery: "passed",
+      visual: "degraded-infrastructure",
+      acceptedReceiptIds: [],
+      attempts: ["r1"],
+      category: "evidence-degradation",
+      blocksGate: false,
+      reschedulesBuild: false,
+      markedDegraded: true,
+      evidenceOnlyRepair: true,
+      reason: "degraded",
+    })}\n`;
+    writeFileSync(healthPath, health);
+    symlinkSync(outsideEvidence, join(f.workspaceRoot, "evidence"), "dir");
+
+    const result = runRoll(f.outsideCwd, [
+      "capture", "repair", "US-EVIDENCE-LINK", "--workspace", f.workspaceId,
+    ], f.env);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("authority_symlink");
+    expect(readFileSync(healthPath, "utf8")).toBe(health);
+    expect(existsSync(join(outsideEvidence, "repairs"))).toBe(false);
   });
 
   it("reads imported .roll/features links against canonical features without rewriting backlog", () => {

@@ -95,7 +95,8 @@ These commands and their internal view refresh read or write `backlog/index.md`,
 `features/`, `policy.yaml`, `evidence/`, `runtime/` and the derived `index.json`
 under the canonical Workspace. A mutation fails closed when its required
 authority is missing or has the wrong type; it never falls back to creating a
-new `.roll` tree. A legacy `.roll` project is migration input only; Roll never
+new `.roll` tree. Symlinked authorities or internal mutation paths are rejected
+before Roll reads or writes through them. A legacy `.roll` project is migration input only; Roll never
 writes both layouts.
 
 `roll idea` writes the Story card and a canonical linked backlog row, so the

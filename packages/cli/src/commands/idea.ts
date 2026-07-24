@@ -34,7 +34,7 @@ import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { generateIndex, projectDataPath } from "../lib/archive.js";
 import { UNCATEGORIZED } from "../lib/archive.js";
 import { writeStoryCardFiles } from "../lib/story-mint.js";
-import { requireWorkspaceAuthorities } from "../lib/workspace-project-authority.js";
+import { requireWorkspaceAuthorities, requireWorkspaceMutationPath } from "../lib/workspace-project-authority.js";
 import { c, renderState } from "../render.js";
 
 const STORY_ID_DIR_RE = /^(?:US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)$/;
@@ -208,7 +208,11 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   // Epic is inferred from the description text; falls back to "uncategorized".
   const epic = inferEpic(text) ?? UNCATEGORIZED;
   let cardDir = join(featuresDir, epic, plan.id);
-  while (existsSync(join(cardDir, "spec.md"))) {
+  while (true) {
+    if (deps.canonical === true && !requireWorkspaceMutationPath("roll idea", featuresDir, cardDir, "directory")) {
+      return 1;
+    }
+    if (!existsSync(join(cardDir, "spec.md"))) break;
     extraOccupiedIds.push(plan.id);
     plan = planIdea(
       [...snap.items, ...occupiedCardItems, ...remoteItems, ...cardIdsAsBacklogItems(extraOccupiedIds)],

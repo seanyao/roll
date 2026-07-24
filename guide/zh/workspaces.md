@@ -85,8 +85,9 @@ roll truth query US-PAY-102 --workspace ws-payments --json
 
 这些命令及其内部 view refresh 只读写 canonical Workspace 下的 `backlog/index.md`、
 `features/`、`policy.yaml`、`evidence/`、`runtime/` 与派生 `index.json`。变更所需的
-authority 缺失或类型损坏时会 fail closed，绝不会回退创建新的 `.roll` 树。legacy `.roll`
-只作为 migration input；Roll 不会同时写两套布局。
+authority 缺失或类型损坏时会 fail closed，绝不会回退创建新的 `.roll` 树。authority
+或内部变更路径是 symlink 时，也会在读取或写入前拒绝。legacy `.roll` 只作为 migration
+input；Roll 不会同时写两套布局。
 
 `roll idea` 会同时写 Story card 与 canonical linked backlog row，因此可以立即用
 `roll backlog show <ID> --workspace ...` 打开。导入 backlog 中仍以 `.roll/features/`

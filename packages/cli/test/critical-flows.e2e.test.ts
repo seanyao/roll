@@ -38,37 +38,49 @@ function tmpEmptyProject(prefix: string): string {
   return dir;
 }
 
-function tmpWorkspaceProject(prefix: string): { project: string; env: NodeJS.ProcessEnv } {
+function tmpWorkspaceProject(prefix: string): {
+  project: string;
+  decoy: string;
+  cwd: string;
+  workspaceId: string;
+  env: NodeJS.ProcessEnv;
+} {
   const project = realpathSync(mkdtempSync(join(tmpdir(), `roll-e2e-${prefix}-`)));
+  const decoy = realpathSync(mkdtempSync(join(tmpdir(), `roll-e2e-${prefix}-decoy-`)));
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), `roll-e2e-${prefix}-cwd-`)));
   const rollHome = realpathSync(mkdtempSync(join(tmpdir(), `roll-e2e-${prefix}-home-`)));
-  dirs.push(project, rollHome);
+  dirs.push(project, decoy, cwd, rollHome);
   const workspaceId = `ws-${prefix}`;
-  const remote = `https://example.test/workspaces/${workspaceId}.git`;
-  const repoId = repositoryIdFromRemote(remote);
-  if (!repoId.ok) throw new Error("fixture remote must be valid");
-  writeFileSync(join(project, "workspace.yaml"), `${JSON.stringify({
-    schema: WORKSPACE_MANIFEST_V1,
-    workspaceId,
-    displayName: workspaceId,
-    requirements: [],
-    repositories: [{
-      schema: REPOSITORY_BINDING_V1,
-      repoId: repoId.value,
-      alias: "product",
-      remote,
-      integrationBranch: "main",
-      provider: "generic",
-      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
-    }],
-  }, null, 2)}\n`);
-  mkdirSync(join(project, "backlog"), { recursive: true });
-  mkdirSync(join(project, "features"), { recursive: true });
-  mkdirSync(join(project, "runtime"), { recursive: true });
-  writeFileSync(join(project, "backlog", "index.md"), "| Story | Description | Status |\n|---|---|---|\n");
+  const decoyId = `${workspaceId}-decoy`;
+  for (const [root, id] of [[project, workspaceId], [decoy, decoyId]] as const) {
+    const remote = `https://example.test/workspaces/${id}.git`;
+    const repoId = repositoryIdFromRemote(remote);
+    if (!repoId.ok) throw new Error("fixture remote must be valid");
+    writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify({
+      schema: WORKSPACE_MANIFEST_V1,
+      workspaceId: id,
+      displayName: id,
+      requirements: [],
+      repositories: [{
+        schema: REPOSITORY_BINDING_V1,
+        repoId: repoId.value,
+        alias: "product",
+        remote,
+        integrationBranch: "main",
+        provider: "generic",
+        workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+      }],
+    }, null, 2)}\n`);
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    mkdirSync(join(root, "features"), { recursive: true });
+    mkdirSync(join(root, "runtime"), { recursive: true });
+    writeFileSync(join(root, "backlog", "index.md"), "| Story | Description | Status |\n|---|---|---|\n");
+  }
   const registry = new WorkspaceRegistry({ rollHome });
   registry.register({ workspaceId, root: project });
-  registry.activate(workspaceId);
-  return { project, env: { ROLL_HOME: rollHome, ROLL_WORKSPACE: workspaceId } };
+  registry.register({ workspaceId: decoyId, root: decoy });
+  registry.activate(decoyId);
+  return { project, decoy, cwd, workspaceId, env: { ROLL_HOME: rollHome, ROLL_WORKSPACE: "" } };
 }
 
 function runRoll(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): { code: number; out: string; err: string } {
@@ -348,9 +360,12 @@ describe("critical CLI E2E", () => {
   });
 
   it("roll story new is the single card-minting entry: card folder + backlog row + index", () => {
-    const { project, env } = tmpWorkspaceProject("story-new");
+    const { project, decoy, cwd, workspaceId, env } = tmpWorkspaceProject("story-new");
 
-    const result = runRoll(project, ["story", "new", "FIX-901", "--title", "critical e2e card", "--epic", "qa-testing"], env);
+    const result = runRoll(cwd, [
+      "story", "new", "FIX-901", "--title", "critical e2e card", "--epic", "qa-testing",
+      "--workspace", workspaceId,
+    ], env);
 
     expect(result.code).toBe(0);
     expect(result.out).toContain("card minted");
@@ -361,10 +376,11 @@ describe("critical CLI E2E", () => {
     );
     const index = JSON.parse(readFileSync(join(project, "index.json"), "utf8")) as { stories: Record<string, string> };
     expect(index.stories["FIX-901"]).toBe("qa-testing");
+    expect(existsSync(join(decoy, "features", "qa-testing", "FIX-901"))).toBe(false);
   });
 
   it("roll attest parses modern `## Acceptance Criteria` specs instead of facts-only reports", () => {
-    const { project, env } = tmpWorkspaceProject("attest-modern-ac");
+    const { project, decoy, cwd, workspaceId, env } = tmpWorkspaceProject("attest-modern-ac");
     const storyDir = join(project, "features", "acceptance-evidence", "FIX-902");
     mkdirSync(storyDir, { recursive: true });
     writeFileSync(
@@ -388,7 +404,7 @@ describe("critical CLI E2E", () => {
       ].join("\n"),
     );
 
-    const result = runRoll(project, ["attest", "FIX-902"], env);
+    const result = runRoll(cwd, ["attest", "FIX-902", "--ws", workspaceId], env);
 
     expect(result.code).toBe(0);
     expect(result.err).not.toContain("no **AC:** block");
@@ -396,10 +412,11 @@ describe("critical CLI E2E", () => {
     expect(report).toContain("FIX-902:AC1");
     expect(report).toContain("AC1 report renders this checklist");
     expect(report).toContain("Claimed");
+    expect(existsSync(join(decoy, "features", "acceptance-evidence", "FIX-902"))).toBe(false);
   });
 
   it("physical_terminal stories validate and attest without headless stdout masquerading as pixels", () => {
-    const { project, env } = tmpWorkspaceProject("physical-terminal");
+    const { project, decoy, cwd, workspaceId, env } = tmpWorkspaceProject("physical-terminal");
     const storyDir = join(project, "features", "acceptance-evidence", "US-PHYS-E2E");
     mkdirSync(storyDir, { recursive: true });
     const command = `node ${rollBin} doctor --tools`;
@@ -428,11 +445,11 @@ describe("critical CLI E2E", () => {
       ].join("\n"),
     );
 
-    const validate = runRoll(project, ["story", "validate", "US-PHYS-E2E"], env);
+    const validate = runRoll(cwd, ["story", "validate", "US-PHYS-E2E", "--workspace", workspaceId], env);
     expect(validate.code).toBe(0);
     expect(validate.out).toContain("visual-evidence: ok (surface: terminal)");
 
-    const attest = runRoll(project, ["attest", "US-PHYS-E2E", "--capture-command", command], {
+    const attest = runRoll(cwd, ["attest", "US-PHYS-E2E", "--capture-command", command, "--ws", workspaceId], {
       ...env,
       ROLL_NO_SCREENCAP: "1",
     });
@@ -444,10 +461,11 @@ describe("critical CLI E2E", () => {
     };
     expect(evidence.captures?.[0]).toMatchObject({ kind: "physical_terminal", taken: false });
     expect(evidence.captures?.[0]?.skipped).toContain("ROLL_NO_SCREENCAP");
+    expect(existsSync(join(decoy, "features", "acceptance-evidence", "US-PHYS-E2E"))).toBe(false);
   });
 
   it("cards can declare fullscreen capture and attest degrades gracefully without Roll Capture.app", () => {
-    const { project, env } = tmpWorkspaceProject("fullscreen-declare");
+    const { project, decoy, cwd, workspaceId, env } = tmpWorkspaceProject("fullscreen-declare");
     const storyDir = join(project, "features", "capture-tool", "US-PHYS-007-E2E");
     mkdirSync(storyDir, { recursive: true });
     writeFileSync(
@@ -473,11 +491,11 @@ describe("critical CLI E2E", () => {
       ].join("\n"),
     );
 
-    const validate = runRoll(project, ["story", "validate", "US-PHYS-007-E2E"], env);
+    const validate = runRoll(cwd, ["story", "validate", "US-PHYS-007-E2E", "--ws", workspaceId], env);
     expect(validate.code).toBe(0);
     expect(validate.out).toContain("visual-evidence: ok");
 
-    const attest = runRoll(project, ["attest", "US-PHYS-007-E2E"], {
+    const attest = runRoll(cwd, ["attest", "US-PHYS-007-E2E", "--workspace", workspaceId], {
       ...env,
       ROLL_NO_SCREENCAP: "1",
     });
@@ -490,6 +508,7 @@ describe("critical CLI E2E", () => {
     expect(capture).toBeDefined();
     expect(capture!.taken).toBe(false);
     expect(capture!.skipped).toBeDefined();
+    expect(existsSync(join(decoy, "features", "capture-tool", "US-PHYS-007-E2E"))).toBe(false);
   });
 
   it("roll doctor --tools is a focused tool and screenshot-readiness smoke", () => {

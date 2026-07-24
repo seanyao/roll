@@ -46,7 +46,7 @@ import {
 import { ROLL_CAPTURE_PROTOCOL_V1, resolveLang, t, v3Catalog, type Lang, type WorkspaceExecutionAuthorityPaths } from "@roll/spec";
 import { configLang } from "./lang.js";
 import { collectCapturePolicyReadiness, renderCapturePolicyReadinessDoctorSection, resolveCaptureHostRoot, type CapturePolicyReadiness } from "../lib/capture-policy-readiness.js";
-import { requireWorkspaceAuthorities } from "../lib/workspace-project-authority.js";
+import { requireWorkspaceAuthorities, requireWorkspaceMutationPath } from "../lib/workspace-project-authority.js";
 
 /** Resolve the display language for this command, including configLang. */
 function msgLang(): Lang {
@@ -383,6 +383,10 @@ async function captureRepair(args: string[], deps: CaptureCommandDeps): Promise<
     process.stderr.write(`roll capture repair: authority_outside: ${healthPath}\n`);
     return 1;
   }
+  if (
+    deps.authorities !== undefined &&
+    !requireWorkspaceMutationPath("roll capture repair", deps.authorities.evidence, healthPath, "file")
+  ) return 1;
   const readHealthFact = deps.readHealthFact ?? defaultReadHealthFact;
   const writeFileText = deps.writeFileText ?? defaultWriteFileText;
 

@@ -26,6 +26,7 @@ import {
   rankRoleCandidates,
   resolveWorkspaceExecutionContextScope,
   resolveAgentScopeRole,
+  validateResolvedTargetRequirement,
 } from "@roll/core";
 import type {
   AgentCapabilityProfile,
@@ -40,6 +41,7 @@ import type {
   RepositoryExecutionContext,
   WorkspaceDiscoveryDiagnosticV1,
   WorkspaceExecutionContextV1,
+  RequirementHintV1,
 } from "@roll/spec";
 import {
   REQUIREMENT_HINT_V1,
@@ -462,6 +464,16 @@ export function renderScopedExecuteRoute(trace: ScopedExecuteRouteTrace): string
 
 export type RequirementMatchedWorkspaceDecision = ReturnType<typeof discoverWorkspaceForIntent>;
 
+function storyRequirement(storyIds: readonly string[]): RequirementHintV1 {
+  return {
+    schema: REQUIREMENT_HINT_V1,
+    sources: [],
+    storyIds: storyIds.map((storyId) => ({ storyId, provenance: "explicit_user" as const })),
+    repositoryRemotes: [],
+    paths: [],
+  };
+}
+
 /** Resolve a Workspace from exact Story/requirement identity. Lifecycle is a
  * gate, never selection evidence; a sole active Workspace with no match stays
  * unselected. This is deliberately pure so CLI/loop/agent entrypoints share
@@ -480,16 +492,26 @@ export function resolveRequirementMatchedWorkspace(input: {
       interaction: "non_interactive",
       scope: input.operation === "read" ? "workspace_required_read" : "workspace_required_mutation",
       cwd: input.cwd,
-      requirement: {
-        schema: REQUIREMENT_HINT_V1,
-        sources: [],
-        storyIds: input.storyIds.map((storyId) => ({ storyId, provenance: "explicit_user" as const })),
-        repositoryRemotes: [],
-        paths: [],
-      },
+      requirement: storyRequirement(input.storyIds),
     },
     workspaces: input.workspaces,
     diagnostics: input.diagnostics,
+  });
+}
+
+/** Explicit/environment/cwd targets retain selector precedence but still fail
+ * a mutation when exact requirement ownership points at another Workspace. */
+export function validateRequirementMatchedWorkspace(input: {
+  readonly target: WorkspaceDiscoveryFactsV1;
+  readonly workspaces: readonly WorkspaceDiscoveryFactsV1[];
+  readonly storyIds: readonly string[];
+  readonly operation: "read" | "mutation";
+}): ReturnType<typeof validateResolvedTargetRequirement> {
+  return validateResolvedTargetRequirement({
+    target: input.target,
+    allWorkspaces: input.workspaces,
+    requirement: storyRequirement(input.storyIds),
+    operation: input.operation,
   });
 }
 

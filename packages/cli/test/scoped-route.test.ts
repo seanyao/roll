@@ -413,7 +413,7 @@ function workspaceExecutionFixture(): {
     remote: "git@github.com:seanyao/roll.git",
     integrationBranch: "idea-074-workspace",
     provider: "github",
-    workflow: { branchPattern: "roll/{workspaceId}/{storyId}", requiredChecks: [] },
+    workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
   } as const;
   const context: WorkspaceExecutionContextV1 = {
     schema: WORKSPACE_EXECUTION_CONTEXT_V1,

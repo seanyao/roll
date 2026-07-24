@@ -179,9 +179,20 @@ export function canonicalTopLevelCommand(command: string): string {
   return COMMAND_SURFACE.find((decision) => decision.aliases?.includes(command) === true)?.current ?? command;
 }
 
+/** One actual CLI leaf/subcommand registration. */
+export interface CliCommandOperationRegistration {
+  readonly command: string;
+  readonly operation: string;
+  readonly route: readonly string[];
+  readonly canonicalCommand: string;
+  readonly exampleArgs?: readonly string[];
+  readonly supportsWorkspaceSelector: boolean;
+}
+
 /** One current CLI leaf that already accepts the canonical Workspace selector. */
 export interface WorkspaceSelectorOperationDecision {
   readonly id: string;
+  readonly operation: string;
   readonly command: string;
   readonly route: readonly string[];
   readonly canonicalCommand: string;
@@ -201,58 +212,74 @@ export function isWorkspaceSelectorAlias(
   return WORKSPACE_SELECTOR_ALIAS.aliases.some((alias) => alias === token);
 }
 
+function operation(command: string, name: string, route: readonly string[] = [], selector = false, exampleArgs?: readonly string[]): CliCommandOperationRegistration {
+  return {
+    command,
+    operation: name,
+    route,
+    canonicalCommand: `roll ${command}${route.length === 0 ? "" : ` ${route.join(" ")}`}`,
+    ...(exampleArgs === undefined ? {} : { exampleArgs }),
+    supportsWorkspaceSelector: selector,
+  };
+}
+
+function selectorOperation(command: string, name: string, route: readonly string[], exampleArgs: readonly string[]): CliCommandOperationRegistration {
+  return operation(command, name, route, true, exampleArgs);
+}
+
 /**
- * Narrow selector capability source for US-WS-022. The closed cross-surface
- * context-policy registry is delivered by US-WS-032; it consumes this list
- * instead of inventing a second alias inventory.
+ * Operation inventory consumed by the actual public bridge registrations. The
+ * family count is a projection of COMMAND_SURFACE; leaf counts come from these
+ * registration records and are never used as a pass threshold.
  */
-export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = [
-  { id: "agent.workspace", command: "agent", route: [], canonicalCommand: "roll agent", exampleArgs: ["--workspace", "roll"], acceptsWorkspaceSelector: true },
-  { id: "backlog.read", command: "backlog", route: [], canonicalCommand: "roll backlog", exampleArgs: ["--workspace", "roll"], acceptsWorkspaceSelector: true },
-  ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((operation) => ({
-    id: `backlog.${operation}`,
-    command: "backlog",
-    route: [operation],
-    canonicalCommand: `roll backlog ${operation}`,
-    exampleArgs: [operation, "--workspace", "roll"],
-    acceptsWorkspaceSelector: true as const,
-  })),
-  ...["list", "show", "reconcile"].map((operation) => ({
-    id: `delivery.${operation}`,
-    command: "delivery",
-    route: [operation],
-    canonicalCommand: `roll delivery ${operation}`,
-    exampleArgs: [operation, "--workspace", "roll"],
-    acceptsWorkspaceSelector: true as const,
-  })),
-  ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((operation) => ({
-    id: `loop.${operation}`,
-    command: "loop",
-    route: [operation],
-    canonicalCommand: `roll loop ${operation}`,
-    exampleArgs: [operation, "--workspace", "roll"],
-    acceptsWorkspaceSelector: true as const,
-  })),
-  { id: "workspace.issue.init", command: "workspace", route: ["issue", "init"], canonicalCommand: "roll workspace issue init", exampleArgs: ["issue", "init", "US-WS-022", "--workspace", "roll"], acceptsWorkspaceSelector: true },
-  { id: "workspace.requirement.add", command: "workspace", route: ["requirement", "add"], canonicalCommand: "roll workspace requirement add", exampleArgs: ["requirement", "add", "--workspace", "roll"], acceptsWorkspaceSelector: true },
-  { id: "workspace.migrate", command: "workspace", route: ["migrate"], canonicalCommand: "roll workspace migrate", exampleArgs: ["migrate", "--workspace", "roll"], acceptsWorkspaceSelector: true },
-  ...["show", "activate", "pause", "archive"].map((operation) => ({
-    id: `workspace.${operation}`,
-    command: "workspace",
-    route: [operation],
-    canonicalCommand: `roll workspace ${operation}`,
-    exampleArgs: [operation, "--workspace", "roll"],
-    acceptsWorkspaceSelector: true as const,
-  })),
-  ...["audit", "cleanup"].map((operation) => ({
-    id: `worktree.${operation}`,
-    command: "worktree",
-    route: [operation],
-    canonicalCommand: `roll worktree ${operation}`,
-    exampleArgs: [operation, "--workspace", "roll"],
-    acceptsWorkspaceSelector: true as const,
-  })),
+export const PUBLIC_CLI_OPERATIONS: readonly CliCommandOperationRegistration[] = [
+  operation("help", "read"),
+  operation("status", "read"), operation("status", "ci", ["ci"]), operation("status", "pulse", ["pulse"]),
+  operation("workspace", "create", ["create"]),
+  selectorOperation("workspace", "issue.init", ["issue", "init"], ["issue", "init", "US-WS-022", "--workspace", "roll"]),
+  selectorOperation("workspace", "requirement.add", ["requirement", "add"], ["requirement", "add", "--workspace", "roll"]),
+  operation("workspace", "doctor", ["doctor"]),
+  selectorOperation("workspace", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
+  operation("workspace", "edit", ["edit"]), operation("workspace", "list", ["list"]),
+  selectorOperation("workspace", "show", ["show"], ["show", "--workspace", "roll"]),
+  operation("workspace", "register", ["register"]),
+  ...["activate", "pause", "archive"].map((name) => selectorOperation("workspace", name, [name], [name, "--workspace", "roll"])),
+  ...["list", "show", "reconcile"].map((name) => selectorOperation("delivery", name, [name], [name, "--workspace", "roll"])),
+  selectorOperation("agent", "workspace", [], ["--workspace", "roll"]),
+  ...["view", "cast", "list", "readiness", "disable", "enable", "migrate"].map((name) => operation("agent", name, name === "view" ? [] : [name])),
+  selectorOperation("backlog", "read", [], ["--workspace", "roll"]),
+  ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((name) => selectorOperation("backlog", name, [name], [name, "--workspace", "roll"])),
+  operation("config", "read"), operation("config", "write"), operation("config", "prices", ["prices"]), operation("config", "tune", ["tune"]),
+  operation("release", "release"), operation("release", "showcase", ["showcase"]),
+  operation("design", "design"),
+  ...["diagnose", "skills", "tools", "language", "pardon"].map((name) => operation("doctor", name, name === "diagnose" ? [] : [name])),
+  operation("idea", "capture"), operation("init", "onboard"), operation("next", "read"), operation("north", "read"),
+  operation("setup", "setup"), operation("setup", "skills", ["skills"]), operation("setup", "offboard", ["offboard"]),
+  operation("test", "run"), operation("update", "apply"),
+  ...[
+    "eval", "story", "runs", "cycles", "cycle", "goal", "recover", "pardon-skip-list", "signals", "adversarial",
+    "log", "events", "alert", "self-downgrade", "review-resize", "exhaustion-split", "fmt", "watch", "reconcile-pending",
+    "off", "fallback", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
+    "hotfix-head-context", "agent-routes",
+  ].map((name) => operation("loop", name, [name])),
+  ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((name) => selectorOperation("loop", name, [name], [name, "--workspace", "roll"])),
 ];
+
+export function cliOperations(command: string): CliCommandOperationRegistration[] {
+  return PUBLIC_CLI_OPERATIONS.filter((entry) => entry.command === command);
+}
+
+export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = PUBLIC_CLI_OPERATIONS
+  .filter((entry) => entry.supportsWorkspaceSelector)
+  .map((entry) => ({
+    id: `${entry.command}.${entry.operation}`,
+    operation: entry.operation,
+    command: entry.command,
+    route: entry.route,
+    canonicalCommand: entry.canonicalCommand,
+    exampleArgs: entry.exampleArgs ?? [],
+    acceptsWorkspaceSelector: true as const,
+  }));
 
 export function validateWorkspaceSelectorOperations(
   operations: readonly WorkspaceSelectorOperationDecision[],

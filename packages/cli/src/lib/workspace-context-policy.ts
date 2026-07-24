@@ -1,0 +1,192 @@
+import {
+  buildWorkspaceContextCompatibilityMatrix,
+  type WorkspaceContextCompatibilityMatrixV1,
+  type WorkspaceContextSurfaceInventoryItem,
+} from "@roll/core";
+import { builtinToolDeclarations } from "@roll/infra";
+import type {
+  WorkspaceContextConsumer,
+  WorkspaceContextPolicy,
+  WorkspaceContextScope,
+} from "@roll/spec";
+import {
+  PUBLIC_CLI_OPERATIONS,
+  type WorkspaceSelectorOperationDecision,
+} from "./command-surface.js";
+
+interface PolicyShape {
+  readonly scope: WorkspaceContextScope;
+  readonly contextConsumer?: WorkspaceContextConsumer;
+  readonly allowsAmbientCwd?: boolean;
+  readonly allowsLegacyRollPath?: boolean;
+  readonly rationale?: string;
+}
+
+const workspaceRead: PolicyShape = { scope: "workspace_required_read", contextConsumer: "workspace" };
+const workspaceMutation: PolicyShape = { scope: "workspace_required_mutation", contextConsumer: "workspace" };
+const workspaceOptional: PolicyShape = { scope: "workspace_optional_read", contextConsumer: "workspace" };
+const issue: PolicyShape = { scope: "issue_required", contextConsumer: "issue" };
+const repository: PolicyShape = { scope: "repository_required", contextConsumer: "repository" };
+const machine: PolicyShape = { scope: "machine_only" };
+
+const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
+  "help:read": machine,
+  "status:read": workspaceOptional, "status:ci": repository, "status:pulse": workspaceOptional,
+  "workspace:create": { ...machine, allowsAmbientCwd: true, rationale: "Creation starts from an explicit config before the target Workspace exists." },
+  "workspace:issue.init": workspaceMutation, "workspace:requirement.add": workspaceMutation,
+  "workspace:doctor": workspaceRead,
+  "workspace:migrate": { scope: "legacy_migration_only", allowsAmbientCwd: true, allowsLegacyRollPath: true, rationale: "Migration must inspect an explicitly selected legacy Roll project." },
+  "workspace:edit": workspaceMutation, "workspace:list": machine, "workspace:show": workspaceRead,
+  "workspace:register": { ...machine, allowsAmbientCwd: true, rationale: "Registration resolves an explicit existing Workspace path into the machine registry." },
+  "workspace:activate": workspaceMutation, "workspace:pause": workspaceMutation, "workspace:archive": workspaceMutation,
+  "delivery:list": workspaceRead, "delivery:show": workspaceRead, "delivery:reconcile": workspaceMutation,
+  "agent:workspace": workspaceRead, "agent:view": machine, "agent:cast": workspaceOptional, "agent:list": machine,
+  "agent:readiness": machine, "agent:disable": machine, "agent:enable": machine, "agent:migrate": machine,
+  "backlog:read": workspaceRead, "backlog:show": workspaceRead,
+  "backlog:block": workspaceMutation, "backlog:defer": workspaceMutation, "backlog:unblock": workspaceMutation,
+  "backlog:promote": workspaceMutation, "backlog:claim": workspaceMutation, "backlog:lint": workspaceRead,
+  "backlog:unstick": workspaceMutation, "backlog:sync": workspaceMutation,
+  "config:read": machine, "config:write": machine, "config:prices": machine, "config:tune": workspaceOptional,
+  "release:release": workspaceMutation, "release:showcase": issue,
+  "design:design": workspaceMutation,
+  "doctor:diagnose": machine, "doctor:skills": machine, "doctor:tools": machine, "doctor:language": machine, "doctor:pardon": machine,
+  "idea:capture": workspaceMutation,
+  "init:onboard": { scope: "legacy_migration_only", allowsAmbientCwd: true, allowsLegacyRollPath: true, rationale: "Onboarding inspects a legacy project before Workspace authority exists." },
+  "next:read": workspaceRead, "north:read": workspaceOptional,
+  "setup:setup": { ...machine, allowsAmbientCwd: true, rationale: "Machine setup must run before a Workspace is available." },
+  "setup:skills": machine, "setup:offboard": { scope: "legacy_migration_only", allowsAmbientCwd: true, allowsLegacyRollPath: true, rationale: "Offboarding inspects an explicitly selected legacy project." },
+  "test:run": repository,
+  "update:apply": { ...machine, allowsAmbientCwd: true, rationale: "Machine-global updates are independent of Workspace selection." },
+};
+
+const LOOP_READ_OPERATIONS = new Set([
+  "status", "eval", "story", "runs", "cycles", "cycle", "goal", "signals", "adversarial", "log", "events", "fmt", "watch",
+]);
+
+function cliShape(command: string, operation: string): PolicyShape {
+  if (command === "loop") return LOOP_READ_OPERATIONS.has(operation) ? workspaceRead : workspaceMutation;
+  const shape = CLI_POLICY_SHAPES[`${command}:${operation}`];
+  if (shape === undefined) throw new Error(`workspace-context-policy: missing CLI declaration for ${command}:${operation}`);
+  return shape;
+}
+
+function completePolicy(base: Pick<WorkspaceContextPolicy, "surface" | "id" | "operation">, shape: PolicyShape, acceptsWorkspaceSelector = false): WorkspaceContextPolicy {
+  return {
+    ...base,
+    scope: shape.scope,
+    allowsAmbientCwd: shape.allowsAmbientCwd ?? false,
+    allowsLegacyRollPath: shape.allowsLegacyRollPath ?? false,
+    ...(shape.contextConsumer === undefined ? {} : { contextConsumer: shape.contextConsumer }),
+    ...(shape.rationale === undefined ? {} : { rationale: shape.rationale }),
+    ...(acceptsWorkspaceSelector ? { acceptsWorkspaceSelector: true } : {}),
+  };
+}
+
+export const CLI_WORKSPACE_CONTEXT_POLICIES: readonly WorkspaceContextPolicy[] = PUBLIC_CLI_OPERATIONS.map((entry) =>
+  completePolicy(
+    { surface: "cli", id: entry.command, operation: entry.operation },
+    cliShape(entry.command, entry.operation),
+    entry.supportsWorkspaceSelector,
+  ));
+
+/** US-WS-022 generated cases are projected from policy, not a second allowlist. */
+export const POLICY_WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = CLI_WORKSPACE_CONTEXT_POLICIES
+  .filter((policy) => policy.acceptsWorkspaceSelector === true)
+  .map((policy) => {
+    const registration = PUBLIC_CLI_OPERATIONS.find((entry) =>
+      entry.command === policy.id && entry.operation === policy.operation);
+    if (registration === undefined || registration.exampleArgs === undefined) {
+      throw new Error(`workspace-context-policy: selector policy lacks a registered route for ${policy.id}:${policy.operation}`);
+    }
+    return {
+      id: `${registration.command}.${registration.operation}`,
+      operation: registration.operation,
+      command: registration.command,
+      route: registration.route,
+      canonicalCommand: registration.canonicalCommand,
+      exampleArgs: registration.exampleArgs,
+      acceptsWorkspaceSelector: true,
+    };
+  });
+
+const TOOL_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
+  bash: repository,
+  "browser.screenshot": issue,
+  "browser.console": issue,
+  "browser.dom-query": issue,
+  "physical.screenshot": issue,
+  "filesystem.stat": repository,
+  "filesystem.read": repository,
+  "filesystem.write": repository,
+  "git.commit": repository,
+  "git.status": repository,
+  "git.push": repository,
+  "git.merge": repository,
+  "github.pr": issue,
+  "github.ci": issue,
+  "network.fetch": issue,
+  "mcp.call": issue,
+};
+
+export function builtinToolContextPolicies(): WorkspaceContextPolicy[] {
+  return Object.entries(TOOL_POLICY_SHAPES).map(([operation, shape]) =>
+    completePolicy({ surface: "tool", id: operation.split(".")[0] ?? operation, operation }, shape));
+}
+
+export function builtinToolContextInventory(): WorkspaceContextSurfaceInventoryItem[] {
+  return builtinToolDeclarations().map((declaration) => ({
+    surface: "tool",
+    id: String(declaration.id).split(".")[0] ?? String(declaration.id),
+    operation: String(declaration.id),
+  }));
+}
+
+export function cliContextInventory(): WorkspaceContextSurfaceInventoryItem[] {
+  return PUBLIC_CLI_OPERATIONS.map((entry) => ({
+    surface: "cli",
+    id: entry.command,
+    operation: entry.operation,
+    supportsWorkspaceSelector: entry.supportsWorkspaceSelector,
+  }));
+}
+
+function isPolicy(value: unknown): value is WorkspaceContextPolicy {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return item.surface === "skill" && typeof item.id === "string" && typeof item.operation === "string"
+    && typeof item.scope === "string" && typeof item.allowsAmbientCwd === "boolean" && typeof item.allowsLegacyRollPath === "boolean";
+}
+
+export function skillContextPoliciesFromManifest(manifest: unknown): WorkspaceContextPolicy[] {
+  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+    throw new Error("workspace-context-policy: invalid skills manifest");
+  }
+  const policies = (manifest as Record<string, unknown>)["workspaceContextPolicies"];
+  if (!Array.isArray(policies) || !policies.every(isPolicy)) {
+    throw new Error("workspace-context-policy: invalid skill policies");
+  }
+  return policies;
+}
+
+export function skillContextInventory(skillIds: readonly string[], policies: readonly WorkspaceContextPolicy[]): WorkspaceContextSurfaceInventoryItem[] {
+  const shipped = new Set(skillIds);
+  return policies
+    .filter((policy) => shipped.has(policy.id))
+    .map((policy) => ({ surface: "skill", id: policy.id, operation: policy.operation }));
+}
+
+export function buildRegisteredWorkspaceContextMatrix(input: {
+  readonly cliInventory: readonly WorkspaceContextSurfaceInventoryItem[];
+  readonly skillIds: readonly string[];
+  readonly skillPolicies: readonly WorkspaceContextPolicy[];
+}): WorkspaceContextCompatibilityMatrixV1 {
+  const inventory = [
+    ...input.cliInventory,
+    ...skillContextInventory(input.skillIds, input.skillPolicies),
+    ...builtinToolContextInventory(),
+  ];
+  return buildWorkspaceContextCompatibilityMatrix({
+    inventory,
+    policies: [...CLI_WORKSPACE_CONTEXT_POLICIES, ...input.skillPolicies, ...builtinToolContextPolicies()],
+  });
+}

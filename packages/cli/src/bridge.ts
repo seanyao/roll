@@ -18,6 +18,7 @@ import {
   WORKSPACE_SELECTOR_ALIAS,
   workspaceSelectorOperation,
   type WorkspaceSelectorOperationDecision,
+  type CliCommandOperationRegistration,
 } from "./lib/command-surface.js";
 import { renderFrontDoor } from "./lib/front-door.js";
 import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
@@ -46,11 +47,19 @@ const hidden = new Set<string>();
 // going through the central read-only enforcement.
 type HelpSpec = string | (() => string);
 const helpText = new Map<string, HelpSpec>();
+const commandOperations = new Map<string, readonly CliCommandOperationRegistration[]>();
 
-export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: HelpSpec }): void {
+export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: HelpSpec; operations?: readonly CliCommandOperationRegistration[] }): void {
   ported.set(command, handler);
   if (opts?.hidden === true) hidden.add(command);
   if (opts?.help !== undefined) helpText.set(command, opts.help);
+  if (opts?.operations !== undefined) commandOperations.set(command, [...opts.operations]);
+}
+
+/** Actual operation metadata attached to live bridge registrations. */
+export function registeredCliOperations(): CliCommandOperationRegistration[] {
+  return [...commandOperations.values()].flat().sort((left, right) =>
+    `${left.command}:${left.operation}`.localeCompare(`${right.command}:${right.operation}`));
 }
 
 /** Commands with bridge-enforced help (FIX-239 AC3's table). */

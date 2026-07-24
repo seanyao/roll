@@ -30,6 +30,14 @@ export interface WorkspaceContextPolicyFinding {
 
 export interface WorkspaceContextCompatibilityMatrixV1 {
   readonly schema: "roll.workspace-context-compatibility-matrix/v1";
+  readonly summary: {
+    readonly cliFamilies: number;
+    readonly cliOperations: number;
+    readonly skillFamilies: number;
+    readonly skillOperations: number;
+    readonly toolAdapters: number;
+    readonly toolOperations: number;
+  };
   readonly rows: readonly WorkspaceContextPolicy[];
 }
 
@@ -148,6 +156,14 @@ export function buildWorkspaceContextCompatibilityMatrix(input: {
   }
   return {
     schema: "roll.workspace-context-compatibility-matrix/v1",
+    summary: {
+      cliFamilies: new Set(input.inventory.filter((item) => item.surface === "cli").map((item) => item.id)).size,
+      cliOperations: input.inventory.filter((item) => item.surface === "cli").length,
+      skillFamilies: new Set(input.inventory.filter((item) => item.surface === "skill").map((item) => item.id)).size,
+      skillOperations: input.inventory.filter((item) => item.surface === "skill").length,
+      toolAdapters: new Set(input.inventory.filter((item) => item.surface === "tool").map((item) => item.id)).size,
+      toolOperations: input.inventory.filter((item) => item.surface === "tool").length,
+    },
     rows: [...input.policies].sort(compareKeys),
   };
 }

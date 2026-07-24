@@ -6,6 +6,7 @@ import {
   canonicalizeWorkspaceAliasTokens,
   dispatch,
   parseCanonicalWorkspaceSelectorArgs,
+  portedCommands,
   registerPorted,
 } from "../src/bridge.js";
 import {
@@ -14,6 +15,7 @@ import {
   validateWorkspaceSelectorOperations,
   workspaceSelectorOperation,
 } from "../src/lib/command-surface.js";
+import { POLICY_WORKSPACE_SELECTOR_OPERATIONS } from "../src/lib/workspace-context-policy.js";
 import { registerAll } from "../src/commands/index.js";
 
 async function captureDispatch(argv: string[]): Promise<{
@@ -212,8 +214,9 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
 
   it("validates every declared selector capability and its exact alias mapping", () => {
     expect(() => validateWorkspaceSelectorOperations(WORKSPACE_SELECTOR_OPERATIONS)).not.toThrow();
+    expect(POLICY_WORKSPACE_SELECTOR_OPERATIONS).toEqual(WORKSPACE_SELECTOR_OPERATIONS);
 
-    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+    for (const operation of POLICY_WORKSPACE_SELECTOR_OPERATIONS) {
       expect(operation.acceptsWorkspaceSelector, operation.id).toBe(true);
       expect(workspaceSelectorOperation(operation.command, operation.exampleArgs), operation.id).toEqual(operation);
       const aliasArgs = operation.exampleArgs.map((arg) => arg === "--workspace" ? "--ws" : arg);
@@ -226,7 +229,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
   });
 
   it("dispatches canonical and alias selectors identically for every declared capability", async () => {
-    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+    for (const operation of POLICY_WORKSPACE_SELECTOR_OPERATIONS) {
       const operationCalls: string[][] = [];
       registerPorted(operation.command, (args) => {
         operationCalls.push(args);
@@ -263,7 +266,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
       { name: "canonical+canonical", first: "--workspace", second: "--workspace" },
     ] as const;
 
-    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+    for (const operation of POLICY_WORKSPACE_SELECTOR_OPERATIONS) {
       for (const duplicate of duplicateCases) {
         let handlerRuns = 0;
         registerPorted(operation.command, () => {
@@ -294,7 +297,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
   });
 
   it("generates missing-value failures for both spellings without running handlers", async () => {
-    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+    for (const operation of POLICY_WORKSPACE_SELECTOR_OPERATIONS) {
       for (const selector of ["--workspace", "--ws"] as const) {
         let handlerRuns = 0;
         registerPorted(operation.command, () => {
@@ -339,5 +342,28 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
       workspaceSelectorAliases: ["--ws"],
     });
     expect(aliasHelpDecision("status")).toBeUndefined();
+  });
+
+  it("normalizes before every registered family dispatcher and canonicalizes ws to workspace", async () => {
+    registerAll();
+    for (const command of portedCommands()) {
+      const observed: string[][] = [];
+      registerPorted(command, (args) => {
+        observed.push(args);
+        return 0;
+      });
+      const result = await captureDispatch([command, "--ws", "roll"]);
+      expect(result.status, command).toBe(0);
+      expect(observed, command).toEqual([["--workspace", "roll"]]);
+    }
+
+    const workspaceCalls: string[][] = [];
+    registerPorted("workspace", (args) => {
+      workspaceCalls.push(args);
+      return 0;
+    });
+    const alias = await captureDispatch(["ws", "create", "demo", "--config", "demo.yaml"]);
+    expect(alias.status).toBe(0);
+    expect(workspaceCalls).toEqual([["create", "demo", "--config", "demo.yaml"]]);
   });
 });

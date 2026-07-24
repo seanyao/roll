@@ -99,6 +99,14 @@ describe("US-WS-032 Workspace context policy", () => {
       policies: [...policies].reverse(),
     });
     expect(matrix.schema).toBe("roll.workspace-context-compatibility-matrix/v1");
+    expect(matrix.summary).toEqual({
+      cliFamilies: 1,
+      cliOperations: 1,
+      skillFamilies: 1,
+      skillOperations: 1,
+      toolAdapters: 1,
+      toolOperations: 2,
+    });
     expect(matrix.rows.map((row) => `${row.surface}:${row.id}:${row.operation}`)).toEqual([
       "cli:backlog:read",
       "skill:roll-build:build",

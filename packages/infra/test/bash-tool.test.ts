@@ -203,6 +203,8 @@ describe("US-TOOL-004 BashTool", () => {
       { command: "node", args: ["--test-name-pattern", "smoke", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "node", args: ["--import=data:text/javascript,globalThis.compromised=true", "app.js"] },
       { command: "node", args: ["--experimental-loader", "data:text/javascript,export function load(){}", "app.js"] },
+      { command: "node", args: ["--experimental_loader=data:text/javascript,export function load(){}", "app.js"] },
+      { command: "node", args: ["--experimental_loader", "data:text/javascript,export function load(){}", "app.js"] },
       { command: "node", args: ["--import", "file:///etc/passwd", "app.js"] },
       { command: "node", args: ["--run", "unsafe-script"] },
       { command: "node", args: ["--print", "require('node:fs').readFileSync('/etc/passwd')"] },

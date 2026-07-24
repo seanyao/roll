@@ -234,14 +234,16 @@ function nodeEvalDenied(args: readonly string[]): boolean {
       }
       return false;
     }
-    if (argument === "--run" || argument.startsWith("--run=")) return true;
+    const normalizedArgument = argument.startsWith("--") ? argument.replaceAll("_", "-") : argument;
+    if (normalizedArgument === "--run" || normalizedArgument.startsWith("--run=")) return true;
     if (argument.startsWith("-r") && !argument.startsWith("--") && argument.length > 2) {
       if (inlineModuleSpecifier(argument.slice(2))) return true;
       ambiguousOption = undefined;
       continue;
     }
     const equals = argument.indexOf("=");
-    const option = equals < 0 ? argument : argument.slice(0, equals);
+    const rawOption = equals < 0 ? argument : argument.slice(0, equals);
+    const option = rawOption.startsWith("--") ? rawOption.replaceAll("_", "-") : rawOption;
     if (equals >= 0 && nodeInlineModuleDenied(option, argument.slice(equals + 1))) return true;
     // Node's long option set changes between releases. Treat a separate token
     // after any option as a possible option value, so an incomplete allowlist

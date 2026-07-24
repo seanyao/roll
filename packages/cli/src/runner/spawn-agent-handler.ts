@@ -220,7 +220,7 @@ export async function executeSpawnAgentCommand(
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
       const livePath = join(dirname(ports.paths.eventsPath), "live.log");
-      const liveBanner = `── cycle ${ctx.cycleId ?? "?"} · ${ctx.storyId ?? "?"} · agent ${cmd.agent} · build-session ${builderSessionId} ──`;
+      const liveBanner = `── cycle ${ctx.cycleId ?? "?"} · workspace ${ctx.workspaceExecution?.workspace.workspaceId ?? ctx.repositoryExecution?.workspaceId ?? "legacy"} · story ${ctx.storyId ?? "?"} · agent ${cmd.agent} · build-session ${builderSessionId} ──`;
       try {
         writeFileSync(livePath, `${liveBanner}\n`);
       } catch {
@@ -385,6 +385,7 @@ export async function executeSpawnAgentCommand(
               ? {}
               : { writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath) }),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
+          ...(ctx.workspaceExecution === undefined ? {} : { workspaceExecution: ctx.workspaceExecution }),
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,

@@ -48,6 +48,7 @@ import { latestScreenLockEvent } from "./screen-lock-events.js";
 import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
 import { resolveStoryLeasePath } from "./story-lease-path.js";
 import { decideInProgressReclaim, parseLegacyClaimTimestamp, readLeaseEvents } from "./lease-reclaim.js";
+import { freezeWorkspaceCycleContext } from "./scoped-route.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -537,6 +538,31 @@ export async function executeSetupCommand(
         }
         repositoryExecution = await ports.repositories.resolve(story.id);
       }
+      let workspaceExecution = ctx.workspaceExecution;
+      if (workspaceExecution !== undefined) {
+        const frozen = repositoryExecution === undefined
+          ? { ok: false as const, code: "missing_execution_context" }
+          : freezeWorkspaceCycleContext({ workspace: workspaceExecution, storyId: story.id, execution: repositoryExecution });
+        if (!frozen.ok) {
+          ports.events.appendAlert(
+            ports.paths.alertsPath,
+            `workspace cycle context blocked before spawn for ${story.id}: ${frozen.code}`,
+          );
+          ports.backlog.markStatus?.(ports.repoCwd, story.id, preCycleStatus ?? STATUS_MARKER.todo);
+          try {
+            releaseStoryLease(leasePath, story.id, { source: "cycle", pid: process.pid });
+          } catch {
+            /* terminal cleanup retries the lease release */
+          }
+          return {
+            event: { type: "repository_setup_failed", storyId: story.id },
+            ctxPatch: {
+              ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
+            },
+          };
+        }
+        workspaceExecution = frozen.context;
+      }
       // The visible claim follows successful Workspace preparation. Legacy
       // projects retain the same pick-time status transition.
       ports.backlog.markStatus?.(ports.repoCwd, story.id, STATUS_MARKER.in_progress);
@@ -558,6 +584,7 @@ export async function executeSetupCommand(
           type: "story_picked",
           storyId: story.id,
           ...(repositoryExecution === undefined ? {} : { repositoryExecution }),
+          ...(workspaceExecution === undefined ? {} : { workspaceExecution }),
         },
         ctxPatch: {
           evidenceRunDir,

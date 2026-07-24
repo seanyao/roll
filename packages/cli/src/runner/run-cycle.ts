@@ -379,6 +379,7 @@ function mergeCtx(live: CycleContext, next: CycleContext): CycleContext {
     agentTimedOut: next.agentTimedOut ?? live.agentTimedOut,
     publishConfirmed: next.publishConfirmed ?? live.publishConfirmed,
     repositoryExecution: next.repositoryExecution ?? live.repositoryExecution,
+    workspaceExecution: next.workspaceExecution ?? live.workspaceExecution,
   };
 }
 

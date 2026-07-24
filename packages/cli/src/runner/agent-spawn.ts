@@ -40,7 +40,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { Rig } from "@roll/spec";
+import type { Rig, WorkspaceExecutionContextV1 } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
 import { worktreeGitDiscoveryEnv } from "./main-checkout-guard.js";
 
@@ -526,6 +526,9 @@ export interface AgentSpawnOptions {
   skillBody: string;
   /** FIX-204B: the executor-picked story id, pinned into the prompt. */
   storyId?: string;
+  /** US-WS-033: the frozen invocation authority. The child receives this exact
+   * serializable snapshot; it must not rediscover Workspace/Issue from cwd. */
+  workspaceExecution?: WorkspaceExecutionContextV1;
   /** Hard wall-clock kill after this many ms (the watchdog also enforces this at
    *  the orchestrator layer; this is the spawn-local belt-and-braces). */
   timeoutMs?: number;
@@ -735,6 +738,18 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
   };
 }
 
+/** Stable child-process envelope for a frozen Workspace cycle. */
+export function workspaceExecutionEnvironment(
+  context: WorkspaceExecutionContextV1 | undefined,
+): NodeJS.ProcessEnv {
+  if (context === undefined) return {};
+  return {
+    ROLL_WORKSPACE_EXECUTION_CONTEXT: JSON.stringify(context),
+    ROLL_WORKSPACE: context.workspace.workspaceId,
+    ...(context.issue === undefined ? {} : { ROLL_STORY_ID: context.issue.storyId }),
+  };
+}
+
 function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
   // FIX-1473: strip ALL inherited GIT_* variables for EVERY spawned agent.
@@ -750,6 +765,7 @@ function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
   Object.assign(env, worktreeGitDiscoveryEnv(opts.cwd));
   env.PWD = opts.cwd;
   delete env.OLDPWD;
+  Object.assign(env, workspaceExecutionEnvironment(opts.workspaceExecution));
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
 }
 

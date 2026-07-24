@@ -12,9 +12,9 @@
  * The handler stays thin: it resolves the project identity + runtime paths and
  * delegates the entire walk to the runner adapter (packages/cli/src/runner).
  */
-import { EventBus, assessBacklog, branchCanaryVerdict, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatusExact, normalizeAgentScopeConfig, parseBacklog, parsePolicy, readRouteSlot, releaseStoryLease, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
+import { EventBus, assessBacklog, branchCanaryVerdict, buildWorkspaceExecutionContext, cycleEndEvent, DEFAULT_BRANCH_CANARY_MAX, deriveWorkspaceExecutionAuthorities, firstInstalledAgent, isEphemeralBranch, mapV2Status, markStatusExact, normalizeAgentScopeConfig, parseBacklog, parsePolicy, readRouteSlot, releaseStoryLease, shouldResize, shouldSuppressDormancy, type AgentSlot, type BacklogItem, type CycleContext, type RouteDeps, type RouteSlot } from "@roll/core";
 import { STATUS_MARKER, absent, buildTerminalEvent, deriveOrphanVerdict, present, type BacklogReason } from "@roll/spec";
-import { createScheduler, isOwnerHeld, launchdLabel, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
+import { createScheduler, isOwnerHeld, launchdLabel, loadExplicitWorkspaceDiscovery, loadWorkspaceDiscovery, projectIdentity, readLockOwner, releaseLock } from "@roll/infra";
 import { dormantMarkerPath, resolveLoopRunState, writeDormantMarker } from "./loop-sched.js";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -52,6 +52,8 @@ import { lookup } from "node:dns/promises";
 import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs, type ResolvedBacklogTarget } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { resolveStoryLeasePath } from "../runner/story-lease-path.js";
+import { resolveRequirementMatchedWorkspace } from "../runner/scoped-route.js";
+import { workspaceRollHome } from "./workspace-target.js";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
   "loop run-once: delivery published — PR open, awaiting reconciliation (Delivery Reconciler advances merge and credits main evidence)\n" +
@@ -896,6 +898,7 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
   // racing. It is carried to the pick_story handler via env (the default —
   // one-card-one-lease — needs no signal).
   if (args.includes("--race")) process.env["ROLL_LOOP_RACE"] = "1";
+  const allowedCards = parseAllowedCardsEnv();
 
   // FIX-1209: preflight — detect and heal core.worktree contamination BEFORE
   // resolving project identity. The harness systematically writes core.worktree
@@ -908,15 +911,36 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
   const legacyRunnerBound = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() !== "" ||
     (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() !== "";
   let workspaceTarget: ResolvedBacklogTarget | undefined;
+  let workspaceResolutionSource: "explicit" | "environment" | "cwd_manifest" | "requirement_discovery" =
+    args.includes("--workspace") ? "explicit" : (process.env["ROLL_WORKSPACE"] ?? "").trim() !== ""
+      ? "environment"
+      : "cwd_manifest";
   if (workspaceRequested || !legacyRunnerBound) {
     const scoped = stripBacklogScopeArgs(args);
     if (!scoped.ok) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
     const selectorArgs: string[] = [];
     const workspaceIndex = args.indexOf("--workspace");
     if (workspaceIndex >= 0) selectorArgs.push("--workspace", args[workspaceIndex + 1] ?? "");
-    const decision = resolveBacklogCommandTarget(selectorArgs, "mutation");
+    let decision = resolveBacklogCommandTarget(selectorArgs, "mutation");
+    if (!decision.ok && decision.code === "target_missing" && allowedCards !== undefined && allowedCards.size > 0) {
+      const discovery = loadWorkspaceDiscovery({ rollHome: workspaceRollHome() });
+      const requirementDecision = resolveRequirementMatchedWorkspace({
+        storyIds: [...allowedCards],
+        workspaces: discovery.workspaces,
+        diagnostics: discovery.diagnostics,
+        cwd: process.cwd(),
+        operation: "mutation",
+      });
+      if (requirementDecision.ok) {
+        decision = resolveBacklogCommandTarget(
+          ["--workspace", requirementDecision.target.workspaceId],
+          "mutation",
+        );
+        workspaceResolutionSource = "requirement_discovery";
+      }
+    }
     if (!decision.ok) {
-      if (workspaceRequested || decision.code === "migration_required") return emitBacklogTargetError(decision);
+      if (workspaceRequested || decision.code === "migration_required" || allowedCards !== undefined) return emitBacklogTargetError(decision);
     } else {
       if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
       workspaceTarget = decision;
@@ -968,7 +992,40 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
   }
 
   const branch = `loop/cycle-${cycleId}`;
-  const ctx = { cycleId, branch, loop: "ci" as never };
+  let workspaceExecution;
+  if (workspaceTarget !== undefined) {
+    const discovery = loadExplicitWorkspaceDiscovery({
+      rollHome: workspaceRollHome(),
+      workspaceId: workspaceTarget.workspaceId,
+    });
+    const facts = discovery.workspaces.find(
+      (entry) => entry.candidate.workspaceId === workspaceTarget?.workspaceId,
+    );
+    if (facts === undefined) {
+      process.stderr.write("loop run-once: missing_execution_context\n");
+      return 1;
+    }
+    const built = buildWorkspaceExecutionContext({
+      facts: {
+        candidate: facts.candidate,
+        manifest: facts.manifest,
+        authorities: deriveWorkspaceExecutionAuthorities(facts.candidate.canonicalRoot),
+      },
+      source: workspaceResolutionSource,
+      evidence: [],
+    });
+    if (!built.ok) {
+      process.stderr.write(`loop run-once: ${built.error.code}\n`);
+      return 1;
+    }
+    workspaceExecution = built.context;
+  }
+  const ctx: CycleContext = {
+    cycleId,
+    branch,
+    loop: "ci" as never,
+    ...(workspaceExecution === undefined ? {} : { workspaceExecution }),
+  };
 
   if (dryRun) {
     const plan = dryRunPlan(ctx);
@@ -1031,7 +1088,6 @@ export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps =
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
-  const allowedCards = parseAllowedCardsEnv();
   if (allowedCards === undefined) {
     const goLockOwner = readLockOwner(join(rt, "go.lock"));
     if (isOwnerHeld(goLockOwner, Math.floor(Date.now() / 1000), GO_LOCK_STALE_SEC)) {

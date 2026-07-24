@@ -20,9 +20,11 @@ import {
   AGENT_REGISTRY_NAMES,
   agentsInstalled,
   canonicalAgentName,
+  discoverWorkspaceForIntent,
   normalizeAgentScopeConfig,
   parsePolicy,
   rankRoleCandidates,
+  resolveWorkspaceExecutionContextScope,
   resolveAgentScopeRole,
 } from "@roll/core";
 import type {
@@ -33,8 +35,17 @@ import type {
   AgentScopeRole,
   AgentScopeRoleResolution,
   CastRoleName,
+  CycleRepositoryExecutionContext,
   RankedRoleCandidate,
+  RepositoryExecutionContext,
+  WorkspaceDiscoveryDiagnosticV1,
+  WorkspaceExecutionContextV1,
 } from "@roll/spec";
+import {
+  REQUIREMENT_HINT_V1,
+  WORKSPACE_INTENT_V1,
+} from "@roll/spec";
+import type { WorkspaceDiscoveryFactsV1 } from "@roll/core";
 import { realAgentEnv } from "../commands/agent-list.js";
 
 export interface ScopedExecuteRoute {
@@ -447,4 +458,112 @@ export function renderScopedExecuteRoute(trace: ScopedExecuteRouteTrace): string
   lines.push(`  selected: ${trace.selected ?? `(none — ${trace.error ?? "unresolved"})`}`);
   lines.push("");
   return lines.join("\n");
+}
+
+export type RequirementMatchedWorkspaceDecision = ReturnType<typeof discoverWorkspaceForIntent>;
+
+/** Resolve a Workspace from exact Story/requirement identity. Lifecycle is a
+ * gate, never selection evidence; a sole active Workspace with no match stays
+ * unselected. This is deliberately pure so CLI/loop/agent entrypoints share
+ * one route before any handler or child process starts. */
+export function resolveRequirementMatchedWorkspace(input: {
+  readonly storyIds: readonly string[];
+  readonly workspaces: readonly WorkspaceDiscoveryFactsV1[];
+  readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[];
+  readonly cwd: string;
+  readonly operation: "read" | "mutation";
+}): RequirementMatchedWorkspaceDecision {
+  return discoverWorkspaceForIntent({
+    intent: {
+      schema: WORKSPACE_INTENT_V1,
+      operation: input.operation,
+      interaction: "non_interactive",
+      scope: input.operation === "read" ? "workspace_required_read" : "workspace_required_mutation",
+      cwd: input.cwd,
+      requirement: {
+        schema: REQUIREMENT_HINT_V1,
+        sources: [],
+        storyIds: input.storyIds.map((storyId) => ({ storyId, provenance: "explicit_user" as const })),
+        repositoryRemotes: [],
+        paths: [],
+      },
+    },
+    workspaces: input.workspaces,
+    diagnostics: input.diagnostics,
+  });
+}
+
+export type FrozenWorkspaceCycleContextResult =
+  | { readonly ok: true; readonly context: WorkspaceExecutionContextV1 }
+  | { readonly ok: false; readonly code: string };
+
+/** Bind one already-resolved Workspace snapshot to the picked Issue exactly
+ * once. The scope validator performs strict closed-shape validation and returns
+ * a deep-frozen JSON snapshot, so later cwd changes or recovery cannot redirect
+ * any authority path. */
+export function freezeWorkspaceCycleContext(input: {
+  readonly workspace: WorkspaceExecutionContextV1;
+  readonly storyId: string;
+  readonly execution: CycleRepositoryExecutionContext;
+}): FrozenWorkspaceCycleContextResult {
+  if (
+    input.storyId.trim() === "" ||
+    input.execution.workspaceId !== input.workspace.workspace.workspaceId ||
+    input.execution.issueRoot !== join(input.workspace.workspace.canonicalRoot, "issues", input.storyId)
+  ) {
+    return { ok: false, code: "missing_execution_context" };
+  }
+  const resolved = resolveWorkspaceExecutionContextScope({
+    scope: "issue_required",
+    context: {
+      ...input.workspace,
+      issue: {
+        storyId: input.storyId,
+        manifestPath: join(input.execution.issueRoot, "manifest.json"),
+        execution: input.execution,
+      },
+    },
+  });
+  return resolved.ok && resolved.context !== undefined
+    ? { ok: true, context: resolved.context }
+    : { ok: false, code: resolved.ok ? "missing_execution_context" : resolved.error.code };
+}
+
+/** Restore a serialized cycle handoff through the same strict validator used at
+ * initial freeze. A malformed or Workspace-only value cannot resume an Issue
+ * cycle. */
+export function restoreWorkspaceCycleContext(serialized: string): FrozenWorkspaceCycleContextResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized) as unknown;
+  } catch {
+    return { ok: false, code: "invalid_execution_context" };
+  }
+  const resolved = resolveWorkspaceExecutionContextScope({
+    scope: "issue_required",
+    context: value as WorkspaceExecutionContextV1,
+  });
+  return resolved.ok && resolved.context !== undefined
+    ? { ok: true, context: resolved.context }
+    : { ok: false, code: resolved.ok ? "missing_execution_context" : resolved.error.code };
+}
+
+export type WorkspaceCycleRepositoryResult =
+  | { readonly ok: true; readonly repository: RepositoryExecutionContext }
+  | { readonly ok: false; readonly code: "missing_execution_context" };
+
+/** Repository-required operations always name a stable repoId. Cardinality one
+ * is not a selector and multi-repo order is never authority. */
+export function resolveWorkspaceCycleRepository(
+  context: WorkspaceExecutionContextV1,
+  repoId?: string,
+): WorkspaceCycleRepositoryResult {
+  const scoped = resolveWorkspaceExecutionContextScope({ scope: "repository_required", context });
+  if (!scoped.ok || scoped.context?.issue === undefined || (repoId ?? "").trim() === "") {
+    return { ok: false, code: "missing_execution_context" };
+  }
+  const repository = scoped.context.issue.execution.repositories[repoId as string];
+  return repository === undefined
+    ? { ok: false, code: "missing_execution_context" }
+    : { ok: true, repository };
 }

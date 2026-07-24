@@ -7,12 +7,22 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  freezeWorkspaceCycleContext,
   mostRecentBuilder,
   renderScopedExecuteRoute,
+  resolveRequirementMatchedWorkspace,
+  resolveWorkspaceCycleRepository,
   resolveScopedCastRole,
   resolveScopedStoryExecute,
+  restoreWorkspaceCycleContext,
   scopedExecuteRouteTrace,
 } from "../src/runner/scoped-route.js";
+import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_EXECUTION_CONTEXT_V1,
+  type CycleRepositoryExecutionContext,
+  type WorkspaceExecutionContextV1,
+} from "@roll/spec";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -386,5 +396,152 @@ defaults:
       recentUse: { claude: 100, agy: 9000 },
     });
     expect(route!.previousBuilder).toBeNull();
+  });
+});
+
+function workspaceExecutionFixture(): {
+  readonly context: WorkspaceExecutionContextV1;
+  readonly execution: CycleRepositoryExecutionContext;
+} {
+  const root = "/workspace/roll";
+  const storyId = "US-WS-033";
+  const issueRoot = `${root}/issues/${storyId}`;
+  const binding = {
+    schema: REPOSITORY_BINDING_V1,
+    repoId: "repo-111111111111",
+    alias: "product",
+    remote: "git@github.com:seanyao/roll.git",
+    integrationBranch: "idea-074-workspace",
+    provider: "github",
+    workflow: { branchPattern: "roll/{workspaceId}/{storyId}", requiredChecks: [] },
+  } as const;
+  const context: WorkspaceExecutionContextV1 = {
+    schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+    workspace: {
+      workspaceId: "roll",
+      root,
+      canonicalRoot: root,
+      lifecycle: "active",
+    },
+    resolution: { source: "requirement_discovery", evidence: [] },
+    bindings: [binding],
+    authorities: {
+      backlog: `${root}/backlog/index.md`,
+      features: `${root}/features`,
+      design: `${root}/design`,
+      requirements: `${root}/requirements`,
+      policy: `${root}/policy.yaml`,
+      evidence: `${root}/evidence`,
+      toolDumps: `${root}/runtime/tool-dumps`,
+      events: `${root}/runtime/events`,
+      runtime: `${root}/runtime`,
+      locks: `${root}/runtime/locks`,
+    },
+  };
+  const execution: CycleRepositoryExecutionContext = {
+    workspaceId: "roll",
+    issueRoot,
+    repositories: {
+      [binding.repoId]: {
+        repoId: binding.repoId,
+        alias: binding.alias,
+        access: "write",
+        requiredDelivery: true,
+        noChangePolicy: "changes_required",
+        worktreePath: `${issueRoot}/${binding.alias}`,
+        baseSha: "a".repeat(40),
+        headSha: "b".repeat(40),
+        commands: { test: ["pnpm test"], integration: [] },
+      },
+    },
+  };
+  return { context, execution };
+}
+
+describe("US-WS-033 — frozen Workspace cycle route", () => {
+  it("selects only one exact requirement match and never the sole active Workspace", () => {
+    const decision = resolveRequirementMatchedWorkspace({
+      storyIds: ["US-WS-033"],
+      workspaces: [
+        {
+          candidate: {
+            workspaceId: "wrong-active",
+            root: "/workspace/wrong-active",
+            canonicalRoot: "/workspace/wrong-active",
+            manifestWorkspaceId: "wrong-active",
+            pathState: "valid",
+            lifecycle: "active",
+          },
+          manifest: {
+            schema: "roll.workspace/v1",
+            workspaceId: "wrong-active",
+            displayName: "Wrong active",
+            requirements: [],
+            repositories: workspaceExecutionFixture().context.bindings,
+          },
+          issues: [],
+        },
+        {
+          candidate: {
+            workspaceId: "roll",
+            root: "/workspace/roll",
+            canonicalRoot: "/workspace/roll",
+            manifestWorkspaceId: "roll",
+            pathState: "valid",
+            lifecycle: "registered",
+          },
+          manifest: {
+            schema: "roll.workspace/v1",
+            workspaceId: "roll",
+            displayName: "Roll",
+            requirements: [],
+            repositories: workspaceExecutionFixture().context.bindings,
+          },
+          issues: [{
+            storyId: "US-WS-033",
+            workspaceId: "roll",
+            requirements: [],
+          }],
+        },
+      ],
+      diagnostics: [],
+      cwd: "/tmp",
+      operation: "mutation",
+    });
+
+    expect(decision).toMatchObject({ ok: false, code: "workspace_activation_required" });
+    if (!decision.ok) expect(decision.candidates.map((candidate) => candidate.workspaceId)).toEqual(["roll"]);
+  });
+
+  it("freezes one serializable Workspace/Issue context and restores the same authority after cwd changes", () => {
+    const { context, execution } = workspaceExecutionFixture();
+    const frozen = freezeWorkspaceCycleContext({ workspace: context, storyId: "US-WS-033", execution });
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+
+    expect(Object.isFrozen(frozen.context)).toBe(true);
+    expect(Object.isFrozen(frozen.context.issue?.execution.repositories)).toBe(true);
+    const replayed = restoreWorkspaceCycleContext(JSON.stringify(frozen.context));
+    expect(replayed).toEqual(frozen);
+    if (!replayed.ok) return;
+    expect(replayed.context.workspace.workspaceId).toBe("roll");
+    expect(replayed.context.issue?.storyId).toBe("US-WS-033");
+    expect(replayed.context.authorities.backlog).toBe("/workspace/roll/backlog/index.md");
+  });
+
+  it("requires an explicit repository for repository-required actions", () => {
+    const { context, execution } = workspaceExecutionFixture();
+    const frozen = freezeWorkspaceCycleContext({ workspace: context, storyId: "US-WS-033", execution });
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+
+    expect(resolveWorkspaceCycleRepository(frozen.context)).toEqual({
+      ok: false,
+      code: "missing_execution_context",
+    });
+    expect(resolveWorkspaceCycleRepository(frozen.context, "repo-111111111111")).toMatchObject({
+      ok: true,
+      repository: { alias: "product" },
+    });
   });
 });

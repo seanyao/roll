@@ -125,6 +125,7 @@ export async function executeSpawnRoleCommand(
       timeoutMs: wallSec * 1000,
       ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
       ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
+      ...(ctx.workspaceExecution === undefined ? {} : { workspaceExecution: ctx.workspaceExecution }),
       ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
       env: {
         ...process.env,

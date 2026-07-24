@@ -12,11 +12,15 @@
  * the story page skeleton, then refreshes `.roll/index.json`. Refuses to
  * overwrite an existing spec — cards are born once, evolved by hand after.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNCATEGORIZED, generateIndex } from "../lib/archive.js";
 import { BacklogStore, appendBacklogRow } from "@roll/core";
 import { STORY_ID_RE, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
+import {
+  emitBacklogTargetError,
+  type BacklogTargetDecision,
+} from "./backlog-target.js";
 
 function todayYmd(): string {
   const d = new Date();
@@ -31,7 +35,53 @@ function flagValue(args: string[], flag: string): string | undefined {
   return args[i + 1];
 }
 
-export function storyNewCommand(args: string[]): number {
+export interface StoryNewCommandDeps {
+  readonly resolveTarget: (args: readonly string[], operation: "mutation") => BacklogTargetDecision;
+}
+
+interface StoryNewAuthority {
+  readonly projectPath: string;
+  readonly backlogPath: string;
+  readonly featuresDir: string;
+  readonly canonical: boolean;
+}
+
+function canonicalAuthority(args: readonly string[], deps: StoryNewCommandDeps): StoryNewAuthority | number {
+  const target = deps.resolveTarget(args, "mutation");
+  if (!target.ok) return emitBacklogTargetError(target);
+  if ("aggregate" in target) {
+    process.stderr.write("story new: --all is not valid for a mutation\n");
+    return 1;
+  }
+  return {
+    projectPath: target.workspaceRoot,
+    backlogPath: target.backlogPath,
+    featuresDir: target.storyRoot,
+    canonical: true,
+  };
+}
+
+function updateCanonicalIndex(authority: StoryNewAuthority, id: string, epic: string): void {
+  const path = join(authority.projectPath, "index.json");
+  let stories: Record<string, string> = {};
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+      const candidate = (raw as Record<string, unknown>)["stories"];
+      if (typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)) {
+        stories = Object.fromEntries(Object.entries(candidate).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+      }
+    }
+  } catch {
+    // A missing derived index is rebuilt from the current mutation below.
+  }
+  const content = `${JSON.stringify({ stories: { ...stories, [id]: epic } }, null, 2)}\n`;
+  const temporary = `${path}.tmp-${process.pid}`;
+  writeFileSync(temporary, content, "utf8");
+  renameSync(temporary, path);
+}
+
+export function storyNewCommand(args: string[], deps?: StoryNewCommandDeps): number {
   if (args[0] === "--help" || args[0] === "-h" || args[0] === undefined) {
     process.stdout.write(
       "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>] [--no-index]\n" +
@@ -56,8 +106,16 @@ export function storyNewCommand(args: string[]): number {
   const epic = flagValue(args, "--epic") ?? UNCATEGORIZED;
   const note = flagValue(args, "--note");
 
-  const cwd = process.cwd();
-  const dir = join(cwd, ".roll", "features", epic, id);
+  const authority = deps === undefined
+    ? {
+        projectPath: process.cwd(),
+        backlogPath: join(process.cwd(), ".roll", "backlog.md"),
+        featuresDir: join(process.cwd(), ".roll", "features"),
+        canonical: false,
+      }
+    : canonicalAuthority(args, deps);
+  if (typeof authority === "number") return authority;
+  const dir = join(authority.featuresDir, epic, id);
   if (existsSync(join(dir, "spec.md"))) {
     process.stderr.write(`story new: ${epic}/${id}/spec.md already exists — cards are born once\nstory new: 卡已存在，不可覆盖\n`);
     return 1;
@@ -77,13 +135,18 @@ export function storyNewCommand(args: string[]): number {
   // write (I9); an existing row is a no-op so re-runs stay idempotent.
   let rowNote = "";
   try {
-    const backlogPath = join(cwd, ".roll", "backlog.md");
+    const backlogPath = authority.backlogPath;
     if (existsSync(backlogPath)) {
       const store = new BacklogStore();
       const before = store.readBacklog(backlogPath);
       let appended = false;
       store.writeBacklog(backlogPath, before.hash, (content) => {
-        const r = appendBacklogRow(content, { id, title, epic });
+        const r = appendBacklogRow(content, {
+          id,
+          title,
+          epic,
+          ...(authority.canonical ? { linkPrefix: "../features" } : {}),
+        });
         appended = r.appended;
         return r.content;
       });
@@ -100,11 +163,15 @@ export function storyNewCommand(args: string[]): number {
   // NO LONGER a delivery side effect — run `roll index` to render pages on demand.
   if (!args.includes("--no-index")) {
     try {
-      generateIndex(cwd);
+      if (authority.canonical) updateCanonicalIndex(authority, id, epic);
+      else generateIndex(authority.projectPath);
     } catch {
       /* index cache is best-effort; the locator re-derives via live walk */
     }
   }
-  process.stdout.write(`card minted\n卡已建档\n  .roll/features/${epic}/${id}/spec.md\n${rowNote}`);
+  const displayedPath = authority.canonical
+    ? `features/${epic}/${id}/spec.md`
+    : `.roll/features/${epic}/${id}/spec.md`;
+  process.stdout.write(`card minted\n卡已建档\n  ${displayedPath}\n${rowNote}`);
   return 0;
 }

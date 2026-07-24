@@ -1,8 +1,8 @@
 {
   "schema": "roll.workspace-context-compatibility-matrix/v1",
   "summary": {
-    "cliFamilies": 19,
-    "cliOperations": 111,
+    "cliFamilies": 20,
+    "cliOperations": 113,
     "skillFamilies": 22,
     "skillOperations": 24,
     "toolAdapters": 8,
@@ -865,6 +865,26 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "story",
+      "operation": "new",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "story",
+      "operation": "validate",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
     },
     {
       "surface": "cli",

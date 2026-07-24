@@ -15,6 +15,7 @@ import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
+import { resolveBacklogCommandTarget } from "./backlog-target.js";
 import {
   backlogClaimCommand,
   backlogLintCommand,
@@ -338,7 +339,7 @@ export function registerAll(): void {
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.
   registerPorted("story", (args) => {
-    if (args[0] === "new") return storyNewCommand(args.slice(1));
+    if (args[0] === "new") return storyNewCommand(args.slice(1), { resolveTarget: resolveBacklogCommandTarget });
     // FIX-339 (AC7): `story validate <ID>` — must-declare + visual-evidence-AC
     // self-check, the command-side of the AC6 hard闸 (roll-design prefills it).
     if (args[0] === "validate") return storyValidateCommand(args.slice(1));
@@ -347,6 +348,11 @@ export function registerAll(): void {
         "       roll story validate <ID>\n",
     );
     return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
+  }, {
+    operations: [
+      cliSelectorOperation("story", "new", ["new"], ["new", "US-DEMO-1", "--title", "Demo", "--workspace", "roll"]),
+      cliSelectorOperation("story", "validate", ["validate"], ["validate", "US-DEMO-1", "--workspace", "roll"]),
+    ],
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
   registerPorted("gc", removedTopLevel("gc"), { hidden: true });

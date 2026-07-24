@@ -50,6 +50,7 @@ const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
   "backlog:block": workspaceMutation, "backlog:defer": workspaceMutation, "backlog:unblock": workspaceMutation,
   "backlog:promote": workspaceMutation, "backlog:claim": workspaceMutation, "backlog:lint": workspaceRead,
   "backlog:unstick": workspaceMutation, "backlog:sync": workspaceMutation,
+  "story:new": workspaceMutation, "story:validate": workspaceRead,
   "config:read": machine, "config:write": machine, "config:prices": machine, "config:tune": workspaceOptional,
   "release:release": workspaceMutation, "release:showcase": issue, "release:consistency": repository, "release:verify": repository,
   "design:design": workspaceMutation,

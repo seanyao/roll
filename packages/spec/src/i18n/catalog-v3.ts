@@ -9,6 +9,14 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  "workspace.alias.help.command": {
+    en: "Alias: roll %s ... (canonical: roll %s ...)",
+    zh: "别名：roll %s ...（canonical：roll %s ...）",
+  },
+  "workspace.alias.help.selector": {
+    en: "Workspace selector alias: %s <id|path> (canonical: %s <id|path>)",
+    zh: "Workspace selector 别名：%s <ID|路径>（canonical：%s <ID|路径>）",
+  },
   "workspace.selector.error.line": {
     en: "%s: %s — %s",
     zh: "%s：%s — %s",

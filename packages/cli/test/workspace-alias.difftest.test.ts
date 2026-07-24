@@ -47,4 +47,20 @@ describe("US-WS-022 workspace command alias", () => {
     expect(alias.stdout).toContain('"command":"workspace"');
     expect(alias.stdout).not.toContain('"command":"ws"');
   });
+
+  it("keeps canonical help primary and derives the visible alias note", async () => {
+    registerPorted("workspace", () => 9, {
+      help: "Usage: roll workspace <create|list> [--workspace <id|path>]",
+    });
+
+    const canonical = await captureDispatch(["workspace", "--help"]);
+    const alias = await captureDispatch(["ws", "--help"]);
+
+    expect(alias).toEqual(canonical);
+    expect(canonical.status).toBe(0);
+    expect(canonical.stdout).toContain("Usage: roll workspace");
+    expect(canonical.stdout).toContain("Alias: roll ws ...");
+    expect(canonical.stdout).toContain("Workspace selector alias: --ws <id|path>");
+    expect(canonical.stdout).not.toContain("Usage: roll ws");
+  });
 });

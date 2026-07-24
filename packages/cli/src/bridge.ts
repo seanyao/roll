@@ -11,8 +11,11 @@ import { fileURLToPath } from "node:url";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { networkNeeds, requireNetwork } from "./lib/require-network.js";
 import {
+  aliasHelpDecision,
   canonicalTopLevelCommand,
+  isWorkspaceSelectorAlias,
   publicCommands,
+  WORKSPACE_SELECTOR_ALIAS,
   workspaceSelectorOperation,
   type WorkspaceSelectorOperationDecision,
 } from "./lib/command-surface.js";
@@ -102,9 +105,9 @@ export function canonicalizeWorkspaceAliasTokens(args: readonly string[]): Canon
       optionsEnded = true;
       return arg;
     }
-    if (arg === "--ws") {
+    if (isWorkspaceSelectorAlias(arg)) {
       aliasUsed = true;
-      return "--workspace";
+      return WORKSPACE_SELECTOR_ALIAS.canonical;
     }
     return arg;
   });
@@ -163,6 +166,25 @@ function emitWorkspaceSelectorError(
     process.stderr.write(`${nextAction}\n`);
   }
   return { status: 1 };
+}
+
+function renderHelp(command: string, help: HelpSpec): string {
+  const text = typeof help === "function" ? help() : help;
+  const aliases = aliasHelpDecision(command);
+  if (aliases === undefined) return text;
+  const lang = resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+  const lines: string[] = [];
+  for (const alias of aliases.commandAliases) {
+    lines.push(t(v3Catalog, lang, "workspace.alias.help.command", alias, aliases.canonicalCommand));
+  }
+  for (const alias of aliases.workspaceSelectorAliases) {
+    lines.push(t(v3Catalog, lang, "workspace.alias.help.selector", alias, WORKSPACE_SELECTOR_ALIAS.canonical));
+  }
+  return lines.length === 0 ? text : `${text.trimEnd()}\n\n${lines.join("\n")}`;
 }
 
 /** Top-level usage — TS-native (no bash). REFACTOR-056: the command list is
@@ -235,7 +257,7 @@ export async function dispatch(
       // FIX-238/239: the contract half the bridge owns — help is read-only.
       const help = helpText.get(command);
       if (help !== undefined && (rest[0] === "--help" || rest[0] === "-h")) {
-        const text = typeof help === "function" ? help() : help;
+        const text = renderHelp(command, help);
         process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
         return { status: 0 };
       }

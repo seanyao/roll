@@ -5,6 +5,12 @@ import {
   parseCanonicalWorkspaceSelectorArgs,
   registerPorted,
 } from "../src/bridge.js";
+import {
+  WORKSPACE_SELECTOR_OPERATIONS,
+  aliasHelpDecision,
+  validateWorkspaceSelectorOperations,
+  workspaceSelectorOperation,
+} from "../src/lib/command-surface.js";
 
 async function captureDispatch(argv: string[]): Promise<{
   readonly status: number;
@@ -107,5 +113,34 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
       selector: "roll",
       remaining: ["show", "US-WS-022", "--", "--workspace", "literal"],
     });
+  });
+
+  it("generates the alias contract from every declared selector capability", () => {
+    expect(() => validateWorkspaceSelectorOperations(WORKSPACE_SELECTOR_OPERATIONS)).not.toThrow();
+
+    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+      expect(operation.acceptsWorkspaceSelector, operation.id).toBe(true);
+      expect(workspaceSelectorOperation(operation.command, operation.exampleArgs), operation.id).toEqual(operation);
+      const aliasArgs = operation.exampleArgs.map((arg) => arg === "--workspace" ? "--ws" : arg);
+      expect(canonicalizeWorkspaceAliasTokens(aliasArgs).args, operation.id).toEqual(operation.exampleArgs);
+      expect(parseCanonicalWorkspaceSelectorArgs(operation.exampleArgs), operation.id).toMatchObject({
+        ok: true,
+        selector: "roll",
+      });
+    }
+  });
+
+  it("derives help aliases from the command and selector capability registries", () => {
+    expect(aliasHelpDecision("workspace")).toEqual({
+      canonicalCommand: "workspace",
+      commandAliases: ["ws"],
+      workspaceSelectorAliases: ["--ws"],
+    });
+    expect(aliasHelpDecision("backlog")).toEqual({
+      canonicalCommand: "backlog",
+      commandAliases: [],
+      workspaceSelectorAliases: ["--ws"],
+    });
+    expect(aliasHelpDecision("status")).toBeUndefined();
   });
 });

@@ -46,13 +46,13 @@ function fakeBin(name: string, script: string): void {
 }
 
 describe("US-TOOL-014 infra tool delegation", () => {
-  it("delegates public process execFile calls through the bash tool and appends events.ndjson entries", async () => {
+  it("fails closed when public process execFile has no Issue context and still appends governed events", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);
 
     const result = await execFile("node", ["-e", "process.stdout.write('ok')"], { cwd: dir });
 
-    expect(result).toMatchObject({ exitCode: 0, stdout: "ok", timedOut: false });
+    expect(result).toMatchObject({ exitCode: 1, stdout: "", stderr: "tool invocation requires an Issue execution context", timedOut: false });
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["bash", "bash"]);
   });
 

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
+import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   GitTool,
@@ -42,6 +43,7 @@ function initRepo(tag: string): string {
 const policy = (): ToolPolicy => ({ enabled: true, timeoutMs: 1000, sandbox: {} });
 
 function invocation<I>(toolId: GitToolId, input: I): ToolInvocation<I> {
+  const cwd = (input as { cwd: string }).cwd;
   return {
     invocationId: `inv-${toolId}`,
     toolId: toolId as ToolInvocation<I>["toolId"],
@@ -49,6 +51,46 @@ function invocation<I>(toolId: GitToolId, input: I): ToolInvocation<I> {
     caller: { cycleId: "cycle-1", storyId: "US-TOOL-006", agent: "codex" },
     policy: policy(),
     ts: 100,
+    context: {
+      schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+      workspace: { workspaceId: "roll", root: cwd, canonicalRoot: cwd, lifecycle: "active" },
+      resolution: { source: "explicit", evidence: [] },
+      bindings: [],
+      issue: {
+        storyId: "US-TOOL-006",
+        manifestPath: join(cwd, "manifest.json"),
+        execution: {
+          workspaceId: "roll",
+          issueRoot: cwd,
+          repositories: {
+            repo: {
+              repoId: "repo",
+              alias: "repo",
+              access: "write",
+              requiredDelivery: true,
+              noChangePolicy: "changes_required",
+              worktreePath: cwd,
+              baseSha: "a".repeat(40),
+              headSha: "b".repeat(40),
+              commands: { test: [], integration: [] },
+            },
+          },
+        },
+      },
+      authorities: {
+        backlog: join(cwd, "backlog"),
+        features: join(cwd, "features"),
+        design: join(cwd, "design"),
+        requirements: join(cwd, "requirements"),
+        policy: join(cwd, "policy"),
+        evidence: join(cwd, "evidence"),
+        toolDumps: join(cwd, "tool-dumps"),
+        events: join(cwd, "events"),
+        runtime: join(cwd, "runtime"),
+        locks: join(cwd, "locks"),
+      },
+    },
+    repoId: "repo",
   };
 }
 

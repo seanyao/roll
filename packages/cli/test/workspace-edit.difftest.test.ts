@@ -51,6 +51,13 @@ function snapshot(root: string): ReadonlyMap<string, string> {
   return result;
 }
 
+function snapshotState(f: Pick<ReturnType<typeof fixture>, "workspace" | "rollHome">) {
+  return {
+    workspace: snapshot(f.workspace),
+    rollHome: snapshot(f.rollHome),
+  };
+}
+
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "roll-workspace-edit-cli-"));
   roots.push(home);
@@ -138,7 +145,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 describe("US-WS-025 roll workspace edit --check", () => {
   it("emits a complete safe JSON plan through the public route with zero Workspace writes", async () => {
     const f = fixture();
-    const before = snapshot(f.workspace);
+    const before = snapshotState(f);
 
     const first = await run(["workspace", "edit", "ws-demo", "--config", f.config, "--check", "--json"], f);
     const second = await run(["workspace", "edit", f.workspace, "--config", f.config, "--check", "--json"], f);
@@ -160,7 +167,7 @@ describe("US-WS-025 roll workspace edit --check", () => {
         command: `roll workspace edit ws-demo --config ${f.config} --json`,
       },
     });
-    expect(snapshot(f.workspace)).toEqual(before);
+    expect(snapshotState(f)).toEqual(before);
   });
 
   it("returns a blocked referenced-repository preview and preserves the Issue and Workspace bytes", async () => {
@@ -188,20 +195,81 @@ describe("US-WS-025 roll workspace edit --check", () => {
         required_checks: ["lint"],
       }],
     }));
-    const before = snapshot(f.workspace);
+    const before = snapshotState(f);
 
     const result = await run(["workspace", "edit", "ws-demo", "--config", f.config, "--check", "--json"], f);
 
     expect(result).toMatchObject({ status: 2, stderr: "" });
     expect(JSON.parse(result.stdout)).toMatchObject({
       outcome: "blocked",
+      beforeManifest: {
+        repositories: [expect.objectContaining({
+          integrationBranch: "main",
+          workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: ["test"] },
+        })],
+      },
+      afterManifest: {
+        repositories: [expect.objectContaining({
+          integrationBranch: "release",
+          workflow: { branchPattern: "feature/{workspace_id}/{story_id}", requiredChecks: ["lint"] },
+        })],
+      },
       blockers: expect.arrayContaining([expect.objectContaining({
         code: "metadata_referenced",
         path: `repositories[${f.repoId}].branchPattern`,
         references: [expect.objectContaining({ storyId: "US-EXISTING-1" })],
       })]),
+      nextAction: {
+        kind: "blocked",
+        command: `roll workspace edit ws-demo --config ${f.config} --check --json`,
+      },
     });
-    expect(snapshot(f.workspace)).toEqual(before);
+    expect(snapshotState(f)).toEqual(before);
+  });
+
+  it("blocks Requirement deletion referenced by its archive and writes neither root", async () => {
+    const f = fixture();
+    write(join(f.workspace, "requirements", "jira", "req-c78ccf14ea21", "source.yaml"), {
+      schema: "roll.requirement-source/v1",
+      requirementId: "req-c78ccf14ea21",
+      provider: "jira",
+      ref: "SOT-15499",
+      revision: "7",
+      capturedAt: "2026-07-24T00:00:00.000Z",
+      previousRevisions: [],
+      requirement: { bytes: 4, sha256: digest("body") },
+      context: [],
+      stories: [],
+      attest: {
+        schema: "roll.requirement-attest-projection/v1",
+        mode: "generated_aggregate",
+        evidenceAuthority: "issue",
+      },
+    });
+    write(f.config, f.configValue({ requirements: [] }));
+    const before = snapshotState(f);
+
+    const result = await run(["workspace", "edit", "ws-demo", "--config", f.config, "--check", "--json"], f);
+
+    expect(result).toMatchObject({ status: 2, stderr: "" });
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      outcome: "blocked",
+      beforeManifest: { requirements: [{ provider: "jira", ref: "SOT-15499" }] },
+      afterManifest: { requirements: [] },
+      blockers: [expect.objectContaining({
+        code: "metadata_referenced",
+        path: "requirements[jira:SOT-15499]",
+        references: [expect.objectContaining({
+          kind: "requirement_archive",
+          requirementId: "req-c78ccf14ea21",
+        })],
+      })],
+      nextAction: {
+        kind: "blocked",
+        command: `roll workspace edit ws-demo --config ${f.config} --check --json`,
+      },
+    });
+    expect(snapshotState(f)).toEqual(before);
   });
 
   it.each([
@@ -211,7 +279,7 @@ describe("US-WS-025 roll workspace edit --check", () => {
     const f = fixture();
     if (name === "unknown config field") write(f.config, f.configValue({ root: "/escape" }));
     const args = rawArgs.map((arg) => arg === "<CONFIG>" ? f.config : arg);
-    const before = snapshot(f.workspace);
+    const before = snapshotState(f);
 
     const result = await run(args, f);
 
@@ -221,13 +289,13 @@ describe("US-WS-025 roll workspace edit --check", () => {
       schema: "roll.workspace-edit-error/v1",
       error: { code },
     });
-    expect(snapshot(f.workspace)).toEqual(before);
+    expect(snapshotState(f)).toEqual(before);
   });
 
   it("fails closed when a reference authority is corrupt", async () => {
     const f = fixture();
     mkdirSync(join(f.workspace, "issues", "US-BROKEN"), { recursive: true });
-    const before = snapshot(f.workspace);
+    const before = snapshotState(f);
 
     const result = await run(["workspace", "edit", "ws-demo", "--config", f.config, "--check", "--json"], f);
 
@@ -236,6 +304,6 @@ describe("US-WS-025 roll workspace edit --check", () => {
       schema: "roll.workspace-edit-error/v1",
       error: { code: "reference_index_invalid" },
     });
-    expect(snapshot(f.workspace)).toEqual(before);
+    expect(snapshotState(f)).toEqual(before);
   });
 });

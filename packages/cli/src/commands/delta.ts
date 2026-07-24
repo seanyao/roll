@@ -530,13 +530,16 @@ function defaultValidator(input: DeltaValidationInput): ValidatorResult {
   if (input.stage === "evaluator") {
     const bp = join(frameDir, "role-artifacts", "builder", "evaluation-manifest.json");
     try {
-      const bm = existsSync(bp) ? (JSON.parse(readFileSync(bp, "utf8")) as { schemaVersion?: unknown }) : undefined;
-      if (bm?.schemaVersion === 2) builderManifest = bm as unknown as DeltaArtifactManifest;
+      const bm = existsSync(bp) ? (JSON.parse(readFileSync(bp, "utf8")) as { schemaVersion?: unknown; role?: unknown }) : undefined;
+      // Must be a v2 manifest that ACTUALLY declares role "builder" — a wrong-role
+      // v2 file at the builder path must not satisfy the identity-distinctness
+      // requirement.
+      if (bm?.schemaVersion === 2 && bm.role === "builder") builderManifest = bm as unknown as DeltaArtifactManifest;
     } catch {
       /* fall through to the fail-closed block below */
     }
     if (builderManifest === undefined) {
-      return { ok: false, reason: "artifact_invalid", detail: `evaluator requires a published v2 Builder manifest for identity distinctness (none at ${bp})`, role: input.stage };
+      return { ok: false, reason: "artifact_invalid", detail: `evaluator requires a published v2 Builder manifest (role: "builder") for identity distinctness (none valid at ${bp})`, role: input.stage };
     }
   }
   const r = validateDeltaManifest(manifest, {

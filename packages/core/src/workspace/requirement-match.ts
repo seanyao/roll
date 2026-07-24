@@ -60,23 +60,38 @@ const HARD_PROVENANCE = new Set<RequirementHintProvenance>([
   "deterministic_extraction",
 ]);
 
+const PROVENANCE_PRIORITY: Readonly<Record<RequirementHintProvenance, number>> = {
+  explicit_user: 0,
+  cli_argument: 1,
+  issue_manifest: 2,
+  deterministic_extraction: 3,
+  cwd_repository: 4,
+  semantic_inference: 5,
+};
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function evidenceKey(value: WorkspaceMatchEvidence): string {
-  return [value.kind, value.value, value.provenance, value.source, value.detail].join("\0");
+  return [value.kind, value.value, value.source, value.detail].join("\0");
 }
 
 function stableEvidence(values: readonly WorkspaceMatchEvidence[]): readonly WorkspaceMatchEvidence[] {
   const unique = new Map<string, WorkspaceMatchEvidence>();
-  for (const value of values) unique.set(evidenceKey(value), value);
+  for (const value of values) {
+    const key = evidenceKey(value);
+    const current = unique.get(key);
+    if (current === undefined || PROVENANCE_PRIORITY[value.provenance] < PROVENANCE_PRIORITY[current.provenance]) {
+      unique.set(key, value);
+    }
+  }
   return [...unique.values()]
     .sort((left, right) => (
       right.score - left.score ||
       compareText(left.kind, right.kind) ||
       compareText(left.value, right.value) ||
-      compareText(left.provenance, right.provenance) ||
+      PROVENANCE_PRIORITY[left.provenance] - PROVENANCE_PRIORITY[right.provenance] ||
       compareText(left.source, right.source) ||
       compareText(left.detail, right.detail)
     ))

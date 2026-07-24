@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { repositoryIdFromRemote, type RequirementHintV1 } from "@roll/spec";
+import {
+  REQUIREMENT_HINT_V1,
+  repositoryIdFromRemote,
+  type RepositoryHintProvenance,
+  type RequirementHintV1,
+} from "@roll/spec";
 import {
   MAX_REQUIREMENT_MATCH_EVIDENCE,
   matchWorkspaceRequirement,
@@ -215,5 +220,153 @@ describe("US-WS-027 workspace requirement evidence", () => {
       ],
       findings: [],
     });
+  });
+
+  it.each([
+    "explicit_user",
+    "cli_argument",
+    "issue_manifest",
+    "cwd_repository",
+    "deterministic_extraction",
+  ] as const)("keeps repository and path evidence soft for %s provenance", (provenance: RepositoryHintProvenance) => {
+    const hint = normalizeRequirementHint({
+      repositoryRemotes: [{ remote: "https://github.com/Owner/Repo", provenance }],
+      paths: [{ path: "/work/ws/issues/US-WS-027", provenance }],
+    });
+    if (!hint.ok) throw new Error("fixture hint must be valid");
+    const result = matchWorkspaceRequirement({
+      requirement: hint.value,
+      facts: {
+        issues: [],
+        requirementSources: [],
+        repositories: [{ remote: "https://github.com/Owner/Repo", repositoryId: "repo-8d325f3875d5" }],
+        roots: ["/work/ws"],
+      },
+    });
+    expect(result.hardMatch).toBe(false);
+    expect(result.evidence).toEqual([
+      expect.objectContaining({ kind: "repository_exact", provenance, hard: false }),
+      expect.objectContaining({ kind: "path_contained", provenance, hard: false }),
+    ]);
+  });
+
+  it("makes CLI source/story matches hard while deduplicating mixed provenance by strongest audit source", () => {
+    const requirement: RequirementHintV1 = {
+      schema: REQUIREMENT_HINT_V1,
+      sources: [
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "deterministic_extraction" },
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "cli_argument" },
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "explicit_user" },
+      ],
+      storyIds: [{ storyId: "US-WS-027", provenance: "cli_argument" }],
+      repositoryRemotes: [
+        { remote: "https://github.com/Owner/Repo", provenance: "cwd_repository" },
+        { remote: "https://github.com/Owner/Repo", provenance: "cli_argument" },
+      ],
+      paths: [
+        { path: "/work/ws/issues/US-WS-027", provenance: "cwd_repository" },
+        { path: "/work/ws/issues/US-WS-027", provenance: "cli_argument" },
+      ],
+      semanticTerms: ["workspace resolver"],
+    };
+    const result = matchWorkspaceRequirement({
+      requirement,
+      facts: {
+        issues: [{ storyId: "US-WS-027", requirements: [] }],
+        requirementSources: [{ provider: "jira", ref: "APE-234", requirementId: "req-2e4314b10317" }],
+        repositories: [{ remote: "https://github.com/Owner/Repo", repositoryId: "repo-8d325f3875d5" }],
+        roots: ["/work/ws"],
+        semanticTerms: ["Workspace Resolver"],
+      },
+    });
+    expect(result).toEqual({
+      evidence: [
+        {
+          kind: "issue_exact",
+          value: "US-WS-027",
+          hard: true,
+          score: 100,
+          source: "issue:US-WS-027",
+          provenance: "cli_argument",
+          detail: "Issue manifest storyId matched US-WS-027",
+        },
+        {
+          kind: "requirement_source_exact",
+          value: "jira:APE-234",
+          hard: true,
+          score: 90,
+          source: "requirement:jira/req-2e4314b10317",
+          provenance: "explicit_user",
+          detail: "Requirement source identity matched req-2e4314b10317",
+        },
+        {
+          kind: "repository_exact",
+          value: "repo-8d325f3875d5",
+          hard: false,
+          score: 30,
+          source: "repository:repo-8d325f3875d5",
+          provenance: "cli_argument",
+          detail: "Repository identity matched repo-8d325f3875d5",
+        },
+        {
+          kind: "path_contained",
+          value: "/work/ws/issues/US-WS-027",
+          hard: false,
+          score: 20,
+          source: "workspace-root:/work/ws",
+          provenance: "cli_argument",
+          detail: "Candidate path is contained by Workspace root /work/ws",
+        },
+        {
+          kind: "semantic_supported",
+          value: "workspace resolver",
+          hard: false,
+          score: 10,
+          source: "semantic-index:workspace resolver",
+          provenance: "semantic_inference",
+          detail: "Semantic term matched workspace resolver",
+        },
+      ],
+      hardMatch: true,
+      score: 250,
+      findings: [],
+    });
+  });
+
+  it("matches fixed historical identities without rewriting them and excludes legacy/mismatched rows", () => {
+    const historical = [
+      { provider: "jira", ref: "APE-234", requirementId: "req-2e4314b10317" },
+      { provider: "github_issue", ref: "owner/repo#12", requirementId: "req-1aed8113153b" },
+      { provider: "local_file", ref: "PRD/Brief.md", requirementId: "req-bcc74925c520" },
+      { provider: "user_input", ref: "owner-brief", requirementId: "req-8803ac05d541" },
+      { provider: "jira", ref: "234", requirementId: "req-legacy000001" },
+      { provider: "github_issue", ref: "owner/repo#99", requirementId: "req-000000000000" },
+    ];
+    const before = structuredClone(historical);
+    const hint = normalizeRequirementHint({
+      sources: [
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "cli_argument" },
+        { key: { provider: "github_issue", ref: "owner/repo#12" }, provenance: "cli_argument" },
+        { key: { provider: "local_file", ref: "PRD/Brief.md" }, provenance: "cli_argument" },
+        { key: { provider: "user_input", ref: "owner-brief" }, provenance: "cli_argument" },
+      ],
+    });
+    if (!hint.ok) throw new Error("fixture hint must be valid");
+    const result = matchWorkspaceRequirement({
+      requirement: hint.value,
+      facts: { issues: [], requirementSources: historical, repositories: [], roots: [] },
+    });
+    expect(historical).toEqual(before);
+    expect(result.evidence.map(({ value, source }) => ({ value, source }))).toEqual([
+      { value: "github_issue:owner/repo#12", source: "requirement:github_issue/req-1aed8113153b" },
+      { value: "jira:APE-234", source: "requirement:jira/req-2e4314b10317" },
+      { value: "local_file:PRD/Brief.md", source: "requirement:local_file/req-bcc74925c520" },
+      { value: "user_input:owner-brief", source: "requirement:user_input/req-8803ac05d541" },
+    ]);
+    expect(result.evidence.some((entry) => entry.source.includes("legacy") || entry.source.includes("000000000000"))).toBe(false);
+    expect(result.findings).toEqual([
+      expect.objectContaining({ code: "requirement_identity_mismatch", source: "requirement:github_issue/req-000000000000" }),
+      expect.objectContaining({ code: "legacy_requirement_ref_requires_migration", source: "requirement:jira/req-legacy000001" }),
+    ]);
   });
 });

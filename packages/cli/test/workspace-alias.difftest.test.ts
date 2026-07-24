@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { dispatch, registerPorted } from "../src/bridge.js";
+import { cliSelectorOperation } from "../src/lib/command-surface.js";
 
 const WORKSPACE_SUBTREE_CASES: ReadonlyArray<{
   readonly name: string;
@@ -112,6 +113,7 @@ describe("US-WS-022 workspace command alias", () => {
   it("keeps canonical help primary and derives the visible alias note", async () => {
     registerPorted("workspace", () => 9, {
       help: "Usage: roll workspace <create|list> [--workspace <id|path>]",
+      operations: [cliSelectorOperation("workspace", "show", ["show"], ["show", "--workspace", "roll"])],
     });
 
     const canonical = await captureDispatch(["workspace", "--help"]);
@@ -136,7 +138,10 @@ describe("US-WS-022 workspace command alias", () => {
     };
     process.env["ROLL_HOME"] = rollHome;
     delete process.env["ROLL_LANG"];
-    registerPorted("workspace", () => 9, { help: "用法：roll workspace <list>" });
+    registerPorted("workspace", () => 9, {
+      help: "用法：roll workspace <list>",
+      operations: [cliSelectorOperation("workspace", "show", ["show"], ["show", "--workspace", "roll"])],
+    });
 
     try {
       const result = await captureDispatch(["ws", "--help"]);

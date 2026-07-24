@@ -3,7 +3,7 @@ import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
-import { cliOperations } from "../lib/command-surface.js";
+import { cliOperation, cliSelectorOperation } from "../lib/command-surface.js";
 import { agentCommand } from "./agent.js";
 import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
@@ -167,7 +167,7 @@ export function registerAll(): void {
       return 0;
     }
     return docCommand(args);
-  }, { help: HELP_USAGE, operations: cliOperations("help") });
+  }, { help: HELP_USAGE, operations: [cliOperation("help", "read")] });
   registerPorted("status", (args) => {
     if (args[0] === "ci") {
       const rest = args.slice(1);
@@ -180,10 +180,43 @@ export function registerAll(): void {
     }
     if (args[0] === "pulse") return pulseCommand(args.slice(1));
     return statusCommand(args);
-  }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。", operations: cliOperations("status") });
-  registerPorted("workspace", workspaceCommand, { help: workspaceUsage, operations: cliOperations("workspace") });
-  registerPorted("context", contextCommand, { help: contextUsage });
-  registerPorted("delivery", deliveryCommand, { help: deliveryUsage, operations: cliOperations("delivery") });
+  }, {
+    help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。",
+    operations: [
+      cliOperation("status", "read"),
+      cliOperation("status", "ci", ["ci"]),
+      cliOperation("status", "pulse", ["pulse"]),
+    ],
+  });
+  registerPorted("workspace", workspaceCommand, {
+    help: workspaceUsage,
+    operations: [
+      cliOperation("workspace", "create", ["create"]),
+      cliSelectorOperation("workspace", "issue.init", ["issue", "init"], ["issue", "init", "US-WS-022", "--workspace", "roll"]),
+      cliSelectorOperation("workspace", "requirement.add", ["requirement", "add"], ["requirement", "add", "--workspace", "roll"]),
+      cliOperation("workspace", "doctor", ["doctor"]),
+      cliSelectorOperation("workspace", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
+      cliOperation("workspace", "edit", ["edit"]),
+      cliOperation("workspace", "list", ["list"]),
+      cliSelectorOperation("workspace", "show", ["show"], ["show", "--workspace", "roll"]),
+      cliOperation("workspace", "register", ["register"]),
+      ...["activate", "pause", "archive"].map((name) =>
+        cliSelectorOperation("workspace", name, [name], [name, "--workspace", "roll"])),
+    ],
+  });
+  registerPorted("context", contextCommand, {
+    help: contextUsage,
+    operations: [
+      cliOperation("context", "usage"),
+      cliSelectorOperation("context", "status", ["status"], ["status", "--workspace", "roll"]),
+      cliSelectorOperation("context", "read", ["read"], ["read", "--stage", "build", "--workspace", "roll"]),
+    ],
+  });
+  registerPorted("delivery", deliveryCommand, {
+    help: deliveryUsage,
+    operations: ["list", "show", "reconcile"].map((name) =>
+      cliSelectorOperation("delivery", name, [name], [name, "--workspace", "roll"])),
+  });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as
@@ -219,7 +252,11 @@ export function registerAll(): void {
       return doctorPardonCommand(args.slice(1));
     }
     return doctorCommand(args);
-  }, { help: doctorUsage, operations: cliOperations("doctor") });
+  }, {
+    help: doctorUsage,
+    operations: ["diagnose", "skills", "tools", "language", "pardon", "repair-protection"].map((name) =>
+      cliOperation("doctor", name, name === "diagnose" ? [] : [name])),
+  });
   // US-BROW-003: `browser` — DevTools dependency preflight + browser doctor.
   // setup --dry-run never writes; doctor reports managed/interactive/capture readiness.
   // US-BROW-010: `browser update` — check and approve DevTools transport updates.
@@ -287,7 +324,14 @@ export function registerAll(): void {
   registerPorted("agent", (args) => {
     if (args[0] === "cast") return castCommand(args.slice(1));
     return agentCommand(args);
-  }, { help: agentUsage, operations: cliOperations("agent") });
+  }, {
+    help: agentUsage,
+    operations: [
+      cliSelectorOperation("agent", "workspace", [], ["--workspace", "roll"]),
+      ...["view", "cast", "list", "readiness", "disable", "enable", "default", "set", "migrate", "use"].map((name) =>
+        cliOperation("agent", name, name === "view" ? [] : [name])),
+    ],
+  });
   registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback
@@ -310,7 +354,14 @@ export function registerAll(): void {
     if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
-  }, { help: backlogUsage, operations: cliOperations("backlog") });
+  }, {
+    help: backlogUsage,
+    operations: [
+      cliSelectorOperation("backlog", "read", [], ["--workspace", "roll"]),
+      ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((name) =>
+        cliSelectorOperation("backlog", name, [name], [name, "--workspace", "roll"])),
+    ],
+  });
   // FIX-356a: `roll brief` retired — US-PORT-002 was an immature owner digest.
   // The absent-command convention (standard unknown-command error from the bridge)
   // is the chosen retired-surface behaviour.
@@ -331,7 +382,7 @@ export function registerAll(): void {
   // appends through BacklogStore's optimistic atomic write (与 backlog 存取同源).
   // A lint violation reports and refuses — no bad card is ever written.
   // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
-  registerPorted("idea", ideaCommand, { operations: cliOperations("idea") });
+  registerPorted("idea", ideaCommand, { operations: [cliOperation("idea", "capture")] });
   // `release`: v3-native read-only release guidance (US-PORT-004). Computes the
   // next calver version from package.json + today, surfaces changelog readiness,
   // and prints the PR/tag flow + the CI consistency-gate note. It NEVER bumps,
@@ -346,7 +397,14 @@ export function registerAll(): void {
   registerPorted("release", (args) => {
     if (args[0] === "showcase") return showcaseCommand(args.slice(1));
     return releaseCommand(args);
-  }, { operations: cliOperations("release") });
+  }, {
+    operations: [
+      cliOperation("release", "release"),
+      cliOperation("release", "showcase", ["showcase"]),
+      cliOperation("release", "consistency", ["consistency"]),
+      cliOperation("release", "verify", ["verify"]),
+    ],
+  });
   // US-SHOW-001: `roll showcase` — the golden-path standard E2E. Resets the
   // target card in a throwaway sandbox, casts an explicit strict-diversity real-agent trio
   // (builder=kimi / reviewer=claude / scorer=pi), delivers it via `roll loop
@@ -374,7 +432,14 @@ export function registerAll(): void {
     if (args[0] === "prices") return pricesCommand(args.slice(1));
     if (args[0] === "tune") return tuneCommand(args.slice(1));
     return configCommand(args);
-  }, { operations: cliOperations("config") });
+  }, {
+    operations: [
+      cliOperation("config", "read"),
+      cliOperation("config", "write"),
+      cliOperation("config", "prices", ["prices"]),
+      cliOperation("config", "tune", ["tune"]),
+    ],
+  });
   // `changelog`: fully TS, deterministic-canonical (US-PORT-005). The v2 default
   // `generate` shelled the configured agent to AI-restyle the draft (and the
   // dispatch fell back to bash to do it); that path is RETIRED. The deterministic
@@ -387,10 +452,10 @@ export function registerAll(): void {
   // `init`: full surface TS (fresh/re-init scaffold, existing-codebase onboard
   // launcher, --apply plan consumption, unknown flags, and no-template guard).
   // No sub-paths on bash.
-  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply] [--yes|--then design]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n  --yes / --then design: after scaffolding a PRD project, continue straight into `roll design` (skips the confirm prompt).\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。\n  --yes / --then design：脚手架搭好后直接续跑 `roll design`（跳过确认）。", operations: cliOperations("init") });
-  registerPorted("next", nextCommand, { help: NEXT_USAGE, operations: cliOperations("next") });
+  registerPorted("init", initCommand, { help: "Usage: roll init [--auto|--repair|--apply] [--yes|--then design]\n  Diagnose this project and route to scaffold, PRD design, existing-codebase onboard, repair, migration, or roll status.\n  --auto: apply deterministic fresh-project scaffolding in non-interactive runs.\n  --repair: repair partial Roll markers only.\n  --apply: validate and apply a reviewed existing-codebase onboard plan.\n  --yes / --then design: after scaffolding a PRD project, continue straight into `roll design` (skips the confirm prompt).\n诊断项目并路由到骨架、PRD 设计、已有代码库接入、修复、迁移或 roll status。\n  --apply：校验并应用已审阅的已有代码库接入计划。\n  --yes / --then design：脚手架搭好后直接续跑 `roll design`（跳过确认）。", operations: [cliOperation("init", "onboard")] });
+  registerPorted("next", nextCommand, { help: NEXT_USAGE, operations: [cliOperation("next", "read")] });
   registerPorted("north", northCommand, {
-    operations: cliOperations("north"),
+    operations: [cliOperation("north", "read")],
     help: () =>
       currentHelpLang() === "zh"
         ? "用法：roll north [--json] [--no-color]\n  渲染北极星终端面板，或输出原始 roll.north.v1 指标 JSON。\n  四项指标：自主运行时长、交付率、修复税、归因错误；显示当前值、目标、14 天趋势条、趋势箭头和状态。\n  null 表示暂无数据，面板会给出原因。\n"
@@ -399,7 +464,7 @@ export function registerAll(): void {
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.
-  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: cliOperations("design") });
+  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: [cliOperation("design", "design")] });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.
@@ -418,7 +483,14 @@ export function registerAll(): void {
     }
     if (args[0] === "offboard") return offboardCommand(args.slice(1));
     return setupCommand(args);
-  }, { help: "Usage: roll setup [-f|--force] [--reselect] [--no-capture-install]\n       roll setup skills [args...]\n       roll setup offboard [args...]\n  Install or re-sync Roll conventions/templates for this machine; use -f to force refresh; --no-capture-install skips Roll Capture.app repair.\n本机安装或重新同步 Roll 模板与约定；-f 强制刷新；--no-capture-install 跳过 Roll Capture.app 修复。", operations: cliOperations("setup") });
+  }, {
+    help: "Usage: roll setup [-f|--force] [--reselect] [--no-capture-install]\n       roll setup skills [args...]\n       roll setup offboard [args...]\n  Install or re-sync Roll conventions/templates for this machine; use -f to force refresh; --no-capture-install skips Roll Capture.app repair.\n本机安装或重新同步 Roll 模板与约定；-f 强制刷新；--no-capture-install 跳过 Roll Capture.app 修复。",
+    operations: [
+      cliOperation("setup", "setup"),
+      cliOperation("setup", "skills", ["skills"]),
+      cliOperation("setup", "offboard", ["offboard"]),
+    ],
+  });
   // `ci`: the READ surface is TS (no-flag / `--timeout=N` status report:
   // gh-absent warn, not-a-git-repo err, gh-run-list failure, no-runs note, and
   // the per-run "<name>: <status>/<conclusion>" listing). The `--wait` CI gate
@@ -432,7 +504,7 @@ export function registerAll(): void {
   // suite on the host via a forwarded `npm test`; any other configured type
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
-  registerPorted("test", testCommand, { operations: cliOperations("test") });
+  registerPorted("test", testCommand, { operations: [cliOperation("test", "run")] });
   registerPorted("tool", removedTopLevel("tool"));
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
@@ -449,7 +521,7 @@ export function registerAll(): void {
   // post-update `roll setup` chain, changelog). The real install is driven via
   // spawned npm/curl/tar; the curl atomic dir-swap is the one whitelisted gap.
   // No sub-paths on bash.
-  registerPorted("update", updateCommand, { help: "Usage: roll update\n  Upgrade the global roll to the latest release (network + global writes).\n升级全局 roll——有副作用,--help 永不触发。", operations: cliOperations("update") });
+  registerPorted("update", updateCommand, { help: "Usage: roll update\n  Upgrade the global roll to the latest release (network + global writes).\n升级全局 roll——有副作用,--help 永不触发。", operations: [cliOperation("update", "apply")] });
   // `version` / `--version` / `-v`: TS-native (FIX-202). Reads the install
   // tree's package.json (single source of truth), so it no longer reports the
   // fossil bin/roll VERSION= literal. No bash fallback for these.
@@ -586,7 +658,16 @@ export function registerAll(): void {
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
   }, {
-    operations: cliOperations("loop"),
+    operations: [
+      ...[
+        "eval", "story", "runs", "cycles", "cycle", "goal", "recover", "pardon-skip-list", "signals", "adversarial",
+        "log", "events", "alert", "self-downgrade", "review-resize", "exhaustion-split", "fmt", "watch", "reconcile-pending",
+        "off", "fallback", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
+        "hotfix-head-context", "agent-routes", "monitor", "attach", "branches", "test-quality-check",
+      ].map((name) => cliOperation("loop", name, [name])),
+      ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((name) =>
+        cliSelectorOperation("loop", name, [name], [name, "--workspace", "roll"])),
+    ],
     // US-DOSSIER-035: a help PROVIDER (not a static string) so `roll loop --help`
     // renders the grouped (control/observe/alerts/maintain) bands locale-resolved
     // — single-language per resolved locale — while still routing through the

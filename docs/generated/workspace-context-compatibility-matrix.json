@@ -1,8 +1,8 @@
 {
   "schema": "roll.workspace-context-compatibility-matrix/v1",
   "summary": {
-    "cliFamilies": 18,
-    "cliOperations": 97,
+    "cliFamilies": 19,
+    "cliOperations": 110,
     "skillFamilies": 22,
     "skillOperations": 24,
     "toolAdapters": 8,
@@ -17,6 +17,14 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "agent",
+      "operation": "default",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
     },
     {
       "surface": "cli",
@@ -54,6 +62,22 @@
       "surface": "cli",
       "id": "agent",
       "operation": "readiness",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "agent",
+      "operation": "set",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "agent",
+      "operation": "use",
       "scope": "machine_only",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false
@@ -211,6 +235,34 @@
     },
     {
       "surface": "cli",
+      "id": "context",
+      "operation": "read",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "context",
+      "operation": "status",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "context",
+      "operation": "usage",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
       "id": "delivery",
       "operation": "list",
       "scope": "workspace_required_read",
@@ -271,6 +323,15 @@
       "scope": "machine_only",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "doctor",
+      "operation": "repair-protection",
+      "scope": "repository_required",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "repository"
     },
     {
       "surface": "cli",
@@ -340,6 +401,22 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
+      "operation": "attach",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
+      "operation": "branches",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
     },
     {
       "surface": "cli",
@@ -458,6 +535,14 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
+      "operation": "monitor",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
     },
     {
       "surface": "cli",
@@ -657,6 +742,14 @@
     {
       "surface": "cli",
       "id": "loop",
+      "operation": "test-quality-check",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "loop",
       "operation": "unmute",
       "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
@@ -693,6 +786,15 @@
     {
       "surface": "cli",
       "id": "release",
+      "operation": "consistency",
+      "scope": "repository_required",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "repository"
+    },
+    {
+      "surface": "cli",
+      "id": "release",
       "operation": "release",
       "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
@@ -707,6 +809,15 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "issue"
+    },
+    {
+      "surface": "cli",
+      "id": "release",
+      "operation": "verify",
+      "scope": "repository_required",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "repository"
     },
     {
       "surface": "cli",

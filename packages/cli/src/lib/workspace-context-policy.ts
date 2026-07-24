@@ -11,7 +11,7 @@ import type {
 } from "@roll/spec";
 import { validateWorkspaceContextPolicy } from "@roll/spec";
 import {
-  PUBLIC_CLI_OPERATIONS,
+  type CliCommandOperationRegistration,
   type WorkspaceSelectorOperationDecision,
 } from "./command-surface.js";
 
@@ -40,17 +40,20 @@ const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
   "workspace:edit": workspaceMutation, "workspace:list": machine, "workspace:show": workspaceRead,
   "workspace:register": { ...machine, allowsAmbientCwd: true, rationale: "Registration resolves an explicit existing Workspace path into the machine registry." },
   "workspace:activate": workspaceMutation, "workspace:pause": workspaceMutation, "workspace:archive": workspaceMutation,
+  "context:usage": machine, "context:status": workspaceRead, "context:read": workspaceRead,
   "delivery:list": workspaceRead, "delivery:show": workspaceRead, "delivery:reconcile": workspaceMutation,
   "agent:workspace": workspaceRead, "agent:view": machine, "agent:cast": workspaceOptional, "agent:list": machine,
   "agent:readiness": machine, "agent:disable": machine, "agent:enable": machine, "agent:migrate": machine,
+  "agent:default": machine, "agent:set": machine, "agent:use": machine,
   "backlog:read": workspaceRead, "backlog:show": workspaceRead,
   "backlog:block": workspaceMutation, "backlog:defer": workspaceMutation, "backlog:unblock": workspaceMutation,
   "backlog:promote": workspaceMutation, "backlog:claim": workspaceMutation, "backlog:lint": workspaceRead,
   "backlog:unstick": workspaceMutation, "backlog:sync": workspaceMutation,
   "config:read": machine, "config:write": machine, "config:prices": machine, "config:tune": workspaceOptional,
-  "release:release": workspaceMutation, "release:showcase": issue,
+  "release:release": workspaceMutation, "release:showcase": issue, "release:consistency": repository, "release:verify": repository,
   "design:design": workspaceMutation,
   "doctor:diagnose": machine, "doctor:skills": machine, "doctor:tools": machine, "doctor:language": machine, "doctor:pardon": machine,
+  "doctor:repair-protection": repository,
   "idea:capture": workspaceMutation,
   "init:onboard": { scope: "legacy_migration_only", allowsAmbientCwd: true, allowsLegacyRollPath: true, rationale: "Onboarding inspects a legacy project before Workspace authority exists." },
   "next:read": workspaceRead, "north:read": workspaceOptional,
@@ -63,11 +66,14 @@ const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
 const LOOP_READ_OPERATIONS = new Set([
   "status", "eval", "story", "runs", "cycles", "cycle", "goal", "signals", "adversarial", "log", "events", "fmt", "watch",
 ]);
+const LOOP_MACHINE_OPERATIONS = new Set(["monitor", "attach", "branches", "test-quality-check"]);
 
-function cliShape(command: string, operation: string): PolicyShape {
-  if (command === "loop") return LOOP_READ_OPERATIONS.has(operation) ? workspaceRead : workspaceMutation;
+function cliShape(command: string, operation: string): PolicyShape | undefined {
+  if (command === "loop") {
+    if (LOOP_MACHINE_OPERATIONS.has(operation)) return machine;
+    return LOOP_READ_OPERATIONS.has(operation) ? workspaceRead : workspaceMutation;
+  }
   const shape = CLI_POLICY_SHAPES[`${command}:${operation}`];
-  if (shape === undefined) throw new Error(`workspace-context-policy: missing CLI declaration for ${command}:${operation}`);
   return shape;
 }
 
@@ -83,32 +89,42 @@ function completePolicy(base: Pick<WorkspaceContextPolicy, "surface" | "id" | "o
   };
 }
 
-export const CLI_WORKSPACE_CONTEXT_POLICIES: readonly WorkspaceContextPolicy[] = PUBLIC_CLI_OPERATIONS.map((entry) =>
-  completePolicy(
-    { surface: "cli", id: entry.command, operation: entry.operation },
-    cliShape(entry.command, entry.operation),
-    entry.supportsWorkspaceSelector,
-  ));
+export function cliWorkspaceContextPolicies(
+  registrations: readonly CliCommandOperationRegistration[],
+): WorkspaceContextPolicy[] {
+  return registrations.flatMap((entry) => {
+    const shape = cliShape(entry.command, entry.operation);
+    return shape === undefined ? [] : [completePolicy(
+      { surface: "cli", id: entry.command, operation: entry.operation },
+      shape,
+      entry.supportsWorkspaceSelector,
+    )];
+  });
+}
 
 /** US-WS-022 generated cases are projected from policy, not a second allowlist. */
-export const POLICY_WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = CLI_WORKSPACE_CONTEXT_POLICIES
-  .filter((policy) => policy.acceptsWorkspaceSelector === true)
-  .map((policy) => {
-    const registration = PUBLIC_CLI_OPERATIONS.find((entry) =>
-      entry.command === policy.id && entry.operation === policy.operation);
-    if (registration === undefined || registration.exampleArgs === undefined) {
-      throw new Error(`workspace-context-policy: selector policy lacks a registered route for ${policy.id}:${policy.operation}`);
-    }
-    return {
-      id: `${registration.command}.${registration.operation}`,
-      operation: registration.operation,
-      command: registration.command,
-      route: registration.route,
-      canonicalCommand: registration.canonicalCommand,
-      exampleArgs: registration.exampleArgs,
-      acceptsWorkspaceSelector: true,
-    };
-  });
+export function policyWorkspaceSelectorOperations(
+  registrations: readonly CliCommandOperationRegistration[],
+): WorkspaceSelectorOperationDecision[] {
+  return cliWorkspaceContextPolicies(registrations)
+    .filter((policy) => policy.acceptsWorkspaceSelector === true)
+    .map((policy) => {
+      const registration = registrations.find((entry) =>
+        entry.command === policy.id && entry.operation === policy.operation);
+      if (registration === undefined || registration.exampleArgs === undefined) {
+        throw new Error(`workspace-context-policy: selector policy lacks a registered route for ${policy.id}:${policy.operation}`);
+      }
+      return {
+        id: `${registration.command}.${registration.operation}`,
+        operation: registration.operation,
+        command: registration.command,
+        route: registration.route,
+        canonicalCommand: registration.canonicalCommand,
+        exampleArgs: registration.exampleArgs,
+        acceptsWorkspaceSelector: true,
+      };
+    });
+}
 
 const TOOL_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
   bash: repository,
@@ -142,8 +158,10 @@ export function builtinToolContextInventory(): WorkspaceContextSurfaceInventoryI
   }));
 }
 
-export function cliContextInventory(): WorkspaceContextSurfaceInventoryItem[] {
-  return PUBLIC_CLI_OPERATIONS.map((entry) => ({
+export function cliContextInventory(
+  registrations: readonly CliCommandOperationRegistration[],
+): WorkspaceContextSurfaceInventoryItem[] {
+  return registrations.map((entry) => ({
     surface: "cli",
     id: entry.command,
     operation: entry.operation,
@@ -183,17 +201,17 @@ export function skillContextInventory(skillIds: readonly string[], policies: rea
 }
 
 export function buildRegisteredWorkspaceContextMatrix(input: {
-  readonly cliInventory: readonly WorkspaceContextSurfaceInventoryItem[];
+  readonly cliRegistrations: readonly CliCommandOperationRegistration[];
   readonly skillIds: readonly string[];
   readonly skillPolicies: readonly WorkspaceContextPolicy[];
 }): WorkspaceContextCompatibilityMatrixV1 {
   const inventory = [
-    ...input.cliInventory,
+    ...cliContextInventory(input.cliRegistrations),
     ...skillContextInventory(input.skillIds, input.skillPolicies),
     ...builtinToolContextInventory(),
   ];
   return buildWorkspaceContextCompatibilityMatrix({
     inventory,
-    policies: [...CLI_WORKSPACE_CONTEXT_POLICIES, ...input.skillPolicies, ...builtinToolContextPolicies()],
+    policies: [...cliWorkspaceContextPolicies(input.cliRegistrations), ...input.skillPolicies, ...builtinToolContextPolicies()],
   });
 }

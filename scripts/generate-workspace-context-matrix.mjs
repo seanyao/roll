@@ -19,12 +19,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(skillsRoot, "route-cases",
 
 registerAll();
 const matrix = buildRegisteredWorkspaceContextMatrix({
-  cliInventory: registeredCliOperations().map((entry) => ({
-    surface: "cli",
-    id: entry.command,
-    operation: entry.operation,
-    supportsWorkspaceSelector: entry.supportsWorkspaceSelector,
-  })),
+  cliRegistrations: registeredCliOperations(),
   skillIds,
   skillPolicies: skillContextPoliciesFromManifest(manifest),
 });

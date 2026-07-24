@@ -8,15 +8,21 @@ import {
   parseCanonicalWorkspaceSelectorArgs,
   portedCommands,
   registerPorted,
+  registeredCliOperations,
 } from "../src/bridge.js";
 import {
-  WORKSPACE_SELECTOR_OPERATIONS,
   aliasHelpDecision,
   validateWorkspaceSelectorOperations,
   workspaceSelectorOperation,
+  workspaceSelectorOperations,
 } from "../src/lib/command-surface.js";
-import { POLICY_WORKSPACE_SELECTOR_OPERATIONS } from "../src/lib/workspace-context-policy.js";
+import { policyWorkspaceSelectorOperations } from "../src/lib/workspace-context-policy.js";
 import { registerAll } from "../src/commands/index.js";
+
+registerAll();
+const LIVE_CLI_OPERATIONS = registeredCliOperations();
+const WORKSPACE_SELECTOR_OPERATIONS = workspaceSelectorOperations(LIVE_CLI_OPERATIONS);
+const POLICY_WORKSPACE_SELECTOR_OPERATIONS = policyWorkspaceSelectorOperations(LIVE_CLI_OPERATIONS);
 
 async function captureDispatch(argv: string[]): Promise<{
   readonly status: number;
@@ -218,7 +224,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
 
     for (const operation of POLICY_WORKSPACE_SELECTOR_OPERATIONS) {
       expect(operation.acceptsWorkspaceSelector, operation.id).toBe(true);
-      expect(workspaceSelectorOperation(operation.command, operation.exampleArgs), operation.id).toEqual(operation);
+      expect(workspaceSelectorOperation(operation.command, operation.exampleArgs, LIVE_CLI_OPERATIONS), operation.id).toEqual(operation);
       const aliasArgs = operation.exampleArgs.map((arg) => arg === "--workspace" ? "--ws" : arg);
       expect(canonicalizeWorkspaceAliasTokens(aliasArgs).args, operation.id).toEqual(operation.exampleArgs);
       expect(parseCanonicalWorkspaceSelectorArgs(operation.exampleArgs), operation.id).toMatchObject({
@@ -331,17 +337,17 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
   });
 
   it("derives help aliases from the command and selector capability registries", () => {
-    expect(aliasHelpDecision("workspace")).toEqual({
+    expect(aliasHelpDecision("workspace", LIVE_CLI_OPERATIONS)).toEqual({
       canonicalCommand: "workspace",
       commandAliases: ["ws"],
       workspaceSelectorAliases: ["--ws"],
     });
-    expect(aliasHelpDecision("backlog")).toEqual({
+    expect(aliasHelpDecision("backlog", LIVE_CLI_OPERATIONS)).toEqual({
       canonicalCommand: "backlog",
       commandAliases: [],
       workspaceSelectorAliases: ["--ws"],
     });
-    expect(aliasHelpDecision("status")).toBeUndefined();
+    expect(aliasHelpDecision("status", LIVE_CLI_OPERATIONS)).toBeUndefined();
   });
 
   it("normalizes before every registered family dispatcher and canonicalizes ws to workspace", async () => {

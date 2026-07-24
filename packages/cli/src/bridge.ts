@@ -176,7 +176,7 @@ function emitWorkspaceSelectorError(
 
 function renderHelp(command: string, help: HelpSpec): string {
   const text = typeof help === "function" ? help() : help;
-  const aliases = aliasHelpDecision(command);
+  const aliases = aliasHelpDecision(command, commandOperations.get(command) ?? []);
   if (aliases === undefined) return text;
   const lang = resolveCurrent();
   const lines: string[] = [];
@@ -263,7 +263,7 @@ export async function dispatch(
         process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
         return { status: 0 };
       }
-      const selectorOperation = workspaceSelectorOperation(command, rest);
+      const selectorOperation = workspaceSelectorOperation(command, rest, commandOperations.get(command) ?? []);
       if (selectorOperation !== undefined) {
         const parsed = parseCanonicalWorkspaceSelectorArgs(rest);
         if (!parsed.ok) return emitWorkspaceSelectorError(parsed.code, selectorOperation, rest);

@@ -104,6 +104,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   // ── Internal/machine: callable only while an external process boundary needs them; never advertised ──
   { current: "story", owner: "backlog", audience: "internal", disposition: "internal", rationale: "story new/validate are machine entry points under backlog." },
   { current: "attest", owner: "release", audience: "internal", disposition: "internal", rationale: "Acceptance attestation is a release-gate machine surface." },
+  { current: "context", owner: "workspace", audience: "internal", disposition: "internal", rationale: "Execution-context reads remain directly callable for agents and operators without expanding the primary help surface." },
   { current: "truth", owner: "status", audience: "internal", disposition: "internal", rationale: "truth query/audit are internal snapshot surfaces." },
   { current: "supervisor", owner: "loop", audience: "internal", disposition: "internal", rationale: "Observations surface through status/next/loop; internals stay hidden." },
 
@@ -212,7 +213,7 @@ export function isWorkspaceSelectorAlias(
   return WORKSPACE_SELECTOR_ALIAS.aliases.some((alias) => alias === token);
 }
 
-function operation(command: string, name: string, route: readonly string[] = [], selector = false, exampleArgs?: readonly string[]): CliCommandOperationRegistration {
+export function cliOperation(command: string, name: string, route: readonly string[] = [], selector = false, exampleArgs?: readonly string[]): CliCommandOperationRegistration {
   return {
     command,
     operation: name,
@@ -223,53 +224,14 @@ function operation(command: string, name: string, route: readonly string[] = [],
   };
 }
 
-function selectorOperation(command: string, name: string, route: readonly string[], exampleArgs: readonly string[]): CliCommandOperationRegistration {
-  return operation(command, name, route, true, exampleArgs);
+export function cliSelectorOperation(command: string, name: string, route: readonly string[], exampleArgs: readonly string[]): CliCommandOperationRegistration {
+  return cliOperation(command, name, route, true, exampleArgs);
 }
 
-/**
- * Operation inventory consumed by the actual public bridge registrations. The
- * family count is a projection of COMMAND_SURFACE; leaf counts come from these
- * registration records and are never used as a pass threshold.
- */
-export const PUBLIC_CLI_OPERATIONS: readonly CliCommandOperationRegistration[] = [
-  operation("help", "read"),
-  operation("status", "read"), operation("status", "ci", ["ci"]), operation("status", "pulse", ["pulse"]),
-  operation("workspace", "create", ["create"]),
-  selectorOperation("workspace", "issue.init", ["issue", "init"], ["issue", "init", "US-WS-022", "--workspace", "roll"]),
-  selectorOperation("workspace", "requirement.add", ["requirement", "add"], ["requirement", "add", "--workspace", "roll"]),
-  operation("workspace", "doctor", ["doctor"]),
-  selectorOperation("workspace", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
-  operation("workspace", "edit", ["edit"]), operation("workspace", "list", ["list"]),
-  selectorOperation("workspace", "show", ["show"], ["show", "--workspace", "roll"]),
-  operation("workspace", "register", ["register"]),
-  ...["activate", "pause", "archive"].map((name) => selectorOperation("workspace", name, [name], [name, "--workspace", "roll"])),
-  ...["list", "show", "reconcile"].map((name) => selectorOperation("delivery", name, [name], [name, "--workspace", "roll"])),
-  selectorOperation("agent", "workspace", [], ["--workspace", "roll"]),
-  ...["view", "cast", "list", "readiness", "disable", "enable", "migrate"].map((name) => operation("agent", name, name === "view" ? [] : [name])),
-  selectorOperation("backlog", "read", [], ["--workspace", "roll"]),
-  ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((name) => selectorOperation("backlog", name, [name], [name, "--workspace", "roll"])),
-  operation("config", "read"), operation("config", "write"), operation("config", "prices", ["prices"]), operation("config", "tune", ["tune"]),
-  operation("release", "release"), operation("release", "showcase", ["showcase"]),
-  operation("design", "design"),
-  ...["diagnose", "skills", "tools", "language", "pardon"].map((name) => operation("doctor", name, name === "diagnose" ? [] : [name])),
-  operation("idea", "capture"), operation("init", "onboard"), operation("next", "read"), operation("north", "read"),
-  operation("setup", "setup"), operation("setup", "skills", ["skills"]), operation("setup", "offboard", ["offboard"]),
-  operation("test", "run"), operation("update", "apply"),
-  ...[
-    "eval", "story", "runs", "cycles", "cycle", "goal", "recover", "pardon-skip-list", "signals", "adversarial",
-    "log", "events", "alert", "self-downgrade", "review-resize", "exhaustion-split", "fmt", "watch", "reconcile-pending",
-    "off", "fallback", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
-    "hotfix-head-context", "agent-routes",
-  ].map((name) => operation("loop", name, [name])),
-  ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((name) => selectorOperation("loop", name, [name], [name, "--workspace", "roll"])),
-];
-
-export function cliOperations(command: string): CliCommandOperationRegistration[] {
-  return PUBLIC_CLI_OPERATIONS.filter((entry) => entry.command === command);
-}
-
-export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = PUBLIC_CLI_OPERATIONS
+export function workspaceSelectorOperations(
+  operations: readonly CliCommandOperationRegistration[],
+): WorkspaceSelectorOperationDecision[] {
+  const decisions = operations
   .filter((entry) => entry.supportsWorkspaceSelector)
   .map((entry) => ({
     id: `${entry.command}.${entry.operation}`,
@@ -280,6 +242,9 @@ export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationD
     exampleArgs: entry.exampleArgs ?? [],
     acceptsWorkspaceSelector: true as const,
   }));
+  validateWorkspaceSelectorOperations(decisions);
+  return decisions;
+}
 
 export function validateWorkspaceSelectorOperations(
   operations: readonly WorkspaceSelectorOperationDecision[],
@@ -305,8 +270,6 @@ export function validateWorkspaceSelectorOperations(
   }
 }
 
-validateWorkspaceSelectorOperations(WORKSPACE_SELECTOR_OPERATIONS);
-
 export interface AliasHelpDecision {
   readonly canonicalCommand: string;
   readonly commandAliases: readonly string[];
@@ -314,9 +277,13 @@ export interface AliasHelpDecision {
 }
 
 /** Project visible alias notes from the same registries that drive dispatch. */
-export function aliasHelpDecision(command: string): AliasHelpDecision | undefined {
+export function aliasHelpDecision(
+  command: string,
+  operations: readonly CliCommandOperationRegistration[],
+): AliasHelpDecision | undefined {
   const commandAliases = commandDecision(command)?.aliases ?? [];
-  const acceptsWorkspaceSelector = WORKSPACE_SELECTOR_OPERATIONS.some((operation) => operation.command === command);
+  const acceptsWorkspaceSelector = operations.some((operation) =>
+    operation.command === command && operation.supportsWorkspaceSelector);
   if (commandAliases.length === 0 && !acceptsWorkspaceSelector) return undefined;
   return {
     canonicalCommand: command,
@@ -329,8 +296,9 @@ export function aliasHelpDecision(command: string): AliasHelpDecision | undefine
 export function workspaceSelectorOperation(
   command: string,
   args: readonly string[],
+  operations: readonly CliCommandOperationRegistration[],
 ): WorkspaceSelectorOperationDecision | undefined {
-  return WORKSPACE_SELECTOR_OPERATIONS
+  return workspaceSelectorOperations(operations)
     .filter((operation) => {
       if (operation.command !== command) return false;
       if (operation.route.length === 0) {

@@ -247,6 +247,13 @@ export function createContextReadAdapter(options: CreateContextReadAdapterOption
   const runGit = options.runGit ?? git;
   return {
     async read(input: ContextProviderReadInputV1): Promise<ContextProviderReadOutcomeV1> {
+      if (input.paths.length > LLM_WIKI_MAX_PAGES) {
+        return diagnostic(
+          input.plan.provider.id,
+          "context_budget_exceeded",
+          "Context Provider planned page budget exceeded",
+        );
+      }
       try {
         const result = await withFreshGitLlmWikiRead({
           rollHome: options.rollHome,

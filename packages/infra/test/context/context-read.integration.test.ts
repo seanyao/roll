@@ -10,7 +10,7 @@ import {
   type ContextReadRequestV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
-import { createContextReadService } from "@roll/core";
+import { createContextReadService, LLM_WIKI_MAX_PAGES } from "@roll/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createContextReadAdapter } from "../../src/context/context-read-adapter.js";
 import { rawGit, type GitResult } from "../../src/git.js";
@@ -139,6 +139,46 @@ function request(): ContextReadRequestV1 {
 }
 
 describe("Context read integration", () => {
+  it("defensively rejects an over-budget adapter input before any Git command", async () => {
+    const runGit: GitLlmWikiCommandRunner = vi.fn();
+    const paths = Array.from(
+      { length: LLM_WIKI_MAX_PAGES + 1 },
+      (_, index) => `wiki/pages/page-${index}.md`,
+    );
+    const adapter = createContextReadAdapter({ rollHome: join(sandbox(), "roll-home"), runGit });
+
+    const result = await adapter.read({
+      plan: {
+        provider: {
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        },
+        binding: {
+          providerId: "enterprise-wiki",
+          enabled: true,
+          required: true,
+          entrypoints: ["wiki/index.md"],
+        },
+        paths,
+        providerConfigDigest: "a".repeat(64),
+        bindingDigest: "b".repeat(64),
+      },
+      request: request(),
+      paths,
+      refs: paths.map((path) => `context://enterprise-wiki/${path}`),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostic: { code: "context_budget_exceeded", providerId: "enterprise-wiki" },
+    });
+    expect(runGit).not.toHaveBeenCalled();
+  });
+
   it("fetches every read, pins every file to that read SHA and never falls back after a later fetch failure", async () => {
     const root = sandbox();
     const remote = remoteFixture(root);

@@ -18,6 +18,7 @@ import {
   type ContextProviderReadAdapter,
   type ContextProviderReadSuccessV1,
 } from "../../src/context/read-service.js";
+import { LLM_WIKI_MAX_PAGES } from "../../src/context/llm-wiki-validator.js";
 
 function repository(remote: string, index = 0): RepositoryBinding {
   return {
@@ -298,6 +299,75 @@ describe("ContextReadService", () => {
     expect(maxActive).toBe(2);
     expect(result.outcome).toBe("completed");
     expect(result.providers.map((provider) => provider.providerId)).toEqual(["required-wiki", "optional-wiki"]);
+  });
+
+  it("blocks every Provider before effects when one required plan exceeds the page budget", async () => {
+    const adapter: ContextProviderReadAdapter = { read: vi.fn() };
+    const refs = Array.from(
+      { length: LLM_WIKI_MAX_PAGES - 3 },
+      (_, index) => `context://required-wiki/wiki/pages/page-${index}.md`,
+    );
+    const bindings = [
+      contextBinding({ providerId: "healthy-wiki", entrypoints: ["wiki/index.md"] }),
+      contextBinding({ providerId: "required-wiki", entrypoints: ["wiki/index.md"] }),
+    ];
+    const service = createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [providerConfig("healthy-wiki"), providerConfig("required-wiki")],
+      },
+      adapter,
+    });
+
+    const result = await service.read(request({ workspace: workspace(bindings), refs }));
+
+    expect(result).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({
+        code: "context_budget_exceeded",
+        severity: "blocking",
+        providerId: "required-wiki",
+      })],
+    });
+    expect(adapter.read).not.toHaveBeenCalled();
+  });
+
+  it("skips an optional over-budget plan while reading healthy Providers", async () => {
+    const refs = Array.from(
+      { length: LLM_WIKI_MAX_PAGES - 3 },
+      (_, index) => `context://optional-wiki/wiki/pages/page-${index}.md`,
+    );
+    const bindings = [
+      contextBinding({ providerId: "required-wiki", entrypoints: ["wiki/index.md"] }),
+      contextBinding({ providerId: "optional-wiki", required: false, entrypoints: ["wiki/index.md"] }),
+    ];
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => providerSuccess(input.plan.provider.id, input.paths)),
+    };
+    const service = createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [providerConfig("required-wiki"), providerConfig("optional-wiki")],
+      },
+      adapter,
+    });
+
+    const result = await service.read(request({ workspace: workspace(bindings), refs }));
+
+    expect(result).toMatchObject({
+      outcome: "partial",
+      providers: [{ providerId: "required-wiki" }],
+      gaps: [expect.objectContaining({
+        code: "context_budget_exceeded",
+        severity: "gap",
+        providerId: "optional-wiki",
+      })],
+    });
+    expect(adapter.read).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(adapter.read).mock.calls[0]?.[0].plan.provider.id).toBe("required-wiki");
   });
 
   it("blocks required failures, degrades optional failures and redacts adapter details", async () => {

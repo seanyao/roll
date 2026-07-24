@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { CHROME_CONTROLS, CHROME_CSS, CHROME_SCRIPT, bi } from "@roll/core";
 import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
@@ -420,7 +420,7 @@ export function indexCommand(args: string[], deps: { readonly projectPath?: stri
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(
       "Usage: roll index [--rebuild]\n" +
-        "  Regenerate .roll/index.json + the static archive (front page, every epic page).\n" +
+        "  Regenerate the selected Workspace index.json + static archive (legacy projects use .roll/index.json).\n" +
         "  Story archive pages are living mount boards: each lifecycle node mounts its own\n" +
         "  facts onto the existing page, so by default an existing story page is left intact.\n" +
         "  --rebuild  force a full re-render of every story page from source (reconciliation:\n" +
@@ -435,7 +435,8 @@ export function indexCommand(args: string[], deps: { readonly projectPath?: stri
   const cwd = deps.projectPath ?? process.cwd();
   const stories = generateIndex(cwd);
   const n = Object.keys(stories).length;
-  process.stdout.write(`index.json regenerated\n索引已重建\n  ${n} stories mapped to epics (.roll/index.json)\n`);
+  const indexPath = relative(cwd, projectDataPath(cwd, "index.json")) || "index.json";
+  process.stdout.write(`index.json regenerated\n索引已重建\n  ${n} stories mapped to epics (${indexPath})\n`);
 
   if (existsSync(projectDataPath(cwd, "features"))) {
     const pages = generateDossierPages(cwd, rebuild);

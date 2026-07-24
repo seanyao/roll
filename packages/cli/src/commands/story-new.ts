@@ -86,7 +86,7 @@ export function storyNewCommand(args: string[], deps?: StoryNewCommandDeps): num
     process.stdout.write(
       "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>] [--no-index]\n" +
         "  The ONE card-minting entry: card folder (spec.md + index.html) + backlog row\n" +
-        "  + .roll/index.json cache refresh. --no-index defers the cache for batch minting;\n" +
+        "  + selected Workspace index.json cache refresh (legacy: .roll/index.json). --no-index defers it;\n" +
         "  the cache is best-effort — the live locator resolves cards without it.\n" +
         "  单一建卡入口:卡夹 + backlog 行 + index.json 缓存刷新一步完成。\n" +
         "  批量建卡用 --no-index 延后缓存;缓存是尽力而为,定位器无需它即可解析卡片。\n",

@@ -148,7 +148,10 @@ describe("US-WS-034 planning authority", () => {
       ["US-INDEX-1", "--title", "indexed card", "--epic", "planning", "--workspace", "alpha"],
       { resolveTarget: () => f.target },
     )).toBe(0);
-    expect(indexCommand(["--rebuild"], { projectPath: f.workspaceRoot })).toBe(0);
+    const firstRun = capture(() => indexCommand(["--rebuild"], { projectPath: f.workspaceRoot }));
+    expect(firstRun.code).toBe(0);
+    expect(firstRun.out).toContain("stories mapped to epics (index.json)");
+    expect(firstRun.out).not.toContain(".roll/index.json");
     const path = join(f.workspaceRoot, "index.json");
     const first = readFileSync(path, "utf8");
     expect(indexCommand(["--rebuild"], { projectPath: f.workspaceRoot })).toBe(0);

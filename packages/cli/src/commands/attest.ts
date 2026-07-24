@@ -1427,8 +1427,9 @@ export async function attestCommand(args: string[], deps: AttestDeps = {}): Prom
   const projectPath = deps.projectPath ?? process.cwd();
   const featureFile = findFeatureFile(projectPath, storyId);
   if (featureFile === null) {
-    process.stderr.write(`[roll] attest: story ${storyId} not found under .roll/features/\n`);
-    process.stderr.write(`[roll] attest：在 .roll/features/ 下找不到 ${storyId}\n`);
+    const featuresPath = `${relative(projectPath, projectDataPath(projectPath, "features")) || "features"}/`;
+    process.stderr.write(`[roll] attest: story ${storyId} not found under ${featuresPath}\n`);
+    process.stderr.write(`[roll] attest：在 ${featuresPath} 下找不到 ${storyId}\n`);
     return 1;
   }
   let featureText = "";

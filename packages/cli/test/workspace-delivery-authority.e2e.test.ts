@@ -76,4 +76,13 @@ describe("US-WS-034 delivery and evidence authority", () => {
     expect(existsSync(join(alpha, ".roll"))).toBe(false);
     expect(existsSync(join(beta, ".roll"))).toBe(false);
   });
+
+  it("reports the canonical features authority when a Story is missing", async () => {
+    const alpha = workspace("missing", "Missing story fixture");
+    const result = await capture(() => attestCommand(["US-NOT-THERE"], { projectPath: alpha }));
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("not found under features/");
+    expect(result.err).not.toContain(".roll/features/");
+  });
 });

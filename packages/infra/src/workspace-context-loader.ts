@@ -61,6 +61,34 @@ function sameIdentity(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function canonicalDirectorySnapshot(path: string, code: WorkspaceContextLoaderErrorCode): Stats {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || !stat.isDirectory() || realpathSync(path) !== path) {
+      fail(code, `Authority directory is not canonical: ${path}`);
+    }
+    return stat;
+  } catch (error) {
+    if (error instanceof WorkspaceContextLoaderError) throw error;
+    fail(code, `Authority directory could not be inspected: ${path}`, error);
+  }
+}
+
+function assertDirectoryUnchanged(path: string, before: Stats): void {
+  try {
+    const after = lstatSync(path);
+    if (
+      after.isSymbolicLink() || !after.isDirectory() || !sameIdentity(before, after) ||
+      realpathSync(path) !== path
+    ) {
+      fail("authority_changed", `Authority directory changed during context loading: ${path}`);
+    }
+  } catch (error) {
+    if (error instanceof WorkspaceContextLoaderError) throw error;
+    fail("authority_changed", `Authority directory changed during context loading: ${path}`, error);
+  }
+}
+
 function fail(code: WorkspaceContextLoaderErrorCode, message: string, cause?: unknown): never {
   throw new WorkspaceContextLoaderError(code, message, cause === undefined ? undefined : { cause });
 }
@@ -158,6 +186,7 @@ function parseIssueAuthority(
   const issueRoot = join(workspaceRoot, "issues", storyId);
   const manifestPath = join(issueRoot, "manifest.json");
   assertSafeAuthorityPath(workspaceRoot, issueRoot);
+  const directorySnapshot = canonicalDirectorySnapshot(issueRoot, "invalid_issue_manifest");
   let raw: unknown;
   try {
     raw = JSON.parse(readWorkspaceAuthoritySnapshot({
@@ -170,7 +199,7 @@ function parseIssueAuthority(
   }
   const parsed = parseIssueManifest(raw, { workspaceId, storyId });
   if (!parsed.ok) fail("invalid_issue_manifest", `Issue manifest is invalid or mismatched: ${manifestPath}`);
-  return { issueRoot, manifestPath, manifest: parsed.value };
+  return { issueRoot, manifestPath, manifest: parsed.value, directorySnapshot };
 }
 
 function repositoryExecution(
@@ -235,6 +264,7 @@ export function loadWorkspaceExecutionContext(
     if (!scoped.ok) fail(scoped.error.code, scoped.error.message);
     return undefined;
   }
+  const workspaceSnapshot = canonicalDirectorySnapshot(input.target.canonicalRoot, "target_mismatch");
   const loaded = loadExplicitWorkspaceDiscovery(
     { rollHome: input.rollHome, workspaceId: input.target.workspaceId },
     dependencies,
@@ -260,6 +290,10 @@ export function loadWorkspaceExecutionContext(
   const issue = input.storyId === undefined
     ? undefined
     : parseIssueAuthority(facts.candidate.canonicalRoot, facts.candidate.workspaceId, input.storyId, dependencies);
+  const repositories = issue === undefined
+    ? undefined
+    : repositoryExecution(facts.candidate.canonicalRoot, issue, dependencies);
+  if (issue !== undefined) assertDirectoryUnchanged(issue.issueRoot, issue.directorySnapshot);
   const build = buildWorkspaceExecutionContext({
     facts: {
       candidate: facts.candidate,
@@ -272,7 +306,7 @@ export function loadWorkspaceExecutionContext(
           execution: {
             workspaceId: facts.candidate.workspaceId,
             issueRoot: issue.issueRoot,
-            repositories: repositoryExecution(facts.candidate.canonicalRoot, issue, dependencies),
+            repositories: repositories ?? {},
           },
         },
       }),
@@ -283,5 +317,6 @@ export function loadWorkspaceExecutionContext(
   if (!build.ok) fail(build.error.code, build.error.message);
   const scoped = resolveWorkspaceExecutionContextScope({ scope: input.scope, context: build.context });
   if (!scoped.ok) fail(scoped.error.code, scoped.error.message);
+  assertDirectoryUnchanged(input.target.canonicalRoot, workspaceSnapshot);
   return scoped.context;
 }

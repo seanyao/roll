@@ -23,7 +23,7 @@ import { c, renderState } from "../render.js";
 import { STORY_ID_RE } from "../lib/story-page.js";
 import { DuplicateStoryIdError, declaresAnySurface, screenshotExemption, storySpecPath } from "../runner/attest-gate.js";
 import { validateStoryVisualEvidence } from "../lib/design-visual-evidence.js";
-import { hasGranularityContract, lintCardGranularity } from "../lib/card-granularity.js";
+import { isNewRegimeCard, lintCardGranularity } from "../lib/card-granularity.js";
 
 const green = (s: string): string => c("green", s);
 const red = (s: string): string => c("red", s);
@@ -106,11 +106,12 @@ export function storyValidateCommand(args: string[]): number {
   if (visual.exemptSubstituteMissing === true) {
     fails.push("screenshot_exempt without a substitute capturable evidence (declare deliverable_cmd or name the tests) — 免截图 ≠ 免证据");
   }
-  // US-CYCLE-005 — design-time granularity gate. Self-scoping: only a NEW-regime
-  // card (one that declares `est_min:`) is linted, so the 900+ legacy cards are
-  // never retroactively failed. A minted-under-the-new-regime card that is too
-  // big / missing the contract is rejected here, at the design boundary.
-  const granularity = hasGranularityContract(specText) ? lintCardGranularity(specText) : null;
+  // US-CYCLE-005 — design-time granularity gate. Self-scoping by the card's
+  // intrinsic `created:` date (>= the cutover): the 900+ legacy cards are never
+  // retroactively failed, and a NEW card cannot bypass the lint by omitting
+  // est_min/risk_tier (the created date is not dodgeable). A new-regime card that
+  // is too big / missing the contract (incl. risk_tier) is rejected here.
+  const granularity = isNewRegimeCard(specText, id) ? lintCardGranularity(specText) : null;
   if (granularity !== null && !granularity.ok) {
     for (const v of granularity.violations) {
       fails.push(`granularity: ${v.message}`);

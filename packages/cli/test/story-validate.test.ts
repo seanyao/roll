@@ -55,11 +55,12 @@ describe("roll story validate — US-CYCLE-005 granularity gate", () => {
   const goodEval =
     "\n\n## Evaluation contract\n\n**Expected evidence:**\n- `test` — unit\n\n**Scorer focus:** works\n";
 
+  const NEW = "created: 2026-07-24\n"; // >= cutover ⇒ new-regime
   it("NEGATIVE: an oversized new-regime card is rejected (exit 1) with itemized violations + fix", () => {
     const p = project(
       "US-BIG-1",
       "cli-visual",
-      "---\nid: US-BIG-1\ndeliverable_cmd: roll backlog\nest_min: 40\nrisk_tier: low\n---\n# US-BIG-1\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" +
+      `---\nid: US-BIG-1\ndeliverable_cmd: roll backlog\n${NEW}est_min: 40\nrisk_tier: low\n---\n# US-BIG-1\n\n## AC\n- [ ] terminal screenshot of \`roll backlog\`` +
         goodEval,
     );
     const r = run(p, ["US-BIG-1"]);
@@ -70,22 +71,25 @@ describe("roll story validate — US-CYCLE-005 granularity gate", () => {
     expect(r.out).toContain("↳"); // actionable fix (怎么拆)
   });
 
-  it("NEGATIVE: a new-regime card missing risk_tier is rejected", () => {
+  it("codex r1 bypass CLOSED: a NEW card that omits est_min AND risk_tier is still gated (rejected)", () => {
     const p = project(
-      "US-BIG-2",
+      "US-DODGE",
       "cli-visual",
-      "---\nid: US-BIG-2\ndeliverable_cmd: roll backlog\nest_min: 10\n---\n# US-BIG-2\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" + goodEval,
+      // No est_min, no risk_tier — but created >= cutover ⇒ cannot slip through as legacy.
+      `---\nid: US-DODGE\ndeliverable_cmd: roll backlog\n${NEW}---\n# US-DODGE\n\n## AC\n- [ ] terminal screenshot of \`roll backlog\`` + goodEval,
     );
-    const r = run(p, ["US-BIG-2"]);
+    const r = run(p, ["US-DODGE"]);
     expect(r.code).toBe(1);
+    expect(r.out).toContain("granularity:");
     expect(r.out + r.err).toContain("risk_tier");
+    expect(r.out + r.err).toContain("est_min");
   });
 
   it("a small, well-formed new-regime card passes the granularity gate (exit 0)", () => {
     const p = project(
       "US-SM-1",
       "cli-visual",
-      "---\nid: US-SM-1\ndeliverable_cmd: roll backlog\nest_min: 15\nrisk_tier: high\n---\n# US-SM-1\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" + goodEval,
+      `---\nid: US-SM-1\ndeliverable_cmd: roll backlog\n${NEW}est_min: 15\nrisk_tier: high\n---\n# US-SM-1\n\n## AC\n- [ ] terminal screenshot of \`roll backlog\`` + goodEval,
     );
     const r = run(p, ["US-SM-1"]);
     expect(r.code).toBe(0);
@@ -93,12 +97,12 @@ describe("roll story validate — US-CYCLE-005 granularity gate", () => {
     expect(r.out).toContain("ok");
   });
 
-  it("存量卡不追溯: a LEGACY card (no est_min) is NOT granularity-gated", () => {
+  it("存量卡不追溯: a LEGACY card (created before cutover) is NOT granularity-gated", () => {
     const p = project(
       "FIX-LEGACY",
       "cli-visual",
-      // Oversized-looking (no eval contract, no risk_tier) but legacy → gate inert.
-      "---\nid: FIX-LEGACY\ndeliverable_cmd: roll backlog\n---\n# FIX-LEGACY\n\n## Acceptance Criteria\n- [ ] terminal screenshot of `roll backlog`\n",
+      // Oversized-looking but created before the cutover ⇒ gate inert.
+      "---\nid: FIX-LEGACY\ndeliverable_cmd: roll backlog\ncreated: 2026-01-01\n---\n# FIX-LEGACY\n\n## Acceptance Criteria\n- [ ] terminal screenshot of `roll backlog`\n",
     );
     const r = run(p, ["FIX-LEGACY"]);
     expect(r.code).toBe(0); // passes as before — no granularity line

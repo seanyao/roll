@@ -4,8 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  GRANULARITY_CUTOVER_DATE,
   GRANULARITY_LIMITS,
-  hasGranularityContract,
+  isNewRegimeCard,
   lintCardGranularity,
   renderGranularityViolations,
 } from "../src/lib/card-granularity.js";
@@ -17,10 +18,16 @@ const GOOD =
   fm("est_min: 15\nrisk_tier: low") +
   "# US-X-1\n\n## AC\n- [ ] one\n- [ ] two\n\n## Evaluation contract\n\n**Expected evidence:**\n- `test` — unit\n- `command` — roll test\n\n**Scorer focus:** it works\n";
 
-describe("hasGranularityContract — self-scoping to new-regime cards", () => {
-  it("true only when est_min is declared (legacy cards are out of scope)", () => {
-    expect(hasGranularityContract(GOOD)).toBe(true);
-    expect(hasGranularityContract("---\nid: US-OLD\ntype: us\n---\n# old\n\n## AC\n- [ ] a\n")).toBe(false);
+describe("isNewRegimeCard — self-scoping by created date (not a dodgeable field)", () => {
+  it("true for a card created on/after the cutover — even if it OMITS est_min (codex r1: no bypass)", () => {
+    expect(isNewRegimeCard(GOOD)).toBe(true);
+    // A new card that omits est_min/risk_tier is STILL new-regime (cannot dodge).
+    expect(isNewRegimeCard(`---\nid: US-N\ntype: us\ncreated: ${GRANULARITY_CUTOVER_DATE}\n---\n# n\n`)).toBe(true);
+  });
+  it("false for legacy (created before cutover / no created) and for IDEA-*", () => {
+    expect(isNewRegimeCard("---\nid: US-OLD\ntype: us\ncreated: 2026-01-01\n---\n# old\n")).toBe(false);
+    expect(isNewRegimeCard("---\nid: US-NODATE\ntype: us\n---\n# nodate\n")).toBe(false);
+    expect(isNewRegimeCard(`---\nid: IDEA-9\ntype: idea\ncreated: ${GRANULARITY_CUTOVER_DATE}\n---\n# idea\n`, "IDEA-9")).toBe(false);
   });
 });
 

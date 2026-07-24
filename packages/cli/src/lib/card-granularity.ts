@@ -23,6 +23,16 @@ export const GRANULARITY_LIMITS = {
   maxEstMin: 25,
 } as const;
 
+/**
+ * The policy cutover (YYYY-MM-DD): cards CREATED on or after this date are the
+ * "new regime" and must satisfy the granularity contract; cards created before
+ * it are legacy and never retroactively gated (存量卡不追溯). Keyed on the
+ * intrinsic `created:` date — NOT a dodgeable field like `est_min` presence — so
+ * a new card cannot bypass the lint by omitting metadata, whatever minted it
+ * (`story new`, `roll idea`, or hand-authored). This is the date the lint shipped.
+ */
+export const GRANULARITY_CUTOVER_DATE = "2026-07-24";
+
 export interface GranularityViolation {
   /** Short machine-ish label, e.g. "est_min", "ac_count". */
   code: string;
@@ -43,10 +53,19 @@ function frontmatter(spec: string): string {
   return m ? (m[1] ?? "") : "";
 }
 
-/** A NEW-regime card that opts into the granularity contract by declaring
- *  `est_min:` in its frontmatter. Legacy cards (no est_min) are out of scope. */
-export function hasGranularityContract(spec: string): boolean {
-  return /^\s*est_min\s*:/m.test(frontmatter(spec));
+/**
+ * A NEW-regime card that MUST satisfy the granularity contract: created on or
+ * after {@link GRANULARITY_CUTOVER_DATE}. Keyed on the intrinsic `created:` date
+ * so a new card cannot dodge the gate by omitting `est_min`/`risk_tier`. A card
+ * with no parseable `created:` is treated as legacy (conservative — can't prove
+ * it is new). IDEA-* cards are exempt: an idea is a speculative seed, not sized
+ * work — it gets sized when promoted to a US.
+ */
+export function isNewRegimeCard(spec: string, id?: string): boolean {
+  if (id !== undefined && /^IDEA-/i.test(id)) return false;
+  const created = fmValue(spec, "created");
+  if (created === undefined || !/^\d{4}-\d{2}-\d{2}/.test(created)) return false;
+  return created.slice(0, 10) >= GRANULARITY_CUTOVER_DATE;
 }
 
 /** Count acceptance-criteria checkboxes (`- [ ]` / `- [x]`) anywhere in the body. */

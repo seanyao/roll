@@ -182,6 +182,17 @@ describe("US-DELTA-007 — authored eval-report reader (legacy labeling, no asse
     expect(validateAuthoredEvalReport(AUTHORED).ok).toBe(true);
   });
 
+  it("validateAuthoredEvalReport: two BARE headings with no content are REJECTED (codex r2 — empty ≠ authored)", () => {
+    const empty = ["# Evaluator report", "", "## Inputs checked", "", "## Rationale", ""].join("\n");
+    const v = validateAuthoredEvalReport(empty);
+    expect(v.ok).toBe(false);
+    expect(v.reasons.join(" ")).toMatch(/Inputs checked.*empty/i);
+    expect(v.reasons.join(" ")).toMatch(/Rationale.*empty/i);
+    // one empty, one filled → still rejected (the empty one)
+    const half = ["## Inputs checked", "- diff reviewed", "", "## Rationale", ""].join("\n");
+    expect(validateAuthoredEvalReport(half).ok).toBe(false);
+  });
+
   it("validateAuthoredEvalReport: a legacy assembled report can NEVER satisfy the Evaluator requirement", () => {
     const v = validateAuthoredEvalReport(LEGACY);
     expect(v.ok).toBe(false);

@@ -176,10 +176,35 @@ export function classifyEvalReport(md: string): EvalReportKind {
  * REJECTED — an assembly of score/attest fields can never satisfy the Evaluator
  * requirement. `null` (no report on disk) is fail-closed.
  */
+/**
+ * The non-blank body lines under a `## <heading>` section (up to the next `##`
+ * or EOF), excluding the heading itself. Used to reject an EMPTY required
+ * section — two bare headings must not pass as a real evaluation (codex #1501 r2).
+ */
+function sectionBody(md: string, headingRe: RegExp): string[] {
+  const lines = md.split("\n");
+  const start = lines.findIndex((l) => headingRe.test(l));
+  if (start === -1) return [];
+  const body: string[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (/^##\s+/.test(line)) break; // next section
+    if (line.trim() !== "") body.push(line.trim());
+  }
+  return body;
+}
+
 export function validateAuthoredEvalReport(md: string | null): ArtifactValidation {
   if (md === null) return { ok: false, reasons: ["eval-report.md missing"] };
   const kind = classifyEvalReport(md);
-  if (kind === "authored") return { ok: true, reasons: [] };
+  if (kind === "authored") {
+    // Both required headings are present — but each must carry real content, not
+    // be a bare heading (an empty section is not a genuine evaluation).
+    const reasons: string[] = [];
+    if (sectionBody(md, /^##\s+inputs checked/i).length === 0) reasons.push("eval-report.md '## Inputs checked' section is empty (no inputs listed)");
+    if (sectionBody(md, /^##\s+rationale/i).length === 0) reasons.push("eval-report.md '## Rationale' section is empty (no reasoning)");
+    return reasons.length === 0 ? { ok: true, reasons: [] } : { ok: false, reasons };
+  }
   if (kind === "legacy") {
     return {
       ok: false,

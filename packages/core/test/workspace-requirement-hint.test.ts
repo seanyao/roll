@@ -9,6 +9,7 @@ import {
   MAX_REQUIREMENT_HINT_VALUE_LENGTH,
   MAX_REQUIREMENT_SEMANTIC_TERM_LENGTH,
   normalizeRequirementHint,
+  parseRequirementSourceUrl,
 } from "../src/index.js";
 
 describe("US-WS-027 RequirementHintV1 normalization", () => {
@@ -195,5 +196,35 @@ describe("US-WS-027 RequirementHintV1 normalization", () => {
       ok: false,
       findings: expect.arrayContaining([expect.objectContaining({ code: "value_too_long", path })]),
     });
+  });
+
+  it.each([
+    [
+      "Jira",
+      "https://example.atlassian.net/browse/ape-234?focusedCommentId=1#comment-1",
+      { provider: "jira", ref: "APE-234", requirementId: "req-2e4314b10317" },
+    ],
+    [
+      "GitHub issue",
+      "https://github.com/Owner/Repo/issues/42?notification_referrer_id=1#issuecomment-2",
+      { provider: "github_issue", ref: "owner/repo#42", requirementId: "req-f1aac6289d07" },
+    ],
+  ] as const)("extracts a canonical %s ref before applying the existing identity normalizer", (_name, url, expected) => {
+    expect(parseRequirementSourceUrl(url)).toEqual({ ok: true, value: expected });
+  });
+
+  it.each([
+    ["non-string", 42, "invalid_type"],
+    ["HTTP URL", "http://example.atlassian.net/browse/APE-234", "invalid_url"],
+    ["credential URL", "https://token@example.atlassian.net/browse/APE-234", "invalid_url"],
+    ["custom port", "https://example.atlassian.net:8443/browse/APE-234", "invalid_url"],
+    ["wrong Jira host", "https://jira.example.test/browse/APE-234", "unsupported_provider_host"],
+    ["wrong GitHub host", "https://git.example.test/Owner/Repo/issues/42", "unsupported_provider_host"],
+    ["incomplete Jira URL", "https://example.atlassian.net/browse/", "invalid_requirement_url"],
+    ["extra Jira path", "https://example.atlassian.net/browse/APE-234/edit", "invalid_requirement_url"],
+    ["incomplete GitHub URL", "https://github.com/Owner/Repo/issues/", "invalid_requirement_url"],
+    ["non-issue GitHub URL", "https://github.com/Owner/Repo/pull/42", "invalid_requirement_url"],
+  ] as const)("rejects %s without guessing a provider ref", (_name, input, code) => {
+    expect(parseRequirementSourceUrl(input)).toMatchObject({ ok: false, findings: [{ code, path: "url" }] });
   });
 });

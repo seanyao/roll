@@ -15,6 +15,7 @@ export * from "./workspace/lifecycle.js";
 export * from "./workspace/init-plan.js";
 export * from "./workspace/requirement-source.js";
 export * from "./workspace/requirement-hint.js";
+export * from "./workspace/requirement-url.js";
 export * from "./workspace/requirement-match.js";
 export * from "./workspace/requirement-archive-integrity.js";
 export * from "./workspace/requirement-attest.js";

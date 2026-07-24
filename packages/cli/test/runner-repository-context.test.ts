@@ -267,6 +267,69 @@ describe("US-WS-010 repository Builder context", () => {
     expect(stepped.state.ctx.repositoryExecution).toEqual(resolved);
   });
 
+  it("routes production repository verification and push through the frozen Workspace tool context", async () => {
+    const fixture = productionWorkspaceFixture();
+    const fixturePaths: RunnerPaths = {
+      eventsPath: join(fixture.root, "runtime", "events.ndjson"),
+      runsPath: join(fixture.root, "runtime", "runs.jsonl"),
+      alertsPath: join(fixture.root, "runtime", "alerts.log"),
+      lockPath: join(fixture.root, "runtime", "lock"),
+      heartbeatPath: join(fixture.root, "runtime", "heartbeat"),
+      worktreePath: join(fixture.root, "legacy-worktree"),
+    };
+    const ports = nodePorts({
+      repoCwd: fixture.root,
+      paths: fixturePaths,
+      skillBody: "BUILD STORY",
+      routeDeps,
+      agentSpawn: fakeSpawn(),
+    });
+    const resolved = await ports.repositories?.resolve(fixture.storyId);
+    expect(resolved).toBeDefined();
+    const ctx = {
+      cycleId: "cycle-tool-runtime",
+      branch: "story/US-WS-010",
+      loop: "ci",
+      storyId: fixture.storyId,
+      agent: "codex" as const,
+      repositoryExecution: resolved,
+    };
+
+    const repositories = ports.repositories?.bind(ctx);
+    const verification = await repositories?.verification.runRepository(
+      fixture.repoId,
+      ["node", "-e", "process.stdout.write('verified')"],
+      { TOKEN: "ghp_abcdefghijklmnopqrstuvwxyz" },
+    );
+    const push = await repositories?.git.push(fixture.repoId, "story/US-WS-010");
+
+    expect(verification).toEqual({ exitCode: 0, stdout: "verified", stderr: "" });
+    expect(push?.code).not.toBe(0);
+    const toolEventsPath = join(fixture.root, "runtime", "events", "tools.ndjson");
+    const events = readFileSync(toolEventsPath, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(events.filter((event) => event["type"] === "tool:invoke")).toEqual([
+      expect.objectContaining({
+        type: "tool:invoke",
+        cycleId: ctx.cycleId,
+        invocation: expect.objectContaining({
+          toolId: "bash",
+          repoId: fixture.repoId,
+          context: expect.objectContaining({
+            workspace: expect.objectContaining({ workspaceId: resolved?.workspaceId }),
+            issue: expect.objectContaining({ storyId: fixture.storyId }),
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        type: "tool:invoke",
+        cycleId: ctx.cycleId,
+        invocation: expect.objectContaining({ toolId: "git.push", repoId: fixture.repoId }),
+      }),
+    ]);
+    expect(readFileSync(toolEventsPath, "utf8")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz");
+  });
+
   it("reuses the persisted Story integration command when resolving a later Cycle", async () => {
     const fixture = productionWorkspaceFixture();
     const manifestPath = join(fixture.root, "issues", fixture.storyId, "manifest.json");

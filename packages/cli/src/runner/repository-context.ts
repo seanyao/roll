@@ -7,7 +7,12 @@ import {
   readRepositoryBoundFacts,
   readWorkspace,
 } from "@roll/infra";
-import { repositoryEventIdentity, type CycleContext } from "@roll/core";
+import {
+  buildWorkspaceExecutionContext,
+  deriveWorkspaceExecutionAuthorities,
+  repositoryEventIdentity,
+  type CycleContext,
+} from "@roll/core";
 import {
   parseIssueManifest,
   type CycleRepositoryExecutionContext,
@@ -16,6 +21,7 @@ import {
   type RepositoryExecutionContext,
   type RepositoryExecutionEvent,
   type RepositoryExecutionEventPayload,
+  type WorkspaceExecutionContextV1,
 } from "@roll/spec";
 
 const execFileAsync = promisify(execFile);
@@ -105,6 +111,44 @@ export async function resolveRepositoryExecutionContext(
     throw new Error(`invalid_repository_map: ${storyId}`);
   }
   return { workspaceId: workspace.workspaceId, issueRoot: canonicalIssue, repositories };
+}
+
+/** Rebuild and validate the full immutable Workspace context at the Cycle bind
+ * boundary. Repository ports use this single snapshot for every governed tool
+ * invocation in the Cycle. */
+export function buildRepositoryWorkspaceExecutionContext(
+  workspaceRoot: string,
+  storyId: string,
+  execution: CycleRepositoryExecutionContext,
+): WorkspaceExecutionContextV1 {
+  const canonicalWorkspace = realpathSync(workspaceRoot);
+  const workspace = readWorkspace(canonicalWorkspace);
+  const manifest = issueManifest(execution.issueRoot, workspace.workspaceId, storyId);
+  const built = buildWorkspaceExecutionContext({
+    facts: {
+      candidate: {
+        workspaceId: workspace.workspaceId,
+        root: canonicalWorkspace,
+        canonicalRoot: canonicalWorkspace,
+        manifestWorkspaceId: workspace.workspaceId,
+        pathState: "valid",
+        lifecycle: "active",
+      },
+      manifest: workspace,
+      authorities: deriveWorkspaceExecutionAuthorities(canonicalWorkspace),
+      issue: {
+        manifest,
+        manifestPath: join(execution.issueRoot, "manifest.json"),
+        execution,
+      },
+    },
+    source: "issue_manifest",
+    evidence: [],
+  });
+  if (!built.ok) {
+    throw new Error(`${built.error.code}: ${built.error.message}`);
+  }
+  return built.context;
 }
 
 /** The only Issue event writer for repository-scoped runtime facts. Callers

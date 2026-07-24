@@ -10,7 +10,12 @@ import {
   type FixedRevisionBlobFact,
 } from "@roll/core";
 import type { ContextDiagnosticV1 } from "@roll/spec";
-import { git } from "../git.js";
+import {
+  git,
+  rawGitBinary,
+  type GitBinaryResult,
+  type GitExecutionOptions,
+} from "../git.js";
 import {
   ContextTransportError,
   GIT_LLM_WIKI_POLICY_ARGS,
@@ -25,9 +30,16 @@ import {
 export interface CreateContextReadAdapterOptions {
   readonly rollHome: string;
   readonly runGit?: GitLlmWikiCommandRunner;
+  readonly runGitBinary?: GitLlmWikiBinaryCommandRunner;
   readonly now?: () => number;
   readonly audit?: GitLlmWikiReadAuditSink;
 }
+
+export type GitLlmWikiBinaryCommandRunner = (
+  args: readonly string[],
+  cwd: string | undefined,
+  options: GitExecutionOptions,
+) => Promise<GitBinaryResult>;
 
 interface GitObjectDescriptor {
   readonly path: string;
@@ -90,10 +102,38 @@ async function checkedObjectGit(
   return result.stdout;
 }
 
+async function checkedObjectGitBinary(
+  runGitBinary: GitLlmWikiBinaryCommandRunner,
+  revision: GitProviderRevisionV1,
+  args: readonly string[],
+  timeoutMs: number,
+  code: ContextDiagnosticV1["code"],
+  ref?: string,
+): Promise<Uint8Array> {
+  let result;
+  try {
+    result = await runGitBinary(
+      command(args),
+      revision.cachePath,
+      { timeoutMs },
+    );
+  } catch {
+    throw new ContextObjectReadError(code, ref);
+  }
+  if (result.code !== 0 || result.timedOut === true) throw new ContextObjectReadError(code, ref);
+  return result.stdout;
+}
+
 function parseLsTree(path: string, output: string): { readonly mode: FixedRevisionBlobFact["mode"]; readonly oid: string } | undefined {
   if (output === "") return undefined;
-  const line = output.endsWith("\n") ? output.slice(0, -1) : output;
-  const match = /^(100644|100755|120000) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/u.exec(line);
+  if (!output.endsWith("\0")) {
+    throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
+  }
+  const record = output.slice(0, -1);
+  if (record.includes("\0")) {
+    throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
+  }
+  const match = /^(100644|100755|120000) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/u.exec(record);
   if (match === null || match[3] !== path || match[1] === undefined || match[2] === undefined) {
     throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
   }
@@ -112,7 +152,7 @@ async function describeFiles(
     const tree = await checkedObjectGit(
       runGit,
       revision,
-      ["ls-tree", revision.revision, "--", path],
+      ["ls-tree", "-z", revision.revision, "--", path],
       timeoutMs,
       "context_file_missing",
       ref,
@@ -158,7 +198,7 @@ function budgetFailure(
 }
 
 async function readContents(
-  runGit: GitLlmWikiCommandRunner,
+  runGitBinary: GitLlmWikiBinaryCommandRunner,
   revision: GitProviderRevisionV1,
   descriptors: readonly GitObjectDescriptor[],
   timeoutMs: number,
@@ -176,8 +216,8 @@ async function readContents(
       });
       continue;
     }
-    const content = await checkedObjectGit(
-      runGit,
+    const content = await checkedObjectGitBinary(
+      runGitBinary,
       revision,
       ["cat-file", "blob", descriptor.oid],
       timeoutMs,
@@ -199,13 +239,14 @@ async function readAtFixedRevision(
   input: ContextProviderReadInputV1,
   revision: GitProviderRevisionV1,
   runGit: GitLlmWikiCommandRunner,
+  runGitBinary: GitLlmWikiBinaryCommandRunner,
 ): Promise<ContextProviderReadOutcomeV1> {
   try {
     const timeoutMs = input.plan.provider.fetch_timeout_seconds * 1_000;
     const descriptors = await describeFiles(runGit, revision, input.paths, timeoutMs);
     const overBudget = budgetFailure(revision.providerId, descriptors);
     if (overBudget !== undefined) return overBudget;
-    const facts = await readContents(runGit, revision, descriptors, timeoutMs);
+    const facts = await readContents(runGitBinary, revision, descriptors, timeoutMs);
     const validation = validateLlmWikiRevision({
       providerId: revision.providerId,
       entrypoints: input.plan.binding.entrypoints,
@@ -247,8 +288,16 @@ async function readAtFixedRevision(
 
 export function createContextReadAdapter(options: CreateContextReadAdapterOptions): ContextProviderReadAdapter {
   const runGit = options.runGit ?? git;
+  const runGitBinary = options.runGitBinary ?? rawGitBinary;
   return {
     async read(input: ContextProviderReadInputV1): Promise<ContextProviderReadOutcomeV1> {
+      if (input.paths.length > LLM_WIKI_MAX_PAGES) {
+        return diagnostic(
+          input.plan.provider.id,
+          "context_budget_exceeded",
+          "Context Provider planned page budget exceeded",
+        );
+      }
       try {
         const result = await withFreshGitLlmWikiRead({
           rollHome: options.rollHome,
@@ -256,7 +305,7 @@ export function createContextReadAdapter(options: CreateContextReadAdapterOption
           runGit,
           ...(options.now === undefined ? {} : { now: options.now }),
           ...(options.audit === undefined ? {} : { audit: options.audit }),
-        }, async (revision) => readAtFixedRevision(input, revision, runGit));
+        }, async (revision) => readAtFixedRevision(input, revision, runGit, runGitBinary));
         return result.value;
       } catch (error) {
         if (error instanceof ContextTransportError) return { ok: false, diagnostic: error.diagnostic };

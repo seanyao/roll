@@ -15,6 +15,8 @@ import {
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
 import { validateJsonSchemaValue } from "../tools/schema.js";
+import { planLlmWikiRevisionPaths } from "./context-ref.js";
+import { LLM_WIKI_MAX_PAGES } from "./llm-wiki-validator.js";
 
 export interface CompileContextProviderExecutionPlansInput {
   readonly registry?: ContextProviderRegistryV1;
@@ -283,10 +285,21 @@ export function compileContextProviderExecutionPlans(
       required: binding.required,
       entrypoints: stableUnique(binding.entrypoints),
     };
+    const plannedPaths = planLlmWikiRevisionPaths(normalizedBinding.entrypoints, requestedPaths);
+    if (plannedPaths.length > LLM_WIKI_MAX_PAGES) {
+      diagnostics.push(diagnostic(
+        "context_budget_exceeded",
+        severity,
+        "Context Provider planned page budget exceeded",
+        binding.providerId,
+      ));
+      blocked ||= binding.required;
+      continue;
+    }
     plans.push({
       provider: normalizedProvider,
       binding: normalizedBinding,
-      paths: stableUnique(["purpose.md", "schema.md", ...normalizedBinding.entrypoints, ...requestedPaths]),
+      paths: plannedPaths,
       providerConfigDigest: digest(providerDigestInput(normalizedProvider)),
       bindingDigest: digest(normalizedBinding),
     });

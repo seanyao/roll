@@ -10,10 +10,13 @@ import {
   type ContextReadRequestV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
-import { createContextReadService } from "@roll/core";
+import { createContextReadService, LLM_WIKI_MAX_PAGES } from "@roll/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createContextReadAdapter } from "../../src/context/context-read-adapter.js";
-import { rawGit, type GitResult } from "../../src/git.js";
+import {
+  createContextReadAdapter,
+  type GitLlmWikiBinaryCommandRunner,
+} from "../../src/context/context-read-adapter.js";
+import { rawGit, rawGitBinary, type GitResult } from "../../src/git.js";
 import type {
   GitLlmWikiCommandRunner,
   GitLlmWikiReadAuditEventV1,
@@ -67,6 +70,7 @@ function writeWiki(source: string, version: string): void {
   writeFileSync(join(source, "wiki", "index.md"), `# Index\n\naxis-${version}\n`, "utf8");
   writeFileSync(join(source, "wiki", "overview.md"), page("Overview", `overview-${version}`), "utf8");
   writeFileSync(join(source, "wiki", "systems", "axis.md"), page("Axis", `axis-${version}`), "utf8");
+  writeFileSync(join(source, "wiki", "systems", "中文.md"), page("中文", `中文-${version}`), "utf8");
 }
 
 function remoteFixture(root: string): { readonly source: string; readonly bare: string; revision: string } {
@@ -87,6 +91,19 @@ function advance(remote: ReturnType<typeof remoteFixture>, version: string): str
   writeWiki(remote.source, version);
   git(remote.source, ["add", "."]);
   git(remote.source, ["commit", "-q", "-m", version]);
+  git(remote.source, ["push", "-q", remote.bare, "HEAD:refs/heads/main"]);
+  remote.revision = git(remote.source, ["rev-parse", "HEAD"]);
+  return remote.revision;
+}
+
+function advanceWithInvalidUtf8(remote: ReturnType<typeof remoteFixture>): string {
+  const path = join(remote.source, "wiki", "systems", "invalid-utf8.md");
+  writeFileSync(path, Buffer.concat([
+    Buffer.from(page("Invalid UTF-8", "invalid-bytes"), "utf8"),
+    Buffer.from([0xc3, 0x28]),
+  ]));
+  git(remote.source, ["add", "."]);
+  git(remote.source, ["commit", "-q", "-m", "invalid utf8"]);
   git(remote.source, ["push", "-q", remote.bare, "HEAD:refs/heads/main"]);
   remote.revision = git(remote.source, ["rev-parse", "HEAD"]);
   return remote.revision;
@@ -130,18 +147,186 @@ function workspace(): WorkspaceExecutionContextV1 {
   };
 }
 
-function request(): ContextReadRequestV1 {
+function request(refs: readonly string[] = ["context://enterprise-wiki/wiki/systems/axis.md"]): ContextReadRequestV1 {
   return {
     schema: CONTEXT_READ_REQUEST_V1,
     workspace: workspace(),
     storyId: "US-CONTEXT-005",
     stage: "build",
     environmentIds: ["sit"],
-    refs: ["context://enterprise-wiki/wiki/systems/axis.md"],
+    refs,
   };
 }
 
 describe("Context read integration", () => {
+  it("defensively rejects an over-budget adapter input before any Git command", async () => {
+    const runGit: GitLlmWikiCommandRunner = vi.fn();
+    const paths = Array.from(
+      { length: LLM_WIKI_MAX_PAGES + 1 },
+      (_, index) => `wiki/pages/page-${index}.md`,
+    );
+    const adapter = createContextReadAdapter({ rollHome: join(sandbox(), "roll-home"), runGit });
+
+    const result = await adapter.read({
+      plan: {
+        provider: {
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        },
+        binding: {
+          providerId: "enterprise-wiki",
+          enabled: true,
+          required: true,
+          entrypoints: ["wiki/index.md"],
+        },
+        paths,
+        providerConfigDigest: "a".repeat(64),
+        bindingDigest: "b".repeat(64),
+      },
+      request: request(),
+      paths,
+      refs: paths.map((path) => `context://enterprise-wiki/${path}`),
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostic: { code: "context_budget_exceeded", providerId: "enterprise-wiki" },
+    });
+    expect(runGit).not.toHaveBeenCalled();
+  });
+
+  it("reads a Unicode wiki path from real Git without depending on core.quotePath", async () => {
+    const root = sandbox();
+    const remote = remoteFixture(root);
+    const calls: string[][] = [];
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
+      calls.push([...args]);
+      const operation = args.slice(12);
+      const executable = [...args];
+      if (operation[0] === "remote" && operation[1] === "add") {
+        executable[executable.length - 1] = `file://${remote.bare}`;
+      }
+      if (operation[0] === "fetch") {
+        executable[executable.length - 2] = `file://${remote.bare}`;
+      }
+      executable.splice(12, 0, "-c", "protocol.file.allow=always");
+      const result = await rawGit(executable, cwd, options);
+      if (operation[0] === "remote" && operation[1] === "get-url" && result.code === 0) {
+        return { ...result, stdout: `${PUBLIC_REMOTE}\n` };
+      }
+      return result;
+    });
+    const adapter = createContextReadAdapter({ rollHome: join(root, "roll-home"), runGit });
+    const service = createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [{
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        }],
+      },
+      adapter,
+    });
+
+    const result = await service.read(request(["context://enterprise-wiki/wiki/systems/中文.md"]));
+
+    expect(result).toMatchObject({ outcome: "completed", providers: [{ revision: remote.revision }] });
+    expect(result.providers[0]?.files.find((file) => file.path === "wiki/systems/中文.md")?.content)
+      .toContain("中文-v1");
+    const unicodeTree = calls.find((args) => args.includes("wiki/systems/中文.md") && args.includes("ls-tree"));
+    expect(unicodeTree?.slice(12, 15)).toEqual(["ls-tree", "-z", remote.revision]);
+  });
+
+  it("fails closed on invalid UTF-8 Git blob bytes before producing content digests", async () => {
+    const root = sandbox();
+    const remote = remoteFixture(root);
+    const invalidRevision = advanceWithInvalidUtf8(remote);
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
+      const operation = args.slice(12);
+      const executable = [...args];
+      if (operation[0] === "remote" && operation[1] === "add") {
+        executable[executable.length - 1] = `file://${remote.bare}`;
+      }
+      if (operation[0] === "fetch") {
+        executable[executable.length - 2] = `file://${remote.bare}`;
+      }
+      executable.splice(12, 0, "-c", "protocol.file.allow=always");
+      const result = await rawGit(executable, cwd, options);
+      if (operation[0] === "remote" && operation[1] === "get-url" && result.code === 0) {
+        return { ...result, stdout: `${PUBLIC_REMOTE}\n` };
+      }
+      return result;
+    });
+    const binaryCalls: Array<{ readonly args: readonly string[]; readonly timeoutMs?: number }> = [];
+    const runGitBinary: GitLlmWikiBinaryCommandRunner = vi.fn(async (args, cwd, options) => {
+      binaryCalls.push({ args: [...args], timeoutMs: options.timeoutMs });
+      return rawGitBinary(args, cwd, options);
+    });
+    const serviceFor = (binaryRunner: GitLlmWikiBinaryCommandRunner, suffix: string) => createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [{
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        }],
+      },
+      adapter: createContextReadAdapter({
+        rollHome: join(root, `roll-home-${suffix}`),
+        runGit,
+        runGitBinary: binaryRunner,
+      }),
+    });
+    const service = serviceFor(runGitBinary, "invalid");
+
+    const result = await service.read(request(["context://enterprise-wiki/wiki/systems/invalid-utf8.md"]));
+
+    expect(result).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({
+        code: "invalid_page_frontmatter",
+        severity: "blocking",
+        ref: "context://enterprise-wiki/wiki/systems/invalid-utf8.md",
+      })],
+    });
+    expect(JSON.stringify(result)).not.toContain("�(");
+    expect(binaryCalls.length).toBeGreaterThan(0);
+    expect(binaryCalls.every((call) => call.args.slice(12, 14).join(" ") === "cat-file blob")).toBe(true);
+    expect(new Set(binaryCalls.map((call) => call.timeoutMs))).toEqual(new Set([5_000]));
+    expect(invalidRevision).toBe(remote.revision);
+
+    const timedOutBinary: GitLlmWikiBinaryCommandRunner = vi.fn(async () => ({
+      code: 1,
+      stdout: new Uint8Array(),
+      stderr: "fatal: token=secret-token blob read failed",
+      timedOut: true,
+      signal: "SIGTERM",
+    }));
+    const timedOut = await serviceFor(timedOutBinary, "timeout").read(
+      request(["context://enterprise-wiki/wiki/systems/invalid-utf8.md"]),
+    );
+    expect(timedOut).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({ code: "context_file_missing", severity: "blocking" })],
+    });
+    expect(JSON.stringify(timedOut)).not.toMatch(/secret-token|blob read failed/u);
+  });
+
   it("fetches every read, pins every file to that read SHA and never falls back after a later fetch failure", async () => {
     const root = sandbox();
     const remote = remoteFixture(root);
@@ -225,7 +410,7 @@ describe("Context read integration", () => {
     const lsTrees = mutableCalls.filter((args) => args.slice(12)[0] === "ls-tree");
     expect(lsTrees.length).toBeGreaterThan(0);
     expect(lsTrees.every((args) => {
-      const revision = args.slice(12)[1];
+      const revision = args.slice(12)[2];
       return revision === first.providers[0]?.revision || revision === second.providers[0]?.revision;
     })).toBe(true);
     expect(lsTrees.some((args) => args.includes("HEAD"))).toBe(false);

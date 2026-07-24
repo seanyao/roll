@@ -73,6 +73,8 @@ describe("compileContextProviderExecutionPlans", () => {
       "node:crypto",
       "@roll/spec",
       "../tools/schema.js",
+      "./context-ref.js",
+      "./llm-wiki-validator.js",
     ]);
     expect(source).not.toMatch(/(?:node:fs|node:child_process|node:http|node:https|node:net|process\.cwd|\bfetch\s*\(|\bimport\s*\()/u);
     const result = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] });
@@ -266,6 +268,7 @@ describe("compileContextProviderExecutionPlans", () => {
       "purpose.md",
       "schema.md",
       "wiki/index.md",
+      "wiki/log.md",
       "wiki/systems/axis.md",
       "wiki/data-surfaces/reporting.md",
     ]);
@@ -273,6 +276,7 @@ describe("compileContextProviderExecutionPlans", () => {
       "purpose.md",
       "schema.md",
       "wiki/index.md",
+      "wiki/log.md",
       "wiki/workflows/release.md",
     ]);
   });

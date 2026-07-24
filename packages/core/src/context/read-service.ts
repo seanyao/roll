@@ -11,7 +11,6 @@ import {
   type ContextReadResultV1,
 } from "@roll/spec";
 import { compileContextProviderExecutionPlans } from "./execution-plan.js";
-import { planLlmWikiRevisionPaths } from "./context-ref.js";
 import { evaluateContextScope, normalizeContextScopeRequest } from "./scope-policy.js";
 import { computeContextSnapshotDigest, contextSnapshotId } from "./snapshot.js";
 
@@ -269,10 +268,9 @@ async function executeProvider(
   request: ContextReadRequestV1,
 ): Promise<ProviderExecutionResult> {
   const refs = explicitPaths(request, plan.provider.id);
-  const paths = planLlmWikiRevisionPaths(plan.binding.entrypoints, refs);
   let read: ContextProviderReadOutcomeV1;
   try {
-    read = await options.adapter.read({ plan, request, paths, refs });
+    read = await options.adapter.read({ plan, request, paths: plan.paths, refs });
   } catch {
     return { gap: genericProviderFailure(plan) };
   }

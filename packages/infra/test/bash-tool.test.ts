@@ -1,15 +1,17 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import type { ExecOpts, ExecResult, MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
-import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
+import { REPOSITORY_BINDING_V1, WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { afterAll, describe, expect, it } from "vitest";
 import { BashTool, type BashInput, type BashOutput } from "../src/index.js";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-bash-tool-")));
-const repo = join(root, "repo");
+const issueRoot = join(root, "issues", "US-TOOL-004");
+const repo = join(issueRoot, "repo");
 const outside = join(root, "outside");
-mkdirSync(repo);
+mkdirSync(repo, { recursive: true });
 mkdirSync(outside);
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -32,13 +34,21 @@ function invocation(input: BashInput, sandbox: ToolPolicy["sandbox"] = {}): Tool
       schema: WORKSPACE_EXECUTION_CONTEXT_V1,
       workspace: { workspaceId: "roll", root, canonicalRoot: root, lifecycle: "active" },
       resolution: { source: "explicit", evidence: [] },
-      bindings: [],
+      bindings: [{
+        schema: REPOSITORY_BINDING_V1,
+        repoId: "repo",
+        alias: "repo",
+        remote: "git@github.com:example/repo.git",
+        integrationBranch: "main",
+        provider: "github",
+        workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+      }],
       issue: {
         storyId: "US-TOOL-004",
-        manifestPath: join(root, "manifest.json"),
+        manifestPath: join(issueRoot, "manifest.json"),
         execution: {
           workspaceId: "roll",
-          issueRoot: root,
+          issueRoot,
           repositories: {
             repo: {
               repoId: "repo",
@@ -54,18 +64,7 @@ function invocation(input: BashInput, sandbox: ToolPolicy["sandbox"] = {}): Tool
           },
         },
       },
-      authorities: {
-        backlog: join(root, "backlog"),
-        features: join(root, "features"),
-        design: join(root, "design"),
-        requirements: join(root, "requirements"),
-        policy: join(root, "policy"),
-        evidence: join(root, "evidence"),
-        toolDumps: join(root, "tool-dumps"),
-        events: join(root, "events"),
-        runtime: join(root, "runtime"),
-        locks: join(root, "locks"),
-      },
+      authorities: deriveWorkspaceExecutionAuthorities(root),
     },
     repoId: "repo",
   };
@@ -105,7 +104,7 @@ describe("US-TOOL-004 BashTool", () => {
 
     expect(result).toMatchObject({ ok: true, output: { exitCode: 0, stdout: "hello\n", stderr: "", timedOut: false } });
     expect(deps.calls).toEqual([{ command: "printf", args: ["hello"], opts: { cwd: repo, env: undefined, timeoutMs: 1000, maxOutputBytes: undefined } }]);
-    expect(deps.files.get(join(root, "tool-dumps", "inv-1.log"))).toContain("stdout:\nhello\n");
+    expect(deps.files.get(join(root, "runtime", "tool-dumps", "inv-1.log"))).toContain("stdout:\nhello\n");
   });
 
   it("treats non-zero exit as ok:true with the exitCode in output", async () => {
@@ -140,33 +139,6 @@ describe("US-TOOL-004 BashTool", () => {
     expect(deps.calls).toHaveLength(0);
   });
 
-  it.each([
-    { name: "absolute path", command: "cat", args: [join(outside, "secret.txt")] },
-    { name: "parent traversal", command: "cat", args: ["../outside/secret.txt"] },
-    { name: "git -C", command: "git", args: ["-C", outside, "status"] },
-    { name: "git --git-dir", command: "git", args: [`--git-dir=${join(outside, ".git")}`, "status"] },
-  ])("denies $name argv paths outside the selected repository", async ({ command, args }) => {
-    const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
-
-    const result = await new BashTool().execute(invocation({ command, args, cwd: repo }), deps);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe("sandbox_denied");
-    expect(deps.calls).toHaveLength(0);
-  });
-
-  it("allows relative argv paths contained by the selected repository", async () => {
-    const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
-
-    const result = await new BashTool().execute(
-      invocation({ command: "git", args: ["-C", ".", "status", "--", "src/file.ts"], cwd: repo }),
-      deps,
-    );
-
-    expect(result.ok).toBe(true);
-    expect(deps.calls).toHaveLength(1);
-  });
-
   it("caps stdout/stderr and dump content at maxOutputBytes", async () => {
     const deps = fakeDeps({ exitCode: 0, stdout: "abcdef", stderr: "uvwxyz", timedOut: false });
     const result = await new BashTool().execute(
@@ -175,8 +147,8 @@ describe("US-TOOL-004 BashTool", () => {
     );
 
     expect(result).toMatchObject({ ok: true, output: { stdout: "abc", stderr: "uvw" } });
-    expect(deps.files.get(join(root, "tool-dumps", "inv-1.log"))).toContain("stdout:\nabc\n");
-    expect(deps.files.get(join(root, "tool-dumps", "inv-1.log"))).not.toContain("abcdef");
+    expect(deps.files.get(join(root, "runtime", "tool-dumps", "inv-1.log"))).toContain("stdout:\nabc\n");
+    expect(deps.files.get(join(root, "runtime", "tool-dumps", "inv-1.log"))).not.toContain("abcdef");
   });
 
   it("redacts command input before execution and dump persistence", async () => {
@@ -189,7 +161,7 @@ describe("US-TOOL-004 BashTool", () => {
     expect(result.ok).toBe(true);
     expect(deps.calls[0]).toMatchObject({ command: "echo", args: ["[REDACTED]"] });
     expect(deps.calls[0]?.opts?.env).toEqual({ TOKEN: "[REDACTED]" });
-    expect(deps.files.get(join(root, "tool-dumps", "inv-1.log"))).not.toContain("SECRET");
+    expect(deps.files.get(join(root, "runtime", "tool-dumps", "inv-1.log"))).not.toContain("SECRET");
   });
 
   it("blockedCommands are advisory warnings and do not block execution", async () => {
@@ -201,6 +173,61 @@ describe("US-TOOL-004 BashTool", () => {
 
     expect(result.ok).toBe(true);
     expect(result.warnings).toEqual(["blocked command advisory: rm"]);
+    expect(deps.calls).toHaveLength(1);
+  });
+
+  it("rejects absolute and traversal argv paths that escape the selected Issue repository", async () => {
+    for (const args of [[outside], ["../outside"], ["-C", outside]]) {
+      const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
+      const result = await new BashTool().execute(invocation({ command: "git", args, cwd: repo }), deps);
+
+      expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+      expect(deps.calls).toHaveLength(0);
+      expect(JSON.stringify(result)).not.toContain(outside);
+    }
+  });
+
+  it("rejects dynamic interpreter code and relative symlink paths before execution", async () => {
+    const escape = join(repo, "escape");
+    symlinkSync(outside, escape);
+    for (const input of [
+      { command: "sh", args: ["-c", "cat /etc/passwd"] },
+      { command: "bash", args: ["-lc", "cat /etc/passwd"] },
+      { command: "node", args: ["-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--eval=require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--input-type", "module", "-e", "import fs from 'node:fs'; fs.readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--env-file", "package.json", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--env-file-if-exists", ".env", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--dns-result-order", "ipv4first", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--trace-require-module", "all", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--test-name-pattern", "smoke", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--import=data:text/javascript,globalThis.compromised=true", "app.js"] },
+      { command: "node", args: ["--experimental-loader", "data:text/javascript,export function load(){}", "app.js"] },
+      { command: "node", args: ["--experimental_loader=data:text/javascript,export function load(){}", "app.js"] },
+      { command: "node", args: ["--experimental_loader", "data:text/javascript,export function load(){}", "app.js"] },
+      { command: "node", args: ["--import", "file:///etc/passwd", "app.js"] },
+      { command: "node", args: ["--run", "unsafe-script"] },
+      { command: "node", args: ["--print", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "/usr/bin/env", args: ["node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "/usr/bin/env", args: ["-u", "NODE_OPTIONS", "node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "cat", args: ["escape/file.txt"] },
+    ]) {
+      const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
+      const result = await new BashTool().execute(invocation({ ...input, cwd: repo }), deps);
+
+      expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+      expect(deps.calls).toHaveLength(0);
+    }
+  });
+
+  it("allows interpreter-like flags after the Node script boundary", async () => {
+    const deps = fakeDeps({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+    const result = await new BashTool().execute(
+      invocation({ command: "node", args: ["app.js", "-e", "development"], cwd: repo }),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: true, output: { stdout: "ok" } });
     expect(deps.calls).toHaveLength(1);
   });
 

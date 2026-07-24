@@ -2,12 +2,7 @@ import { existsSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
-import {
-  isCanonicalPathContained,
-  resolveContainedExistingPath,
-  resolveContainedPath,
-  resolveWorkspaceLocalRepository,
-} from "./workspace-local-context.js";
+import { isCanonicalPathContained, resolveContainedExistingPath, resolveContainedPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
 
 export interface BashInput {
   command: string;
@@ -84,7 +79,7 @@ export class BashTool {
         ok: false,
         error: {
           code: "sandbox_denied",
-          message: "bash argv path is outside the selected Issue repository",
+          message: "bash path argument is outside the selected Issue repository",
           retryable: false,
         },
         meta: meta(boundInvocation, startedAt, deps.now()),
@@ -165,6 +160,11 @@ function allowed(cwd: string, repositoryRoot: string, allowedPaths: readonly str
   return { ok: false };
 }
 
+function advisoryWarnings(command: string, blockedCommands: readonly string[] | undefined): string[] {
+  if (blockedCommands === undefined) return [];
+  return blockedCommands.includes(command) ? [`blocked command advisory: ${command}`] : [];
+}
+
 function argumentsContained(command: string, args: readonly string[], cwd: string, repositoryRoot: string): boolean {
   if (dynamicInterpreterDenied(command, args)) return false;
   for (let index = 0; index < args.length; index += 1) {
@@ -179,7 +179,8 @@ function argumentsContained(command: string, args: readonly string[], cwd: strin
       (!candidate.startsWith("-") && existsSync(localCandidate));
     if (!pathLike) continue;
     const base = isAbsolute(candidate) ? repositoryRoot : cwd;
-    if (resolveContainedPath(repositoryRoot, resolve(base, candidate), true) === undefined) return false;
+    const resolved = resolveContainedPath(repositoryRoot, resolve(base, candidate), true);
+    if (resolved === undefined) return false;
   }
   return true;
 }
@@ -194,7 +195,9 @@ function dynamicInterpreterDenied(command: string, args: readonly string[]): boo
   if (["bash", "dash", "fish", "sh", "zsh"].includes(executable)) {
     return args.some((argument) => /^-[^-]*c/u.test(argument));
   }
-  if (executable === "node") return nodeEvalDenied(args);
+  if (executable === "node") {
+    return nodeEvalDenied(args);
+  }
   if (["perl", "ruby"].includes(executable)) return args.some((argument) => argument.startsWith("-e"));
   if (["python", "python2", "python3"].includes(executable)) return args.some((argument) => argument.startsWith("-c"));
   if (executable === "php") return args.some((argument) => argument.startsWith("-r"));
@@ -215,28 +218,50 @@ function envCommandIndex(args: readonly string[]): number {
 }
 
 function nodeEvalDenied(args: readonly string[]): boolean {
-  let ambiguousOptionValue = false;
-  for (const argument of args) {
+  let ambiguousOption: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
     if (argument === "--") return false;
     if (
       argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=") ||
       argument === "-p" || argument.startsWith("-p") || argument === "--print" || argument.startsWith("--print=")
     ) return true;
     if (!argument.startsWith("-")) {
-      if (ambiguousOptionValue) {
-        ambiguousOptionValue = false;
+      if (ambiguousOption !== undefined) {
+        if (nodeInlineModuleDenied(ambiguousOption, argument)) return true;
+        ambiguousOption = undefined;
         continue;
       }
       return false;
     }
-    ambiguousOptionValue = argument.startsWith("--") ? !argument.includes("=") : argument.length === 2;
+    const normalizedArgument = argument.startsWith("--") ? argument.replaceAll("_", "-") : argument;
+    if (normalizedArgument === "--run" || normalizedArgument.startsWith("--run=")) return true;
+    if (argument.startsWith("-r") && !argument.startsWith("--") && argument.length > 2) {
+      if (inlineModuleSpecifier(argument.slice(2))) return true;
+      ambiguousOption = undefined;
+      continue;
+    }
+    const equals = argument.indexOf("=");
+    const rawOption = equals < 0 ? argument : argument.slice(0, equals);
+    const option = rawOption.startsWith("--") ? rawOption.replaceAll("_", "-") : rawOption;
+    if (equals >= 0 && nodeInlineModuleDenied(option, argument.slice(equals + 1))) return true;
+    // Node's long option set changes between releases. Treat a separate token
+    // after any option as a possible option value, so an incomplete allowlist
+    // cannot turn that value into a false script boundary before -e/--print.
+    ambiguousOption = equals < 0 && (argument.startsWith("--") || argument.length === 2)
+      ? option
+      : undefined;
   }
   return false;
 }
 
-function advisoryWarnings(command: string, blockedCommands: readonly string[] | undefined): string[] {
-  if (blockedCommands === undefined) return [];
-  return blockedCommands.includes(command) ? [`blocked command advisory: ${command}`] : [];
+function nodeInlineModuleDenied(option: string, value: string): boolean {
+  return ["-r", "--require", "--import", "--loader", "--experimental-loader"].includes(option) &&
+    inlineModuleSpecifier(value);
+}
+
+function inlineModuleSpecifier(value: string): boolean {
+  return /^(?:data|file|https?|javascript):/iu.test(value);
 }
 
 function redactEnv(env: Record<string, string> | undefined, deps: ToolDeps): Record<string, string> | undefined {

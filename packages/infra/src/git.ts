@@ -387,6 +387,8 @@ export async function git(
   const result = await invokeInfraTool<GitRawInput, GitResult>({
     declaration: GIT_RAW_DECLARATION,
     input: { args: [...args], cwd },
+    // Legacy repository lifecycle helper; Agent-facing GitTool is repository-scoped.
+    scope: "machine_only",
     ...(options.timeoutMs === undefined ? {} : { policy: { timeoutMs: options.timeoutMs } }),
     run: async (invocation) => ok(
       invocation,
@@ -903,6 +905,8 @@ export async function commit(
   const result = await invokeInfraTool<GitCommitInput, GitResult>({
     declaration: GIT_COMMIT_DECLARATION,
     input: { cwd: repoCwd, message, allowEmpty: opts.allowEmpty },
+    // Legacy repository lifecycle helper; Agent-facing GitTool is repository-scoped.
+    scope: "machine_only",
     run: async (invocation) => {
       const args = ["commit", "-m", invocation.input.message];
       if (invocation.input.allowEmpty === true) args.splice(1, 0, "--allow-empty");
@@ -925,6 +929,8 @@ export async function push(
   const result = await invokeInfraTool<GitPushInput, GitResult>({
     declaration: GIT_PUSH_DECLARATION,
     input: { cwd: repoCwd, branch, remote: opts.remote, setUpstream: opts.setUpstream },
+    // Legacy repository lifecycle helper; Agent-facing GitTool is repository-scoped.
+    scope: "machine_only",
     run: async (invocation) => {
       const remote = invocation.input.remote ?? "origin";
       const args = invocation.input.setUpstream === true

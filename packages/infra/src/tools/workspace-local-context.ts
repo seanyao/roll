@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { resolveWorkspaceExecutionContextScope } from "@roll/core";
 import type {
   RepositoryExecutionContext,
   ToolContextCorrelation,
@@ -28,10 +29,14 @@ export function resolveWorkspaceLocalRepository(
   invocation: Pick<ToolInvocation, "context" | "repoId">,
   access: WorkspaceLocalAccess,
 ): WorkspaceLocalRepositoryResult {
-  const context = invocation.context;
+  if (invocation.context === undefined || invocation.context.issue === undefined) {
+    return missing("tool invocation requires an Issue execution context");
+  }
+  const scoped = resolveWorkspaceExecutionContextScope({ scope: "repository_required", context: invocation.context });
+  const context = scoped.ok ? scoped.context : undefined;
   const issue = context?.issue;
   if (context === undefined || issue === undefined) {
-    return missing("tool invocation requires an Issue execution context");
+    return invalid("tool invocation has an invalid Issue repository execution context");
   }
 
   const repositories = Object.values(issue.execution.repositories);
@@ -55,9 +60,7 @@ export function resolveWorkspaceLocalRepository(
   const canonicalWorktreePath = canonicalExistingPath(repository.worktreePath);
   if (
     canonicalIssueRoot === undefined ||
-    canonicalIssueRoot !== issue.execution.issueRoot ||
     canonicalWorktreePath === undefined ||
-    canonicalWorktreePath !== repository.worktreePath ||
     !isCanonicalPathContained(canonicalIssueRoot, canonicalWorktreePath)
   ) {
     return invalid("selected Issue repository worktree is unavailable");

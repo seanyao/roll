@@ -1,4 +1,5 @@
 import {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -325,4 +326,40 @@ describe("loadWorkspaceExecutionContext", () => {
       },
     }), "authority_changed");
   });
+
+  it.each(["workspace", "issue"] as const)(
+    "fails closed when the selected %s root is replaced by an identical copy during loading",
+    (authority) => {
+      const f = fixture();
+      let replaced = false;
+      const replaceDirectory = (path: string): void => {
+        const moved = `${path}-before`;
+        renameSync(path, moved);
+        cpSync(moved, path, { recursive: true });
+        replaced = true;
+      };
+
+      expectCode(() => loadWorkspaceExecutionContext({
+        rollHome: f.rollHome,
+        target: { kind: "workspace", workspaceId: "ws-demo", root: f.root, canonicalRoot: f.root },
+        source: "explicit",
+        scope: "repository_required",
+        storyId: f.storyId,
+        evidence: [],
+      }, {
+        headSha: heads.headSha,
+        ...(authority === "workspace" ? {
+          afterAuthorityRead: (path: string) => {
+            if (!replaced && path === join(f.root, "workspace.yaml")) replaceDirectory(f.root);
+          },
+        } : {
+          afterRepositoryHead: (path: string) => {
+            if (!replaced && path === join(f.issueRoot, "product")) replaceDirectory(f.issueRoot);
+          },
+        }),
+      }), authority === "workspace" ? "workspace_discovery_incomplete" : "authority_changed");
+
+      expect(replaced).toBe(true);
+    },
+  );
 });

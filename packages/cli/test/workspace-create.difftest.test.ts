@@ -1,12 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { dispatch } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 
 interface Run { readonly status: number; readonly stdout: string; readonly stderr: string }
 const roots: string[] = [];
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 async function run(args: string[], home: string, language: "en" | "zh" = "en"): Promise<Run> {
   const saved = { HOME: process.env["HOME"], ROLL_HOME: process.env["ROLL_HOME"], ROLL_LANG: process.env["ROLL_LANG"] };
@@ -100,5 +102,25 @@ describe("US-WS-023 create-only CLI", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("roll init");
     expect(result.stderr).toBe("");
+  });
+
+  it("records an honest physical-capture skip beside a redacted headless transcript", () => {
+    const evidenceRoot = join(repoRoot, "packages", "cli", "test", "fixtures", "workspace", "us-ws-023-terminal-evidence");
+    const skip = JSON.parse(readFileSync(join(evidenceRoot, "capture-skip.json"), "utf8")) as {
+      readonly captures: readonly { readonly taken: boolean; readonly skipped: string; readonly out: string }[];
+      readonly fallback: { readonly path: string; readonly countsAsScreenshot: boolean };
+    };
+    const transcript = readFileSync(join(evidenceRoot, skip.fallback.path), "utf8");
+
+    expect(skip.captures).toEqual([expect.objectContaining({
+      taken: false,
+      out: "screenshots/terminal.png",
+      skipped: expect.stringContaining("no PNG was fabricated"),
+    })]);
+    expect(skip.fallback.countsAsScreenshot).toBe(false);
+    expect(existsSync(join(evidenceRoot, "screenshots", "terminal.png"))).toBe(false);
+    expect(transcript).toContain("Usage: roll workspace create");
+    expect(transcript).toContain("Unknown workspace subcommand \"init\". Use \"roll workspace create\".");
+    expect(transcript).not.toContain("/Users/");
   });
 });

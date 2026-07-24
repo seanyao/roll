@@ -144,9 +144,11 @@ describe("Context read integration", () => {
     const remote = remoteFixture(root);
     const firstExpectedRevision = remote.revision;
     const mutableCalls: string[][] = [];
+    const timeouts: number[] = [];
     let failFetch = false;
     const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
       mutableCalls.push([...args]);
+      timeouts.push(options.timeoutMs);
       const operation = args.slice(12);
       if (operation[0] === "fetch" && failFetch) {
         return { code: 1, stdout: "", stderr: "fatal: token=secret-token fetch failed" };
@@ -174,7 +176,7 @@ describe("Context read integration", () => {
           enabled: true,
           remote: PUBLIC_REMOTE,
           branch: "main",
-          fetch_timeout_seconds: 30,
+          fetch_timeout_seconds: 5,
         }],
       },
       adapter,
@@ -209,5 +211,6 @@ describe("Context read integration", () => {
       return revision === first.providers[0]?.revision || revision === second.providers[0]?.revision;
     })).toBe(true);
     expect(lsTrees.some((args) => args.includes("HEAD"))).toBe(false);
+    expect(new Set(timeouts)).toEqual(new Set([5_000]));
   });
 });

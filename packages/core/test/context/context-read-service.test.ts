@@ -347,6 +347,38 @@ describe("ContextReadService", () => {
     });
   });
 
+  it("redacts adapter warning details before publishing a Provider snapshot", async () => {
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => ({
+        ...providerSuccess(input.plan.provider.id, input.paths),
+        warnings: [{
+          code: "scope_mismatch",
+          severity: "warning",
+          providerId: input.plan.provider.id,
+          ref: "https://secret-token@example.test/private",
+          message: "warning token=secret-token",
+          mismatchedDimensions: ["environment_ids", "secret-token"],
+        }],
+      })),
+    };
+
+    const result = await createContextReadService({ registry: registry(), adapter }).read(request({ refs: [] }));
+
+    expect(result).toMatchObject({
+      outcome: "completed",
+      providers: [{
+        warnings: [{
+          code: "scope_mismatch",
+          severity: "warning",
+          providerId: "enterprise-wiki",
+          message: "Context Provider warning (scope_mismatch)",
+          mismatchedDimensions: ["environment_ids"],
+        }],
+      }],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-token");
+  });
+
   it("blocks scope mismatch without retaining the Provider files", async () => {
     const paths = ["purpose.md", "schema.md", "wiki/index.md", "wiki/log.md", "wiki/systems/axis.md"];
     const adapter: ContextProviderReadAdapter = {

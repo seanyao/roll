@@ -70,6 +70,7 @@ async function checkedObjectGit(
   runGit: GitLlmWikiCommandRunner,
   revision: GitProviderRevisionV1,
   args: readonly string[],
+  timeoutMs: number,
   code: ContextDiagnosticV1["code"],
   ref?: string,
 ): Promise<string> {
@@ -78,7 +79,7 @@ async function checkedObjectGit(
     result = await runGit(
       command(args),
       revision.cachePath,
-      { timeoutMs: 30_000 },
+      { timeoutMs },
     );
   } catch {
     throw new ContextObjectReadError(code, ref);
@@ -101,6 +102,7 @@ async function describeFiles(
   runGit: GitLlmWikiCommandRunner,
   revision: GitProviderRevisionV1,
   paths: readonly string[],
+  timeoutMs: number,
 ): Promise<readonly GitObjectDescriptor[]> {
   const descriptors: GitObjectDescriptor[] = [];
   for (const path of paths) {
@@ -109,6 +111,7 @@ async function describeFiles(
       runGit,
       revision,
       ["ls-tree", revision.revision, "--", path],
+      timeoutMs,
       "context_file_missing",
       ref,
     );
@@ -118,6 +121,7 @@ async function describeFiles(
       runGit,
       revision,
       ["cat-file", "-s", parsed.oid],
+      timeoutMs,
       "context_file_missing",
       ref,
     );
@@ -155,6 +159,7 @@ async function readContents(
   runGit: GitLlmWikiCommandRunner,
   revision: GitProviderRevisionV1,
   descriptors: readonly GitObjectDescriptor[],
+  timeoutMs: number,
 ): Promise<readonly FixedRevisionBlobFact[]> {
   const files: FixedRevisionBlobFact[] = [];
   for (const descriptor of descriptors) {
@@ -173,6 +178,7 @@ async function readContents(
       runGit,
       revision,
       ["cat-file", "blob", descriptor.oid],
+      timeoutMs,
       "context_file_missing",
       ref,
     );
@@ -193,10 +199,11 @@ async function readAtFixedRevision(
   runGit: GitLlmWikiCommandRunner,
 ): Promise<ContextProviderReadOutcomeV1> {
   try {
-    const descriptors = await describeFiles(runGit, revision, input.paths);
+    const timeoutMs = input.plan.provider.fetch_timeout_seconds * 1_000;
+    const descriptors = await describeFiles(runGit, revision, input.paths, timeoutMs);
     const overBudget = budgetFailure(revision.providerId, descriptors);
     if (overBudget !== undefined) return overBudget;
-    const facts = await readContents(runGit, revision, descriptors);
+    const facts = await readContents(runGit, revision, descriptors, timeoutMs);
     const validation = validateLlmWikiRevision({
       providerId: revision.providerId,
       entrypoints: input.plan.binding.entrypoints,

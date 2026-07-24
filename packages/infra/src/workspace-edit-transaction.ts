@@ -223,7 +223,17 @@ async function applyUnderLock(
   const preview = input.plan;
   const journalPath = workspaceEditJournalPath(input.rollHome, preview.workspaceId);
   const existing = parseJournal(journalPath);
-  const facts = input.reloadCurrent();
+  let facts: WorkspaceEditTransactionFacts;
+  try {
+    facts = input.reloadCurrent();
+  } catch (error) {
+    throw new WorkspaceEditTransactionError(
+      "reference_index_invalid",
+      "Workspace metadata reference authority could not be reloaded safely",
+      `roll workspace doctor ${preview.workspaceId}`,
+      { cause: error },
+    );
+  }
   const currentSha256 = sha256(serializeWorkspaceManifest(facts.manifest));
 
   if (existing !== null) {

@@ -250,6 +250,69 @@ describe("US-WS-026 Workspace edit transaction", () => {
     expect(readWorkspace(f.workspaceRoot).displayName).toBe("Renamed Demo");
   });
 
+  it("rebuilds from fresh references on a prepared-journal retry and rejects a newly dangerous Issue reference", async () => {
+    const f = fixture();
+    const preview = plan(f, { requirements: [] });
+    const input = transactionInput(f, preview);
+    const manifestBefore = readFileSync(f.manifestPath);
+    const issueBefore = readFileSync(f.issuePath);
+    const requirementBefore = readFileSync(f.requirementPath);
+
+    await expect(applyWorkspaceEditPlan(input, {
+      crashPoint: (phase) => { if (phase === "journal_prepared") throw new Error("crash"); },
+    })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "io_failure" }));
+    const journalPath = workspaceEditJournalPath(f.rollHome, "ws-demo");
+    expect(existsSync(journalPath)).toBe(true);
+
+    write(join(f.workspaceRoot, "issues", "US-NEW", "manifest.json"), {
+      schema: "roll.issue/v1",
+      workspaceId: "ws-demo",
+      storyId: "US-NEW",
+      requirements: [{ provider: "jira", ref: "SOT-15499" }],
+      repositories: [{
+        repoId: f.repoId,
+        alias: "product",
+        access: "write",
+        requiredDelivery: true,
+        noChangePolicy: "changes_required",
+      }],
+    });
+
+    await expect(applyWorkspaceEditPlan(input)).rejects.toEqual(
+      expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "metadata_referenced" }),
+    );
+    expect(readFileSync(f.manifestPath)).toEqual(manifestBefore);
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
+    expect(existsSync(journalPath)).toBe(false);
+  });
+
+  it("fails closed when reference authority is corrupt on a prepared-journal retry", async () => {
+    const f = fixture();
+    const preview = plan(f);
+    const input = transactionInput(f, preview);
+    const manifestBefore = readFileSync(f.manifestPath);
+    const requirementBefore = readFileSync(f.requirementPath);
+
+    await expect(applyWorkspaceEditPlan(input, {
+      crashPoint: (phase) => { if (phase === "journal_prepared") throw new Error("crash"); },
+    })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "io_failure" }));
+    const journalPath = workspaceEditJournalPath(f.rollHome, "ws-demo");
+    writeFileSync(f.issuePath, "{invalid issue authority\n", "utf8");
+    const corruptedIssue = readFileSync(f.issuePath);
+
+    await expect(applyWorkspaceEditPlan(input)).rejects.toEqual(
+      expect.objectContaining<Partial<WorkspaceEditTransactionError>>({
+        code: "reference_index_invalid",
+        action: "roll workspace doctor ws-demo",
+      }),
+    );
+    expect(readFileSync(f.manifestPath)).toEqual(manifestBefore);
+    expect(readFileSync(f.issuePath)).toEqual(corruptedIssue);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
+    expect(existsSync(journalPath)).toBe(true);
+  });
+
   it("rejects a lock-time rebuild whose canonical after digest differs from preview", async () => {
     const f = fixture();
     const preview = plan(f);

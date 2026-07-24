@@ -109,6 +109,11 @@ function safeString(
   return normalized;
 }
 
+function safeRelativeRequirementPath(value: string): boolean {
+  if (value.startsWith("/") || value.startsWith("~") || value.includes("\\") || /^[A-Za-z]:/u.test(value)) return false;
+  return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
 function validProvenance(
   value: unknown,
   allowed: ReadonlySet<RequirementHintProvenance>,
@@ -146,6 +151,10 @@ export function normalizeRequirementHint(input: RequirementHintInput): Requireme
     const normalized = normalizeRequirementSourceReference(provider, ref);
     if (!normalized.ok) {
       findings.push({ code: "invalid_requirement_source", path: `sources[${index}].key`, detail: "Requirement source must be a canonical structured provider/reference" });
+      continue;
+    }
+    if (normalized.value.provider === "local_file" && !safeRelativeRequirementPath(normalized.value.ref)) {
+      findings.push({ code: "invalid_requirement_source", path: `sources[${index}].key`, detail: "Local-file requirement source must remain inside the host-selected Workspace root" });
       continue;
     }
     sources.push({

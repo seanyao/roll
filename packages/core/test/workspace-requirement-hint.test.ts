@@ -94,6 +94,7 @@ describe("US-WS-027 RequirementHintV1 normalization", () => {
     ["incomplete Jira number", { sources: [{ key: { provider: "jira", ref: "234" }, provenance: "deterministic_extraction" }] }],
     ["unknown provider", { sources: [{ key: { provider: "linear", ref: "ENG-1" }, provenance: "explicit_user" }] }],
     ["semantic exact source", { sources: [{ key: { provider: "jira", ref: "APE-234" }, provenance: "semantic_inference" }] }],
+    ["out-of-bounds local file", { sources: [{ key: { provider: "local_file", ref: "../PRD/Brief.md" }, provenance: "explicit_user" }] }],
     ["relative candidate path", { paths: [{ path: "issues/US-WS-027", provenance: "explicit_user" }] }],
     ["semantic repository", { repositoryRemotes: [{ remote: "https://github.com/Owner/Repo", provenance: "semantic_inference" }] }],
   ] as const)("rejects %s instead of guessing a structured identity", (_name, input) => {

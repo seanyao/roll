@@ -140,6 +140,60 @@ export interface ArtifactValidation {
   readonly reasons: readonly string[];
 }
 
+/**
+ * US-DELTA-007 — the two eval-report shapes Roll can READ:
+ *  - `authored` — a REAL Evaluator-authored Full Delta report: carries
+ *    `## Inputs checked` + `## Rationale`. The ONLY shape a NEW Delta/Full Delta
+ *    run may produce (an adapter-launched Evaluator writes it).
+ *  - `legacy` — a historical ASSEMBLED report (the retired `writeEvaluatorArtifact`
+ *    writer: `## Blocking findings` / `## Recommendation`). Kept READABLE as
+ *    archived evidence — never producible again, and never accepted as a new
+ *    authored evaluation.
+ *  - `invalid` — neither shape parses.
+ */
+export type EvalReportKind = "authored" | "legacy" | "invalid";
+
+/**
+ * US-DELTA-007 — classify an `eval-report.md` WITHOUT rewriting it. Historical
+ * assembled reports are recognised + explicitly labeled `legacy` so they stay
+ * readable evidence; a real authored report is `authored`. This is the READER's
+ * legacy allowance (AC6): no on-disk migration.
+ */
+export function classifyEvalReport(md: string): EvalReportKind {
+  if (typeof md !== "string" || md.trim() === "") return "invalid";
+  const hasInputs = /^##\s+inputs checked/im.test(md);
+  const hasRationale = /^##\s+rationale/im.test(md);
+  if (hasInputs && hasRationale) return "authored";
+  // parseEvalReport reads the RETIRED assembled format — historical evidence.
+  if (parseEvalReport(md, "legacy") !== null) return "legacy";
+  return "invalid";
+}
+
+/**
+ * US-DELTA-007 — the PURE report validator for a NEW Full Delta run: a report is
+ * valid ONLY when it is a REAL authored evaluation (`## Inputs checked` +
+ * `## Rationale`). A legacy ASSEMBLED report is recognised, labeled, and
+ * REJECTED — an assembly of score/attest fields can never satisfy the Evaluator
+ * requirement. `null` (no report on disk) is fail-closed.
+ */
+export function validateAuthoredEvalReport(md: string | null): ArtifactValidation {
+  if (md === null) return { ok: false, reasons: ["eval-report.md missing"] };
+  const kind = classifyEvalReport(md);
+  if (kind === "authored") return { ok: true, reasons: [] };
+  if (kind === "legacy") {
+    return {
+      ok: false,
+      reasons: [
+        "eval-report.md is a legacy ASSEMBLED report (no '## Inputs checked' / '## Rationale') — an assembled report can never satisfy the Evaluator requirement",
+      ],
+    };
+  }
+  const reasons: string[] = [];
+  if (!/^##\s+inputs checked/im.test(md)) reasons.push("eval-report.md missing '## Inputs checked' section");
+  if (!/^##\s+rationale/im.test(md)) reasons.push("eval-report.md missing '## Rationale' section");
+  return { ok: false, reasons: reasons.length > 0 ? reasons : ["eval-report.md malformed"] };
+}
+
 /** Shape-check an {@link ArtifactManifest} read from disk (fail-closed on a
  *  missing/garbled manifest). `expectedRole` pins the role. */
 export function validateArtifactManifest(

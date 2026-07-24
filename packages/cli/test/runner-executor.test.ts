@@ -14,7 +14,7 @@ import { AGENTS } from "../../core/src/agent/specs.js";
 import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
 import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
-import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
+import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, runEvaluatorStage, runDesignerStage } from "../src/runner/executor.js";
 import { submoduleAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
 import { evaluateReviewScoreGate, readLatestStoryPeerScore, writeReviewScoreNote } from "../src/lib/review-score.js";
 import { buildLowScoreFixForwardPrompt } from "../src/runner/project-map.js";
@@ -6846,99 +6846,211 @@ describe("US-V4-004 — execution profile selection + durable recording", () => 
   });
 });
 
-describe("US-V4-005 — verified execution: evaluator artifact boundary", () => {
-  function repoWithScore(id: string, sessionId: string, verdict: "good" | "ok" | "regression", score: number): string {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-005-")));
-    execDirs.push(repo);
-    const notesDir = join(repo, ".roll", "features", "uncategorized", id, "notes");
-    mkdirSync(notesDir, { recursive: true });
-    writeFileSync(
-      join(notesDir, `2026-06-28-roll-build-${id}-${score}.md`),
-      ["---", "skill: roll-build", `story: ${id}`, `score: ${score}`, `verdict: ${verdict}`, "ts: 2026-06-28T12:00:00Z", "scoring: pair", "scored-by: reasonix", `session-id: ${sessionId}`, "---", "", "peer rationale."].join("\n"),
-    );
-    return repo;
-  }
-  function ctxFor(repo: string, id: string, profile: "standard" | "verified" | "designed", builderSession: string): Parameters<typeof writeEvaluatorArtifact>[1] {
+describe("US-DELTA-007 — Full Delta Evaluator authors its own report (no assembly)", () => {
+  // A GENUINE Evaluator-authored report: the ONLY shape that gates success.
+  const AUTHORED_REPORT = [
+    "# Evaluator report",
+    "",
+    "## Inputs checked",
+    "- builder committed diff",
+    "- ac-map.json",
+    "- attest report",
+    "",
+    "## Rationale",
+    "- Every AC is covered by a test; no regressions. Recommend merge.",
+    "",
+  ].join("\n");
+  // A historical ASSEMBLED report (the RETIRED writer's shape) — must be
+  // recognised, labeled legacy, and REJECTED as a new authored evaluation.
+  const LEGACY_ASSEMBLED_REPORT = [
+    "# Evaluator report — US-E",
+    "",
+    "## Blocking findings",
+    "- (none)",
+    "",
+    "## Advisory findings",
+    "- (none)",
+    "",
+    "## Score",
+    "- 8 (good)",
+    "",
+    "## Attest / evidence status",
+    "- produced",
+    "",
+    "## Recommendation",
+    "- merge",
+    "",
+  ].join("\n");
+  // A peer-review-only artifact — an INPUT, never an Evaluator report.
+  const PEER_ONLY = ["# Peer review", "", "Looks good, ship it.", ""].join("\n");
+
+  function evalCtx(repo: string, id: string, profile: "standard" | "verified" | "designed"): Parameters<typeof runEvaluatorStage>[1] {
     const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
     mkdirSync(runDir, { recursive: true });
-    return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: profile, evidenceRunDir: runDir, builderSessionId: builderSession };
+    return { cycleId: "C-7", branch: "b", loop: "x", storyId: id, selectedProfile: profile, evidenceRunDir: runDir, agent: "pi", builderSessionId: "C-7:build:pi:0" };
   }
-
-  it("standard profile writes no evaluator artifact", () => {
-    const repo = repoWithScore("US-E1", "C-1:score:reasonix:1", "good", 8);
-    const { ports } = fakePorts({ repoCwd: repo });
-    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E1", "standard", "C-1:build:codex:0"), { attestStatus: "produced", blockingFindings: [] });
-    expect(r.written).toBe(false);
-    expect(r.valid).toBe(true);
-  });
-
-  it("verified profile writes eval-report.md + manifest from a fresh-session score → valid", () => {
-    const repo = repoWithScore("US-E2", "C-1:score:reasonix:1", "good", 8);
-    const { ports } = fakePorts({ repoCwd: repo });
-    const ctx = ctxFor(repo, "US-E2", "verified", "C-1:build:codex:0");
-    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
-    expect(r.written).toBe(true);
-    expect(r.valid).toBe(true);
-    const reportPath = join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md");
-    expect(readFileSync(reportPath, "utf8")).toContain("## Recommendation");
-    expect(readFileSync(reportPath, "utf8")).toContain("merge");
-    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
-    expect(man.role).toBe("evaluator");
-  });
-
-  it("BUILDER SELF-GRADE: evaluator session == builder session → written but fails closed (invalid)", () => {
-    const shared = "C-1:build:codex:0";
-    const repo = repoWithScore("US-E3", shared, "good", 8);
-    const { ports } = fakePorts({ repoCwd: repo });
-    const r = writeEvaluatorArtifact(ports, ctxFor(repo, "US-E3", "verified", shared), { attestStatus: "produced", blockingFindings: [] });
-    expect(r.written).toBe(true);
-    expect(r.valid).toBe(false);
-    expect(r.reasons.join(" ")).toContain("self-grade");
-  });
-
-  it("a blocking finding → repair recommendation in the eval report", () => {
-    const repo = repoWithScore("US-E4", "C-1:score:reasonix:1", "ok", 7);
-    const { ports } = fakePorts({ repoCwd: repo });
-    const ctx = ctxFor(repo, "US-E4", "verified", "C-1:build:codex:0");
-    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: ["AC2 has no test"] });
-    expect(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "eval-report.md"), "utf8")).toContain("repair");
-  });
-
-  // FIX-1262 — the evaluator manifest's rig.agent must come from the ACTUAL
-  // scorer (`scored-by`), never a source-baked 'reasonix' fabrication.
-  function repoWithScoreBy(id: string, sessionId: string, score: number, scoredBy: string | undefined): string {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1262-")));
+  const EVAL_DEPS: Parameters<typeof runEvaluatorStage>[2] = {
+    resolveEvaluator: () => ({ ok: true, agent: "reasonix", source: "availability-fallback", reasons: ["cast"] }),
+  };
+  function eventsOfType(calls: Record<string, unknown[]>, type: string): Record<string, unknown>[] {
+    return (calls["event"] ?? []).map((a) => (a as unknown[])[1] as Record<string, unknown>).filter((e) => e.type === type);
+  }
+  function newRepo(): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-007-")));
     execDirs.push(repo);
-    const notesDir = join(repo, ".roll", "features", "uncategorized", id, "notes");
-    mkdirSync(notesDir, { recursive: true });
-    const lines = ["---", "skill: roll-build", `story: ${id}`, `score: ${score}`, "verdict: good", "ts: 2026-07-15T12:00:00Z", "scoring: pair"];
-    if (scoredBy !== undefined) lines.push(`scored-by: ${scoredBy}`);
-    lines.push(`session-id: ${sessionId}`, "---", "", "peer rationale.");
-    writeFileSync(join(notesDir, `2026-07-15-roll-build-${id}-${score}.md`), lines.join("\n"));
     return repo;
   }
+  function spawnWriting(sink: { agent: string; opts: AgentSpawnOptions }[], content: string | null): Ports["agentSpawn"] {
+    return (async (agent: string, opts: AgentSpawnOptions) => {
+      sink.push({ agent, opts });
+      if (content !== null) writeFileSync(join(opts.runDir as string, "eval-report.md"), content);
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    }) as unknown as Ports["agentSpawn"];
+  }
 
-  it("FIX-1262: manifest.rig.agent is the ACTUAL scorer (scored-by), never a baked 'reasonix'", () => {
-    const repo = repoWithScoreBy("US-E5", "C-1:score:kimi:1", 8, "kimi");
-    const { ports } = fakePorts({ repoCwd: repo });
-    const ctx = ctxFor(repo, "US-E5", "verified", "C-1:build:codex:0");
-    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
-    expect(r.valid).toBe(true);
-    const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
-    expect(man.rig.agent).toBe("kimi");
-    expect(JSON.stringify(man)).not.toContain("reasonix");
+  it("AC guardrail: standard profile runs NO evaluator stage (byte-unchanged builder-only path)", async () => {
+    const repo = newRepo();
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports, calls } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, AUTHORED_REPORT) });
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E0", "standard"), EVAL_DEPS);
+    expect(r.ran).toBe(false);
+    expect(r.ok).toBe(true);
+    expect(spawns).toHaveLength(0);
+    expect(eventsOfType(calls, "delta:role_started")).toHaveLength(0);
   });
 
-  it("FIX-1262: a score note with NO scored-by → rig.agent absent + fails closed (no fabricated 'reasonix')", () => {
-    const repo = repoWithScoreBy("US-E6", "C-1:score:anon:1", 8, undefined);
-    const { ports } = fakePorts({ repoCwd: repo });
-    const ctx = ctxFor(repo, "US-E6", "verified", "C-1:build:codex:0");
-    const r = writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
+  it("AC3: Evaluator is cast INDEPENDENTLY (distinct session, read-only) and authors report + v2 manifest → ok", async () => {
+    const repo = newRepo();
+    const ctx = evalCtx(repo, "US-E1", "verified");
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports, calls } = fakePorts({ repoCwd: repo, clock: () => 77, agentSpawn: spawnWriting(spawns, AUTHORED_REPORT) });
+    const r = await runEvaluatorStage(ports, ctx, { ...EVAL_DEPS, hostId: "host-A" });
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(true);
+    expect(r.evaluatorAgent).toBe("reasonix");
+    // AC4: the evaluator session is distinct from the builder's session shape.
+    expect(r.evaluatorSessionId).toBe("C-7:evaluate:reasonix:77");
+    expect(r.evaluatorSessionId).not.toBe(ctx.builderSessionId);
+    // Cast as "reasonix" (its own agent), not the builder "pi".
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]!.agent).toBe("reasonix");
+    // AC3: READ-ONLY — its only writable root is its own artifact dir.
+    expect(spawns[0]!.opts.readOnly).toBe(true);
+    const roots = spawns[0]!.opts.writableRoots ?? [];
+    expect(roots).not.toContain(ports.paths.worktreePath);
+    expect(roots.every((p) => p.includes("role-artifacts"))).toBe(true);
+    // AC3: its OWN v2 manifest, role="evaluator", read-only access.
     const man = JSON.parse(readFileSync(join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator", "artifact-manifest.json"), "utf8"));
-    expect(man.rig.agent).toBeUndefined();
-    expect(JSON.stringify(man)).not.toContain("reasonix");
-    expect(r.valid).toBe(false);
-    expect(r.reasons.join(" ")).toContain("rig.agent");
+    expect(man.schemaVersion).toBe(2);
+    expect(man.role).toBe("evaluator");
+    expect(man.worktreeAccess).toBe("read-only");
+    expect(man.executionIdentity.roleInstanceId).toBe("C-7:evaluator:reasonix");
+    // AC3: separate role_resolved + role_started facts, adapter-observed, read-only.
+    const resolvedEv = eventsOfType(calls, "delta:role_resolved");
+    const startedEv = eventsOfType(calls, "delta:role_started");
+    expect(resolvedEv).toHaveLength(1);
+    expect(startedEv).toHaveLength(1);
+    expect(resolvedEv[0]!.role).toBe("evaluator");
+    expect(startedEv[0]!.role).toBe("evaluator");
+    expect(startedEv[0]!.sessionId).toBe("C-7:evaluate:reasonix:77");
+    expect(startedEv[0]!.identityProvenance).toBe("adapter-observed");
+    expect(startedEv[0]!.worktreeAccess).toBe("read-only");
+  });
+
+  it("AC1/AC2: score/attest-only inputs CANNOT finish — no authored report → BLOCKED artifact_invalid", async () => {
+    const repo = newRepo();
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    // The evaluator spawn writes NOTHING (mirrors score/attest fields alone).
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, null) });
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E2", "verified"), EVAL_DEPS);
+    expect(r.ran).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(r.reasons.join(" ")).toContain("eval-report.md missing");
+  });
+
+  it("AC5/AC6: a LEGACY assembled report is recognised, labeled legacy, and REJECTED (never satisfies the Evaluator)", async () => {
+    const repo = newRepo();
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, LEGACY_ASSEMBLED_REPORT) });
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E3", "verified"), EVAL_DEPS);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(r.reasons.join(" ")).toContain("legacy ASSEMBLED report");
+  });
+
+  it("AC5: a peer-only artifact is an INPUT and can NEVER satisfy the Evaluator requirement", async () => {
+    const repo = newRepo();
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, PEER_ONLY) });
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E4", "verified"), EVAL_DEPS);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(r.reasons.join(" ")).toMatch(/Inputs checked|Rationale/);
+  });
+
+  it("AC4: identity_collision — evaluator sessionId == builder sessionId is rejected BEFORE any spawn", async () => {
+    const repo = newRepo();
+    const ctx = { ...evalCtx(repo, "US-E5", "verified"), builderSessionId: "C-7:evaluate:reasonix:42" };
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    // Default clock is 42 → evaluatorSessionId "C-7:evaluate:reasonix:42" collides.
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, AUTHORED_REPORT) });
+    const r = await runEvaluatorStage(ports, ctx, EVAL_DEPS);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("identity_collision");
+    expect(spawns).toHaveLength(0); // rejected before spawn — no self-grade
+  });
+
+  it("AC3: role facts are REQUIRED — a failure to record them FAILS CLOSED (no spawn)", async () => {
+    const repo = newRepo();
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, AUTHORED_REPORT) });
+    ports.events.appendEvent = () => {
+      throw new Error("events volume full");
+    };
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E6", "verified"), EVAL_DEPS);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(spawns).toHaveLength(0);
+    expect(r.reasons.join(" ")).toContain("role facts");
+  });
+
+  it("AC3: FAIL CLOSED when no scoped evaluate binding exists (no fallback to the Builder)", async () => {
+    const repo = newRepo();
+    let spawned = false;
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => {
+        spawned = true;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    const r = await runEvaluatorStage(ports, evalCtx(repo, "US-E7", "verified"), { resolveEvaluator: () => null });
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(spawned).toBe(false);
+    expect(r.reasons.join(" ")).toContain("no scoped agents.yaml evaluate binding");
+  });
+
+  it("AC2/AC8: capture_facts BLOCKS a verified delivery with no valid evaluator artifact + emits a fail-loud alert", async () => {
+    const repo = newRepo();
+    mkdirSync(join(repo, ".roll"), { recursive: true });
+    const wt = join(repo, "wt");
+    mkdirSync(wt, { recursive: true });
+    // No agents.yaml in repo → defaultResolveEvaluator returns null → blocked.
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, worktreePath: wt, eventsPath: join(repo, ".roll", "events.ndjson") },
+      github: { ...fakePorts().ports.github, prState: vi.fn(async () => "NONE") },
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, { ...CTX, startSec: 1, selectedProfile: "verified" });
+    // Delivery is gate-blocked → NOT Done.
+    expect(r.event).toMatchObject({ type: "facts_captured", facts: { gateBlocked: true } });
+    // AC8: a clear fail-loud evaluator block alert was emitted.
+    const alerts = (calls["alert"] ?? []).map((a) => (a as unknown[])[1] as string);
+    const evalAlert = alerts.find((m) => m.includes("evaluator artifact") && m.includes("BLOCKED"));
+    expect(evalAlert).toBeDefined();
+    expect(evalAlert).toContain("artifact_invalid");
   });
 });
 
@@ -7014,23 +7126,11 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     expect(r.reasons.join(" ")).toContain("design-contract.md missing or malformed");
   });
 
-  it("Evaluator reports design-contract-vs-delivered when a designer contract exists", () => {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
-    execDirs.push(repo);
-    const id = "US-P3";
-    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
-    mkdirSync(join(runDir, "role-artifacts", "designer"), { recursive: true });
-    writeFileSync(join(runDir, "role-artifacts", "designer", "design-contract.md"), VALID_CONTRACT);
-    // an ac-map delivering the designed acceptance item
-    mkdirSync(join(repo, ".roll", "features", "uncategorized", id), { recursive: true });
-    writeFileSync(join(repo, ".roll", "features", "uncategorized", id, "ac-map.json"), JSON.stringify([{ ac: "picker prefers est_min", status: "pass" }]));
-    const { ports } = fakePorts({ repoCwd: repo });
-    const ctx = { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "designed" as const, evidenceRunDir: runDir, builderSessionId: "C-1:build:codex:0" };
-    writeEvaluatorArtifact(ports, ctx, { attestStatus: "produced", blockingFindings: [] });
-    const report = readFileSync(join(runDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8");
-    expect(report).toContain("## Design contract vs delivered");
-    expect(report).toContain("satisfied");
-  });
+  // NOTE (US-DELTA-007): the former "Evaluator reports design-contract-vs-delivered"
+  // test was REMOVED — it asserted the RETIRED `writeEvaluatorArtifact` assembler
+  // (score/attest → eval-report.md). Full Delta now requires a REAL Evaluator to
+  // author its own report; the assembly path no longer exists. See the
+  // "US-DELTA-007 — Full Delta Evaluator authors its own report" describe block.
 });
 
 describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () => {

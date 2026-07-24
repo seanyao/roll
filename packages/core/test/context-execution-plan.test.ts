@@ -458,11 +458,16 @@ describe("compileContextProviderExecutionPlans", () => {
       enabled: true,
       bindings: [binding()],
     };
+    const inheritedAuthority = Object.create({
+      ...workspace(),
+      contexts: workspace({ bindings: [{ ...binding(), credentialRef: secret } as WorkspaceContextBindingV1] }).contexts,
+    }) as unknown;
 
     for (const invalidWorkspace of [
       workspace({ bindings: [bindingWithExtras] }),
       rootWithExtras,
       { ...workspace(), authorities: { ...workspace().authorities, runtime: "" } },
+      inheritedAuthority,
     ]) {
       const result = compileContextProviderExecutionPlans({
         registry: registry(),

@@ -219,6 +219,7 @@ function envCommandIndex(args: readonly string[]): number {
 
 const NODE_OPTIONS_WITH_VALUE = new Set([
   "-r", "--require", "--import", "--loader", "--experimental-loader", "--conditions",
+  "--input-type",
   "--inspect-port", "--title", "--icu-data-dir", "--openssl-config", "--redirect-warnings",
   "--diagnostic-dir", "--cpu-prof-dir", "--heap-prof-dir", "--report-dir", "--test-reporter",
 ]);
@@ -227,7 +228,10 @@ function nodeEvalDenied(args: readonly string[]): boolean {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? "";
     if (argument === "--") return false;
-    if (argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=")) return true;
+    if (
+      argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=") ||
+      argument === "-p" || argument.startsWith("-p") || argument === "--print" || argument.startsWith("--print=")
+    ) return true;
     if (!argument.startsWith("-")) return false;
     if (NODE_OPTIONS_WITH_VALUE.has(argument)) index += 1;
   }

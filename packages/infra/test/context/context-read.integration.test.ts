@@ -64,6 +64,7 @@ function writeWiki(source: string, version: string): void {
   writeFileSync(join(source, "wiki", "index.md"), `# Index\n\naxis-${version}\n`, "utf8");
   writeFileSync(join(source, "wiki", "overview.md"), page("Overview", `overview-${version}`), "utf8");
   writeFileSync(join(source, "wiki", "systems", "axis.md"), page("Axis", `axis-${version}`), "utf8");
+  writeFileSync(join(source, "wiki", "systems", "中文.md"), page("中文", `中文-${version}`), "utf8");
 }
 
 function remoteFixture(root: string): { readonly source: string; readonly bare: string; revision: string } {
@@ -127,14 +128,14 @@ function workspace(): WorkspaceExecutionContextV1 {
   };
 }
 
-function request(): ContextReadRequestV1 {
+function request(refs: readonly string[] = ["context://enterprise-wiki/wiki/systems/axis.md"]): ContextReadRequestV1 {
   return {
     schema: CONTEXT_READ_REQUEST_V1,
     workspace: workspace(),
     storyId: "US-CONTEXT-005",
     stage: "build",
     environmentIds: ["sit"],
-    refs: ["context://enterprise-wiki/wiki/systems/axis.md"],
+    refs,
   };
 }
 
@@ -177,6 +178,53 @@ describe("Context read integration", () => {
       diagnostic: { code: "context_budget_exceeded", providerId: "enterprise-wiki" },
     });
     expect(runGit).not.toHaveBeenCalled();
+  });
+
+  it("reads a Unicode wiki path from real Git without depending on core.quotePath", async () => {
+    const root = sandbox();
+    const remote = remoteFixture(root);
+    const calls: string[][] = [];
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
+      calls.push([...args]);
+      const operation = args.slice(12);
+      const executable = [...args];
+      if (operation[0] === "remote" && operation[1] === "add") {
+        executable[executable.length - 1] = `file://${remote.bare}`;
+      }
+      if (operation[0] === "fetch") {
+        executable[executable.length - 2] = `file://${remote.bare}`;
+      }
+      executable.splice(12, 0, "-c", "protocol.file.allow=always");
+      const result = await rawGit(executable, cwd, options);
+      if (operation[0] === "remote" && operation[1] === "get-url" && result.code === 0) {
+        return { ...result, stdout: `${PUBLIC_REMOTE}\n` };
+      }
+      return result;
+    });
+    const adapter = createContextReadAdapter({ rollHome: join(root, "roll-home"), runGit });
+    const service = createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [{
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        }],
+      },
+      adapter,
+    });
+
+    const result = await service.read(request(["context://enterprise-wiki/wiki/systems/中文.md"]));
+
+    expect(result).toMatchObject({ outcome: "completed", providers: [{ revision: remote.revision }] });
+    expect(result.providers[0]?.files.find((file) => file.path === "wiki/systems/中文.md")?.content)
+      .toContain("中文-v1");
+    const unicodeTree = calls.find((args) => args.includes("wiki/systems/中文.md") && args.includes("ls-tree"));
+    expect(unicodeTree?.slice(12, 15)).toEqual(["ls-tree", "-z", remote.revision]);
   });
 
   it("fetches every read, pins every file to that read SHA and never falls back after a later fetch failure", async () => {
@@ -250,7 +298,7 @@ describe("Context read integration", () => {
     const lsTrees = mutableCalls.filter((args) => args.slice(12)[0] === "ls-tree");
     expect(lsTrees.length).toBeGreaterThan(0);
     expect(lsTrees.every((args) => {
-      const revision = args.slice(12)[1];
+      const revision = args.slice(12)[2];
       return revision === first.providers[0]?.revision || revision === second.providers[0]?.revision;
     })).toBe(true);
     expect(lsTrees.some((args) => args.includes("HEAD"))).toBe(false);

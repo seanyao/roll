@@ -90,8 +90,14 @@ async function checkedObjectGit(
 
 function parseLsTree(path: string, output: string): { readonly mode: FixedRevisionBlobFact["mode"]; readonly oid: string } | undefined {
   if (output === "") return undefined;
-  const line = output.endsWith("\n") ? output.slice(0, -1) : output;
-  const match = /^(100644|100755|120000) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/u.exec(line);
+  if (!output.endsWith("\0")) {
+    throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
+  }
+  const record = output.slice(0, -1);
+  if (record.includes("\0")) {
+    throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
+  }
+  const match = /^(100644|100755|120000) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/u.exec(record);
   if (match === null || match[3] !== path || match[1] === undefined || match[2] === undefined) {
     throw new ContextObjectReadError("context_file_missing", `context://unknown/${path}`);
   }
@@ -110,7 +116,7 @@ async function describeFiles(
     const tree = await checkedObjectGit(
       runGit,
       revision,
-      ["ls-tree", revision.revision, "--", path],
+      ["ls-tree", "-z", revision.revision, "--", path],
       timeoutMs,
       "context_file_missing",
       ref,

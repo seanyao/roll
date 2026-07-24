@@ -191,6 +191,21 @@ describe("US-WS-032 actual Workspace surface inventory", () => {
     }
   });
 
+  it("excludes retired loop routes from live inventory and the compatibility matrix", () => {
+    registerAll();
+    const retired = new Set(["monitor", "attach", "branches", "test-quality-check"]);
+    const inventory = registeredCliOperations();
+    const matrix = buildRegisteredWorkspaceContextMatrix({
+      cliRegistrations: inventory,
+      skillInventory: skillContextInventoryFromManifest(skillsManifest()),
+      skillPolicies: skillContextPoliciesFromManifest(skillsManifest()),
+    });
+
+    expect(inventory.filter((entry) => entry.command === "loop" && retired.has(entry.operation))).toEqual([]);
+    expect(matrix.rows.filter((row) => row.surface === "cli" && row.id === "loop" && retired.has(row.operation)))
+      .toEqual([]);
+  });
+
   it("preserves a legitimate positional single-operation command at runtime", async () => {
     registerAll();
     const operations = registeredCliOperations().filter((entry) => entry.command === "idea");

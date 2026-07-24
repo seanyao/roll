@@ -17,7 +17,6 @@ import {
   isWorkspaceSelectorAlias,
   publicCommands,
   WORKSPACE_SELECTOR_ALIAS,
-  workspaceSelectorOperation,
   type WorkspaceSelectorOperationDecision,
   type CliCommandOperationRegistration,
 } from "./lib/command-surface.js";
@@ -302,8 +301,16 @@ export async function dispatch(
         process.stderr.write(`roll ${command}: operation '${operation.operation}' does not accept --workspace\n`);
         return { status: 1 };
       }
-      const selectorOperation = workspaceSelectorOperation(command, rest, operations);
-      if (operation?.supportsWorkspaceSelector === true && selectorOperation !== undefined) {
+      if (operation?.supportsWorkspaceSelector === true) {
+        const selectorOperation: WorkspaceSelectorOperationDecision = {
+          id: `${operation.command}.${operation.operation}`,
+          operation: operation.operation,
+          command: operation.command,
+          route: operation.route,
+          canonicalCommand: operation.canonicalCommand,
+          exampleArgs: operation.exampleArgs ?? [],
+          acceptsWorkspaceSelector: true,
+        };
         const parsed = parseCanonicalWorkspaceSelectorArgs(rest);
         if (!parsed.ok) return emitWorkspaceSelectorError(parsed.code, selectorOperation, rest);
       }

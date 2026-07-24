@@ -186,6 +186,80 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(unsupportedCalls).toEqual([["--", "--workspace", "roll"]]);
   });
 
+  it.each(["monitor", "attach", "branches", "test-quality-check"])(
+    "rejects retired loop route %s without counting it as a live operation",
+    async (route) => {
+      registerAll();
+      const operations = registeredCliOperations().filter((entry) => entry.command === "loop");
+      let handlerRuns = 0;
+      registerPorted("loop", () => {
+        handlerRuns += 1;
+        return 9;
+      }, { operations });
+
+      const result = await captureDispatch(["loop", route]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`[roll] unknown loop subcommand: ${route}`);
+      expect(result.stderr).toContain("Usage: roll loop");
+      expect(handlerRuns).toBe(0);
+    },
+  );
+
+  it.each([
+    {
+      name: "issue help canonical duplicate",
+      args: ["issue", "--help", "--workspace", "roll", "--workspace", "other"],
+      code: "duplicate_workspace_selector",
+    },
+    {
+      name: "issue help alias combination",
+      args: ["issue", "--help", "--ws", "roll", "--workspace", "other"],
+      code: "duplicate_workspace_selector",
+    },
+    {
+      name: "issue help missing alias value",
+      args: ["issue", "--help", "--ws", "--json"],
+      code: "workspace_selector_missing_value",
+    },
+    {
+      name: "requirement help alias duplicate",
+      args: ["requirement", "--help", "--workspace", "roll", "--ws", "other"],
+      code: "duplicate_workspace_selector",
+    },
+    {
+      name: "requirement help missing canonical value",
+      args: ["requirement", "--help", "--workspace", "--json"],
+      code: "workspace_selector_missing_value",
+    },
+  ])("validates $name from the uniquely matched selector operation", async ({ args, code }) => {
+    registerAll();
+    const operations = registeredCliOperations().filter((entry) => entry.command === "workspace");
+    const calls: string[][] = [];
+    registerPorted("workspace", (handlerArgs) => {
+      calls.push(handlerArgs);
+      return 91;
+    }, { operations });
+
+    const result = await captureDispatch(["workspace", ...args]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(code);
+    expect(calls).toEqual([]);
+  });
+
+  it("passes post-sentinel selector literals to a uniquely matched selector operation", async () => {
+    registerAll();
+    const operations = registeredCliOperations().filter((entry) => entry.command === "workspace");
+    const calls: string[][] = [];
+    registerPorted("workspace", (args) => {
+      calls.push(args);
+      return 91;
+    }, { operations });
+
+    const result = await captureDispatch(["workspace", "issue", "--help", "--", "--ws", "literal"]);
+    expect(result).toMatchObject({ status: 91, stderr: "" });
+    expect(calls).toEqual([["issue", "--help", "--", "--ws", "literal"]]);
+  });
+
   it("fails closed before an unsupported public handler can consume canonical --workspace", async () => {
     registerAll();
 

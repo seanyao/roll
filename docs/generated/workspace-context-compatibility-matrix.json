@@ -2,7 +2,7 @@
   "schema": "roll.workspace-context-compatibility-matrix/v1",
   "summary": {
     "cliFamilies": 19,
-    "cliOperations": 115,
+    "cliOperations": 111,
     "skillFamilies": 22,
     "skillOperations": 24,
     "toolAdapters": 8,
@@ -413,22 +413,6 @@
     {
       "surface": "cli",
       "id": "loop",
-      "operation": "attach",
-      "scope": "machine_only",
-      "allowsAmbientCwd": false,
-      "allowsLegacyRollPath": false
-    },
-    {
-      "surface": "cli",
-      "id": "loop",
-      "operation": "branches",
-      "scope": "machine_only",
-      "allowsAmbientCwd": false,
-      "allowsLegacyRollPath": false
-    },
-    {
-      "surface": "cli",
-      "id": "loop",
       "operation": "cycle",
       "scope": "workspace_required_read",
       "allowsAmbientCwd": false,
@@ -561,14 +545,6 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
-    },
-    {
-      "surface": "cli",
-      "id": "loop",
-      "operation": "monitor",
-      "scope": "machine_only",
-      "allowsAmbientCwd": false,
-      "allowsLegacyRollPath": false
     },
     {
       "surface": "cli",
@@ -764,14 +740,6 @@
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace"
-    },
-    {
-      "surface": "cli",
-      "id": "loop",
-      "operation": "test-quality-check",
-      "scope": "machine_only",
-      "allowsAmbientCwd": false,
-      "allowsLegacyRollPath": false
     },
     {
       "surface": "cli",

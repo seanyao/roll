@@ -28,6 +28,7 @@ import {
   loopHotfixHeadContextCommand,
   loopNotifyCommand,
   loopPrecheckCiCommand,
+  loopUnknownSubcommandText,
   loopUnknownSubcommand,
 } from "./loop-cycle-gates.js";
 // US-DOSSIER-037: `roll cast` (routing view) + `roll doc --lang` (Charter/guide viewer).
@@ -638,10 +639,6 @@ export function registerAll(): void {
     if (args[0] === "log") return loopLogCommand(args.slice(1));
     if (args[0] === "events") return loopEventsCommand(args.slice(1));
     if (args[0] === "alert") return alertCommand(args.slice(1));
-    // `loop monitor` / `loop attach`: retired aliases are gone from dispatch;
-    // the tested stub helpers stay only as historical format fixtures.
-    if (args[0] === "monitor") return loopUnknownSubcommand(args[0]);
-    if (args[0] === "attach") return loopUnknownSubcommand(args[0]);
     if (args[0] === "run-once") return loopRunOnceCommand(args.slice(1));
     // `loop self-downgrade <story> <reason> [subs]`: park a too-big story at
     // 🚫 Hold + append its sub-stories (US-AGENT-042). The roll-build/roll-fix
@@ -692,8 +689,6 @@ export function registerAll(): void {
     // `loop test` (≠ top-level `roll test`): manual smoke gate — generates the
     // v3 test runner and runs it once with ROLL_LOOP_FORCE=1 (US-PORT-022).
     if (args[0] === "test") return loopTestCommand(args.slice(1));
-    // `loop branches`: retired and no longer dispatched.
-    if (args[0] === "branches") return loopUnknownSubcommand(args[0]);
     // Cycle-gate subcommands the loop AGENT invokes per the roll-loop skill
     // (US-PORT-021 prerequisite — the last loop fallbacks, now native TS).
     if (args[0] === "notify") return loopNotifyCommand(args.slice(1));
@@ -701,7 +696,6 @@ export function registerAll(): void {
     if (args[0] === "precheck-ci") return loopPrecheckCiCommand(args.slice(1));
     if (args[0] === "hotfix-head-context") return loopHotfixHeadContextCommand(args.slice(1));
     if (args[0] === "agent-routes") return loopAgentRoutesCommand(args.slice(1));
-    if (args[0] === "test-quality-check") return loopUnknownSubcommand(args[0]);
     // Anything else is an unknown loop subcommand — print the v2 usage, exit 1
     // (no bash fallback remains; bin/roll is being retired in US-PORT-021).
     return loopUnknownSubcommand(args[0]);
@@ -711,7 +705,7 @@ export function registerAll(): void {
         "eval", "story", "runs", "cycles", "cycle", "goal", "recover", "pardon-skip-list", "signals", "adversarial",
         "log", "events", "alert", "self-downgrade", "review-resize", "exhaustion-split", "fmt", "watch", "reconcile-pending",
         "off", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
-        "hotfix-head-context", "agent-routes", "monitor", "attach", "branches", "test-quality-check",
+        "hotfix-head-context", "agent-routes",
       ].map((name) => cliOperation("loop", name, [name])),
       cliMatchedOperation(
         "loop",
@@ -741,6 +735,10 @@ export function registerAll(): void {
       ...["go", "run-once", "reconcile", "on", "pause", "resume"].map((name) =>
         cliSelectorOperation("loop", name, [name], [name, "--workspace", "roll"])),
     ],
+    rejectedRoutes: ["monitor", "attach", "branches", "test-quality-check"].map((route) => ({
+      route: [route],
+      message: loopUnknownSubcommandText(route),
+    })),
     // US-DOSSIER-035: a help PROVIDER (not a static string) so `roll loop --help`
     // renders the grouped (control/observe/alerts/maintain) bands locale-resolved
     // — single-language per resolved locale — while still routing through the

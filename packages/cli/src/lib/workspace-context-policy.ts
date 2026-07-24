@@ -68,11 +68,8 @@ const LOOP_READ_OPERATIONS = new Set([
   "status", "eval", "story", "runs", "cycles", "cycle", "goal", "signals", "adversarial", "log", "events", "fmt", "watch",
   "fallback.status",
 ]);
-const LOOP_MACHINE_OPERATIONS = new Set(["monitor", "attach", "branches", "test-quality-check"]);
-
 function cliShape(command: string, operation: string): PolicyShape | undefined {
   if (command === "loop") {
-    if (LOOP_MACHINE_OPERATIONS.has(operation)) return machine;
     return LOOP_READ_OPERATIONS.has(operation) ? workspaceRead : workspaceMutation;
   }
   const shape = CLI_POLICY_SHAPES[`${command}:${operation}`];

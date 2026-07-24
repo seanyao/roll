@@ -23,7 +23,7 @@ import {
   requirementCaptureLockPath,
   resolveRequirementSourcesForStoryOnDisk,
 } from "../src/requirement-source-store.js";
-import { workspaceAuthorityLockPath } from "../src/workspace-authority-lock.js";
+import { withWorkspaceAuthorityLockSync, workspaceAuthorityLockPath } from "../src/workspace-authority-lock.js";
 
 const roots: string[] = [];
 
@@ -91,8 +91,10 @@ describe("US-WS-007 RequirementSourceStore", () => {
     const f = fixture();
     const renames: string[] = [];
     let observedOrderedLocks = false;
+    const lockOrder: string[] = [];
     const deps = {
       renameFile: (from: string, to: string) => { renames.push(to); renameSync(from, to); },
+      onLockAcquired: (lock: "authority" | "requirement") => lockOrder.push(lock),
       beforeProjection: () => {
         expect(existsSync(workspaceAuthorityLockPath(f.root, "ws-demo"))).toBe(true);
         expect(existsSync(requirementCaptureLockPath(f.workspace, "req-c78ccf14ea21"))).toBe(true);
@@ -107,6 +109,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
       manifest: { provider: "jira", ref: "SOT-15499", revision: "42", stories: ["US-WS-007", "US-WS-008"] },
       contextCount: 2,
     });
+    expect(lockOrder.slice(0, 2)).toEqual(["authority", "requirement"]);
     expect(first.requirementPath).toMatch(/requirements\/jira\/req-c78ccf14ea21$/u);
     const revisionKey = "rev-" + "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049";
     const revision = join(first.requirementPath, "revisions", revisionKey);
@@ -903,12 +906,16 @@ describe("US-WS-007 RequirementSourceStore", () => {
       provider: "jira",
       requirementId: captured.manifest.requirementId,
     }).state).toBe("drift");
+    const repairLockOrder: string[] = [];
     expect(repairRequirementProjection({
       rollHome: f.root,
       workspaceRoot: f.workspace,
       provider: "jira",
       requirementId: captured.manifest.requirementId,
+    }, {
+      onLockAcquired: (lock) => repairLockOrder.push(lock),
     }).outcome).toBe("repaired");
+    expect(repairLockOrder).toEqual(["authority", "requirement"]);
     expect(readFileSync(join(captured.requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
     expect(createHash("sha256").update(readFileSync(join(revision, "requirement.md"))).digest("hex")).toBe(immutableBefore);
     expect(repairRequirementProjection({
@@ -917,5 +924,25 @@ describe("US-WS-007 RequirementSourceStore", () => {
       provider: "jira",
       requirementId: captured.manifest.requirementId,
     }).outcome).toBe("reused");
+  });
+
+  it("rejects Requirement projection repair while another writer owns Workspace authority", () => {
+    const f = fixture();
+    const captured = captureRequirementSource(request(f));
+    writeFileSync(join(captured.requirementPath, "requirement.md"), "projection drift\n", "utf8");
+
+    withWorkspaceAuthorityLockSync({
+      rollHome: f.root,
+      workspaceId: "ws-demo",
+      operation: "metadata-edit",
+    }, () => {
+      expect(() => repairRequirementProjection({
+        rollHome: f.root,
+        workspaceRoot: f.workspace,
+        provider: "jira",
+        requirementId: captured.manifest.requirementId,
+      })).toThrowError(expect.objectContaining<Partial<RequirementSourceStoreError>>({ code: "concurrent_capture" }));
+    });
+    expect(readFileSync(join(captured.requirementPath, "requirement.md"), "utf8")).toBe("projection drift\n");
   });
 });

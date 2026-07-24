@@ -24,6 +24,7 @@ export interface WorkspaceAuthorityLockInput {
   readonly rollHome: string;
   readonly workspaceId: string;
   readonly operation: WorkspaceAuthorityOperation;
+  readonly onAcquired?: () => void;
 }
 
 function validate(input: WorkspaceAuthorityLockInput): void {
@@ -58,7 +59,14 @@ function acquire(input: WorkspaceAuthorityLockInput): WorkspaceAuthorityLease {
   if (!lock.acquired) {
     throw new WorkspaceAuthorityLockError("authority_locked", `Workspace ${input.workspaceId} authority is locked by another writer`);
   }
-  return { path, cleanupDirectories };
+  const lease = { path, cleanupDirectories };
+  try {
+    input.onAcquired?.();
+    return lease;
+  } catch (error) {
+    release(lease);
+    throw error;
+  }
 }
 
 function release(lease: WorkspaceAuthorityLease): void {

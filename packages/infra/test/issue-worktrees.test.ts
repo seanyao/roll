@@ -366,6 +366,7 @@ describe("applyIssueInit", () => {
       ],
     };
     const observed: string[] = [];
+    const lockOrder: string[] = [];
     const assertOwned = (alias: string, phase: "add" | "rollback"): void => {
       expect(existsSync(workspaceAuthorityLockPath(f.rollHome, "ws-demo"))).toBe(true);
       const repository = f.bindings.find((candidate) => candidate.alias === alias);
@@ -387,6 +388,7 @@ describe("applyIssueInit", () => {
       bindings: f.bindings,
       requirementManifests: f.requirementManifests,
     }, {
+      onLockAcquired: (lock, alias) => lockOrder.push(`${lock}:${alias ?? "workspace"}`),
       beforeAddMutation: (alias) => assertOwned(alias, "add"),
       beforeMutateTarget: (alias) => {
         if (alias === "sot2") throw new Error("force rollback after sot1 creation");
@@ -395,6 +397,9 @@ describe("applyIssueInit", () => {
     })).rejects.toThrow(IssueInitializationError);
 
     expect(observed).toEqual(["add:sot1", "rollback:sot1"]);
+    expect(lockOrder[0]).toBe("authority:workspace");
+    expect(lockOrder).toContain("repository:sot1");
+    expect(lockOrder.slice(1).every((entry) => entry.startsWith("repository:"))).toBe(true);
     expect(existsSync(join(f.issueRoot, "sot1"))).toBe(false);
   });
 

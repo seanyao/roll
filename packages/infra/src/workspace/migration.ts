@@ -81,6 +81,7 @@ export interface HistoricalWorkspaceMigrationDeps {
   readonly afterPhase?: (phase: HistoricalWorkspaceMigrationPhase) => void;
   readonly forceCopy?: boolean;
   readonly now?: () => number;
+  readonly onLockAcquired?: (lock: "authority" | "migration" | "repository") => void;
 }
 
 export interface HistoricalWorkspaceMigrationResult {
@@ -764,6 +765,7 @@ async function applyHistoricalWorkspaceMigrationUnlocked(
   const lock = acquireLock(lockPath, process.pid, { cycleId: `workspace-migration:${plan.workspaceId}`, unparseableIsHeld: true });
   if (!lock.acquired) throw new HistoricalWorkspaceMigrationError("concurrent_migration", "Workspace migration is already running");
   try {
+    deps.onLockAcquired?.("migration");
     if (completedMigrationIsActive(normalizedInput, plan) && !existsSync(journalPath)) {
       const ownership = plan.verdict === "manual_metadata_handoff" ? "independent_git" : plan.verdict === "repository_cutover_required" ? "product_tracked" : "ordinary";
       return completedResult({
@@ -810,6 +812,7 @@ async function applyHistoricalWorkspaceMigrationUnlocked(
         transportRemote: journal.transportRemote,
         rollHome: journal.rollHome,
         integrationRefspec: `+refs/heads/${repo.integrationBranch}:refs/remotes/origin/${repo.integrationBranch}`,
+        onLockAcquired: () => deps.onLockAcquired?.("repository"),
       });
       journal = { ...journal, phase: "cache_ready" };
       writeJournal(journalPath, journal);
@@ -869,6 +872,7 @@ export async function applyHistoricalWorkspaceMigration(
       rollHome: resolve(input.rollHome),
       workspaceId: plan.workspaceId,
       operation: "migration",
+      onAcquired: () => deps.onLockAcquired?.("authority"),
     }, () => applyHistoricalWorkspaceMigrationUnlocked(input, deps));
   } catch (error) {
     if (error instanceof WorkspaceAuthorityLockError) {

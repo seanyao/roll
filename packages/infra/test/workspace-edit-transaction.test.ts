@@ -11,12 +11,16 @@ import {
 } from "@roll/core";
 import { repositoryIdFromRemote, type WorkspaceEditPlan, type WorkspaceManifest } from "@roll/spec";
 import {
+  captureRequirementSource,
+  readWorkspace,
+  RequirementSourceStoreError,
+} from "../src/requirement-source-store.js";
+import {
   applyWorkspaceEditPlan,
   workspaceEditJournalPath,
   WorkspaceEditTransactionError,
 } from "../src/workspace-edit-transaction.js";
 import { collectWorkspaceMetadataReferenceIndex } from "../src/workspace-reference-index.js";
-import { readWorkspace } from "../src/requirement-source-store.js";
 
 const roots: string[] = [];
 
@@ -158,8 +162,21 @@ describe("US-WS-026 Workspace edit transaction", () => {
     const issueBefore = readFileSync(f.issuePath);
     const requirementBefore = readFileSync(f.requirementPath);
     const phases: string[] = [];
+    const lockOrder: string[] = [];
+    const input = transactionInput(f, preview);
 
-    const result = await applyWorkspaceEditPlan(transactionInput(f, preview), {
+    const result = await applyWorkspaceEditPlan({
+      ...input,
+      reloadCurrent: () => {
+        lockOrder.push("reload");
+        return input.reloadCurrent();
+      },
+      rebuildPlan: (facts) => {
+        lockOrder.push("rebuild");
+        return input.rebuildPlan(facts);
+      },
+    }, {
+      onAuthorityLockAcquired: () => lockOrder.push("authority"),
       afterPhase: (phase) => phases.push(phase),
     });
 
@@ -168,6 +185,7 @@ describe("US-WS-026 Workspace edit transaction", () => {
     expect(readFileSync(f.issuePath)).toEqual(issueBefore);
     expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
     expect(existsSync(workspaceEditJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(lockOrder).toEqual(["authority", "reload", "rebuild", "reload"]);
     expect(phases).toEqual([
       "journal_prepared",
       "manifest_temp_fsynced",
@@ -176,6 +194,60 @@ describe("US-WS-026 Workspace edit transaction", () => {
       "journal_committed",
       "journal_removed",
     ]);
+  });
+
+  it("blocks a Requirement writer inside edit reference reload and rejects the reverse interleaving without deadlock", async () => {
+    const f = fixture();
+    const preview = plan(f);
+    const input = transactionInput(f, preview);
+    const body = join(f.root, "captured-body.md");
+    writeFileSync(body, "captured body\n", "utf8");
+    let reloadRaceObserved = false;
+
+    await applyWorkspaceEditPlan({
+      ...input,
+      reloadCurrent: () => {
+        if (!reloadRaceObserved) {
+          reloadRaceObserved = true;
+          expect(() => captureRequirementSource({
+            rollHome: f.rollHome,
+            workspaceRoot: f.workspaceRoot,
+            provider: "jira",
+            ref: "SOT-15499",
+            revision: "1",
+            capturedAt: "2026-07-24T00:00:00.000Z",
+            bodyFile: body,
+            contextPaths: [],
+            storyIds: [],
+          })).toThrowError(expect.objectContaining<Partial<RequirementSourceStoreError>>({ code: "concurrent_capture" }));
+        }
+        return input.reloadCurrent();
+      },
+    });
+    expect(reloadRaceObserved).toBe(true);
+
+    writeFileSync(f.manifestPath, serializeWorkspaceManifest(f.manifest), "utf8");
+    const reversePreview = plan(f);
+    let competingEdit: Promise<unknown> | undefined;
+    const captured = captureRequirementSource({
+      rollHome: f.rollHome,
+      workspaceRoot: f.workspaceRoot,
+      provider: "jira",
+      ref: "SOT-15499",
+      revision: "1",
+      capturedAt: "2026-07-24T00:00:00.000Z",
+      bodyFile: body,
+      contextPaths: [],
+      storyIds: [],
+    }, {
+      beforeProjection: () => {
+        competingEdit ??= applyWorkspaceEditPlan(transactionInput(f, reversePreview));
+      },
+    });
+    expect(captured.outcome).toBe("created");
+    await expect(competingEdit).rejects.toEqual(
+      expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "concurrent_edit" }),
+    );
   });
 
   it("rejects a new durable reference discovered after preview without touching the manifest", async () => {

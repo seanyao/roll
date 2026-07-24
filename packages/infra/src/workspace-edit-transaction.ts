@@ -70,6 +70,7 @@ export interface ApplyWorkspaceEditPlanInput {
 }
 
 export interface WorkspaceEditTransactionDeps {
+  readonly onAuthorityLockAcquired?: () => void;
   readonly afterPhase?: (phase: WorkspaceEditTransactionPhase) => void;
   readonly crashPoint?: (phase: WorkspaceEditTransactionPhase) => void;
   readonly fsyncFile?: (descriptor: number, path: string) => void;
@@ -354,6 +355,7 @@ export async function applyWorkspaceEditPlan(
       rollHome: input.rollHome,
       workspaceId: input.plan.workspaceId,
       operation: "metadata-edit",
+      onAcquired: deps.onAuthorityLockAcquired,
     }, () => applyUnderLock(input, deps));
   } catch (error) {
     if (error instanceof WorkspaceEditTransactionError) {

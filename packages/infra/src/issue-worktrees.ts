@@ -758,6 +758,9 @@ export async function inspectIssueInit(input: InspectIssueInitInput): Promise<Is
 }
 
 export interface ApplyIssueInitDeps {
+  /** Test-only causal trace for the Workspace authority lock and nested
+   * repository-cache locks acquired by this operation. */
+  readonly onLockAcquired?: (lock: "authority" | "repository", alias?: string) => void;
   /** Test-only hook fired synchronously right after each target's real git
    *  worktree is created — lets a test inject a genuine filesystem mutation
    *  (e.g. making an earlier target dirty) between one target's creation and
@@ -881,7 +884,7 @@ function writeJournal(issueRoot: string, journal: IssueInitJournal): void {
 async function rollbackCreatedTargets(
   targets: readonly JournalTarget[],
   cacheByAlias: ReadonlyMap<string, ResolvedTargetCache>,
-  deps: Pick<ApplyIssueInitDeps, "beforeRollbackMutation">,
+  deps: Pick<ApplyIssueInitDeps, "beforeRollbackMutation" | "onLockAcquired">,
 ): Promise<void> {
   for (const target of [...targets].reverse()) {
     if (!target.created) continue;
@@ -894,7 +897,11 @@ async function rollbackCreatedTargets(
     // shared cache admin — take the owning repoId lock once so a concurrent
     // Workspace's add cannot interleave with either half of this rollback.
     try {
-      await withRepositoryCacheLock({ rollHome: cache.rollHome, binding: cache.binding }, async () => {
+      await withRepositoryCacheLock({
+        rollHome: cache.rollHome,
+        binding: cache.binding,
+        onLockAcquired: () => deps.onLockAcquired?.("repository", target.alias),
+      }, async () => {
         deps.beforeRollbackMutation?.(target.alias, target.path);
         await issueWorktreeRemove(cache.cachePath, target.path, { readOnly: target.access === "read" });
         // The worktree is gone; also delete the governed branch, but ONLY when
@@ -1012,6 +1019,7 @@ async function applyIssueInitUnlocked(input: ApplyIssueInitInput, deps: ApplyIss
         binding,
         rollHome: input.rollHome,
         integrationRefspec: integrationRefspecFor(binding),
+        onLockAcquired: () => deps.onLockAcquired?.("repository", declared.alias),
       });
       const pinned = readPinnedTargetFacts(input.issueRoot, declared.alias, { workspaceId: input.workspaceId, storyId: input.contract.storyId, repoId: binding.repoId });
       if (pinned !== undefined) {
@@ -1126,7 +1134,11 @@ async function applyIssueInitUnlocked(input: ApplyIssueInitInput, deps: ApplyIss
       // rewrites and can cross-bind a worktree path to the wrong governed
       // branch (US-WS-011 concurrent-isolation gate).
       const added = await withRepositoryCacheLock(
-        { rollHome: cache.rollHome, binding: cache.binding },
+        {
+          rollHome: cache.rollHome,
+          binding: cache.binding,
+          onLockAcquired: () => deps.onLockAcquired?.("repository", target.alias),
+        },
         () => {
           deps.beforeAddMutation?.(target.alias, targetPath);
           return issueWorktreeAdd(cache.cachePath, targetPath, cache.baseSha, target.workBranch, {
@@ -1191,6 +1203,7 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
       rollHome: input.rollHome,
       workspaceId: input.workspaceId,
       operation: "issue-init",
+      onAcquired: () => deps.onLockAcquired?.("authority"),
     }, () => applyIssueInitUnlocked(input, deps));
   } catch (error) {
     if (error instanceof WorkspaceAuthorityLockError) {

@@ -102,6 +102,7 @@ export interface RequirementSourceStoreDeps {
   readonly renameFile?: (from: string, to: string) => void;
   readonly afterReadFile?: (path: string) => void;
   readonly beforeProjection?: () => void;
+  readonly onLockAcquired?: (lock: "authority" | "requirement") => void;
 }
 
 interface StableFile {
@@ -446,6 +447,7 @@ function repairRequirementProjectionUnlocked(
   });
   if (!lock.acquired) fail("concurrent_capture", "Requirement source capture or repair is already running");
   try {
+    deps.onLockAcquired?.("requirement");
     const audit = auditRequirementArchive({
       workspaceRoot,
       provider: input.provider,
@@ -486,6 +488,7 @@ export function repairRequirementProjection(
       rollHome: resolve(input.rollHome),
       workspaceId: workspace.workspaceId,
       operation: "requirement-repair",
+      onAcquired: () => deps.onLockAcquired?.("authority"),
     }, () => repairRequirementProjectionUnlocked(input, deps));
   } catch (error) {
     if (error instanceof WorkspaceAuthorityLockError) {
@@ -834,6 +837,7 @@ function captureRequirementSourceUnlocked(
   });
   if (!lock.acquired) fail("concurrent_capture", "Requirement source capture is already running");
   try {
+    deps.onLockAcquired?.("requirement");
     const renameFile = deps.renameFile ?? renameSync;
     const sourcePath = join(requirementPath, "source.yaml");
     const existing = existsSync(requirementPath) ? readExisting(sourcePath) : undefined;
@@ -924,6 +928,7 @@ export function captureRequirementSource(
       rollHome: resolve(input.rollHome),
       workspaceId: workspace.workspaceId,
       operation: "requirement-capture",
+      onAcquired: () => deps.onLockAcquired?.("authority"),
     }, () => captureRequirementSourceUnlocked(input, deps));
   } catch (error) {
     if (error instanceof WorkspaceAuthorityLockError) {

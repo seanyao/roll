@@ -36,24 +36,39 @@ export interface CycleTierInfo {
 
 export const NO_TIER: CycleTierInfo = { tier: undefined, blocked: false, fanout: undefined };
 
+const BLOCKED: CycleTierInfo = { tier: undefined, blocked: true, fanout: undefined };
+
 /**
  * Resolve the evaluation tier for a delivering cycle from the card's
- * LINT-VALIDATED spec. An IO miss (unreadable/absent spec) degrades to the
- * default serial path — it is never a tier violation (we cannot even tell if the
- * card is new-regime), so a delivery is never blocked on an IO error.
+ * LINT-VALIDATED spec.
+ *
+ * Fail-closed on an UNREADABLE spec (AC5): if the spec file EXISTS but cannot be
+ * read, we cannot verify the tier of a real card → BLOCK rather than silently
+ * defaulting to the serial path. A spec that is ABSENT (no file) is treated as
+ * legacy → default serial: a card can only be new-regime by DECLARING it in spec
+ * content (est_min / risk_tier / created ≥ cutover), so no file ⇒ not new-regime,
+ * and gating it would wrongly block genuine legacy/pre-contract cards. An
+ * unresolvable card archive dir likewise degrades to legacy.
  */
 export function resolveCycleEvaluationTier(repoCwd: string, storyId: string): CycleTierInfo {
   if (storyId === "") return NO_TIER;
+  let specPath: string;
   try {
-    const specPath = join(cardArchiveDir(repoCwd, storyId), "spec.md");
-    const specText = existsSync(specPath) ? readFileSync(specPath, "utf8") : "";
-    const decision = resolveEvaluationTier(specText, storyId);
-    if (decision.kind === "tier") return { tier: decision.tier, blocked: false, fanout: tierFanoutReason(decision.tier) };
-    if (decision.kind === "missing") return { tier: undefined, blocked: true, fanout: undefined };
-    return NO_TIER; // legacy → default serial
+    specPath = join(cardArchiveDir(repoCwd, storyId), "spec.md");
   } catch {
-    return NO_TIER;
+    return NO_TIER; // cannot locate the card archive → treat as legacy (default serial)
   }
+  if (!existsSync(specPath)) return NO_TIER; // no spec on disk → cannot be new-regime
+  let specText: string;
+  try {
+    specText = readFileSync(specPath, "utf8");
+  } catch {
+    return BLOCKED; // spec exists but is unreadable → fail-closed, never silent serial
+  }
+  const decision = resolveEvaluationTier(specText, storyId);
+  if (decision.kind === "tier") return { tier: decision.tier, blocked: false, fanout: tierFanoutReason(decision.tier) };
+  if (decision.kind === "missing") return BLOCKED;
+  return NO_TIER; // legacy → default serial
 }
 
 export interface TierGateSinks {

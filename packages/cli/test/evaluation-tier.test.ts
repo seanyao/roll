@@ -9,8 +9,12 @@
  *   - legacy card with no tier → "legacy" (default serial, byte-compatible);
  *   - NO supervisor/flag/env downgrade path (anti-Goodhart).
  */
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveEvaluationTier, tierFanoutReason } from "../src/lib/evaluation-tier.js";
+import { resolveCycleEvaluationTier } from "../src/runner/evaluation-tier-stage.js";
 
 /** A spec with the given frontmatter body between --- fences + a minimal contract. */
 function spec(fm: string): string {
@@ -92,5 +96,42 @@ describe("resolveEvaluationTier — no downgrade path (AC3, anti-Goodhart)", () 
     // The signature is (spec, id?) — arity 2. There is no third override channel
     // through which a caller could inject a downgraded tier.
     expect(resolveEvaluationTier.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("resolveCycleEvaluationTier — spec IO (fail-closed on unreadable, exempt on absent)", () => {
+  function repoWithSpec(id: string, specText: string | "DIR" | null): string {
+    const repo = mkdtempSync(join(tmpdir(), "roll-c008-stage-"));
+    const dir = join(repo, ".roll", "features", "uncategorized", id);
+    mkdirSync(dir, { recursive: true });
+    if (specText === "DIR") mkdirSync(join(dir, "spec.md")); // exists but unreadable (EISDIR)
+    else if (specText !== null) writeFileSync(join(dir, "spec.md"), specText);
+    return repo;
+  }
+  const contract = "\n\n## Evaluation contract\n**Expected evidence:**\n- test\n";
+
+  it("high-tier spec → tier high + fan-out reason", () => {
+    const repo = repoWithSpec("US-A-1", `---\nest_min: 20\nrisk_tier: high\n---${contract}`);
+    expect(resolveCycleEvaluationTier(repo, "US-A-1")).toEqual({ tier: "high", blocked: false, fanout: "high_risk_tier_card" });
+  });
+
+  it("low-tier spec → tier low, no fan-out (serial default)", () => {
+    const repo = repoWithSpec("US-A-2", `---\nest_min: 5\nrisk_tier: low\n---${contract}`);
+    expect(resolveCycleEvaluationTier(repo, "US-A-2")).toEqual({ tier: "low", blocked: false, fanout: undefined });
+  });
+
+  it("new-regime card with no risk_tier → BLOCKED (fail-loud)", () => {
+    const repo = repoWithSpec("US-A-3", `---\nest_min: 5\n---${contract}`);
+    expect(resolveCycleEvaluationTier(repo, "US-A-3")).toEqual({ tier: undefined, blocked: true, fanout: undefined });
+  });
+
+  it("spec EXISTS but is unreadable → BLOCKED (fail-closed, never silent serial)", () => {
+    const repo = repoWithSpec("US-A-4", "DIR");
+    expect(resolveCycleEvaluationTier(repo, "US-A-4")).toEqual({ tier: undefined, blocked: true, fanout: undefined });
+  });
+
+  it("spec ABSENT → legacy (default serial, not blocked): a card with no spec cannot be new-regime", () => {
+    const repo = repoWithSpec("US-A-5", null);
+    expect(resolveCycleEvaluationTier(repo, "US-A-5")).toEqual({ tier: undefined, blocked: false, fanout: undefined });
   });
 });

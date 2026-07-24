@@ -26,9 +26,12 @@ const refactor060Limits = [
   { file: "spawn-agent-handler.ts", maxExclusive: 800 },
   // US-CYCLE-008: risk-tier evaluation wiring. The feature's logic was extracted
   // into evaluation-tier.ts + evaluation-tier-stage.ts; only the unavoidable
-  // capture-stage wiring (gate call + two fan-out deps + one journal call)
-  // remains here, nudging this hot handler just past 800 (cf. setup-handlers 810).
-  { file: "capture-facts-handler.ts", maxExclusive: 815 },
+  // capture-stage wiring remains here — the tier gate call + two fan-out deps + a
+  // journal call, plus the fail-loud EARLY-block guards on each evaluator dispatch
+  // (pairing loop, peer gate, score, ac-map, attest, evaluator) so a tier-blocked
+  // cycle never runs a serial evaluation before blocking. Nudges this hot handler
+  // just past 800 (cf. setup-handlers 810).
+  { file: "capture-facts-handler.ts", maxExclusive: 825 },
   { file: "capture-peer-helpers.ts", maxExclusive: 800 },
   { file: "terminal-handlers.ts", maxExclusive: 800 },
 ] as const;

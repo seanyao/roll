@@ -92,6 +92,35 @@ describe("US-WS-027 RequirementHintV1 normalization", () => {
     expect(first.value.semanticTerms).toEqual(["resolver"]);
   });
 
+  it("normalizes harmless surrounding whitespace before applying the existing Story ID validator", () => {
+    expect(normalizeRequirementHint({
+      storyIds: [{ storyId: "  US-WS-027  ", provenance: "explicit_user" }],
+    })).toEqual({
+      ok: true,
+      value: {
+        schema: REQUIREMENT_HINT_V1,
+        sources: [],
+        storyIds: [{ storyId: "US-WS-027", provenance: "explicit_user" }],
+        repositoryRemotes: [],
+        paths: [],
+      },
+    });
+  });
+
+  it.each([
+    "us-ws-027",
+    "US/WS-027",
+    "../US-WS-027",
+    "US-WS-027!",
+  ])("rejects the non-canonical Story ID %s according to validateStoryId", (storyId) => {
+    expect(normalizeRequirementHint({
+      storyIds: [{ storyId, provenance: "explicit_user" }],
+    })).toMatchObject({
+      ok: false,
+      findings: expect.arrayContaining([expect.objectContaining({ code: "invalid_story_id", path: "storyIds[0].storyId" })]),
+    });
+  });
+
   it.each([
     ["provider URL", { sources: [{ key: { provider: "jira", ref: "https://example.atlassian.net/browse/APE-234" }, provenance: "explicit_user" }] }],
     ["incomplete Jira number", { sources: [{ key: { provider: "jira", ref: "234" }, provenance: "deterministic_extraction" }] }],

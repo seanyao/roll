@@ -17,6 +17,7 @@ import {
   type WorkspaceEditConfigV1,
   type WorkspaceEditPlan,
   type WorkspaceEditReference,
+  type WorkspaceEditRepositoryInput,
   type WorkspaceManifest,
   type WorkspaceMetadataReferenceIndex,
 } from "@roll/spec";
@@ -120,6 +121,7 @@ function parseConfigDocument(text: string): unknown {
   const root: Record<string, unknown> = {};
   let section: "requirements" | "repositories" | null = null;
   let item: Record<string, unknown> | null = null;
+  let nestedList: "required_checks" | null = null;
   for (const rawLine of text.replace(/^\uFEFF/u, "").split(/\r?\n/u)) {
     if (rawLine.includes("\t")) throw new Error("tabs are not supported");
     const line = stripComment(rawLine).trimEnd();
@@ -128,14 +130,22 @@ function parseConfigDocument(text: string): unknown {
     const body = line.trimStart();
     if (indent === 0) {
       item = null;
+      nestedList = null;
       const separator = body.indexOf(":");
       if (separator <= 0) throw new Error("invalid top-level mapping");
       const key = body.slice(0, separator).trim();
       const value = body.slice(separator + 1).trim();
       if (key === "requirements" || key === "repositories") {
-        if (value !== "" || Object.hasOwn(root, key)) throw new Error("invalid list mapping");
-        root[key] = [];
-        section = key;
+        if (Object.hasOwn(root, key)) throw new Error("invalid list mapping");
+        if (value === "") {
+          root[key] = [];
+          section = key;
+        } else if (key === "requirements" && value === "[]") {
+          root[key] = [];
+          section = null;
+        } else {
+          throw new Error("invalid list mapping");
+        }
       } else {
         if (value === "" || Object.hasOwn(root, key)) throw new Error("invalid scalar mapping");
         root[key] = parseScalar(value);
@@ -146,14 +156,30 @@ function parseConfigDocument(text: string): unknown {
     if (section === null || indent < 2) throw new Error("unexpected indentation");
     const list = root[section];
     if (!Array.isArray(list)) throw new Error("unexpected list state");
+    if (indent === 6 && item !== null && nestedList !== null && body.startsWith("- ")) {
+      const values = item[nestedList];
+      if (!Array.isArray(values)) throw new Error("invalid nested list state");
+      const value = unquote(body.slice(2));
+      if (value === "") throw new Error("nested list values must be non-empty");
+      values.push(value);
+      continue;
+    }
     if (body.startsWith("- ")) {
       if (indent !== 2) throw new Error("list items must use two-space indentation");
       item = {};
+      nestedList = null;
       list.push(item);
       assignPair(item, body.slice(2));
       continue;
     }
     if (indent !== 4 || item === null) throw new Error("list fields must use four-space indentation");
+    if (section === "repositories" && body === "required_checks:") {
+      if (Object.hasOwn(item, "required_checks")) throw new Error("duplicate required_checks");
+      item["required_checks"] = [];
+      nestedList = "required_checks";
+      continue;
+    }
+    nestedList = null;
     assignPair(item, body);
   }
   return root;
@@ -196,12 +222,12 @@ function parseRequirements(value: unknown, errors: ContractError[]): readonly Re
     .map(({ provider, ref }) => ({ provider, ref }));
 }
 
-function parseRepositories(value: unknown, errors: ContractError[]): readonly RepositoryBinding[] {
+function parseRepositories(value: unknown, errors: ContractError[]): readonly WorkspaceEditRepositoryInput[] {
   if (!Array.isArray(value) || value.length === 0) {
     errors.push({ code: "invalid_type", path: "repositories", message: "repositories must be a non-empty array" });
     return [];
   }
-  const repositories: RepositoryBinding[] = [];
+  const repositories: Array<WorkspaceEditRepositoryInput & { readonly repoId: string }> = [];
   for (const [index, candidate] of value.entries()) {
     const path = `repositories[${index}]`;
     if (!isRecord(candidate)) {
@@ -248,7 +274,15 @@ function parseRepositories(value: unknown, errors: ContractError[]): readonly Re
       errors.push(...parsed.errors.map((error) => ({ ...error, path: `${path}.${error.path}` })));
       continue;
     }
-    repositories.push(parsed.value);
+    repositories.push({
+      repoId: parsed.value.repoId,
+      alias: parsed.value.alias,
+      remote: parsed.value.remote,
+      provider: parsed.value.provider,
+      integrationBranch: parsed.value.integrationBranch,
+      branchPattern: parsed.value.workflow.branchPattern,
+      requiredChecks: parsed.value.workflow.requiredChecks,
+    });
   }
   const aliases = new Set<string>();
   const ids = new Set<string>();
@@ -259,7 +293,14 @@ function parseRepositories(value: unknown, errors: ContractError[]): readonly Re
     aliases.add(repository.alias);
     ids.add(repository.repoId);
   }
-  return repositories.slice().sort((left, right) => compareText(left.repoId, right.repoId));
+  return repositories.slice().sort((left, right) => compareText(left.repoId, right.repoId)).map((repository) => ({
+    alias: repository.alias,
+    remote: repository.remote,
+    provider: repository.provider,
+    integrationBranch: repository.integrationBranch,
+    branchPattern: repository.branchPattern,
+    requiredChecks: repository.requiredChecks,
+  }));
 }
 
 export function parseWorkspaceEditConfig(
@@ -389,6 +430,30 @@ function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function repositoryBindingFromEdit(repository: WorkspaceEditRepositoryInput): RepositoryBinding {
+  const repoId = repositoryIdFromRemote(repository.remote);
+  if (!repoId.ok) throw new Error("parsed Workspace edit config contains an invalid repository remote");
+  const parsed = parseRepositoryBinding({
+    schema: REPOSITORY_BINDING_V1,
+    repoId: repoId.value,
+    alias: repository.alias,
+    remote: repository.remote,
+    integrationBranch: repository.integrationBranch,
+    provider: repository.provider,
+    workflow: {
+      branchPattern: repository.branchPattern,
+      requiredChecks: repository.requiredChecks,
+    },
+  });
+  if (!parsed.ok) throw new Error("parsed Workspace edit config contains an invalid repository binding");
+  return parsed.value;
+}
+
+function shellArgument(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(value)) return value;
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 function validDigest(value: string): boolean {
   return /^[0-9a-f]{64}$/u.test(value);
 }
@@ -485,7 +550,7 @@ export function buildWorkspaceEditPlan(input: {
     displayName: input.config.displayName,
     ...(input.current.createdAt === undefined ? {} : { createdAt: input.current.createdAt }),
     requirements: input.config.requirements,
-    repositories: input.config.repositories,
+    repositories: input.config.repositories.map(repositoryBindingFromEdit),
   });
   const beforeSha256 = sha256(serializeWorkspaceManifest(beforeManifest));
   const afterSha256 = sha256(serializeWorkspaceManifest(afterManifest));
@@ -578,7 +643,7 @@ export function buildWorkspaceEditPlan(input: {
   const sortedChanges = changes.slice().sort((left, right) => compareText(left.path, right.path));
   const sortedBlockers = blockers.slice().sort((left, right) => compareText(`${left.path}\0${left.code}`, `${right.path}\0${right.code}`));
   const outcome = sortedBlockers.length === 0 ? "ready" : "blocked";
-  const configPath = input.configPath ?? "<path>";
+  const configPath = shellArgument(input.configPath ?? "<path>");
   return {
     schema: WORKSPACE_EDIT_PLAN_V1,
     outcome,

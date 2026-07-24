@@ -71,13 +71,20 @@ describe("US-WS-025 Workspace metadata edit plan", () => {
         displayName: "Renamed Demo",
         requirements: [{ provider: "jira", ref: "SOT-15499" }],
         repositories: [{
-          repoId: "repo-ff7a87ddbb2b",
           alias: "product",
           remote: "https://example.test/owner/product",
         }],
       },
     });
     if (!parsed.ok) throw new Error("fixture must parse");
+    expect(Object.keys(parsed.value.repositories[0] ?? {}).sort()).toEqual([
+      "alias",
+      "branchPattern",
+      "integrationBranch",
+      "provider",
+      "remote",
+      "requiredChecks",
+    ]);
 
     const first = buildWorkspaceEditPlan({
       config: parsed.value,
@@ -117,6 +124,39 @@ describe("US-WS-025 Workspace metadata edit plan", () => {
       blockers: [],
     });
     expect(first.afterSha256).toBe(digest(serializeWorkspaceManifest(first.afterManifest)));
+  });
+
+  it("accepts the documented block-style YAML and shell-quotes a complete apply action", () => {
+    const yaml = `
+schema: roll.workspace-edit/v1
+workspace_id: ws-demo
+expected_manifest_sha256: ${digest(serializeWorkspaceManifest(current))}
+display_name: Renamed Demo
+requirements:
+  - provider: jira
+    ref: sot-15499
+repositories:
+  - alias: product
+    remote: https://example.test/owner/product.git
+    provider: github
+    integration_branch: main
+    branch_pattern: roll/{workspace_id}/{story_id}
+    required_checks:
+      - test
+`;
+    const parsed = parseWorkspaceEditConfig(yaml, { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+
+    expect(buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references(),
+      manifestPath: "/workspace/workspace.yaml",
+      configPath: "/tmp/edit configs/ws.yaml",
+    }).nextAction).toEqual({
+      kind: "apply",
+      command: "roll workspace edit ws-demo --config '/tmp/edit configs/ws.yaml' --json",
+    });
   });
 
   it.each([

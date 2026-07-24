@@ -401,7 +401,14 @@ export interface WorkspaceManifest {
   readonly repositories: readonly RepositoryBinding[];
 }
 
-export interface WorkspaceEditRepositoryInput extends RepositoryBinding {}
+export interface WorkspaceEditRepositoryInput {
+  readonly alias: string;
+  readonly remote: string;
+  readonly provider: string;
+  readonly integrationBranch: string;
+  readonly branchPattern: string;
+  readonly requiredChecks: readonly string[];
+}
 
 export interface WorkspaceEditConfigV1 {
   readonly schema: typeof WORKSPACE_EDIT_CONFIG_V1;

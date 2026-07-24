@@ -412,7 +412,9 @@ function stableReferenceIndex(index: WorkspaceMetadataReferenceIndex): Workspace
       source: archive.source,
       manifestSha256: archive.manifestSha256,
     })),
-    additionalFacts: index.additionalFacts.slice().sort((left, right) => compareText(left.authorityPath, right.authorityPath)).map((fact) => ({
+    additionalFacts: index.additionalFacts.slice().sort((left, right) =>
+      compareText(`${left.authorityPath}\0${left.kind}`, `${right.authorityPath}\0${right.kind}`)
+    ).map((fact) => ({
       kind: fact.kind,
       authorityPath: fact.authorityPath,
       sha256: fact.sha256,

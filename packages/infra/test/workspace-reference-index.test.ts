@@ -26,6 +26,11 @@ function write(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function writeText(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, text, "utf8");
+}
+
 function digest(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -147,6 +152,111 @@ describe("US-WS-025 Workspace metadata reference index", () => {
       additionalFacts: [],
     });
     expect(snapshot(f.workspace)).toEqual(before);
+  });
+
+  it("indexes delivery, runtime, event and migration authorities with deterministic references and digests", () => {
+    const f = fixture();
+    const delivery = {
+      type: "issue:repository_merge_evidence_recorded",
+      workspaceId: "ws-demo",
+      storyId: "US-A",
+      repoId: f.repoId,
+      provider: "jira",
+      ref: "sot-15499",
+    };
+    const event = {
+      type: "issue:repository_bound",
+      workspaceId: "ws-demo",
+      storyId: "US-A",
+      repoId: f.repoId,
+      requirement: { provider: "jira", ref: "SOT-15499" },
+    };
+    writeText(join(f.workspace, "issues", "US-A", "events.jsonl"), `${JSON.stringify(delivery)}\n${JSON.stringify(event)}\n`);
+    const runtime = { runs: [{ storyId: "US-A", repoId: f.repoId, requirement: { provider: "jira", ref: "SOT-15499" } }] };
+    write(join(f.workspace, "runtime", "runs.json"), runtime);
+    const migration = {
+      schema: "roll.workspace-migration-manifest/v1",
+      planId: "plan-1",
+      sourceRoot: "/redacted/source",
+      workspaceId: "ws-demo",
+      repoId: f.repoId,
+      ownership: "ordinary",
+      state: "active",
+      mappings: [],
+      manualHandoffRequired: false,
+    };
+    write(join(f.workspace, "migration-manifest.json"), migration);
+
+    const index = collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace });
+
+    expect(index.additionalFacts).toEqual([
+      {
+        kind: "delivery",
+        authorityPath: "issues/US-A/events.jsonl",
+        sha256: digest(`${JSON.stringify(delivery)}\n`),
+        requirementKeys: [{ provider: "jira", ref: "SOT-15499" }],
+        repoIds: [f.repoId],
+      },
+      {
+        kind: "event",
+        authorityPath: "issues/US-A/events.jsonl",
+        sha256: digest(`${JSON.stringify(event)}\n`),
+        requirementKeys: [{ provider: "jira", ref: "SOT-15499" }],
+        repoIds: [f.repoId],
+      },
+      {
+        kind: "migration",
+        authorityPath: "migration-manifest.json",
+        sha256: digest(`${JSON.stringify(migration, null, 2)}\n`),
+        requirementKeys: [],
+        repoIds: [f.repoId],
+      },
+      {
+        kind: "runtime",
+        authorityPath: "runtime/runs.json",
+        sha256: digest(`${JSON.stringify(runtime, null, 2)}\n`),
+        requirementKeys: [{ provider: "jira", ref: "SOT-15499" }],
+        repoIds: [f.repoId],
+      },
+    ]);
+    const serialized = serializeWorkspaceMetadataReferenceIndex(index);
+    expect(serialized).toBe(serializeWorkspaceMetadataReferenceIndex(collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace })));
+    expect(digest(serialized)).toMatch(/^[0-9a-f]{64}$/u);
+  });
+
+  it.each([
+    ["delivery", "runtime/deliveries.jsonl"],
+    ["runtime", "runtime/runs.jsonl"],
+    ["event", "runtime/events.ndjson"],
+    ["migration", "migration-manifest.json"],
+  ])("fails closed when a %s authority is corrupt", (_kind, relativePath) => {
+    const f = fixture();
+    writeText(join(f.workspace, relativePath), "{not-json}\n");
+    expect(() => collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace }))
+      .toThrowError(expect.objectContaining({ code: "invalid_additional_fact" }));
+  });
+
+  it.each([
+    ["delivery", "runtime/deliveries.jsonl"],
+    ["runtime", "runtime/runs.jsonl"],
+    ["event", "runtime/events.ndjson"],
+    ["migration", "migration-manifest.json"],
+  ])("rejects a symlinked %s authority without following the file", (_kind, relativePath) => {
+    const f = fixture();
+    const outside = join(f.root, `${_kind}.json`);
+    writeText(outside, "{}\n");
+    const target = join(f.workspace, relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(outside, target);
+    expect(() => collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace }))
+      .toThrowError(expect.objectContaining({ code: "unsafe_authority_path" }));
+  });
+
+  it("rejects an oversized additional authority instead of returning a partial index", () => {
+    const f = fixture();
+    writeText(join(f.workspace, "runtime", "runs.jsonl"), "x".repeat(4 * 1024 * 1024 + 1));
+    expect(() => collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace }))
+      .toThrowError(expect.objectContaining({ code: "authority_too_large" }));
   });
 
   it.each([

@@ -217,7 +217,10 @@ function collectEmbeddedReferences(value: unknown): {
     if (typeof candidate["repoId"] === "string" && candidate["repoId"] !== "") repoIds.add(candidate["repoId"]);
     if (typeof candidate["provider"] === "string" && typeof candidate["ref"] === "string") {
       const normalized = normalizeRequirementSourceReference(candidate["provider"], candidate["ref"]);
-      if (normalized.ok) requirementMap.set(normalized.value.requirementId, {
+      if (!normalized.ok) {
+        throw new WorkspaceReferenceIndexError("invalid_additional_fact", "Additional authority contains an invalid Requirement identity");
+      }
+      requirementMap.set(normalized.value.requirementId, {
         provider: normalized.value.provider,
         ref: normalized.value.ref,
       });
@@ -231,6 +234,47 @@ function collectEmbeddedReferences(value: unknown): {
   };
 }
 
+function parseJsonLines(
+  file: ReturnType<typeof stableAuthorityFile>,
+): readonly unknown[] {
+  const records: unknown[] = [];
+  for (const [index, line] of file.bytes.toString("utf8").split(/\r?\n/u).entries()) {
+    if (line.trim() === "") continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new WorkspaceReferenceIndexError("invalid_additional_fact", `Additional authority line ${index + 1} is invalid`, { cause: error });
+    }
+    if (!isRecord(value)) {
+      throw new WorkspaceReferenceIndexError("invalid_additional_fact", `Additional authority line ${index + 1} must be an object`);
+    }
+    records.push(value);
+  }
+  return records;
+}
+
+function additionalFact(
+  kind: WorkspaceMetadataAdditionalFact["kind"],
+  authorityPath: string,
+  bytes: Buffer,
+  value: unknown,
+): WorkspaceMetadataAdditionalFact {
+  const references = collectEmbeddedReferences(value);
+  return {
+    kind,
+    authorityPath,
+    sha256: sha256(bytes),
+    requirementKeys: references.requirements,
+    repoIds: references.repoIds,
+  };
+}
+
+const DELIVERY_EVENT_TYPES = new Set([
+  "issue:repository_merge_evidence_recorded",
+  "issue:integration_acceptance_evidence_recorded",
+]);
+
 function collectIssueEventFacts(
   workspaceRoot: string,
   deps: WorkspaceReferenceIndexDependencies,
@@ -242,25 +286,51 @@ function collectIssueEventFacts(
     const path = join(issuesRoot, entry.name, "events.jsonl");
     if (!existsSync(path)) continue;
     const file = stableAuthorityFile(workspaceRoot, path, deps);
-    const records: unknown[] = [];
-    for (const [index, line] of file.bytes.toString("utf8").split(/\r?\n/u).entries()) {
-      if (line.trim() === "") continue;
-      try {
-        records.push(JSON.parse(line) as unknown);
-      } catch (error) {
-        throw new WorkspaceReferenceIndexError("invalid_additional_fact", `Issue event line ${index + 1} is invalid`, { cause: error });
-      }
+    const records = parseJsonLines(file);
+    const deliveryRecords = records.filter((record) => isRecord(record) && DELIVERY_EVENT_TYPES.has(String(record["type"] ?? "")));
+    const eventRecords = records.filter((record) => !isRecord(record) || !DELIVERY_EVENT_TYPES.has(String(record["type"] ?? "")));
+    if (deliveryRecords.length > 0) {
+      const bytes = Buffer.from(deliveryRecords.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+      facts.push(additionalFact("delivery", file.authorityPath, bytes, deliveryRecords));
     }
-    const references = collectEmbeddedReferences(records);
-    facts.push({
-      kind: "event",
-      authorityPath: file.authorityPath,
-      sha256: file.sha256,
-      requirementKeys: references.requirements,
-      repoIds: references.repoIds,
-    });
+    if (eventRecords.length > 0) {
+      const bytes = Buffer.from(eventRecords.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+      facts.push(additionalFact("event", file.authorityPath, bytes, eventRecords));
+    }
   }
-  return facts.sort((left, right) => compareText(left.authorityPath, right.authorityPath));
+  return facts.sort((left, right) => compareText(`${left.authorityPath}\0${left.kind}`, `${right.authorityPath}\0${right.kind}`));
+}
+
+function collectKnownAdditionalFacts(
+  workspaceRoot: string,
+  deps: WorkspaceReferenceIndexDependencies,
+): readonly WorkspaceMetadataAdditionalFact[] {
+  const definitions: readonly {
+    readonly kind: WorkspaceMetadataAdditionalFact["kind"];
+    readonly path: string;
+    readonly format: "json" | "jsonl";
+  }[] = [
+    { kind: "delivery", path: "runtime/deliveries.jsonl", format: "jsonl" },
+    { kind: "event", path: "runtime/events.ndjson", format: "jsonl" },
+    { kind: "migration", path: "migration-manifest.json", format: "json" },
+    { kind: "runtime", path: "runtime/locks/story-leases.json", format: "json" },
+    { kind: "runtime", path: "runtime/runs.json", format: "json" },
+    { kind: "runtime", path: "runtime/runs.jsonl", format: "jsonl" },
+  ];
+  const facts: WorkspaceMetadataAdditionalFact[] = [];
+  for (const definition of definitions) {
+    const path = join(workspaceRoot, definition.path);
+    if (!existsSync(path)) continue;
+    const file = stableAuthorityFile(workspaceRoot, path, deps);
+    const value = definition.format === "jsonl"
+      ? parseJsonLines(file)
+      : parseJson(file.bytes, "invalid_additional_fact", `Additional ${definition.kind} authority`);
+    if (definition.format === "json" && !isRecord(value)) {
+      throw new WorkspaceReferenceIndexError("invalid_additional_fact", `Additional ${definition.kind} authority must be an object`);
+    }
+    facts.push(additionalFact(definition.kind, file.authorityPath, file.bytes, value));
+  }
+  return facts;
 }
 
 export function collectWorkspaceMetadataReferenceIndex(
@@ -283,6 +353,7 @@ export function collectWorkspaceMetadataReferenceIndex(
     workspaceId: parsedWorkspace.value.workspaceId,
     issues: collectIssueReferences(workspaceRoot, parsedWorkspace.value.workspaceId, deps),
     requirementArchives: collectRequirementArchives(workspaceRoot, deps),
-    additionalFacts: collectIssueEventFacts(workspaceRoot, deps),
+    additionalFacts: [...collectIssueEventFacts(workspaceRoot, deps), ...collectKnownAdditionalFacts(workspaceRoot, deps)]
+      .sort((left, right) => compareText(`${left.authorityPath}\0${left.kind}`, `${right.authorityPath}\0${right.kind}`)),
   };
 }

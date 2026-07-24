@@ -65,7 +65,7 @@ import {
 import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
 import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
 import { captureMainHeadBaseline, writeMainDirtyBaseline } from "../src/runner/main-checkout-guard.js";
-import { restorePersistedWorkspaceCycleContext } from "../src/runner/scoped-route.js";
+import { restorePersistedWorkspaceCycleContext, workspaceCycleContextPath } from "../src/runner/scoped-route.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -1023,6 +1023,15 @@ describe("US-WS-033 — unexpected terminal fallback restores frozen context", (
         },
       },
     };
+    const requirementEvidence = {
+      kind: "requirement_source_exact" as const,
+      value: "jira:IDEA-074",
+      hard: true,
+      score: 100,
+      source: "requirement:jira/IDEA-074",
+      provenance: "explicit_user" as const,
+      detail: "Workspace requirement matched jira:IDEA-074",
+    };
     const workspaceExecution = {
       schema: "roll.workspace-execution-context/v1" as const,
       workspace: {
@@ -1031,7 +1040,7 @@ describe("US-WS-033 — unexpected terminal fallback restores frozen context", (
         canonicalRoot: workspaceRoot,
         lifecycle: "active" as const,
       },
-      resolution: { source: "requirement_discovery" as const, evidence: [] },
+      resolution: { source: "requirement_discovery" as const, evidence: [requirementEvidence] },
       bindings: [binding],
       authorities: {
         backlog: join(workspaceRoot, "backlog", "index.md"),
@@ -1079,10 +1088,14 @@ describe("US-WS-033 — unexpected terminal fallback restores frozen context", (
     })).rejects.toThrow("fixture crash after context persistence");
 
     const restored = restorePersistedWorkspaceCycleContext(runtimeRoot, cycleId);
-    expect(restored).toMatchObject({
-      ok: true,
-      context: { workspace: { workspaceId: "roll" }, issue: { storyId: "US-WS-033" } },
-    });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect(restored.context.resolution.evidence).toEqual([requirementEvidence]);
+    const persisted = JSON.parse(readFileSync(workspaceCycleContextPath(runtimeRoot, cycleId), "utf8")) as typeof restored.context;
+    expect(restored.context).toEqual(persisted);
+    expect(restored.context.issue?.execution).toEqual(repositoryExecution);
+    expect(persisted.issue?.execution).toEqual(repositoryExecution);
+    expect(restored.context.resolution.evidence).toEqual(persisted.resolution.evidence);
     const runCall = calls["run"]?.[0];
     expect(runCall?.[1]).toEqual({ storyId: "US-WS-033", cycleId });
     expect(runCall?.[2]).toMatchObject({ workspace_id: "roll", status: "aborted" });

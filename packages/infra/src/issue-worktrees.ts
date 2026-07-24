@@ -233,10 +233,14 @@ function parseRepositoryBoundEvent(raw: unknown, issueRoot: string): { readonly 
  *  genuine corruption, and silently dropping it could un-bind an alias that
  *  had already durably completed, letting a retry recreate/rebind it and
  *  lose the fact that it was ever pinned. */
-export function readRepositoryBoundFacts(issueRoot: string): ReadonlyMap<string, PinnedTargetFacts> {
+export function readRepositoryBoundFacts(
+  issueRoot: string,
+  dependencies: { readonly readText?: (path: string) => string } = {},
+): ReadonlyMap<string, PinnedTargetFacts> {
   const path = eventsPath(issueRoot);
-  if (!existsSync(path)) return new Map();
-  const lines = readFileSync(path, "utf8").split("\n").filter((line) => line.trim() !== "");
+  if (dependencies.readText === undefined && !existsSync(path)) return new Map();
+  const text = dependencies.readText?.(path) ?? readFileSync(path, "utf8");
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
   const facts = new Map<string, PinnedTargetFacts>();
   for (const line of lines) {
     let raw: unknown;

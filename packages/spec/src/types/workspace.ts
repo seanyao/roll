@@ -21,6 +21,7 @@ export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
 export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-reference-index/v1" as const;
 export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
 export const WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 = "roll.workspace-create-apply-authorization/v1" as const;
+export const WORKSPACE_CLARIFICATION_V1 = "roll.workspace-clarification/v1" as const;
 
 export const REQUIREMENT_HINT_PROVENANCES = [
   "explicit_user",
@@ -315,15 +316,15 @@ export interface RequirementHintV1 {
   readonly semanticTerms?: readonly string[];
 }
 
-export type WorkspaceRequirementMatchEvidenceKind =
+export type WorkspaceMatchEvidenceKind =
   | "issue_exact"
   | "requirement_source_exact"
   | "repository_exact"
   | "path_contained"
   | "semantic_supported";
 
-export interface WorkspaceRequirementMatchEvidence {
-  readonly kind: WorkspaceRequirementMatchEvidenceKind;
+export interface WorkspaceMatchEvidence {
+  readonly kind: WorkspaceMatchEvidenceKind;
   readonly value: string;
   readonly hard: boolean;
   readonly score: number;
@@ -332,13 +333,60 @@ export interface WorkspaceRequirementMatchEvidence {
   readonly detail: string;
 }
 
+/** Backward-compatible name retained for requirement matching consumers. */
+export type WorkspaceRequirementMatchEvidenceKind = WorkspaceMatchEvidenceKind;
+export type WorkspaceRequirementMatchEvidence = WorkspaceMatchEvidence;
+
 export type WorkspaceContextScope =
   | "machine_only"
   | "workspace_optional_read"
   | "workspace_required_read"
   | "workspace_required_mutation"
   | "issue_required"
+  | "repository_required"
   | "legacy_migration_only";
+
+export type WorkspaceExecutionContextResolutionSource =
+  | "explicit"
+  | "environment"
+  | "cwd_manifest"
+  | "issue_manifest"
+  | "requirement_discovery";
+
+export interface WorkspaceExecutionAuthorityPaths {
+  readonly backlog: string;
+  readonly features: string;
+  readonly design: string;
+  readonly requirements: string;
+  readonly policy: string;
+  readonly evidence: string;
+  readonly toolDumps: string;
+  readonly events: string;
+  readonly runtime: string;
+  readonly locks: string;
+}
+
+export interface WorkspaceExecutionContextV1 {
+  readonly schema: typeof WORKSPACE_EXECUTION_CONTEXT_V1;
+  readonly workspace: {
+    readonly workspaceId: string;
+    readonly root: string;
+    readonly canonicalRoot: string;
+    readonly lifecycle: WorkspaceLifecycle;
+  };
+  readonly resolution: {
+    readonly source: WorkspaceExecutionContextResolutionSource;
+    readonly evidence: readonly WorkspaceMatchEvidence[];
+  };
+  readonly bindings: readonly RepositoryBinding[];
+  readonly contexts?: WorkspaceContextsV1;
+  readonly issue?: {
+    readonly storyId: string;
+    readonly manifestPath: string;
+    readonly execution: CycleRepositoryExecutionContext;
+  };
+  readonly authorities: WorkspaceExecutionAuthorityPaths;
+}
 
 export interface WorkspaceIntentV1 {
   readonly schema: typeof WORKSPACE_INTENT_V1;
@@ -412,6 +460,58 @@ export type WorkspaceDiscoveryDecisionV1 = (
       readonly candidates: readonly WorkspaceMatchCandidateV1[];
     }
 ) & { readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[] };
+
+export type WorkspaceClarificationReason =
+  | "requirement_match_required"
+  | "ambiguous_requirement_match"
+  | "requirement_workspace_conflict"
+  | "workspace_activation_required"
+  | "create_required"
+  | "workspace_discovery_incomplete";
+
+export type WorkspaceClarificationAction =
+  | "select_existing"
+  | "create_new"
+  | "repair_discovery";
+
+export interface WorkspaceClarificationCandidateV1 {
+  readonly workspaceId: string;
+  readonly displayName: string;
+  readonly lifecycle: Exclude<WorkspaceLifecycle, "archived">;
+  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[];
+  readonly canonicalSelector: string;
+}
+
+export interface WorkspaceClarificationHandoffV1 {
+  readonly schema: typeof WORKSPACE_CLARIFICATION_V1;
+  readonly registryRevision: number;
+  readonly discoveryFactsSha256: Sha256Digest;
+  readonly reason: WorkspaceClarificationReason;
+  readonly operation: "read" | "mutation";
+  readonly requirementSummary: {
+    readonly sources: readonly RequirementSourceKey[];
+    readonly storyIds: readonly string[];
+    readonly hasSemanticOnlyEvidence: boolean;
+  };
+  readonly candidates: readonly WorkspaceClarificationCandidateV1[];
+  readonly allowedActions: readonly WorkspaceClarificationAction[];
+  readonly canonicalCreateCommand: "roll workspace create";
+  readonly canonicalRepairCommands: readonly string[];
+}
+
+export type WorkspaceClarificationAnswerV1 =
+  | {
+      readonly action: "select_existing";
+      readonly workspaceId: string;
+    }
+  | {
+      readonly action: "create_new";
+      readonly workspaceId?: string;
+    }
+  | {
+      readonly action: "repair_discovery";
+    };
 
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;
@@ -698,61 +798,6 @@ export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecution
 export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
   readonly issueRoot: string;
   readonly repositories: RepositoryExecutionMap;
-}
-
-export type WorkspaceMatchEvidenceKind =
-  | "issue_exact"
-  | "requirement_source_exact"
-  | "repository_exact"
-  | "path_contained"
-  | "semantic_supported";
-
-export interface WorkspaceMatchEvidence {
-  readonly kind: WorkspaceMatchEvidenceKind;
-  readonly value: string;
-  readonly hard: boolean;
-  readonly score: number;
-}
-
-export interface WorkspaceExecutionContextAuthoritiesV1 {
-  readonly backlog: string;
-  readonly features: string;
-  readonly design: string;
-  readonly requirements: string;
-  readonly policy: string;
-  readonly evidence: string;
-  readonly toolDumps: string;
-  readonly events: string;
-  readonly runtime: string;
-  readonly locks: string;
-}
-
-/**
- * Complete, versioned Workspace authority handed to every scoped operation.
- * It preserves resolution evidence, repository bindings, Issue execution
- * facts and authority paths; Context Engineering consumes this contract
- * without rediscovering or reducing Workspace identity.
- */
-export interface WorkspaceExecutionContextV1 {
-  readonly schema: typeof WORKSPACE_EXECUTION_CONTEXT_V1;
-  readonly workspace: {
-    readonly workspaceId: string;
-    readonly root: string;
-    readonly canonicalRoot: string;
-    readonly lifecycle: WorkspaceLifecycle;
-  };
-  readonly resolution: {
-    readonly source: "explicit" | "environment" | "cwd_manifest" | "issue_manifest" | "requirement_discovery";
-    readonly evidence: readonly WorkspaceMatchEvidence[];
-  };
-  readonly bindings: readonly RepositoryBinding[];
-  readonly contexts?: WorkspaceContextsV1;
-  readonly issue?: {
-    readonly storyId: string;
-    readonly manifestPath: string;
-    readonly execution: CycleRepositoryExecutionContext;
-  };
-  readonly authorities: WorkspaceExecutionContextAuthoritiesV1;
 }
 
 export interface IssueManifest {

@@ -1,6 +1,7 @@
 export * from "./config.js";
 export * from "./workspace-registry.js";
 export * from "./workspace-discovery.js";
+export * from "./workspace-context-loader.js";
 export * from "./workspace-filesystem.js";
 export * from "./workspace/migration-facts.js";
 export * from "./workspace/migration.js";

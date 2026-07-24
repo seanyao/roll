@@ -282,13 +282,15 @@ exports[`US-WS-005 roll workspace lifecycle surface > rejects archived pause in 
 {
   "en": {
     "status": 1,
-    "stderr": "workspace: archived_requires_activation — Archived Workspace must be activated before other mutations
+    "stderr": "workspace: invalid_target — Workspace target is invalid
+Candidates: ws-alpha=<WS_1>
 ",
     "stdout": "",
   },
   "zh": {
     "status": 1,
-    "stderr": "工作区：archived_requires_activation — 已归档工作区必须先激活，才能执行其他变更
+    "stderr": "工作区：invalid_target — 工作区目标无效
+候选目标：ws-alpha=<WS_1>
 ",
     "stdout": "",
   },

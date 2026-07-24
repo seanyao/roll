@@ -5,6 +5,7 @@ import {
   isValidContextProviderId,
   normalizeContextGitRemote,
   parseContextRef,
+  workspaceExecutionContextV1Schema,
   type ContextDiagnosticV1,
   type ContextProviderExecutionPlanV1,
   type ContextProviderRegistryV1,
@@ -12,11 +13,27 @@ import {
   type WorkspaceContextBindingV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
+import { validateJsonSchemaValue } from "../tools/schema.js";
 
 export interface CompileContextProviderExecutionPlansInput {
   readonly registry?: ContextProviderRegistryV1;
-  readonly workspace?: WorkspaceExecutionContextV1;
+  readonly workspace?: unknown;
   readonly refs?: readonly string[];
+}
+
+export type WorkspaceExecutionContextParseResult =
+  | { readonly ok: true; readonly value: WorkspaceExecutionContextV1 }
+  | { readonly ok: false; readonly errors: readonly string[] };
+
+/**
+ * Validate the complete Workspace authority at the core boundary before any
+ * Context planning can consume it. Callers cannot bypass the versioned,
+ * closed schema through TypeScript structural compatibility.
+ */
+export function parseWorkspaceExecutionContext(value: unknown): WorkspaceExecutionContextParseResult {
+  const validation = validateJsonSchemaValue(workspaceExecutionContextV1Schema, value);
+  if (!validation.ok) return { ok: false, errors: validation.errors };
+  return { ok: true, value: value as WorkspaceExecutionContextV1 };
 }
 
 export interface ContextProviderExecutionPlanCompilationV1 {
@@ -102,8 +119,29 @@ function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProv
 export function compileContextProviderExecutionPlans(
   input: CompileContextProviderExecutionPlansInput,
 ): ContextProviderExecutionPlanCompilationV1 {
-  const contexts = input.workspace?.contexts;
-  if (input.registry === undefined || !input.registry.enabled || contexts === undefined || !contexts.enabled) {
+  if (input.registry === undefined || !input.registry.enabled || input.workspace === undefined) {
+    return {
+      outcome: "disabled",
+      plans: [],
+      diagnostics: [diagnostic("context_disabled", "warning", "Context is disabled for this machine or Workspace")],
+    };
+  }
+
+  const parsedWorkspace = parseWorkspaceExecutionContext(input.workspace);
+  if (!parsedWorkspace.ok) {
+    return {
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [diagnostic(
+        "invalid_context_binding",
+        "blocking",
+        "Workspace execution Context authority is invalid",
+      )],
+    };
+  }
+
+  const contexts = parsedWorkspace.value.contexts;
+  if (contexts === undefined || !contexts.enabled) {
     return {
       outcome: "disabled",
       plans: [],

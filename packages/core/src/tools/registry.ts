@@ -1,5 +1,6 @@
 import type {
   ToolCost,
+  ToolContextCorrelation,
   ToolDeclaration,
   ToolDeps,
   ToolError,
@@ -11,6 +12,7 @@ import type {
   ToolRequirement,
   ToolRequirementResolution,
   ToolResult,
+  WorkspaceExecutionContextV1,
 } from "@roll/spec";
 import { deriveToolReadiness, type ToolRequirementResolver } from "./readiness.js";
 import { validateJsonSchemaValue } from "./schema.js";
@@ -34,6 +36,8 @@ export interface ToolInvokeRequest<I = unknown> {
   invocationId: string;
   input: I;
   caller: Omit<ToolInvocation<I>["caller"], "cycleId"> & { cycleId?: string };
+  context?: WorkspaceExecutionContextV1;
+  repoId?: string;
 }
 
 export interface ToolRegistryOptions {
@@ -59,6 +63,15 @@ function error(code: ToolError["code"], message: string, retryable = false, deta
   return { code, message, retryable, detail };
 }
 
+function correlation(request: Pick<ToolInvokeRequest, "context" | "repoId">): ToolContextCorrelation | undefined {
+  if (request.context === undefined) return undefined;
+  return {
+    workspaceId: request.context.workspace.workspaceId,
+    ...(request.context.issue?.storyId === undefined ? {} : { storyId: request.context.issue.storyId }),
+    ...(request.repoId === undefined ? {} : { repoId: request.repoId }),
+  };
+}
+
 function meta(toolId: ToolId, request: ToolInvokeRequest, startedAt: number, endedAt: number, attempt?: number): ToolMeta {
   return {
     invocationId: request.invocationId,
@@ -68,6 +81,7 @@ function meta(toolId: ToolId, request: ToolInvokeRequest, startedAt: number, end
     endedAt,
     durationMs: Math.max(0, endedAt - startedAt),
     attempt,
+    correlation: correlation(request),
   };
 }
 
@@ -167,6 +181,8 @@ export class ToolRegistry {
       caller: request.caller as ToolInvocation<I>["caller"],
       policy,
       ts: startedAt,
+      context: request.context,
+      repoId: request.repoId,
     };
 
     const emitEvents = state.tool.declaration.emitsEvents !== false;
@@ -180,7 +196,7 @@ export class ToolRegistry {
       } as ToolEvent);
     }
 
-    const result = await this.executeWithRetry<I, O>(state.tool, invocation, request, policy);
+    const result = withCorrelation(await this.executeWithRetry<I, O>(state.tool, invocation, request, policy), request);
     const resultWithWarnings = appendWarnings(result, requirementWarnings);
     if (emitEvents || !result.ok) {
       await this.emit({
@@ -337,4 +353,10 @@ function appendWarnings<T>(result: ToolResult<T>, warnings: readonly string[]): 
     ...result,
     warnings: [...(result.warnings ?? []), ...warnings],
   };
+}
+
+function withCorrelation<T>(result: ToolResult<T>, request: Pick<ToolInvokeRequest, "context" | "repoId">): ToolResult<T> {
+  const value = correlation(request);
+  if (value === undefined) return result;
+  return { ...result, meta: { ...result.meta, correlation: value } };
 }

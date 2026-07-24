@@ -45,8 +45,8 @@ export function projectDataPath(projectPath: string, ...segments: string[]): str
   return join(projectDataRoot(projectPath), ...segments);
 }
 
-export function projectBacklogPath(projectPath: string): string {
-  const root = projectDataRoot(projectPath);
+export function projectBacklogPath(projectPath: string, authorityMode: ProjectDataAuthorityMode = "auto"): string {
+  const root = projectDataRoot(projectPath, authorityMode);
   return root === projectPath ? join(root, "backlog", "index.md") : join(root, "backlog.md");
 }
 
@@ -210,11 +210,15 @@ export function liveEpicOf(projectPath: string, storyId: string): string | null 
  *   - No hit → null (→ uncategorized at the call site).
  * Single-ID callers ({@link liveEpicOf} / {@link findFeatureFile}) are untouched.
  */
-export function bulkLiveEpics(projectPath: string, ids: readonly string[]): Map<string, string | null> {
+export function bulkLiveEpics(
+  projectPath: string,
+  ids: readonly string[],
+  authorityMode: ProjectDataAuthorityMode = "auto",
+): Map<string, string | null> {
   const result = new Map<string, string | null>();
   const remaining = new Set(ids);
   const files: Array<{ path: string; name: string; dirName: string }> = [];
-  const root = projectDataPath(projectPath, "features");
+  const root = join(projectDataRoot(projectPath, authorityMode), "features");
   const walk = (dir: string): void => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
@@ -310,9 +314,12 @@ export function readIndex(projectPath: string): Record<string, string> {
  * epic the live walk can place is recorded. Deterministic + idempotent (sorted,
  * no volatile fields). Returns the written map.
  */
-export function generateIndex(projectPath: string): Record<string, string> {
-  const authorityRoot = projectDataRoot(projectPath);
-  const backlogPath = projectBacklogPath(projectPath);
+export function generateIndex(
+  projectPath: string,
+  authorityMode: ProjectDataAuthorityMode = "auto",
+): Record<string, string> {
+  const authorityRoot = projectDataRoot(projectPath, authorityMode);
+  const backlogPath = projectBacklogPath(projectPath, authorityMode);
   let ids: string[] = [];
   if (existsSync(backlogPath)) {
     try {
@@ -322,7 +329,7 @@ export function generateIndex(projectPath: string): Record<string, string> {
     }
   }
   // FIX-275: one walk for all ids (was a full-tree walk PER id).
-  const bulk = bulkLiveEpics(projectPath, ids);
+  const bulk = bulkLiveEpics(projectPath, ids, authorityMode);
   const stories = buildStoryIndex(ids, (id) => bulk.get(id) ?? null);
   const rollDir = authorityRoot;
   if (!existsSync(rollDir)) mkdirSync(rollDir, { recursive: true });

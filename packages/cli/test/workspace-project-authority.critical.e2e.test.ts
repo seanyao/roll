@@ -104,6 +104,19 @@ describe("US-WS-034 public Workspace project-data authority", () => {
     expect(existsSync(join(f.workspaceRoot, ".roll"))).toBe(false);
   });
 
+  it("rejects capture repair health paths outside the selected Workspace evidence authority", () => {
+    const f = fixture("capture-outside-health");
+    const outsideHealth = join(f.outsideCwd, "health.json");
+    writeFileSync(outsideHealth, "{}\n");
+    const result = runRoll(f.outsideCwd, [
+      "capture", "repair", "US-OUTSIDE-1", "--health", outsideHealth, "--workspace", f.workspaceId,
+    ], f.env);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("authority_outside");
+    expect(readFileSync(outsideHealth, "utf8")).toBe("{}\n");
+  });
+
   it("routes capture and truth through the selected Workspace from an arbitrary cwd", () => {
     const f = fixture("capture-truth");
     writeFileSync(join(f.workspaceRoot, "policy.yaml"), "acceptance:\n  capture:\n    mode: best_effort\n");

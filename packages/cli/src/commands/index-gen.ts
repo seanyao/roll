@@ -444,7 +444,7 @@ export function indexCommand(
     ];
     if (!requireWorkspaceAuthorities("roll index", required)) return 1;
   }
-  const stories = generateIndex(cwd);
+  const stories = generateIndex(cwd, deps.authorityMode);
   const n = Object.keys(stories).length;
   const indexPath = relative(cwd, projectDataPath(cwd, "index.json")) || "index.json";
   process.stdout.write(`index.json regenerated\n索引已重建\n  ${n} stories mapped to epics (${indexPath})\n`);

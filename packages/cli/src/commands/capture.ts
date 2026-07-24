@@ -20,7 +20,7 @@
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   isEvidenceOnlyRepairable,
   planCapturePolicyMigration,
@@ -277,6 +277,11 @@ function safeSegment(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/u.test(value) && !value.includes("..");
 }
 
+function contained(root: string, target: string): boolean {
+  const child = relative(root, target);
+  return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
 // ── status (AC4) ──────────────────────────────────────────────────────────────
 
 function captureStatus(args: string[], deps: CaptureCommandDeps): number {
@@ -367,7 +372,17 @@ async function captureRepair(args: string[], deps: CaptureCommandDeps): Promise<
   const evidenceHealthRoot = deps.authorities === undefined
     ? undefined
     : join(deps.authorities.evidence, "_health");
-  const healthPath = flagValue(args, "--health") ?? evidenceHealthFactPath(projectRoot, storyId, evidenceHealthRoot);
+  const requestedHealthPath = flagValue(args, "--health");
+  const healthPath = evidenceHealthRoot === undefined || requestedHealthPath === undefined
+    ? requestedHealthPath ?? evidenceHealthFactPath(projectRoot, storyId, evidenceHealthRoot)
+    : resolve(
+        requestedHealthPath.startsWith("evidence/") ? projectRoot : evidenceHealthRoot,
+        requestedHealthPath,
+      );
+  if (evidenceHealthRoot !== undefined && !contained(deps.authorities?.evidence ?? evidenceHealthRoot, healthPath)) {
+    process.stderr.write(`roll capture repair: authority_outside: ${healthPath}\n`);
+    return 1;
+  }
   const readHealthFact = deps.readHealthFact ?? defaultReadHealthFact;
   const writeFileText = deps.writeFileText ?? defaultWriteFileText;
 

@@ -280,7 +280,7 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   // dossier/epic page refresh is NO LONGER a delivery side effect — run
   // `roll index` to (re)render those pages on demand.
   try {
-    generateIndex(projectPath);
+    generateIndex(projectPath, deps.canonical === true ? "workspace" : "auto");
   } catch {
     /* index cache is best-effort; the locator re-derives via live walk */
   }

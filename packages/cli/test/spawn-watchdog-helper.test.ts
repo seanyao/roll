@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RollEvent } from "@roll/spec";
 import { formatSpawnKillLine } from "@roll/core";
-import { readRoleTimeouts, spawnWatched, watchdogRoleFor } from "../src/runner/spawn-observers.js";
+import { readRoleTimeouts, spawnWatched, watchdogRoleFor } from "../src/runner/spawn-watchdog.js";
 
 const POLL_ENV = "ROLL_TIMEOUT_POLL_MS";
 

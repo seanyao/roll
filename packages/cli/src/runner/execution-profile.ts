@@ -21,7 +21,7 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { readLatestStoryReviewScore } from "../lib/review-score.js";
 import { storySpecPath } from "./attest-gate.js";
 import { resolveExecutionCwd } from "./submodule-worktree.js";
-import { spawnWatched } from "./spawn-observers.js";
+import { spawnWatched } from "./spawn-watchdog.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 

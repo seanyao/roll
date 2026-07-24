@@ -15,7 +15,7 @@ import {
   type PickRankingEntry,
 } from "@roll/core";
 import { agentSpawnSupportsPurpose, type AgentSpawn } from "./agent-spawn.js";
-import { spawnWatched } from "./spawn-observers.js";
+import { spawnWatched } from "./spawn-watchdog.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 

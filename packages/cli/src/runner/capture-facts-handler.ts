@@ -47,7 +47,7 @@ import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
 import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
-import { spawnWatched } from "./spawn-observers.js";
+import { spawnWatched } from "./spawn-watchdog.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 
 const execFileAsync = promisify(execFile);

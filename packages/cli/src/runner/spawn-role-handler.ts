@@ -37,7 +37,7 @@ import type { CycleCommand, CycleContext } from "@roll/core";
 import { adversarialRolePrompt, agentSpawnEnvironment } from "./agent-spawn.js";
 import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, worktreeGitEnv } from "./main-checkout-guard.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
-import { spawnWatched } from "./spawn-observers.js";
+import { spawnWatched } from "./spawn-watchdog.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";

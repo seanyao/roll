@@ -14,7 +14,7 @@ import { classifyBlockSignature } from "./agent-liveness.js";
 import { blockIfAgentCredentialsMissing } from "./agent-routing.js";
 import { buildReviewPrompt, type PairReview } from "./pairing-gate.js";
 import { resolveExecutionCwd } from "./submodule-worktree.js";
-import { spawnWatched } from "./spawn-observers.js";
+import { spawnWatched } from "./spawn-watchdog.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 

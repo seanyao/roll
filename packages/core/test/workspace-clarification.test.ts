@@ -134,4 +134,22 @@ describe("US-WS-029 Workspace clarification handoff", () => {
       reason === "workspace_discovery_incomplete" ? ["roll workspace doctor fields --json"] : [],
     );
   });
+
+  it("fails closed when repair is allowed but no safe canonical repair command exists", () => {
+    expect(() => buildWorkspaceClarificationHandoff({
+      intent: intent("mutation"),
+      reason: "workspace_discovery_incomplete",
+      candidates: [],
+      diagnostics: [{
+        workspaceId: "<registry>",
+        root: "/roll-home",
+        code: "discovery_io_failure",
+        authorityPath: "/roll-home/workspaces.json",
+        message: "registry unavailable",
+      }],
+      facts: [],
+      registryRevision: 0,
+      discoveryFactsSha256: SHA,
+    })).toThrowError("invalid_workspace_clarification: repair action has no canonical command");
+  });
 });

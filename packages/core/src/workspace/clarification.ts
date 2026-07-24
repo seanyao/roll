@@ -103,6 +103,15 @@ export function buildWorkspaceClarificationHandoff(input: {
   const storyIds = uniqueSorted(input.intent.requirement.storyIds.map((entry) => entry.storyId));
   const hasStructuredEvidence = sources.length > 0 || storyIds.length > 0 ||
     input.intent.requirement.repositoryRemotes.length > 0 || input.intent.requirement.paths.length > 0;
+  const allowedActions = workspaceClarificationAllowedActions({
+    reason: input.reason,
+    operation: input.intent.operation,
+    candidateCount: candidates.length,
+  });
+  const canonicalRepairCommands = repairCommands(input.diagnostics);
+  if (allowedActions.includes("repair_discovery") && canonicalRepairCommands.length === 0) {
+    throw new Error("invalid_workspace_clarification: repair action has no canonical command");
+  }
 
   return {
     schema: WORKSPACE_CLARIFICATION_V1,
@@ -116,12 +125,8 @@ export function buildWorkspaceClarificationHandoff(input: {
       hasSemanticOnlyEvidence: !hasStructuredEvidence && (input.intent.requirement.semanticTerms?.length ?? 0) > 0,
     },
     candidates,
-    allowedActions: workspaceClarificationAllowedActions({
-      reason: input.reason,
-      operation: input.intent.operation,
-      candidateCount: candidates.length,
-    }),
+    allowedActions,
     canonicalCreateCommand: "roll workspace create",
-    canonicalRepairCommands: repairCommands(input.diagnostics),
+    canonicalRepairCommands,
   };
 }

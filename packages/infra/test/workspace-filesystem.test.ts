@@ -543,6 +543,33 @@ describe("Workspace filesystem transaction", () => {
     expect(existsSync(operatorDirectory)).toBe(true);
   });
 
+  it("never overwrites a current journal that claims a real operator-owned directory", async () => {
+    const f = fixture();
+    const operatorDirectory = join(f.root, "operator-owned-empty");
+    mkdirSync(operatorDirectory, { recursive: true });
+    const journalPath = writeCreateJournal(f, {
+      created: [
+        { path: f.root, kind: "directory" },
+        { path: operatorDirectory, kind: "directory" },
+      ],
+    });
+    const before = tree(f.rollHome);
+    const beforeJournal = readFileSync(journalPath, "utf8");
+
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+    expect(preview).toMatchObject({ outcome: "rejected" });
+    expect(tree(f.rollHome)).toEqual(before);
+    expect(readFileSync(journalPath, "utf8")).toBe(beforeJournal);
+
+    await expect(applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "rejected" });
+    expect(tree(f.rollHome)).toEqual(before);
+    expect(existsSync(operatorDirectory)).toBe(true);
+    expect(readFileSync(journalPath, "utf8")).toBe(beforeJournal);
+  });
+
   it("invalidates an exact authorization when the lock-in plan digest changes", async () => {
     const f = fixture();
     const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });

@@ -64,6 +64,7 @@ import {
 import { suspendRig, readRigLifecycleState } from "../src/runner/agent-liveness.js";
 import { startMainCheckoutLeakWatchdog } from "../src/runner/sandbox-boundary.js";
 import { captureMainHeadBaseline, writeMainDirtyBaseline } from "../src/runner/main-checkout-guard.js";
+import { restorePersistedWorkspaceCycleContext } from "../src/runner/scoped-route.js";
 
 /** Temp dirs created by FIX-207 attest-gate executor tests; cleaned at end. */
 const execDirs: string[] = [];
@@ -7296,6 +7297,89 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     });
     await executeCommand({ kind: "spawn_role", role: "implementer", agent: "codex", round: 0 }, ports, { ...CTX, targetSubmodule: sub });
     expect(spawns[0]?.cwd).toBe(subWt);
+  });
+
+  it("US-WS-033: pick_story persists the frozen Issue context before any agent spawn", async () => {
+    const runtimeRoot = realpathSync(mkdtempSync(join(tmpdir(), "roll-ws-033-persist-")));
+    execDirs.push(runtimeRoot);
+    const workspaceRoot = join(runtimeRoot, "workspace");
+    const issueRoot = join(workspaceRoot, "issues", "US-WS-033");
+    const binding = {
+      schema: "roll.repository-binding/v1" as const,
+      repoId: "repo-product",
+      alias: "product",
+      remote: "git@github.com:seanyao/roll.git",
+      integrationBranch: "idea-074-workspace",
+      provider: "github" as const,
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    };
+    const repositoryExecution = {
+      workspaceId: "roll",
+      issueRoot,
+      repositories: {
+        [binding.repoId]: {
+          repoId: binding.repoId,
+          alias: binding.alias,
+          access: "write" as const,
+          requiredDelivery: true,
+          noChangePolicy: "changes_required" as const,
+          worktreePath: join(issueRoot, binding.alias),
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          commands: { test: [], integration: [] },
+        },
+      },
+    };
+    const workspaceExecution = {
+      schema: "roll.workspace-execution-context/v1" as const,
+      workspace: { workspaceId: "roll", root: workspaceRoot, canonicalRoot: workspaceRoot, lifecycle: "active" as const },
+      resolution: { source: "requirement_discovery" as const, evidence: [] },
+      bindings: [binding],
+      authorities: {
+        backlog: join(workspaceRoot, "backlog", "index.md"),
+        features: join(workspaceRoot, "features"),
+        design: join(workspaceRoot, "design"),
+        requirements: join(workspaceRoot, "requirements"),
+        policy: join(workspaceRoot, "policy.yaml"),
+        evidence: join(workspaceRoot, "evidence"),
+        toolDumps: join(workspaceRoot, "runtime", "tool-dumps"),
+        events: join(workspaceRoot, "runtime", "events"),
+        runtime: join(workspaceRoot, "runtime"),
+        locks: join(workspaceRoot, "runtime", "locks"),
+      },
+    };
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      repoCwd: workspaceRoot,
+      paths: {
+        ...base.ports.paths,
+        eventsPath: join(runtimeRoot, "events.ndjson"),
+        runsPath: join(runtimeRoot, "runs.jsonl"),
+        alertsPath: join(runtimeRoot, "alerts.log"),
+        lockPath: join(runtimeRoot, "inner.lock"),
+        heartbeatPath: join(runtimeRoot, "heartbeat"),
+        worktreePath: join(runtimeRoot, "worktree"),
+      },
+      backlog: { read: () => [{ id: "US-WS-033", desc: "est_min:15", status: "📋 Todo" }] },
+      repositories: {
+        prepare: vi.fn(async () => ({ kind: "prepared" as const, outcome: "reused" as const })),
+        resolve: vi.fn(async () => repositoryExecution),
+        bind: vi.fn(),
+      },
+    });
+
+    const result = await executeCommand(
+      { kind: "pick_story" },
+      ports,
+      { ...CTX, cycleId: "cycle-ws-033-persist", workspaceExecution },
+    );
+
+    expect(result.event).toMatchObject({ type: "story_picked", storyId: "US-WS-033" });
+    const restored = restorePersistedWorkspaceCycleContext(runtimeRoot, "cycle-ws-033-persist");
+    expect(restored).toMatchObject({
+      ok: true,
+      context: { workspace: { workspaceId: "roll" }, issue: { storyId: "US-WS-033" } },
+    });
   });
 
   it("US-WS-033: spawn_role receives the frozen Workspace context and Issue root", async () => {

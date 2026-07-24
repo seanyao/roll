@@ -52,7 +52,7 @@ import { lookup } from "node:dns/promises";
 import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs, type ResolvedBacklogTarget } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { resolveStoryLeasePath } from "../runner/story-lease-path.js";
-import { resolveRequirementMatchedWorkspace, validateRequirementMatchedWorkspace } from "../runner/scoped-route.js";
+import { resolveRequirementMatchedWorkspace, restorePersistedWorkspaceCycleContext, validateRequirementMatchedWorkspace } from "../runner/scoped-route.js";
 import { workspaceRollHome } from "./workspace-target.js";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
@@ -169,12 +169,14 @@ export function cycleSignalTeardown(
     // FIX-1060: recover story/agent from events the cycle already wrote before
     // the signal, so an aborted cycle is never anonymous.
     const attr = readCycleAttributionFromEvents(paths.eventsPath, cycleId);
+    const restored = restorePersistedWorkspaceCycleContext(deps.runtimeDir ?? dirname(paths.eventsPath), cycleId);
     const ctx: CycleContext = {
       cycleId,
       branch,
       loop: "ci" as never,
-      storyId: attr.storyId,
+      storyId: restored.ok ? restored.context.issue?.storyId : attr.storyId,
       agent: attr.agent,
+      ...(restored.ok ? { workspaceExecution: restored.context } : {}),
     };
     const tctx = { cycleId, branch, agent: ctx.agent ?? "", model: ctx.model ?? "" };
     const terminalSec = now();

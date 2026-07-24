@@ -14,6 +14,12 @@ import { GOAL_ALLOWED_CARDS_ENV, GOAL_GUIDED_ENV } from "../src/lib/goal-progres
 import { readPendingPublish } from "../src/runner/pending-publish.js";
 import { resolveRoute } from "@roll/core";
 import { realAgentSpawn } from "../src/runner/index.js";
+import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_EXECUTION_CONTEXT_V1,
+  type WorkspaceExecutionContextV1,
+} from "@roll/spec";
+import { persistWorkspaceCycleContext } from "../src/runner/scoped-route.js";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -597,6 +603,60 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     };
   }
 
+  function frozenWorkspaceContext(runtimeRoot: string): WorkspaceExecutionContextV1 {
+    const storyId = "US-WS-033";
+    const workspaceRoot = join(runtimeRoot, "workspace");
+    const issueRoot = join(workspaceRoot, "issues", storyId);
+    const binding = {
+      schema: REPOSITORY_BINDING_V1,
+      repoId: "repo-111111111111",
+      alias: "product",
+      remote: "git@github.com:seanyao/roll.git",
+      integrationBranch: "idea-074-workspace",
+      provider: "github",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    } as const;
+    return {
+      schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+      workspace: { workspaceId: "roll", root: workspaceRoot, canonicalRoot: workspaceRoot, lifecycle: "active" },
+      resolution: { source: "requirement_discovery", evidence: [] },
+      bindings: [binding],
+      issue: {
+        storyId,
+        manifestPath: join(issueRoot, "manifest.json"),
+        execution: {
+          workspaceId: "roll",
+          issueRoot,
+          repositories: {
+            [binding.repoId]: {
+              repoId: binding.repoId,
+              alias: binding.alias,
+              access: "write",
+              requiredDelivery: true,
+              noChangePolicy: "changes_required",
+              worktreePath: join(issueRoot, binding.alias),
+              baseSha: "a".repeat(40),
+              headSha: "b".repeat(40),
+              commands: { test: [], integration: [] },
+            },
+          },
+        },
+      },
+      authorities: {
+        backlog: join(workspaceRoot, "backlog", "index.md"),
+        features: join(workspaceRoot, "features"),
+        design: join(workspaceRoot, "design"),
+        requirements: join(workspaceRoot, "requirements"),
+        policy: join(workspaceRoot, "policy.yaml"),
+        evidence: join(workspaceRoot, "evidence"),
+        toolDumps: join(workspaceRoot, "runtime", "tool-dumps"),
+        events: join(workspaceRoot, "runtime", "events"),
+        runtime: join(workspaceRoot, "runtime"),
+        locks: join(workspaceRoot, "runtime", "locks"),
+      },
+    };
+  }
+
   it("owned lock: writes aborted cycle:end + runs row, releases the lock, kills agents, exit 143", async () => {
     const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
     const { paths: p } = teardownFixture("owned");
@@ -741,6 +801,33 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     const events = readFileSync(p.eventsPath, "utf8");
     expect(events).toContain('"storyId":"FIX-1060-SPAWN"');
     expect(events).toContain('"agent":"pi"');
+  });
+
+  it("US-WS-033: signal teardown restores the persisted Workspace context and keeps workspace_id", async () => {
+    const { cycleSignalTeardown } = await import("../src/commands/loop-run-once.js");
+    const { rt, paths } = teardownFixture("workspace-context");
+    const cycleId = "cycle-ws-033-signal";
+    const context = frozenWorkspaceContext(rt);
+    expect(persistWorkspaceCycleContext(rt, cycleId, context)).toMatchObject({ ok: true });
+    writeFileSync(paths.lockPath, `${process.pid}:1780680000\n`, "utf8");
+    writeFileSync(
+      paths.eventsPath,
+      `${JSON.stringify({ type: "cycle:start", cycleId, storyId: "US-WS-033", agent: "codex", model: "", ts: 1 })}\n`,
+      "utf8",
+    );
+
+    let exitCode = -1;
+    cycleSignalTeardown(paths, cycleId, `loop/cycle-${cycleId}`, "SIGTERM", {
+      killAgents: () => 0,
+      exit: (code) => { exitCode = code; },
+      now: () => 1780680123,
+      runtimeDir: rt,
+    });
+
+    expect(exitCode).toBe(143);
+    const row = JSON.parse(readFileSync(paths.runsPath, "utf8").trimEnd().split("\n").pop() ?? "{}") as Record<string, unknown>;
+    expect(row["story_id"]).toBe("US-WS-033");
+    expect(row["workspace_id"]).toBe("roll");
   });
 
   it("releases the cycle lease when an owned cycle is terminated", async () => {

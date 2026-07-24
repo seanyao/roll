@@ -9,13 +9,16 @@ import { join } from "node:path";
 import {
   freezeWorkspaceCycleContext,
   mostRecentBuilder,
+  persistWorkspaceCycleContext,
   renderScopedExecuteRoute,
   resolveRequirementMatchedWorkspace,
   resolveWorkspaceCycleRepository,
   resolveScopedCastRole,
   resolveScopedStoryExecute,
   restoreWorkspaceCycleContext,
+  restorePersistedWorkspaceCycleContext,
   scopedExecuteRouteTrace,
+  workspaceCycleContextPath,
 } from "../src/runner/scoped-route.js";
 import {
   REPOSITORY_BINDING_V1,
@@ -527,6 +530,46 @@ describe("US-WS-033 — frozen Workspace cycle route", () => {
     expect(replayed.context.workspace.workspaceId).toBe("roll");
     expect(replayed.context.issue?.storyId).toBe("US-WS-033");
     expect(replayed.context.authorities.backlog).toBe("/workspace/roll/backlog/index.md");
+  });
+
+  it("persists one immutable cycle snapshot and restores it after process-local context is gone", () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-ws-033-cycle-context-"));
+    dirs.push(runtimeDir);
+    const { context, execution } = workspaceExecutionFixture();
+    const frozen = freezeWorkspaceCycleContext({ workspace: context, storyId: "US-WS-033", execution });
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+
+    const persisted = persistWorkspaceCycleContext(runtimeDir, "cycle-033", frozen.context);
+    expect(persisted).toEqual(frozen);
+    expect(workspaceCycleContextPath(runtimeDir, "cycle-033")).toContain("cycle-contexts");
+
+    const restored = restorePersistedWorkspaceCycleContext(runtimeDir, "cycle-033");
+    expect(restored).toEqual(frozen);
+    if (!restored.ok) return;
+    expect(Object.isFrozen(restored.context)).toBe(true);
+    expect(restored.context.workspace.workspaceId).toBe("roll");
+    expect(restored.context.issue?.storyId).toBe("US-WS-033");
+  });
+
+  it("fails closed instead of replacing an existing cycle authority snapshot", () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "roll-ws-033-cycle-conflict-"));
+    dirs.push(runtimeDir);
+    const { context, execution } = workspaceExecutionFixture();
+    const frozen = freezeWorkspaceCycleContext({ workspace: context, storyId: "US-WS-033", execution });
+    expect(frozen.ok).toBe(true);
+    if (!frozen.ok) return;
+    expect(persistWorkspaceCycleContext(runtimeDir, "cycle-conflict", frozen.context)).toMatchObject({ ok: true });
+
+    const redirected = {
+      ...frozen.context,
+      resolution: { ...frozen.context.resolution, source: "explicit" as const },
+    };
+    expect(persistWorkspaceCycleContext(runtimeDir, "cycle-conflict", redirected)).toEqual({
+      ok: false,
+      code: "execution_context_conflict",
+    });
+    expect(restorePersistedWorkspaceCycleContext(runtimeDir, "cycle-conflict")).toEqual(frozen);
   });
 
   it("requires an explicit repository for repository-required actions", () => {

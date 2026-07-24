@@ -13,7 +13,7 @@
  * the executor and the route diagnostic command surface the same auditable
  * trace.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -568,6 +568,63 @@ export function restoreWorkspaceCycleContext(serialized: string): FrozenWorkspac
   return resolved.ok && resolved.context !== undefined
     ? { ok: true, context: resolved.context }
     : { ok: false, code: resolved.ok ? "missing_execution_context" : resolved.error.code };
+}
+
+/** Durable per-cycle authority snapshot. The filename is derived only from the
+ * cycle id and lives under the already-scoped runtime directory, so recovery
+ * never consults cwd or the active Workspace registry. */
+export function workspaceCycleContextPath(runtimeDir: string, cycleId: string): string {
+  return join(runtimeDir, "cycle-contexts", `${encodeURIComponent(cycleId)}.json`);
+}
+
+/** Persist an Issue-level context exactly once. Existing identical snapshots
+ * are idempotent; a different or malformed snapshot fails closed instead of
+ * replacing the authority chosen at cycle start. */
+export function persistWorkspaceCycleContext(
+  runtimeDir: string,
+  cycleId: string,
+  context: WorkspaceExecutionContextV1,
+): FrozenWorkspaceCycleContextResult {
+  if (cycleId.trim() === "") return { ok: false, code: "missing_execution_context" };
+  const validated = restoreWorkspaceCycleContext(JSON.stringify(context));
+  if (!validated.ok) return validated;
+  const path = workspaceCycleContextPath(runtimeDir, cycleId);
+  const serialized = `${JSON.stringify(validated.context)}\n`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    if (existsSync(path)) {
+      const existing = restoreWorkspaceCycleContext(readFileSync(path, "utf8"));
+      if (!existing.ok) return existing;
+      return JSON.stringify(existing.context) === JSON.stringify(validated.context)
+        ? existing
+        : { ok: false, code: "execution_context_conflict" };
+    }
+    const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      writeFileSync(tempPath, serialized, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(tempPath, path);
+    } finally {
+      rmSync(tempPath, { force: true });
+    }
+    return validated;
+  } catch {
+    return { ok: false, code: "execution_context_persist_failed" };
+  }
+}
+
+/** Restore only from the cycle's durable snapshot and validate it through the
+ * same issue-required boundary as the initial freeze. */
+export function restorePersistedWorkspaceCycleContext(
+  runtimeDir: string,
+  cycleId: string,
+): FrozenWorkspaceCycleContextResult {
+  const path = workspaceCycleContextPath(runtimeDir, cycleId);
+  if (!existsSync(path)) return { ok: false, code: "missing_execution_context" };
+  try {
+    return restoreWorkspaceCycleContext(readFileSync(path, "utf8"));
+  } catch {
+    return { ok: false, code: "invalid_execution_context" };
+  }
 }
 
 export type WorkspaceCycleRepositoryResult =

@@ -48,7 +48,7 @@ import { latestScreenLockEvent } from "./screen-lock-events.js";
 import { pendingRecoveryCandidateIds } from "./recovery-candidates.js";
 import { resolveStoryLeasePath } from "./story-lease-path.js";
 import { decideInProgressReclaim, parseLegacyClaimTimestamp, readLeaseEvents } from "./lease-reclaim.js";
-import { freezeWorkspaceCycleContext } from "./scoped-route.js";
+import { freezeWorkspaceCycleContext, persistWorkspaceCycleContext } from "./scoped-route.js";
 
 type SetupCommand = Extract<CycleCommand, { kind:
   | "preflight"
@@ -62,6 +62,26 @@ type SetupCommand = Extract<CycleCommand, { kind:
 function storyLeasePath(ports: Ports): string {
   const configured = resolveStoryLeasePath(ports.paths);
   return configured.endsWith("story-leases.json") ? join(dirname(configured), "leases") : configured;
+}
+
+function workspaceSetupFailed(input: {
+  readonly ports: Ports;
+  readonly storyId: string;
+  readonly preCycleStatus?: string;
+  readonly leasePath: string;
+  readonly alert?: string;
+}): ExecuteResult {
+  if (input.alert !== undefined) input.ports.events.appendAlert(input.ports.paths.alertsPath, input.alert);
+  input.ports.backlog.markStatus?.(input.ports.repoCwd, input.storyId, input.preCycleStatus ?? STATUS_MARKER.todo);
+  try {
+    releaseStoryLease(input.leasePath, input.storyId, { source: "cycle", pid: process.pid });
+  } catch {
+    /* terminal cleanup retries the lease release */
+  }
+  return {
+    event: { type: "repository_setup_failed", storyId: input.storyId },
+    ctxPatch: input.preCycleStatus === undefined || input.preCycleStatus === "" ? {} : { preCycleStatus: input.preCycleStatus },
+  };
 }
 export async function executeSetupCommand(
   cmd: SetupCommand,
@@ -523,18 +543,7 @@ export async function executeSetupCommand(
             repairJournal: prepared.repairJournal,
             ts: eventTs(ports),
           });
-          ports.backlog.markStatus?.(ports.repoCwd, story.id, preCycleStatus ?? STATUS_MARKER.todo);
-          try {
-            releaseStoryLease(leasePath, story.id, { source: "cycle", pid: process.pid });
-          } catch {
-            /* the terminal path retries lease cleanup */
-          }
-          return {
-            event: { type: "repository_setup_failed", storyId: story.id },
-            ctxPatch: {
-              ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
-            },
-          };
+          return workspaceSetupFailed({ ports, storyId: story.id, preCycleStatus, leasePath });
         }
         repositoryExecution = await ports.repositories.resolve(story.id);
       }
@@ -544,24 +553,16 @@ export async function executeSetupCommand(
           ? { ok: false as const, code: "missing_execution_context" }
           : freezeWorkspaceCycleContext({ workspace: workspaceExecution, storyId: story.id, execution: repositoryExecution });
         if (!frozen.ok) {
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `workspace cycle context blocked before spawn for ${story.id}: ${frozen.code}`,
-          );
-          ports.backlog.markStatus?.(ports.repoCwd, story.id, preCycleStatus ?? STATUS_MARKER.todo);
-          try {
-            releaseStoryLease(leasePath, story.id, { source: "cycle", pid: process.pid });
-          } catch {
-            /* terminal cleanup retries the lease release */
-          }
-          return {
-            event: { type: "repository_setup_failed", storyId: story.id },
-            ctxPatch: {
-              ...(preCycleStatus !== undefined && preCycleStatus !== "" ? { preCycleStatus } : {}),
-            },
-          };
+          return workspaceSetupFailed({ ports, storyId: story.id, preCycleStatus, leasePath,
+            alert: `workspace cycle context blocked before spawn for ${story.id}: ${frozen.code}` });
         }
         workspaceExecution = frozen.context;
+        const persisted = persistWorkspaceCycleContext(dirname(ports.paths.eventsPath), ctx.cycleId, workspaceExecution);
+        if (!persisted.ok) {
+          return workspaceSetupFailed({ ports, storyId: story.id, preCycleStatus, leasePath,
+            alert: `workspace cycle context persistence blocked before spawn for ${story.id}: ${persisted.code}` });
+        }
+        workspaceExecution = persisted.context;
       }
       // The visible claim follows successful Workspace preparation. Legacy
       // projects retain the same pick-time status transition.

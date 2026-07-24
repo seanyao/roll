@@ -198,6 +198,20 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     ]);
   });
 
+  it("US-DELTA-006: codex readOnly spawn uses --sandbox read-only (product code not writable), keeps --add-dir for its artifact dir", () => {
+    const { args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DESIGN",
+      readOnly: true,
+      writableRoots: ["/wt/.roll/run/role-artifacts/designer"],
+    });
+    expect(args).toContain("read-only");
+    expect(args).not.toContain("workspace-write");
+    // its own artifact dir stays writable via --add-dir
+    expect(args).toContain("--add-dir");
+    expect(args).toContain("/wt/.roll/run/role-artifacts/designer");
+  });
+
   it("FIX-1065: codex ignores empty/duplicate writableRoots", () => {
     const { args } = buildSpawnCommand("codex", {
       cwd: "/wt",
@@ -7071,8 +7085,12 @@ describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () =>
     // The designer spawn ran as "kimi", not the builder "pi".
     expect(spawns).toHaveLength(1);
     expect(spawns[0]!.agent).toBe("kimi");
-    // AC5: read-only — the designer spawn carries NO product write roots.
-    expect(spawns[0]!.opts.writableRoots).toBeUndefined();
+    // AC5: read-only — the designer spawn runs `readOnly` and its ONLY writable
+    // root is its own artifact dir, never the product worktree (execCwd).
+    expect(spawns[0]!.opts.readOnly).toBe(true);
+    const dRoots = spawns[0]!.opts.writableRoots ?? [];
+    expect(dRoots).not.toContain(ports.paths.worktreePath);
+    expect(dRoots.every((p) => p.includes("role-artifacts"))).toBe(true);
     // The designer session is distinct from the builder's session shape.
     expect(r.designerSessionId).toBe("C-9:design:kimi:77");
     const builderSession = `${ctx.cycleId}:build:pi:77`;
@@ -7122,6 +7140,30 @@ describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () =>
     expect(r.reasons.join(" ")).toContain("no binding found");
   });
 
+  it("AC3: role facts are REQUIRED — a failure to record them FAILS CLOSED (Builder never starts)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D3b");
+    let spawned = false;
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => {
+        spawned = true;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    // The required audit facts cannot be written → the stage must fail closed.
+    ports.events.appendEvent = () => {
+      throw new Error("events volume full");
+    };
+    const r = await runDesignerStage(ports, ctx, {
+      resolveDesigner: () => ({ ok: true, agent: "kimi", source: "availability-fallback", reasons: [] }),
+    });
+    expect(r.ok).toBe(false);
+    expect(spawned).toBe(false); // Designer never spawned → Builder never starts
+    expect(r.reasons.join(" ")).toContain("role facts");
+  });
+
   it("AC7: Designer / Builder / Evaluator are three independent spawns with DISTINCT sessions", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
     execDirs.push(repo);
@@ -7139,7 +7181,10 @@ describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () =>
           agent === "kimi"
             ? `${cycleId}:design:kimi:200`
             : ((opts.env?.["ROLL_ROLE_SESSION"] as string | undefined) ?? "");
-        spawns.push({ agent, session, writable: (opts.writableRoots?.length ?? 0) > 0 });
+        // "writable" = has PRODUCT write access: a read-only spawn (Designer /
+        // Evaluator) is sandboxed off product code even if it may write its own
+        // artifact dir. Only a non-readOnly spawn (the Builder) is product-writable.
+        spawns.push({ agent, session, writable: opts.readOnly !== true });
         if (agent === "kimi") writeFileSync(join(opts.runDir as string, "design-contract.md"), VALID_CONTRACT);
         return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
       }) as unknown as Ports["agentSpawn"],
@@ -7166,6 +7211,7 @@ describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () =>
       cwd: repo,
       skillBody: "review",
       bare: true,
+      readOnly: true, // AC5: the Evaluator is read-only — no product write access.
       env: { ROLL_ROLE_SESSION: evalSession },
     });
 

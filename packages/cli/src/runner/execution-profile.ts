@@ -367,7 +367,10 @@ export async function runDesignerStage(
   const execCwd = resolveExecutionCwd(ports, ctx);
 
   // AC3: record SEPARATE role-resolution and role-start facts for the Designer
-  // BEFORE the design stage runs, so the independent cast is auditable.
+  // BEFORE the design stage runs, so the independent cast is auditable. These are
+  // REQUIRED audit facts, NOT best-effort telemetry (codex r1): if they cannot be
+  // written, the stage FAILS CLOSED — the Builder must never proceed on an
+  // unauditable Designer cast.
   try {
     ports.events.appendEvent(ports.paths.eventsPath, {
       type: "delta:role_resolved",
@@ -397,8 +400,12 @@ export async function runDesignerStage(
       worktreeAccess: "read-only",
       ts: eventTs(ports),
     });
-  } catch {
-    /* recording is best-effort; never topple the stage on an event-append blip */
+  } catch (e) {
+    return {
+      ran: false,
+      ok: false,
+      reasons: [`designer stage: could not record required role facts (delta:role_resolved/role_started) — fail closed: ${e instanceof Error ? e.message : String(e)}`],
+    };
   }
 
   if (!existsSync(contractPath)) {
@@ -414,14 +421,19 @@ export async function runDesignerStage(
         agent: designerAgent,
         observeCwd: execCwd,
         run: () =>
-          // AC5: NO `writableRoots` — the Designer runs READ-ONLY. Only the
-          // Builder spawn (spawn-agent-handler) receives product worktree write
-          // roots.
+          // AC5: the Designer runs READ-ONLY on the product worktree. `readOnly`
+          // makes sandbox-capable adapters (codex → --sandbox read-only;
+          // reasonix/Seatbelt → allow_write limited to `writableRoots`) refuse
+          // product writes; `writableRoots` is JUST the Designer's own artifact
+          // dir, so it can emit its design contract but cannot touch product code.
+          // Only the Builder spawn (spawn-agent-handler) gets product write roots.
           ports.agentSpawn(designerAgent, {
             cwd: execCwd,
             skillBody: buildDesignerPrompt(storyId, contractPath),
             storyId,
             runDir: dir,
+            readOnly: true,
+            writableRoots: [dir],
           }),
       });
     } catch {

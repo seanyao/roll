@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   CONTEXT_READ_RESULT_V1,
@@ -14,6 +13,7 @@ import {
 import { compileContextProviderExecutionPlans } from "./execution-plan.js";
 import { planLlmWikiRevisionPaths } from "./context-ref.js";
 import { evaluateContextScope, normalizeContextScopeRequest } from "./scope-policy.js";
+import { computeContextSnapshotDigest, contextSnapshotId } from "./snapshot.js";
 
 export interface ContextProviderRevisionV1 {
   readonly providerId: string;
@@ -74,26 +74,6 @@ const SAFE_SCOPE_DIMENSIONS = new Set([
   "story_ids",
   "stages",
 ]);
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (typeof value === "object") {
-    const record = value as Readonly<Record<string, unknown>>;
-    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-  }
-  throw new TypeError("Context snapshot digest input must be JSON-compatible");
-}
-
-function digest(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value), "utf8").digest("hex");
-}
-
-function timestampId(createdAt: string): string {
-  return createdAt.replaceAll("-", "").replaceAll(":", "").replace(".", "");
-}
 
 function severityFor(plan: ContextProviderExecutionPlanV1): ContextDiagnosticV1["severity"] {
   return plan.binding.required ? "blocking" : "gap";
@@ -177,8 +157,15 @@ function artifactResult(
     providers,
     gaps,
   };
-  const snapshotDigest = digest(payload);
-  const snapshotId = `ctx_${timestampId(createdAt)}_${snapshotDigest.slice(0, 12)}`;
+  const provisional: ContextReadResultV1 = {
+    ...payload,
+    snapshotId: "pending",
+    snapshotDigest: "0".repeat(64),
+    artifactPath: "pending",
+  };
+  const snapshotDigest = computeContextSnapshotDigest(provisional);
+  const snapshotId = contextSnapshotId(createdAt, snapshotDigest);
+  if (snapshotId === undefined) throw new TypeError("Context Snapshot timestamp is invalid");
   const scopeFolder = scope.storyId ?? "_workspace";
   return {
     ...payload,

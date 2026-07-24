@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ContextDiagnosticV1, ContextReadFileV1, ContextReadResultV1, WorkspaceExecutionContextV1 } from "@roll/spec";
-import { verifyContextSnapshot } from "@roll/core";
+import { verifyContextSnapshot, type ContextSnapshotReferenceV1 } from "@roll/core";
 
 export class ContextSnapshotStoreError extends Error {
   readonly diagnostic: ContextDiagnosticV1 = {
@@ -24,6 +24,11 @@ export class ContextSnapshotStoreError extends Error {
     super(message);
     this.name = "ContextSnapshotStoreError";
   }
+}
+
+export interface ContextSnapshotWriteOptions {
+  /** Test/host seam invoked after the exclusive temp write and before atomic publication. */
+  readonly beforePublish?: () => void;
 }
 
 function invalid(): never {
@@ -74,6 +79,7 @@ function assertSnapshotForWorkspace(workspace: WorkspaceExecutionContextV1, snap
 export function writeContextSnapshot(
   workspace: WorkspaceExecutionContextV1,
   snapshot: ContextReadResultV1,
+  options: ContextSnapshotWriteOptions = {},
 ): string {
   const target = assertSnapshotForWorkspace(workspace, snapshot);
   const directory = prepareArtifactDirectory(workspace, snapshot);
@@ -85,10 +91,10 @@ export function writeContextSnapshot(
     invalid();
   }
   try {
-    if (existsSync(target)) invalid();
     writeFileSync(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    if (existsSync(target)) invalid();
-    renameSync(temporary, target);
+    options.beforePublish?.();
+    linkSync(temporary, target);
+    rmSync(temporary, { force: true });
     return target;
   } catch (error) {
     if (error instanceof ContextSnapshotStoreError) throw error;
@@ -101,17 +107,23 @@ export function writeContextSnapshot(
 
 export function readContextSnapshot(
   workspace: WorkspaceExecutionContextV1,
-  artifactPath: string,
+  reference: ContextSnapshotReferenceV1,
 ): ContextReadResultV1 {
   const runtime = resolve(workspace.authorities.runtime);
-  const target = resolve(artifactPath);
-  if (!contained(runtime, target) || target !== artifactPath) invalid();
+  const target = resolve(reference.artifactPath);
+  if (!contained(runtime, target) || target !== reference.artifactPath) invalid();
   try {
     const stat = lstatSync(target);
     if (!stat.isFile() || stat.isSymbolicLink() || realpathSync(target) !== target) invalid();
     const parsed: unknown = JSON.parse(readFileSync(target, "utf8"));
     const verification = verifyContextSnapshot(parsed);
-    if (!verification.valid || expectedArtifactPath(workspace, verification.snapshot) !== target) invalid();
+    if (
+      !verification.valid ||
+      verification.snapshot.snapshotId !== reference.snapshotId ||
+      verification.snapshot.snapshotDigest !== reference.snapshotDigest ||
+      verification.snapshot.artifactPath !== reference.artifactPath ||
+      expectedArtifactPath(workspace, verification.snapshot) !== target
+    ) invalid();
     if (verification.snapshot.requestScope.workspaceId !== workspace.workspace.workspaceId) invalid();
     return verification.snapshot;
   } catch (error) {

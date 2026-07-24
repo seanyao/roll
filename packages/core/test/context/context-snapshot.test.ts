@@ -2,6 +2,7 @@ import { CONTEXT_READ_RESULT_V1, type ContextReadResultV1 } from "@roll/spec";
 import { describe, expect, it } from "vitest";
 import {
   computeContextSnapshotDigest,
+  contextSnapshotId,
   contextSnapshotReference,
   verifyContextSnapshot,
 } from "../../src/context/snapshot.js";
@@ -40,13 +41,20 @@ function snapshot(): ContextReadResultV1 {
     }],
     gaps: [],
   };
-  return { ...value, snapshotDigest: computeContextSnapshotDigest(value) };
+  const snapshotDigest = computeContextSnapshotDigest(value);
+  const snapshotId = contextSnapshotId(value.createdAt, snapshotDigest)!;
+  return {
+    ...value,
+    snapshotId,
+    snapshotDigest,
+    artifactPath: `/workspace/runtime/context/US-CONTEXT-006/${snapshotId}.json`,
+  };
 }
 
 describe("Context Snapshot canonical contract", () => {
   it("excludes self-referential fields and verifies the complete payload", () => {
     const original = snapshot();
-    const moved = { ...original, snapshotId: "ctx_moved", artifactPath: "/other/path.json" };
+    const moved = { ...original, artifactPath: "/other/path.json" };
     expect(computeContextSnapshotDigest(moved)).toBe(original.snapshotDigest);
     expect(verifyContextSnapshot(original)).toEqual({
       valid: true,
@@ -61,6 +69,7 @@ describe("Context Snapshot canonical contract", () => {
       diagnostic: { code: "invalid_context_snapshot" },
     });
     expect(verifyContextSnapshot({ ...snapshot(), secret: "not-allowed" })).toMatchObject({ valid: false });
+    expect(verifyContextSnapshot({ ...snapshot(), snapshotId: "ctx_moved" })).toMatchObject({ valid: false });
     const disabled = snapshot();
     expect(verifyContextSnapshot({
       ...disabled,

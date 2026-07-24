@@ -1,4 +1,5 @@
 import type { ContextDiagnosticV1, ContextReadResultV1 } from "@roll/spec";
+import { contextSnapshotReference, type ContextSnapshotReferenceV1 } from "./snapshot.js";
 
 export type ContextRevisionDecisionV1 =
   | "continue_with_handoff_snapshot"
@@ -14,13 +15,21 @@ export interface ContextProviderRevisionChangeV1 {
 
 export interface ContextRevisionComparisonV1 {
   readonly status: "unchanged" | "changed";
+  readonly handoffSnapshot: ContextSnapshotReferenceV1;
+  readonly freshSnapshot: ContextSnapshotReferenceV1;
   readonly providers: readonly ContextProviderRevisionChangeV1[];
+}
+
+export interface ContextRevisionDecisionRecordV1 {
+  readonly decision: ContextRevisionDecisionV1;
+  readonly handoffSnapshot: ContextSnapshotReferenceV1;
+  readonly freshSnapshot: ContextSnapshotReferenceV1;
 }
 
 export type ContextRevisionDecisionResultV1 =
   | {
       readonly accepted: true;
-      readonly decision: ContextRevisionDecisionV1;
+      readonly record: ContextRevisionDecisionRecordV1;
       readonly useSnapshot: "handoff" | "new" | "none";
     }
   | { readonly accepted: false; readonly diagnostic: ContextDiagnosticV1 };
@@ -55,7 +64,12 @@ export function compareContextRevisions(
   const status = providers.some((provider) =>
     provider.fromRevision !== provider.toRevision || provider.changedRefs.length > 0
   ) ? "changed" : "unchanged";
-  return { status, providers };
+  return {
+    status,
+    handoffSnapshot: contextSnapshotReference(handoff),
+    freshSnapshot: contextSnapshotReference(fresh),
+    providers,
+  };
 }
 
 export function decideContextRevision(
@@ -75,7 +89,11 @@ export function decideContextRevision(
   const resolved = decision ?? "continue_with_handoff_snapshot";
   return {
     accepted: true,
-    decision: resolved,
+    record: {
+      decision: resolved,
+      handoffSnapshot: comparison.handoffSnapshot,
+      freshSnapshot: comparison.freshSnapshot,
+    },
     useSnapshot: resolved === "adopt_new_snapshot" ? "new" :
       resolved === "continue_with_handoff_snapshot" ? "handoff" : "none",
   };

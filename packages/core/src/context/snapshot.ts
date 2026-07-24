@@ -43,6 +43,15 @@ export function computeContextSnapshotDigest(snapshot: ContextReadResultV1): str
   return createHash("sha256").update(canonicalJson(contextSnapshotPayload(snapshot)), "utf8").digest("hex");
 }
 
+export function contextSnapshotId(createdAt: string, snapshotDigest: string): string | undefined {
+  const epoch = Date.parse(createdAt);
+  if (!Number.isFinite(epoch) || new Date(epoch).toISOString() !== createdAt || !/^[0-9a-f]{64}$/u.test(snapshotDigest)) {
+    return undefined;
+  }
+  const timestamp = createdAt.replaceAll("-", "").replaceAll(":", "").replace(".", "");
+  return `ctx_${timestamp}_${snapshotDigest.slice(0, 12)}`;
+}
+
 export function contextSnapshotReference(snapshot: ContextReadResultV1): ContextSnapshotReferenceV1 {
   return {
     snapshotId: snapshot.snapshotId,
@@ -55,7 +64,12 @@ export function verifyContextSnapshot(value: unknown): ContextSnapshotVerificati
   const validation = validateJsonSchemaValue(contextReadResultV1Schema, value);
   if (!validation.ok) return invalidSnapshot();
   const snapshot = value as ContextReadResultV1;
-  if (snapshot.outcome === "disabled" || computeContextSnapshotDigest(snapshot) !== snapshot.snapshotDigest) return invalidSnapshot();
+  const computedDigest = computeContextSnapshotDigest(snapshot);
+  if (
+    snapshot.outcome === "disabled" ||
+    computedDigest !== snapshot.snapshotDigest ||
+    contextSnapshotId(snapshot.createdAt, computedDigest) !== snapshot.snapshotId
+  ) return invalidSnapshot();
   return { valid: true, snapshot, reference: contextSnapshotReference(snapshot) };
 }
 

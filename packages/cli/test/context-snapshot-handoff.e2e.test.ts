@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,12 +9,13 @@ import {
 } from "@roll/spec";
 import {
   computeContextSnapshotDigest,
+  contextSnapshotId,
   contextSnapshotReference,
   verifyContextSnapshot,
   type ContextSnapshotReferenceV1,
 } from "@roll/core";
 import { readCapturedContextFile, readContextSnapshot, writeContextSnapshot } from "@roll/infra";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 function fixture(): { workspace: WorkspaceExecutionContextV1; snapshot: ContextReadResultV1 } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-context-handoff-")));
@@ -37,13 +38,13 @@ function fixture(): { workspace: WorkspaceExecutionContextV1; snapshot: ContextR
       locks: join(runtime, "locks"),
     },
   };
-  const snapshotId = "ctx_20260724T060000000Z_aaaaaaaaaaaa";
+  const snapshotId = "pending";
   const initial: ContextReadResultV1 = {
     schema: CONTEXT_READ_RESULT_V1,
     snapshotId,
     snapshotDigest: "0".repeat(64),
     createdAt: "2026-07-24T06:00:00.000Z",
-    artifactPath: join(runtime, "context", "US-CONTEXT-006", `${snapshotId}.json`),
+    artifactPath: "pending",
     outcome: "completed",
     requestScope: { workspaceId: "roll", storyId: "US-CONTEXT-006", repositoryIds: [], environmentIds: [], stage: "design" },
     providers: [{
@@ -65,28 +66,38 @@ function fixture(): { workspace: WorkspaceExecutionContextV1; snapshot: ContextR
     }],
     gaps: [],
   };
-  return { workspace, snapshot: { ...initial, snapshotDigest: computeContextSnapshotDigest(initial) } };
+  const snapshotDigest = computeContextSnapshotDigest(initial);
+  const resolvedSnapshotId = contextSnapshotId(initial.createdAt, snapshotDigest)!;
+  return {
+    workspace,
+    snapshot: {
+      ...initial,
+      snapshotId: resolvedSnapshotId,
+      snapshotDigest,
+      artifactPath: join(runtime, "context", "US-CONTEXT-006", `${resolvedSnapshotId}.json`),
+    },
+  };
 }
 
 describe("Context Snapshot stage handoff", () => {
   it("serializes design reference and lets build/QA verify and reuse the same captured bytes without fetch", () => {
-    const fetchCanary = vi.fn();
     const { workspace, snapshot } = fixture();
     writeContextSnapshot(workspace, snapshot);
 
     const wire = JSON.stringify(contextSnapshotReference(snapshot));
     const buildReference = JSON.parse(wire) as ContextSnapshotReferenceV1;
-    const buildSnapshot = readContextSnapshot(workspace, buildReference.artifactPath);
+    const buildSnapshot = readContextSnapshot(workspace, buildReference);
     expect(verifyContextSnapshot(buildSnapshot)).toMatchObject({
       valid: true,
       reference: buildReference,
     });
 
     const qaReference = JSON.parse(JSON.stringify(contextSnapshotReference(buildSnapshot))) as ContextSnapshotReferenceV1;
-    const qaSnapshot = readContextSnapshot(workspace, qaReference.artifactPath);
+    const qaSnapshot = readContextSnapshot(workspace, qaReference);
     expect(readCapturedContextFile(qaSnapshot, "context://wiki/wiki/index.md").content).toBe("# Index\n");
     expect(qaSnapshot.snapshotDigest).toBe(snapshot.snapshotDigest);
     expect(existsSync(snapshot.artifactPath)).toBe(true);
-    expect(fetchCanary).not.toHaveBeenCalled();
+    const storeSource = readFileSync(new URL("../../infra/src/context/snapshot-store.ts", import.meta.url), "utf8");
+    expect(storeSource).not.toMatch(/git-llm-wiki|context-read-adapter|child_process|\bfetch\s*\(/u);
   });
 });

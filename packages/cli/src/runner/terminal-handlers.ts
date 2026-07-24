@@ -27,6 +27,7 @@ import { buildRunRow, buildTerminalRecord, commitRollMetadata, stampTs, withReal
 import { eventTs } from "./runner-time.js";
 import { cleanStaleEvidence, isParkedAtHold, resetStaleSpecTruth, revertPrematureDone } from "./resume-truth.js";
 import { appendCleanupEvent, cleanupGuardResult, recordCleanupFailures } from "./sandbox-boundary.js";
+import { resolveStoryLeasePath } from "./story-lease-path.js";
 
 type TerminalCommand = Extract<CycleCommand, { kind:
   | "publish_pr"
@@ -52,7 +53,7 @@ const LEGACY_REPOSITORY_TERMINAL_COMMANDS = new Set<TerminalCommand["kind"]>([
 ]);
 
 function storyLeasePath(ports: Ports): string {
-  return ports.paths.storyLeasePath ?? join(dirname(ports.paths.eventsPath), "leases");
+  return resolveStoryLeasePath(ports.paths);
 }
 
 function preservedIssueWorktreeFacts(ctx: CycleContext): object | undefined {

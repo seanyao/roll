@@ -12,6 +12,8 @@ import {
   ROUND_JOURNAL_SCHEMA_VERSION,
   aggregateRounds,
   appendRoundEntry,
+  appendRoundEntryAsync,
+  deriveRounds,
   formatRoundReadout,
   readRoundEntries,
   renderRoundJournalMd,
@@ -110,6 +112,35 @@ describe("appendRoundEntry / readRoundEntries", () => {
     // aggregate + readout must not throw on the corrupt row (era → "unknown" window).
     expect(() => formatRoundReadout(aggregateRounds(dir))).not.toThrow();
     expect(aggregateRounds(dir).byEra[0]?.era).toBe("unknown");
+  });
+});
+
+describe("appendRoundEntryAsync (non-blocking hot-path append) + deriveRounds", () => {
+  it("appends asynchronously; round is DERIVED from cycleId (no stored round, no race)", async () => {
+    const dir = cardDir();
+    // Hot-path inputs carry NO round (recordSpawnRound omits it to avoid a racy
+    // read-modify-write). Two cycles → two rounds; both c2 turns share c2's round.
+    const noRound = (cycleId: string, role: string): RoundJournalInput => ({
+      card: "US-X-1", role, start: 1_000, durMs: 60_000, outcome: "delivered", cycleId,
+    });
+    expect(await appendRoundEntryAsync(dir, noRound("c1", "builder"))).toBe(true);
+    expect(await appendRoundEntryAsync(dir, noRound("c2", "builder"))).toBe(true);
+    expect(await appendRoundEntryAsync(dir, noRound("c2", "evaluator"))).toBe(true);
+    const { entries } = readRoundEntries(dir);
+    expect(entries).toHaveLength(3);
+    expect(entries.every((e) => e.round === undefined)).toBe(true);
+    // The readout derives it: c1→1, c2→2 (both c2 turns share round 2).
+    expect(deriveRounds(entries).map((e) => e.round)).toEqual([1, 2, 2]);
+  });
+
+  it("async half-line guard prevents a crash-truncated tail from corrupting the next row", async () => {
+    const dir = cardDir();
+    await appendRoundEntryAsync(dir, entry({ cycleId: "c1" }));
+    appendFileSync(join(dir, "round-journal.jsonl"), '{"card":"US-X-1","cycleId":"c2"', "utf8"); // half line, no newline
+    await appendRoundEntryAsync(dir, entry({ cycleId: "c3" }));
+    const { entries, skipped } = readRoundEntries(dir);
+    expect(entries.map((e) => e.cycleId)).toEqual(["c1", "c3"]);
+    expect(skipped).toBe(1); // only the half line is lost
   });
 });
 

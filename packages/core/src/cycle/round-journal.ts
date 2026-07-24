@@ -13,6 +13,7 @@
  * contract (concurrency, schema evolution, bad-line tolerance, cleanup).
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFile as appendFileAsync, mkdir as mkdirAsync, readFile as readFileAsync } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export const ROUND_JOURNAL_SCHEMA_VERSION = 1;
@@ -24,8 +25,13 @@ export interface RoundJournalEntry {
   schemaVersion: number;
   /** Card id (also implied by file location; kept in-line for portable reads). */
   card: string;
-  /** Round index within the card (1-based; repair rounds increment it). */
-  round: number;
+  /**
+   * Round index within the card (1-based). OPTIONAL: callers on the hot path
+   * omit it (computing it would need a racy read-modify-write count). The
+   * readout DERIVES the round from `cycleId` ordering — one cycle = one round —
+   * via {@link deriveRounds}, which is race-free and read-free on the hot path.
+   */
+  round?: number;
   /** builder | evaluator | designer | scorer | gate | … */
   role: string;
   /** Resolved model, when known. */
@@ -94,10 +100,65 @@ export function appendRoundEntry(cardDir: string, input: RoundJournalInput): boo
   return true;
 }
 
+/**
+ * Non-blocking append for the hot path (spawn/gate). Uses async fs so the event
+ * loop is NEVER blocked — even on a slow/stalled filesystem the I/O yields
+ * instead of freezing cycle continuation. Does NOT compute a round (no
+ * read-modify-write → no cross-process race); the readout derives rounds from
+ * `cycleId`. Best-effort: resolves false on any failure, never rejects.
+ */
+export async function appendRoundEntryAsync(cardDir: string, input: RoundJournalInput): Promise<boolean> {
+  const entry: RoundJournalEntry = { schemaVersion: ROUND_JOURNAL_SCHEMA_VERSION, ...input };
+  try {
+    await mkdirAsync(cardDir, { recursive: true });
+    const p = jsonlPath(cardDir);
+    // Half-line guard (async, non-blocking): if the file's last byte isn't "\n",
+    // prefix one so this row can't concatenate onto a crash-truncated tail.
+    let prefix = "";
+    try {
+      const cur = await readFileAsync(p, "utf8");
+      if (cur.length > 0 && !cur.endsWith("\n")) prefix = "\n";
+    } catch {
+      /* no file yet / unreadable → append fresh; reader tolerates */
+    }
+    await appendFileAsync(p, `${prefix}${JSON.stringify(entry)}\n`, "utf8");
+    return true;
+  } catch {
+    return false; // best-effort — never block/break the cycle on a journal write
+  }
+}
+
 export interface ReadResult {
   entries: RoundJournalEntry[];
   /** Count of malformed/half-written lines skipped (bad-line tolerance). */
   skipped: number;
+}
+
+/**
+ * Assign a display round to each entry: entries sharing a `cycleId` belong to the
+ * same round (one cycle = one round of work on the card), numbered 1-based in
+ * first-appearance order. Entries with no cycleId keep any explicit `round`, else
+ * fall into their own append-order slot. Race-free and read-free on the hot path
+ * (derived purely from already-read entries).
+ */
+export function deriveRounds(entries: readonly RoundJournalEntry[]): (RoundJournalEntry & { round: number })[] {
+  const cycleRound = new Map<string, number>();
+  let next = 0;
+  return entries.map((e, idx) => {
+    let round: number;
+    if (typeof e.cycleId === "string" && e.cycleId !== "") {
+      const seen = cycleRound.get(e.cycleId);
+      if (seen !== undefined) round = seen;
+      else {
+        next += 1;
+        cycleRound.set(e.cycleId, next);
+        round = next;
+      }
+    } else {
+      round = typeof e.round === "number" ? e.round : idx + 1;
+    }
+    return { ...e, round };
+  });
 }
 
 /**
@@ -131,7 +192,7 @@ export function readRoundEntries(cardDir: string): ReadResult {
         if (typeof raw["era"] !== "string") delete (norm as { era?: unknown }).era;
         if (typeof raw["model"] !== "string") delete (norm as { model?: unknown }).model;
         if (typeof raw["outcome"] !== "string") norm.outcome = String(raw["outcome"] ?? "");
-        if (typeof raw["round"] !== "number") norm.round = 0;
+        if (typeof raw["round"] !== "number") delete (norm as { round?: unknown }).round;
         entries.push(norm);
       } else {
         skipped += 1;
@@ -225,7 +286,7 @@ export function renderRoundJournalMd(cardDir: string, entries: readonly RoundJou
     "| round | role | model | start | dur (s) | gate (s) | outcome | era |",
     "|------:|------|-------|-------|--------:|---------:|---------|-----|",
   ];
-  for (const e of entries) {
+  for (const e of deriveRounds(entries)) {
     const durS = (e.durMs / 1000).toFixed(1);
     const gateS = e.gateTimeMs !== undefined ? (e.gateTimeMs / 1000).toFixed(1) : "—";
     lines.push(

@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CycleContext } from "@roll/core";
-import { readRoundEntries } from "@roll/core";
+import { deriveRounds, readRoundEntries } from "@roll/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { recordSpawnRound } from "../src/runner/round-journal-emit.js";
 import { cycleCommand } from "../src/commands/cycle.js";
@@ -26,24 +26,28 @@ function proj(): string {
 function cardDirOf(project: string, id: string): string {
   return join(project, ".roll", "features", "uncategorized", id);
 }
-/** recordSpawnRound defers the write via setImmediate (non-blocking) — flush it. */
+/** recordSpawnRound fires an async (fire-and-forget) write — let it settle. */
 function flush(): Promise<void> {
-  return new Promise((r) => setImmediate(() => setImmediate(() => r())));
+  return new Promise((r) => setTimeout(r, 30));
 }
 
 describe("recordSpawnRound (US-CYCLE-004 auto-write)", () => {
-  it("writes a builder turn into the card's round-journal, numbering rounds by append order", async () => {
+  it("writes a builder turn per cycle; the readout derives round from cycleId", async () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;
-    const ctx = { storyId: "US-X-1", model: "glm-5.2", cycleId: "c1" } as unknown as CycleContext;
-    recordSpawnRound(ports, ctx, { role: "builder", start: 1_000, durMs: 60_000, outcome: "delivered" });
+    // Two separate cycles (c1, c2) for the same card = two rounds.
+    recordSpawnRound(ports, { storyId: "US-X-1", model: "glm-5.2", cycleId: "c1" } as unknown as CycleContext, { role: "builder", start: 1_000, durMs: 60_000, outcome: "delivered" });
     await flush();
-    recordSpawnRound(ports, ctx, { role: "builder", start: 70_000, durMs: 30_000, outcome: "failed", gateTimeMs: 5_000 });
+    recordSpawnRound(ports, { storyId: "US-X-1", model: "glm-5.2", cycleId: "c2" } as unknown as CycleContext, { role: "builder", start: 70_000, durMs: 30_000, outcome: "failed", gateTimeMs: 5_000 });
     await flush();
     const { entries } = readRoundEntries(cardDirOf(project, "US-X-1"));
-    expect(entries.map((e) => e.round)).toEqual([1, 2]);
+    expect(entries).toHaveLength(2);
+    // No racy round stored on the hot path; derived from cycleId ordering.
+    expect(deriveRounds(entries).map((e) => e.round)).toEqual([1, 2]);
     expect(entries[0]).toMatchObject({ role: "builder", model: "glm-5.2", cycleId: "c1", outcome: "delivered" });
-    expect(entries[1]).toMatchObject({ outcome: "failed", gateTimeMs: 5_000 });
+    expect(entries[1]).toMatchObject({ outcome: "failed", gateTimeMs: 5_000, cycleId: "c2" });
+    // Two builder turns in the SAME cycle share one round.
+    expect(deriveRounds([...entries, { ...entries[0]!, cycleId: "c2", role: "evaluator" }]).map((e) => e.round)).toEqual([1, 2, 2]);
   });
 
   it("returns synchronously (non-blocking) — the write is deferred off the hot path", () => {

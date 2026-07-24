@@ -8,6 +8,7 @@ import {
 } from "@roll/spec";
 import {
   discoverWorkspaceForIntent,
+  resolveWorkspaceTarget,
   validateResolvedTargetRequirement,
   type WorkspaceDiscoveryFactsV1,
 } from "../src/index.js";
@@ -240,5 +241,65 @@ describe("US-WS-028 resolved target requirement validation", () => {
       requirement: requirement(),
       operation: "mutation",
     })).toMatchObject({ ok: true, state: "unbound", evidence: [], warnings: [expect.any(String)] });
+  });
+
+  it.each([
+    {
+      source: "explicit" as const,
+      targetInput: { explicit: { kind: "id" as const, workspaceId: "roll" } },
+    },
+    {
+      source: "environment" as const,
+      targetInput: { environment: { kind: "id" as const, workspaceId: "roll" } },
+    },
+    {
+      source: "cwd_manifest" as const,
+      targetInput: {
+        context: {
+          cwdManifest: {
+            workspaceId: "roll",
+            root: "/workspaces/roll",
+            canonicalRoot: "/workspaces/roll",
+            containment: "safe" as const,
+          },
+        },
+      },
+    },
+    {
+      source: "issue_manifest" as const,
+      targetInput: {
+        context: {
+          issueManifest: {
+            workspaceId: "roll",
+            root: "/workspaces/roll",
+            canonicalRoot: "/workspaces/roll",
+            containment: "safe" as const,
+          },
+        },
+      },
+    },
+  ])("routes a $source target through the same mutation/read requirement conflict validator", ({ source, targetInput }) => {
+    const resolution = resolveWorkspaceTarget({
+      operation: "mutation",
+      registry: [roll.candidate, fields.candidate],
+      ...targetInput,
+    });
+    expect(resolution).toMatchObject({ ok: true, source, target: { workspaceId: "roll" } });
+    if (!resolution.ok || resolution.target.kind !== "workspace") return;
+    const target = [roll, fields].find((candidate) => candidate.candidate.workspaceId === resolution.target.workspaceId);
+    if (target === undefined) throw new Error("resolved target facts must exist");
+
+    expect(validateResolvedTargetRequirement({
+      target,
+      allWorkspaces: [roll, fields],
+      requirement: requirement(),
+      operation: "mutation",
+    })).toMatchObject({ ok: false, state: "rejected", code: "requirement_workspace_conflict" });
+    expect(validateResolvedTargetRequirement({
+      target,
+      allWorkspaces: [roll, fields],
+      requirement: requirement(),
+      operation: "read",
+    })).toMatchObject({ ok: false, state: "confirmation_required", code: "requirement_workspace_conflict" });
   });
 });

@@ -359,14 +359,7 @@ export function workspaceSelectorOperation(
   args: readonly string[],
   operations: readonly CliCommandOperationRegistration[],
 ): WorkspaceSelectorOperationDecision | undefined {
-  return workspaceSelectorOperations(operations)
-    .filter((operation) => {
-      if (operation.command !== command) return false;
-      if (operation.route.length === 0) {
-        const first = args[0];
-        return first === undefined || first.startsWith("-");
-      }
-      return operation.route.every((token, index) => args[index] === token);
-    })
-    .sort((left, right) => right.route.length - left.route.length)[0];
+  const registration = cliOperationForArgs(command, args, operations);
+  if (registration?.supportsWorkspaceSelector !== true) return undefined;
+  return workspaceSelectorOperations([registration])[0];
 }

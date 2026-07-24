@@ -15,7 +15,7 @@ import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
-import { resolveBacklogCommandTarget } from "./backlog-target.js";
+import { emitBacklogTargetError, resolveBacklogCommandTarget } from "./backlog-target.js";
 import {
   backlogClaimCommand,
   backlogLintCommand,
@@ -160,6 +160,16 @@ function unknownTopLevel(command: string): number {
 
 function removedTopLevel(command: string) {
   return (): number => unknownTopLevel(command);
+}
+
+function workspaceProjectRoot(args: readonly string[], operation: "read" | "mutation"): string | number {
+  const target = resolveBacklogCommandTarget(args, operation);
+  if (!target.ok) return emitBacklogTargetError(target);
+  if ("aggregate" in target) {
+    process.stderr.write("roll: --all is not valid for this Workspace-scoped operation\n");
+    return 1;
+  }
+  return target.workspaceRoot;
 }
 
 function isHelp(arg: string | undefined): boolean {
@@ -316,7 +326,20 @@ export function registerAll(): void {
   });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
-  registerPorted("attest", attestCommand, { hidden: true });
+  registerPorted("attest", async (args) => {
+    if (args.includes("--help") || args.includes("-h") || args.includes("help")) {
+      return attestCommand(args);
+    }
+    const root = workspaceProjectRoot(args, args[0] === "audit" ? "read" : "mutation");
+    if (typeof root === "number") return root;
+    return attestCommand(args, { projectPath: root });
+  }, {
+    hidden: true,
+    operations: [
+      cliSelectorOperation("attest", "audit", ["audit"], ["audit", "--workspace", "roll"]),
+      cliOperation("attest", "render", [], true, ["US-DEMO-1", "--workspace", "roll"], true),
+    ],
+  });
   // `cycles`: the cycle ledger as a first-class command (US-CLI-012) — same
   // aggregation + verdict vocabulary as the web ledger; failures never swallowed.
   registerPorted("cycles", removedTopLevel("cycles"));
@@ -342,7 +365,11 @@ export function registerAll(): void {
     if (args[0] === "new") return storyNewCommand(args.slice(1), { resolveTarget: resolveBacklogCommandTarget });
     // FIX-339 (AC7): `story validate <ID>` — must-declare + visual-evidence-AC
     // self-check, the command-side of the AC6 hard闸 (roll-design prefills it).
-    if (args[0] === "validate") return storyValidateCommand(args.slice(1));
+    if (args[0] === "validate") {
+      const root = workspaceProjectRoot(args.slice(1), "read");
+      if (typeof root === "number") return root;
+      return storyValidateCommand(args.slice(1), { projectPath: root });
+    }
     process.stdout.write(
       "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n" +
         "       roll story validate <ID>\n",

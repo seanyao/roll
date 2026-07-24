@@ -461,6 +461,7 @@ describe("Workspace filesystem transaction", () => {
       ["empty transaction", () => ({ transactionId: "" })],
       ["relative created path", () => ({ created: [{ path: "workspace.yaml", kind: "file", digest: sha256("x") }] })],
       ["unexpected absolute created path", (f) => ({ created: [{ path: join(f.rollHome, "operator-owned"), kind: "directory" }] })],
+      ["unexpected workspace descendant", (f) => ({ created: [{ path: join(f.root, "operator-owned-empty"), kind: "directory" }] })],
       ["directory digest", (f) => ({ created: [{ path: f.root, kind: "directory", digest: sha256("x") }] })],
       ["relative preserved path", () => ({ preserved: ["workspace.yaml"] })],
       ["unknown preserved cache", () => ({ preservedCaches: ["unknown-repo"] })],
@@ -513,6 +514,33 @@ describe("Workspace filesystem transaction", () => {
       ensureCache: async () => ({ action: "created" as const }),
     })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
     expect(tree(f.rollHome)).toEqual(before);
+  });
+
+  it("never rolls back an operator-owned directory that is not an exact layout target", async () => {
+    const f = fixture();
+    const operatorDirectory = join(f.root, "operator-owned-empty");
+    mkdirSync(operatorDirectory, { recursive: true });
+    const legacyPath = writeLegacyJournal(f, [
+      { path: f.root, kind: "directory" },
+      { path: operatorDirectory, kind: "directory" },
+    ]);
+    const before = tree(f.rollHome);
+
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+    expect(preview).toMatchObject({
+      outcome: "rejected",
+      recovery: {
+        kind: "legacy_recovery_required",
+        journalPath: legacyPath,
+        nextAction: "roll workspace doctor ws-demo --json",
+      },
+    });
+    await expect(applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
+    expect(tree(f.rollHome)).toEqual(before);
+    expect(existsSync(operatorDirectory)).toBe(true);
   });
 
   it("invalidates an exact authorization when the lock-in plan digest changes", async () => {

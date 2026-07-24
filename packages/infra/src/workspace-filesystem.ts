@@ -315,7 +315,13 @@ function hasCanonicalPathConflict(config: WorkspaceCreateConfig): boolean {
 }
 
 function createdDirectoryAllowed(config: WorkspaceCreateConfig, path: string): boolean {
-  if (contains(config.root, path)) return true;
+  const plannedDirectories = new Set(buildWorkspaceCreatePlan(config, {
+    paths: {},
+    caches: {},
+    registry: { state: "absent" },
+    journal: { state: "absent" },
+  }).steps.filter((step) => step.kind === "directory").map((step) => step.target));
+  if (plannedDirectories.has(path)) return true;
   return contains(config.rollHome, path) && contains(path, config.root);
 }
 

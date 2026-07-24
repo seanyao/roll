@@ -292,10 +292,10 @@ opens the remote publication gate after local acceptance.
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <id\|path>]` | View and manage one Workspace backlog; `--all` is read-only |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
 | `roll delivery <list\|show\|reconcile> [--workspace <id\|path>]` | Inspect Issue repository PR/CI/merge facts and exact-SHA integration acceptance; `list --all` is read-only |
-| `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, handoff, and an optional `roll loop go --review auto` continuation when new Todo cards are created |
+| `roll design [--from-file <path>] [--agent <name>] [--workspace <id\|path>] [--verbose\|--raw]` | Launch `$roll-design` against one Workspace authority, with bounded live progress and handoff |
 | `roll doctor [skills\|tools\|language\|repair-protection]` | Diagnose install health, skills, tools, permissions, language drift, and stale main-checkout write protection |
 | `roll help [--lang en\|zh] [name]` | View built-in Charter / guide docs; `roll --help` prints CLI usage |
-| `roll idea "<one-sentence description>"` | Capture and classify a new backlog card |
+| `roll idea "<one-sentence description>" --workspace <id\|path>` | Capture and classify a new card in one Workspace backlog |
 | `roll init` | Diagnose this directory and route setup/onboarding |
 | `roll loop <on\|go\|pause\|resume> --workspace <id\|path>` / `roll loop status --all` | Run or mutate one Workspace scheduler; aggregate status is read-only |
 | `roll next` | Continue init/onboard with one best next command |

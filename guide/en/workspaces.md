@@ -78,6 +78,21 @@ Roll reports the candidates and exits non-zero. Conflicting explicit,
 environment and cwd selectors also fail loud. Mutations such as `pause`,
 `archive`, scheduler control and delivery reconciliation reject `--all`.
 
+Planning and delivery commands use the selected Workspace as their only
+project-data authority. They can run from an arbitrary directory without
+creating `<cwd>/.roll`:
+
+```bash
+roll story new US-PAY-102 --title "Retry refund" --epic payments --workspace ws-payments
+roll idea "improve refund diagnostics" --workspace ws-payments
+roll design "split refund recovery" --workspace ws-payments
+roll attest US-PAY-102 --workspace ws-payments
+```
+
+These commands and their internal view refresh read or write `backlog/index.md`,
+`features/`, `runtime/` and the derived `index.json` under the canonical Workspace. A legacy `.roll`
+project is migration input only; Roll never writes both layouts.
+
 ## Requirement and Issue layout
 
 A requirement revision is captured before execution and remains attributable to

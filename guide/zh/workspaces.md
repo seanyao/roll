@@ -71,6 +71,20 @@ roll delivery list --workspace ws-payments
 显式参数、环境变量与 cwd 指向不同目标时也会 fail loud。`pause`、`archive`、scheduler
 控制和 delivery reconcile 等变更拒绝 `--all`。
 
+planning 与 delivery 命令只把选定 Workspace 当作 project-data authority。即使从任意
+目录运行，也不会创建 `<cwd>/.roll`：
+
+```bash
+roll story new US-PAY-102 --title "重试退款" --epic payments --workspace ws-payments
+roll idea "改进退款诊断" --workspace ws-payments
+roll design "拆分退款恢复方案" --workspace ws-payments
+roll attest US-PAY-102 --workspace ws-payments
+```
+
+这些命令及其内部 view refresh 只读写 canonical Workspace 下的 `backlog/index.md`、
+`features/`、`runtime/` 与派生 `index.json`。legacy `.roll` 只作为 migration input；
+Roll 不会同时写两套布局。
+
 ## Requirement 与 Issue 布局
 
 执行前先采集 requirement revision，并保留 provider ref 与 digest。`backlog/` 中的 Story

@@ -157,6 +157,9 @@ export async function executeSpawnAgentCommand(
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
+        // US-CYCLE-001: observe the run's OWN work dir (worktree/submodule),
+        // not the main checkout — commitCount/stateSignature both bind execCwd.
+        observeCwd: execCwd,
         commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
         ...(statusSignature !== undefined ? { stateSignature: () => statusSignature(execCwd) } : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),

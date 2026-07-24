@@ -7,7 +7,6 @@ import {
   CYCLE_WALL_TIMEOUT_SEC,
   STALL_STARTUP_GRACE_SEC,
   baselineCommits,
-  cycleTimeoutVerdict,
   maybeBuildHeartbeat,
   newCycleObserverState,
   newNormalizerState,
@@ -19,6 +18,7 @@ import {
   type AgentActivityNormalizer,
   type CycleObserverState,
   type NormalizerState,
+  watchRun,
 } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
 import { parseCaptureMarker, type CaptureMarker, type ScreenshotResult } from "@roll/infra";
@@ -295,122 +295,39 @@ export function startSpawnTimeoutWatchdog(opts: {
   kill?: () => number;
   /** Poll cadence ms (default {@link TIMEOUT_POLL_MS}; tests pin a small value). */
   pollMs?: number;
+  /** US-CYCLE-001: the run's worktree cwd the signals observe (record only —
+   *  commitCount/stateSignature are already bound to it by the caller). */
+  observeCwd?: string;
 }): SpawnTimeoutWatchdog {
   const { cycleId, thresholds, clock, commitCount, appendEvent } = opts;
   const stateSignature = opts.stateSignature;
   const kill = opts.kill ?? ((): number => killLiveAgents("SIGKILL"));
   const pollMs = opts.pollMs ?? (Number((process.env["ROLL_TIMEOUT_POLL_MS"] ?? "").trim()) || TIMEOUT_POLL_MS);
-  // All criteria disabled → an inert handle (no timer, never fires).
-  if (thresholds.wallSec <= 0 && thresholds.noProgressSec <= 0 && thresholds.noStateChangeSec <= 0) {
-    return { markProgress: () => {}, stop: () => ({ firedReason: null }) };
-  }
-  const startSec = clock();
-  let lastProgressSec = startSec;
-  let lastStateSec = startSec;
-  let lastCommitCount = -1;
-  let lastSignature: string | undefined;
-  let firedReason: "wall" | "no-progress" | "no-state-change" | null = null;
-  let running = false;
-
-  const markProgress = (): void => {
-    // stdout feeds ONLY the true-silence fuse (FIX-1477) — it is proof of
-    // liveness, not of work; the state clock (lastStateSec) is untouched.
-    lastProgressSec = clock();
-  };
-
-  const tick = async (): Promise<void> => {
-    if (running || firedReason !== null) return; // don't stack ticks / re-fire
-    running = true;
-    try {
-      // A NEW commit on the worktree branch is GIT-STATE progress — it bumps
-      // BOTH the silence clock and the state clock.
-      try {
-        const n = await commitCount();
-        if (n > lastCommitCount) {
-          lastCommitCount = n;
-          const now = clock();
-          lastProgressSec = now;
-          lastStateSec = now;
-        }
-      } catch {
-        /* a git-probe blip is NOT progress and NOT a reason to kill — skip */
-      }
-      // FIX-1477 — a dirty-state signature CHANGE (files written/edited before
-      // or between commits) is also git-state progress: it bumps BOTH clocks.
-      // The first observation only establishes the baseline (never a bump).
-      if (stateSignature !== undefined) {
-        try {
-          const sig = await stateSignature();
-          if (lastSignature !== undefined && sig !== lastSignature) {
-            const now = clock();
-            lastProgressSec = now;
-            lastStateSec = now;
-          }
-          lastSignature = sig;
-        } catch {
-          /* a signature-probe blip is NOT progress and NOT a kill — skip */
-        }
-      }
-      const now = clock();
-      const verdict = cycleTimeoutVerdict({
-        elapsedSec: now - startSec,
-        idleSec: now - lastProgressSec,
-        stateIdleSec: now - lastStateSec,
-        wallLimitSec: thresholds.wallSec,
-        noProgressLimitSec: thresholds.noProgressSec,
-        noStateChangeLimitSec: thresholds.noStateChangeSec,
+  // US-CYCLE-001: delegate to the shared @roll/core run-watchdog — ONE
+  // implementation, observed on the run's worktree cwd. The loop runner binds
+  // commitCount/stateSignature to the worktree (via ports); the goal/supervisor
+  // + subagent path reuses the same watchRun with its own cwd-bound signals.
+  const handle = watchRun({
+    cwd: opts.observeCwd ?? "",
+    clock,
+    thresholds,
+    progressSignals: { commitCount, ...(stateSignature !== undefined ? { stateSignature } : {}) },
+    onTimeout: (info) => {
+      // Record FIRST (durable), then kill — so the trip is observable even if
+      // the kill races the process exiting on its own.
+      appendEvent({
+        type: "cycle:timeout",
+        cycleId,
+        reason: info.reason,
+        elapsedSec: info.elapsedSec,
+        idleSec: info.idleSec,
+        ts: epochMs(clock()),
       });
-      if (verdict.timedOut) {
-        firedReason = verdict.reason;
-        clearInterval(timer);
-        // Record FIRST (durable), then kill — so the trip is observable even if
-        // the kill races the process exiting on its own.
-        try {
-          appendEvent({
-            type: "cycle:timeout",
-            cycleId,
-            reason: verdict.reason,
-            elapsedSec: verdict.elapsedSec,
-            idleSec: verdict.idleSec,
-            ts: epochMs(now),
-          });
-        } catch {
-          /* event append is best-effort; the kill below is the point */
-        }
-        try {
-          kill();
-        } catch {
-          /* the spawn's exit handler still settles the promise */
-        }
-      }
-    } finally {
-      running = false;
-    }
-  };
-  // Seed the baselines once up front so the first real change counts.
-  void (async () => {
-    try {
-      lastCommitCount = await commitCount();
-    } catch {
-      /* baseline best-effort */
-    }
-    if (stateSignature !== undefined) {
-      try {
-        lastSignature = await stateSignature();
-      } catch {
-        /* baseline best-effort */
-      }
-    }
-  })();
-  const timer = setInterval(() => void tick(), pollMs);
-  timer.unref?.();
-  return {
-    markProgress,
-    stop: () => {
-      clearInterval(timer);
-      return { firedReason };
     },
-  };
+    kill,
+    pollMs,
+  });
+  return { markProgress: handle.markProgress, stop: handle.stop };
 }
 
 /** FIX-929 — agent stall detector. Monitors agent output (stdout token stream)

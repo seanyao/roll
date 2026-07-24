@@ -36,10 +36,16 @@ describe("US-WS-027 workspace requirement evidence", () => {
     const result = matchWorkspaceRequirement({
       requirement: hint.value,
       facts: {
-        issues: [{ storyId: "US-WS-027", requirements: [] }],
+        issues: [{
+          storyId: "US-WS-027",
+          requirements: [{
+            provider: "local_file",
+            ref: "PRD/Brief.md",
+            requirementId: requirementId("local_file", "PRD/Brief.md"),
+          }],
+        }],
         requirementSources: [
           { provider: "jira", ref: "APE-234", requirementId: requirementId("jira", "APE-234") },
-          { provider: "local_file", ref: "PRD/Brief.md", requirementId: requirementId("local_file", "PRD/Brief.md") },
         ],
         repositories: [{ remote: "https://github.com/Owner/Repo.git", repositoryId: repoId("https://github.com/Owner/Repo") }],
         roots: ["/work/ws"],
@@ -62,6 +68,12 @@ describe("US-WS-027 workspace requirement evidence", () => {
         value: "jira:APE-234",
         provenance: "explicit_user",
         source: `requirement:jira/${requirementId("jira", "APE-234")}`,
+      }),
+      expect.objectContaining({
+        kind: "requirement_source_exact",
+        hard: true,
+        value: "local_file:PRD/Brief.md",
+        provenance: "deterministic_extraction",
       }),
       expect.objectContaining({ kind: "repository_exact", hard: false, provenance: "cwd_repository" }),
       expect.objectContaining({ kind: "path_contained", hard: false, provenance: "cwd_repository" }),
@@ -156,6 +168,21 @@ describe("US-WS-027 workspace requirement evidence", () => {
     expect(first.evidence).toHaveLength(MAX_REQUIREMENT_MATCH_EVIDENCE);
     expect(second.evidence).toEqual(first.evidence);
     expect(new Set(first.evidence.map((entry) => `${entry.kind}:${entry.value}`)).size).toBe(first.evidence.length);
+  });
+
+  it("requires host-canonical absolute roots before path containment matching", () => {
+    const hint = normalizeRequirementHint({
+      paths: [{ path: "/work/ws/issues/US-WS-027", provenance: "cwd_repository" }],
+    });
+    if (!hint.ok) throw new Error("fixture hint must be valid");
+    expect(matchWorkspaceRequirement({
+      requirement: hint.value,
+      facts: { issues: [], requirementSources: [], repositories: [], roots: ["work/ws"] },
+    })).toMatchObject({
+      evidence: [],
+      hardMatch: false,
+      findings: [{ code: "invalid_workspace_root", source: "workspace-root:work/ws" }],
+    });
   });
 
   it("provides a pure normalization-to-match golden path without provider URL or text collection", () => {

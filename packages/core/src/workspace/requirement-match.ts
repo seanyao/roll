@@ -28,6 +28,7 @@ export interface WorkspaceRequirementMatchFacts {
   }[];
   readonly requirementSources: readonly PersistedRequirementIdentity[];
   readonly repositories: readonly PersistedRepositoryIdentity[];
+  /** Host-resolved canonical absolute roots; core performs no filesystem access. */
   readonly roots: readonly string[];
   readonly semanticTerms?: readonly string[];
 }
@@ -202,7 +203,10 @@ export function matchWorkspaceRequirement(input: {
     if (match !== undefined) evidence.push(match);
   }
 
-  const persistedRequirements = normalizePersistedRequirements(input.facts.requirementSources, findings);
+  const persistedRequirements = normalizePersistedRequirements([
+    ...input.facts.requirementSources,
+    ...input.facts.issues.flatMap((issue) => issue.requirements),
+  ], findings);
   for (const hint of input.requirement.sources) {
     const identity = normalizeRequirementSourceReference(hint.key.provider, hint.key.ref);
     if (!identity.ok) continue;

@@ -358,5 +358,11 @@ function appendWarnings<T>(result: ToolResult<T>, warnings: readonly string[]): 
 function withCorrelation<T>(result: ToolResult<T>, request: Pick<ToolInvokeRequest, "context" | "repoId">): ToolResult<T> {
   const value = correlation(request);
   if (value === undefined) return result;
-  return { ...result, meta: { ...result.meta, correlation: value } };
+  return {
+    ...result,
+    meta: {
+      ...result.meta,
+      correlation: { ...result.meta.correlation, ...value },
+    },
+  };
 }

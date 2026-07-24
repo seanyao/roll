@@ -53,6 +53,8 @@ import {
   readContextSnapshot,
   writeContextSnapshot,
   type GitLlmWikiCommandRunner,
+  type GitLlmWikiBinaryCommandRunner,
+  type GitBinaryResult,
   type GitResult,
 } from "@roll/infra";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -136,6 +138,7 @@ function oid(revision: string, path: string): string {
 class FakeGitBoundary {
   readonly calls: Array<{ readonly providerId?: string; readonly operation: readonly string[]; readonly cwd?: string }> = [];
   readonly runGit: GitLlmWikiCommandRunner;
+  readonly runGitBinary: GitLlmWikiBinaryCommandRunner;
   private readonly providers = new Map<string, FakeProviderState>();
   private globalActiveFetches = 0;
   maxGlobalActiveFetches = 0;
@@ -189,12 +192,12 @@ class FakeGitBoundary {
           : { code: 1, stdout: "", stderr: "missing object" };
       }
       if (operation[0] === "ls-tree") {
-        const revision = operation[1];
-        const path = operation[3];
+        const revision = operation[1] === "-z" ? operation[2] : operation[1];
+        const path = operation[1] === "-z" ? operation[4] : operation[3];
         const file = revision === undefined || path === undefined ? undefined : state.revisions.get(revision)?.files.get(path);
         return file === undefined
           ? { code: 0, stdout: "", stderr: "" }
-          : { code: 0, stdout: `${file.mode} blob ${oid(revision!, path!)}\t${path}\n`, stderr: "" };
+          : { code: 0, stdout: `${file.mode} blob ${oid(revision!, path!)}\t${path}\0`, stderr: "" };
       }
       if (operation[0] === "cat-file" && operation[1] === "-s") {
         const file = operation[2] === undefined ? undefined : state.blobsByOid.get(operation[2]);
@@ -209,6 +212,20 @@ class FakeGitBoundary {
           : { code: 0, stdout: file.content, stderr: "" };
       }
       throw new Error(`unexpected fake Git operation: ${operation.join(" ")}`);
+    });
+    this.runGitBinary = vi.fn(async (args, cwd, options): Promise<GitBinaryResult> => {
+      const operation = gitOperation(args);
+      expect(options.env).toBeUndefined();
+      if (operation[0] !== "cat-file" || operation[1] !== "blob") {
+        throw new Error(`unexpected fake binary Git operation: ${operation.join(" ")}`);
+      }
+      const providerId = providerIdFromCwd(cwd);
+      const state = this.state(providerId);
+      this.calls.push({ providerId, operation, ...(cwd === undefined ? {} : { cwd }) });
+      const file = operation[2] === undefined ? undefined : state.blobsByOid.get(operation[2]);
+      return file === undefined
+        ? { code: 1, stdout: new Uint8Array(), stderr: "missing blob" }
+        : { code: 0, stdout: new TextEncoder().encode(file.content), stderr: "" };
     });
   }
 
@@ -402,7 +419,13 @@ function criticalFixture(options: {
     now,
     createReadService: (input) => createContextReadService({
       registry: input.registry,
-      adapter: createContextReadAdapter({ rollHome, runGit: fakeGit.runGit, now, audit: input.audit }),
+      adapter: createContextReadAdapter({
+        rollHome,
+        runGit: fakeGit.runGit,
+        runGitBinary: fakeGit.runGitBinary,
+        now,
+        audit: input.audit,
+      }),
       now,
       authorizeRestrictedReference: (_request, file) => input.authorizeRestrictedReference(file),
     }),
@@ -1136,6 +1159,7 @@ describe("US-CONTEXT-009 critical compatibility matrix", () => {
     const completedAdapter = createContextReadAdapter({
       rollHome: transportAuditFixture.rollHome,
       runGit: transportAuditFixture.fakeGit.runGit,
+      runGitBinary: transportAuditFixture.fakeGit.runGitBinary,
       audit: () => { throw new Error("audit unavailable"); },
     });
     const completed = await createContextReadService({ registry: transportAuditFixture.deps.readRegistry(), adapter: completedAdapter })
@@ -1149,6 +1173,7 @@ describe("US-CONTEXT-009 critical compatibility matrix", () => {
     const adapter = createContextReadAdapter({
       rollHome: failedFixture.rollHome,
       runGit: failedFixture.fakeGit.runGit,
+      runGitBinary: failedFixture.fakeGit.runGitBinary,
       audit: () => { throw new Error("audit unavailable"); },
     });
     const failed = await createContextReadService({ registry: failedFixture.deps.readRegistry(), adapter })

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   REPOSITORY_BINDING_V1,
   REQUIREMENT_HINT_V1,
@@ -15,6 +17,7 @@ import {
 } from "../src/runner/workspace-clarification.js";
 
 const SHA = "a".repeat(64);
+const evidenceDir = fileURLToPath(new URL("./fixtures/workspace/us-ws-029-terminal-evidence", import.meta.url));
 
 function intent(operation: "read" | "mutation" = "mutation"): WorkspaceIntentV1 {
   return {
@@ -85,6 +88,59 @@ function candidate(workspaceId: string, lifecycle: WorkspaceLifecycle): Workspac
 }
 
 describe("US-WS-029 agent Workspace clarification host", () => {
+  it("deposits the single-active requirement-mismatch select/create stopping transcript", () => {
+    const question = beginAgentWorkspaceClarification({
+      intent: intent(),
+      reason: "requirement_match_required",
+      candidates: [candidate("roll", "active")],
+      diagnostics: [],
+      discovery: { registryRevision: 7, discoveryFactsSha256: SHA, workspaces: [facts("roll", "active")] },
+    });
+    const selected = continueAgentWorkspaceClarification({
+      handoff: question.handoff,
+      answer: { action: "select_existing", workspaceId: "roll" },
+      currentDiscovery: { registryRevision: 7, discoveryFactsSha256: SHA },
+      rerunResolver: (selector) => ({ selector, status: "explicit_recheck_required" }),
+    });
+    const created = continueAgentWorkspaceClarification({
+      handoff: question.handoff,
+      answer: { action: "create_new", workspaceId: "ws-ape-234" },
+      currentDiscovery: { registryRevision: 7, discoveryFactsSha256: SHA },
+      rerunResolver: () => ({ unexpected: true }),
+    });
+    const transcript = [
+      "US-WS-029 normalized agent terminal transcript",
+      "Generated from the public agent Workspace clarification host.",
+      "",
+      "$ agent -> roll-.clarify workspace_target",
+      question.prompt,
+      "",
+      "> select_existing roll",
+      JSON.stringify(selected, null, 2),
+      "",
+      "> create_new ws-ape-234",
+      JSON.stringify(created, null, 2),
+      "",
+    ].join("\n");
+
+    expect(question.handoff.allowedActions).toEqual(["select_existing", "create_new"]);
+    expect(selected).toMatchObject({ kind: "resolution_retried", stopped: true, canonicalSelector: "--workspace roll" });
+    expect(created).toMatchObject({
+      kind: "collect_create_input",
+      stopped: true,
+      previewCommand: "roll workspace create <ID> --config <path> --check",
+      applyAuthorized: false,
+    });
+    expect(readFileSync(`${evidenceDir}/transcript.txt`, "utf8")).toBe(transcript);
+    expect(JSON.parse(readFileSync(`${evidenceDir}/evidence.json`, "utf8"))).toMatchObject({
+      storyId: "US-WS-029",
+      physical: false,
+      taken: false,
+      reason: "headless_terminal_capture_unavailable",
+    });
+    expect(readFileSync(`${evidenceDir}/capture-skip.txt`, "utf8")).toContain("No PNG was generated");
+  });
+
   it.each(["registered", "paused"] as const)("stops on a %s exact match without activating or mutating", (lifecycle) => {
     const writeRegistry = vi.fn();
     const activate = vi.fn();

@@ -17,6 +17,7 @@ import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { readSkillBody } from "./skill-body.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import { resolveIntegrationBranch } from "@roll/infra";
+import { recordSpawnRound } from "./round-journal-emit.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
@@ -220,6 +221,8 @@ export async function executeSpawnAgentCommand(
           resolveLostRace?.();
         },
       });
+      // US-CYCLE-004: wall-clock start for the round-journal builder turn.
+      const roundStart = Date.now();
       try {
         appendWriteProtectionEvent(
           ports,
@@ -316,6 +319,16 @@ export async function executeSpawnAgentCommand(
       } else {
         await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
       }
+
+      // US-CYCLE-004: record this builder turn in the per-card round-journal.
+      // Best-effort + guaranteed non-blocking (recordSpawnRound never throws) —
+      // this is the auto-write for the spawn path, no manual step.
+      recordSpawnRound(ports, ctx, {
+        role: "builder",
+        start: roundStart,
+        durMs: Date.now() - roundStart,
+        outcome: res.timedOut ? "timeout" : res.exitCode === 0 ? "delivered" : "failed",
+      });
 
       // FIX-1237: heal-at-every-boundary — repair core.worktree contamination
       // immediately after EVERY agent spawn completes, not just at pre-init

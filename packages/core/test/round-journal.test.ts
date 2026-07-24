@@ -1,0 +1,142 @@
+/**
+ * US-CYCLE-004 — round-journal: append-only per-card ledger + readout.
+ * Covers the "8 questions" durability contract: concurrent-safe append, bad-line
+ * tolerance, schema-version tolerance, aggregation correctness, and .md derived
+ * from jsonl (jsonl is the source of truth).
+ */
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  ROUND_JOURNAL_SCHEMA_VERSION,
+  aggregateRounds,
+  appendRoundEntry,
+  formatRoundReadout,
+  readRoundEntries,
+  type RoundJournalInput,
+} from "../src/index.js";
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+function cardDir(): string {
+  const d = mkdtempSync(join(tmpdir(), "roll-roundj-"));
+  dirs.push(d);
+  return d;
+}
+function entry(over: Partial<RoundJournalInput> = {}): RoundJournalInput {
+  return { card: "US-X-1", round: 1, role: "builder", start: 1_000, durMs: 60_000, outcome: "delivered", ...over };
+}
+
+describe("appendRoundEntry / readRoundEntries", () => {
+  it("appends a jsonl line stamped with the schema version and reads it back", () => {
+    const dir = cardDir();
+    expect(appendRoundEntry(dir, entry({ model: "glm", gateTimeMs: 5_000, era: "e1" }))).toBe(true);
+    const { entries, skipped } = readRoundEntries(dir);
+    expect(skipped).toBe(0);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.schemaVersion).toBe(ROUND_JOURNAL_SCHEMA_VERSION);
+    expect(entries[0]).toMatchObject({ role: "builder", model: "glm", gateTimeMs: 5_000, era: "e1", outcome: "delivered" });
+  });
+
+  it("is append-only — many entries accumulate as distinct lines", () => {
+    const dir = cardDir();
+    for (let i = 1; i <= 5; i++) appendRoundEntry(dir, entry({ round: i, durMs: i * 1_000 }));
+    const { entries } = readRoundEntries(dir);
+    expect(entries.map((e) => e.round)).toEqual([1, 2, 3, 4, 5]);
+    // Raw jsonl really has one line per entry (concurrency contract).
+    const raw = readFileSync(join(dir, "round-journal.jsonl"), "utf8").trim().split("\n");
+    expect(raw).toHaveLength(5);
+  });
+
+  it("tolerates malformed / half-written lines (skips + counts them)", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry({ round: 1 }));
+    // Simulate a corrupt row + a half-written trailing line.
+    appendFileSync(join(dir, "round-journal.jsonl"), "{not json}\n", "utf8");
+    appendFileSync(join(dir, "round-journal.jsonl"), '{"card":"US-X-1","round":2', "utf8");
+    appendRoundEntry(dir, entry({ round: 3 }));
+    const { entries, skipped } = readRoundEntries(dir);
+    expect(entries.map((e) => e.round).sort()).toEqual([1, 3]);
+    expect(skipped).toBe(2);
+  });
+
+  it("tolerant reader keeps rows with an unknown/newer schemaVersion + extra fields", () => {
+    const dir = cardDir();
+    appendFileSync(
+      join(dir, "round-journal.jsonl"),
+      JSON.stringify({ schemaVersion: 999, card: "US-X-1", round: 1, role: "designer", start: 1, durMs: 42, outcome: "passed", futureField: "x" }) + "\n",
+      "utf8",
+    );
+    const { entries, skipped } = readRoundEntries(dir);
+    expect(skipped).toBe(0);
+    expect(entries[0]?.role).toBe("designer");
+    expect((entries[0] as Record<string, unknown>)["futureField"]).toBe("x");
+  });
+
+  it("never throws on an unwritable dir — returns false (best-effort, non-blocking)", () => {
+    // A path whose parent is a file, not a dir → mkdir/append fail.
+    const dir = cardDir();
+    const filePath = join(dir, "afile");
+    appendFileSync(filePath, "x", "utf8");
+    expect(appendRoundEntry(join(filePath, "nested"), entry())).toBe(false);
+  });
+
+  it("renders a derived .md table from the jsonl", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry({ role: "evaluator", outcome: "passed", era: "e2" }));
+    expect(existsSync(join(dir, "round-journal.md"))).toBe(true);
+    const md = readFileSync(join(dir, "round-journal.md"), "utf8");
+    expect(md).toContain("| round | role |");
+    expect(md).toContain("evaluator");
+    expect(md).toContain("passed");
+  });
+});
+
+describe("aggregateRounds", () => {
+  it("computes median/mean/p90 and gate-share, split by era", () => {
+    const dir = cardDir();
+    // era e1: durs 10s,20s,30s,40s,50s (gate 5s each)
+    for (let i = 1; i <= 5; i++) appendRoundEntry(dir, entry({ round: i, durMs: i * 10_000, gateTimeMs: 5_000, era: "e1", role: "builder" }));
+    // era e2: one 100s turn, no gate
+    appendRoundEntry(dir, entry({ round: 6, durMs: 100_000, era: "e2" }));
+    const agg = aggregateRounds(dir);
+    expect(agg.overall.count).toBe(6);
+    const e1 = agg.byEra.find((e) => e.era === "e1");
+    expect(e1?.count).toBe(5);
+    expect(e1?.medianMs).toBe(30_000); // nearest-rank median of 10..50k
+    expect(e1?.meanMs).toBe(30_000);
+    expect(e1?.p90Ms).toBe(50_000);
+    // gate share = 25s / 150s ≈ 0.1667
+    expect(e1?.gateShare).toBeCloseTo(25 / 150, 3);
+    const e2 = agg.byEra.find((e) => e.era === "e2");
+    expect(e2?.gateShare).toBe(0);
+    // byEra sorted by label
+    expect(agg.byEra.map((e) => e.era)).toEqual(["e1", "e2"]);
+  });
+
+  it("entries without an era fall into the 'unknown' window", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry());
+    const agg = aggregateRounds(dir);
+    expect(agg.byEra[0]?.era).toBe("unknown");
+  });
+
+  it("formatRoundReadout surfaces overall + per-era + skipped count", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry({ era: "e1" }));
+    appendFileSync(join(dir, "round-journal.jsonl"), "garbage\n", "utf8");
+    const out = formatRoundReadout(aggregateRounds(dir));
+    expect(out).toContain("overall:");
+    expect(out).toContain("era e1:");
+    expect(out).toContain("malformed");
+  });
+
+  it("empty card → zeroed stats, no throw", () => {
+    const agg = aggregateRounds(cardDir());
+    expect(agg.overall).toMatchObject({ count: 0, medianMs: 0, meanMs: 0, p90Ms: 0, gateShare: 0 });
+    expect(agg.byEra).toEqual([]);
+  });
+});

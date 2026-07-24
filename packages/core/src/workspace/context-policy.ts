@@ -1,9 +1,8 @@
 import type {
-  WorkspaceContextConsumer,
   WorkspaceContextPolicy,
   WorkspaceContextPolicySurface,
-  WorkspaceContextScope,
 } from "@roll/spec";
+import { validateWorkspaceContextPolicy } from "@roll/spec";
 
 export interface WorkspaceContextSurfaceInventoryItem {
   readonly surface: WorkspaceContextPolicySurface;
@@ -15,6 +14,7 @@ export interface WorkspaceContextSurfaceInventoryItem {
 export type WorkspaceContextPolicyFindingCode =
   | "duplicate_inventory_key"
   | "duplicate_policy_key"
+  | "invalid_policy_schema"
   | "missing_policy"
   | "orphan_policy"
   | "invalid_scope_consumer"
@@ -40,14 +40,6 @@ export interface WorkspaceContextCompatibilityMatrixV1 {
   };
   readonly rows: readonly WorkspaceContextPolicy[];
 }
-
-const EXPECTED_CONSUMER: Readonly<Partial<Record<WorkspaceContextScope, WorkspaceContextConsumer>>> = {
-  workspace_optional_read: "workspace",
-  workspace_required_read: "workspace",
-  workspace_required_mutation: "workspace",
-  issue_required: "issue",
-  repository_required: "repository",
-};
 
 function keyOf(item: Pick<WorkspaceContextSurfaceInventoryItem, "surface" | "id" | "operation">): string {
   return `${item.surface}:${item.id}:${item.operation}`;
@@ -85,34 +77,52 @@ export function auditWorkspaceContextPolicies(input: {
 }): WorkspaceContextPolicyFinding[] {
   const findings: WorkspaceContextPolicyFinding[] = [];
   const inventoryByKey = new Map(input.inventory.map((item) => [keyOf(item), item]));
-  const policyByKey = new Map(input.policies.map((policy) => [keyOf(policy), policy]));
+  const validPolicies: WorkspaceContextPolicy[] = [];
+  const presentPolicyKeys = new Set<string>();
+  for (const [index, policy] of input.policies.entries()) {
+    const partial = policy as unknown as Record<string, unknown>;
+    const hasIdentity = typeof partial === "object" && partial !== null
+      && typeof partial["surface"] === "string"
+      && typeof partial["id"] === "string"
+      && typeof partial["operation"] === "string";
+    const key = hasIdentity
+      ? `${partial["surface"]}:${partial["id"]}:${partial["operation"]}`
+      : `policy[${index}]`;
+    if (hasIdentity) presentPolicyKeys.add(key);
+    const issues = validateWorkspaceContextPolicy(policy);
+    if (issues.length === 0) {
+      validPolicies.push(policy);
+      continue;
+    }
+    const schemaIssues = issues.filter((issue) => issue.code !== "invalid_scope_consumer");
+    if (schemaIssues.length > 0) {
+      findings.push({
+        code: "invalid_policy_schema",
+        key,
+        message: `${key} invalid policy schema: ${schemaIssues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`,
+      });
+    }
+    for (const issue of issues.filter((candidate) => candidate.code === "invalid_scope_consumer")) {
+      findings.push({ code: "invalid_scope_consumer", key, message: `${key} ${issue.message}` });
+    }
+  }
+  const policyByKey = new Map(validPolicies.map((policy) => [keyOf(policy), policy]));
 
   for (const key of duplicateKeys(input.inventory)) {
     findings.push({ code: "duplicate_inventory_key", key, message: `duplicate inventory key: ${key}` });
   }
-  for (const key of duplicatePolicyKeys(input.policies)) {
+  for (const key of duplicatePolicyKeys(validPolicies)) {
     findings.push({ code: "duplicate_policy_key", key, message: `duplicate policy key: ${key}` });
   }
   for (const key of [...inventoryByKey.keys()].sort()) {
-    if (!policyByKey.has(key)) findings.push({ code: "missing_policy", key, message: `missing policy: ${key}` });
+    if (!presentPolicyKeys.has(key)) findings.push({ code: "missing_policy", key, message: `missing policy: ${key}` });
   }
   for (const key of [...policyByKey.keys()].sort()) {
     if (!inventoryByKey.has(key)) findings.push({ code: "orphan_policy", key, message: `policy has no registered surface: ${key}` });
   }
 
-  for (const policy of [...input.policies].sort(compareKeys)) {
+  for (const policy of [...validPolicies].sort(compareKeys)) {
     const key = keyOf(policy);
-    const expectedConsumer = EXPECTED_CONSUMER[policy.scope];
-    const validConsumer = expectedConsumer === undefined
-      ? policy.contextConsumer === undefined
-      : policy.contextConsumer === expectedConsumer;
-    if (!validConsumer) {
-      findings.push({
-        code: "invalid_scope_consumer",
-        key,
-        message: `${key} scope '${policy.scope}' requires consumer '${expectedConsumer ?? "none"}'`,
-      });
-    }
     const allowsFallback = policy.allowsAmbientCwd || policy.allowsLegacyRollPath;
     if (allowsFallback && policy.scope !== "machine_only" && policy.scope !== "legacy_migration_only") {
       findings.push({

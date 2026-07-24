@@ -4,7 +4,7 @@ import {
   buildWorkspaceContextCompatibilityMatrix,
   type WorkspaceContextSurfaceInventoryItem,
 } from "../src/workspace/context-policy.js";
-import type { WorkspaceContextPolicy } from "@roll/spec";
+import { validateWorkspaceContextPolicy, type WorkspaceContextPolicy } from "@roll/spec";
 
 const inventory: readonly WorkspaceContextSurfaceInventoryItem[] = [
   { surface: "cli", id: "backlog", operation: "read", supportsWorkspaceSelector: true },
@@ -60,8 +60,14 @@ describe("US-WS-032 Workspace context policy", () => {
       inventory: inventory.slice(0, 3),
       policies: [
         { ...policies[0]!, contextConsumer: "issue" },
-        { ...policies[1]!, scope: "machine_only", contextConsumer: undefined, allowsAmbientCwd: true },
-        { ...policies[2]!, scope: "legacy_migration_only", contextConsumer: undefined, allowsLegacyRollPath: true, rationale: "  " },
+        {
+          surface: "skill", id: "roll-build", operation: "build", scope: "machine_only",
+          allowsAmbientCwd: true, allowsLegacyRollPath: false,
+        },
+        {
+          surface: "tool", id: "filesystem", operation: "read", scope: "legacy_migration_only",
+          allowsAmbientCwd: false, allowsLegacyRollPath: true, rationale: "  ",
+        },
       ],
     });
     expect(findings.map((finding) => finding.code)).toEqual([
@@ -69,6 +75,20 @@ describe("US-WS-032 Workspace context policy", () => {
       "missing_fallback_rationale",
       "missing_fallback_rationale",
     ]);
+  });
+
+  it.each([
+    ["unknown scope", { ...policies[0]!, scope: "future_scope" }, "invalid_scope"],
+    ["wrong selector type", { ...policies[0]!, acceptsWorkspaceSelector: "yes" }, "invalid_type"],
+    ["extra field", { ...policies[0]!, undocumented: true }, "unknown_key"],
+    ["empty id", { ...policies[0]!, id: "" }, "invalid_value"],
+    ["unknown consumer", { ...policies[0]!, contextConsumer: "project" }, "invalid_consumer"],
+  ] as const)("rejects closed-schema violation: %s", (_name, policy, code) => {
+    expect(validateWorkspaceContextPolicy(policy).map((issue) => issue.code)).toContain(code);
+    expect(auditWorkspaceContextPolicies({
+      inventory: inventory.slice(0, 1),
+      policies: [policy as unknown as WorkspaceContextPolicy],
+    }).map((finding) => finding.code)).toContain("invalid_policy_schema");
   });
 
   it("rejects fallback permissions outside machine or migration scopes", () => {

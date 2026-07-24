@@ -50,6 +50,23 @@ describe("US-WS-032 actual Workspace surface inventory", () => {
     expect(new Set(toolInventory.map((item) => `${item.id}:${item.operation}`)).size).toBe(toolInventory.length);
   });
 
+  it.each([
+    ["unknown scope", { scope: "future_scope" }],
+    ["wrong selector type", { acceptsWorkspaceSelector: "yes" }],
+    ["extra field", { undocumented: true }],
+    ["empty operation", { operation: "" }],
+    ["unknown consumer", { contextConsumer: "project" }],
+  ])("rejects malformed skill manifest policy: %s", (_name, mutation) => {
+    const manifest = structuredClone(skillsManifest()) as {
+      workspaceContextPolicies: Array<Record<string, unknown>>;
+    };
+    manifest.workspaceContextPolicies[0] = {
+      ...manifest.workspaceContextPolicies[0],
+      ...mutation,
+    };
+    expect(() => skillContextPoliciesFromManifest(manifest)).toThrow(/invalid skill policy at index 0/);
+  });
+
   it("closes the registered inventory and matches the stable machine artifact", () => {
     registerAll();
     const matrix = buildRegisteredWorkspaceContextMatrix({

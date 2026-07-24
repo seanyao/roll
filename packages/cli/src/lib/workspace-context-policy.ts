@@ -9,6 +9,7 @@ import type {
   WorkspaceContextPolicy,
   WorkspaceContextScope,
 } from "@roll/spec";
+import { validateWorkspaceContextPolicy } from "@roll/spec";
 import {
   PUBLIC_CLI_OPERATIONS,
   type WorkspaceSelectorOperationDecision,
@@ -150,22 +151,28 @@ export function cliContextInventory(): WorkspaceContextSurfaceInventoryItem[] {
   }));
 }
 
-function isPolicy(value: unknown): value is WorkspaceContextPolicy {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const item = value as Record<string, unknown>;
-  return item.surface === "skill" && typeof item.id === "string" && typeof item.operation === "string"
-    && typeof item.scope === "string" && typeof item.allowsAmbientCwd === "boolean" && typeof item.allowsLegacyRollPath === "boolean";
-}
-
 export function skillContextPoliciesFromManifest(manifest: unknown): WorkspaceContextPolicy[] {
   if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
     throw new Error("workspace-context-policy: invalid skills manifest");
   }
   const policies = (manifest as Record<string, unknown>)["workspaceContextPolicies"];
-  if (!Array.isArray(policies) || !policies.every(isPolicy)) {
+  if (!Array.isArray(policies)) {
     throw new Error("workspace-context-policy: invalid skill policies");
   }
-  return policies;
+  return policies.map((policy, index) => {
+    const issues = validateWorkspaceContextPolicy(policy);
+    const surface = typeof policy === "object" && policy !== null && !Array.isArray(policy)
+      ? (policy as Record<string, unknown>)["surface"]
+      : undefined;
+    if (issues.length > 0 || surface !== "skill") {
+      const details = [
+        ...issues.map((issue) => `${issue.path}: ${issue.message}`),
+        ...(surface === "skill" ? [] : ["surface: skill manifest policies must use surface 'skill'"]),
+      ];
+      throw new Error(`workspace-context-policy: invalid skill policy at index ${index}: ${details.join("; ")}`);
+    }
+    return policy as WorkspaceContextPolicy;
+  });
 }
 
 export function skillContextInventory(skillIds: readonly string[], policies: readonly WorkspaceContextPolicy[]): WorkspaceContextSurfaceInventoryItem[] {

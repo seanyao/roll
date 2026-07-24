@@ -350,6 +350,63 @@ export type WorkspaceContextPolicySurface = "cli" | "skill" | "tool";
 
 export type WorkspaceContextConsumer = "workspace" | "issue" | "repository";
 
+export const WORKSPACE_CONTEXT_POLICY_SURFACES = ["cli", "skill", "tool"] as const;
+export const WORKSPACE_CONTEXT_POLICY_SCOPES = [
+  "machine_only",
+  "workspace_optional_read",
+  "workspace_required_read",
+  "workspace_required_mutation",
+  "issue_required",
+  "repository_required",
+  "legacy_migration_only",
+] as const;
+export const WORKSPACE_CONTEXT_POLICY_CONSUMERS = ["workspace", "issue", "repository"] as const;
+
+const WORKSPACE_CONTEXT_POLICY_KEYS = new Set([
+  "surface",
+  "id",
+  "operation",
+  "scope",
+  "allowsAmbientCwd",
+  "allowsLegacyRollPath",
+  "acceptsWorkspaceSelector",
+  "contextConsumer",
+  "rationale",
+]);
+
+const WORKSPACE_CONTEXT_POLICY_REQUIRED_KEYS = [
+  "surface",
+  "id",
+  "operation",
+  "scope",
+  "allowsAmbientCwd",
+  "allowsLegacyRollPath",
+] as const;
+
+const WORKSPACE_CONTEXT_EXPECTED_CONSUMER: Readonly<Partial<Record<WorkspaceContextScope, WorkspaceContextConsumer>>> = {
+  workspace_optional_read: "workspace",
+  workspace_required_read: "workspace",
+  workspace_required_mutation: "workspace",
+  issue_required: "issue",
+  repository_required: "repository",
+};
+
+export type WorkspaceContextPolicyValidationCode =
+  | "invalid_type"
+  | "missing_key"
+  | "unknown_key"
+  | "invalid_surface"
+  | "invalid_scope"
+  | "invalid_consumer"
+  | "invalid_scope_consumer"
+  | "invalid_value";
+
+export interface WorkspaceContextPolicyValidationIssue {
+  readonly code: WorkspaceContextPolicyValidationCode;
+  readonly path: string;
+  readonly message: string;
+}
+
 /** Closed, operation-level declaration for every public Workspace-aware surface. */
 export interface WorkspaceContextPolicy {
   readonly surface: WorkspaceContextPolicySurface;
@@ -361,6 +418,78 @@ export interface WorkspaceContextPolicy {
   readonly acceptsWorkspaceSelector?: boolean;
   readonly contextConsumer?: WorkspaceContextConsumer;
   readonly rationale?: string;
+}
+
+/** Strict runtime validator for the closed WorkspaceContextPolicy schema. */
+export function validateWorkspaceContextPolicy(value: unknown): WorkspaceContextPolicyValidationIssue[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return [{ code: "invalid_type", path: "$", message: "policy must be an object" }];
+  }
+  const item = value as Record<string, unknown>;
+  const issues: WorkspaceContextPolicyValidationIssue[] = [];
+  for (const key of Object.keys(item).sort()) {
+    if (!WORKSPACE_CONTEXT_POLICY_KEYS.has(key)) {
+      issues.push({ code: "unknown_key", path: key, message: `unknown policy key '${key}'` });
+    }
+  }
+  for (const key of WORKSPACE_CONTEXT_POLICY_REQUIRED_KEYS) {
+    if (!Object.hasOwn(item, key)) {
+      issues.push({ code: "missing_key", path: key, message: `missing required policy key '${key}'` });
+    }
+  }
+  if (typeof item["surface"] !== "string") {
+    issues.push({ code: "invalid_type", path: "surface", message: "surface must be a string" });
+  } else if (!(WORKSPACE_CONTEXT_POLICY_SURFACES as readonly string[]).includes(item["surface"])) {
+    issues.push({ code: "invalid_surface", path: "surface", message: `unknown policy surface '${item["surface"]}'` });
+  }
+  for (const key of ["id", "operation"] as const) {
+    const field = item[key];
+    if (typeof field !== "string") {
+      issues.push({ code: "invalid_type", path: key, message: `${key} must be a string` });
+    } else if (field.trim() === "") {
+      issues.push({ code: "invalid_value", path: key, message: `${key} must not be empty` });
+    }
+  }
+  const scope = item["scope"];
+  const validScope = typeof scope === "string"
+    && (WORKSPACE_CONTEXT_POLICY_SCOPES as readonly string[]).includes(scope);
+  if (typeof scope !== "string") {
+    issues.push({ code: "invalid_type", path: "scope", message: "scope must be a string" });
+  } else if (!validScope) {
+    issues.push({ code: "invalid_scope", path: "scope", message: `unknown policy scope '${scope}'` });
+  }
+  for (const key of ["allowsAmbientCwd", "allowsLegacyRollPath"] as const) {
+    if (typeof item[key] !== "boolean") {
+      issues.push({ code: "invalid_type", path: key, message: `${key} must be a boolean` });
+    }
+  }
+  if (Object.hasOwn(item, "acceptsWorkspaceSelector") && typeof item["acceptsWorkspaceSelector"] !== "boolean") {
+    issues.push({ code: "invalid_type", path: "acceptsWorkspaceSelector", message: "acceptsWorkspaceSelector must be a boolean" });
+  }
+  const consumer = item["contextConsumer"];
+  const hasConsumer = Object.hasOwn(item, "contextConsumer");
+  const validConsumer = typeof consumer === "string"
+    && (WORKSPACE_CONTEXT_POLICY_CONSUMERS as readonly string[]).includes(consumer);
+  if (hasConsumer && typeof consumer !== "string") {
+    issues.push({ code: "invalid_type", path: "contextConsumer", message: "contextConsumer must be a string" });
+  } else if (hasConsumer && !validConsumer) {
+    issues.push({ code: "invalid_consumer", path: "contextConsumer", message: `unknown context consumer '${String(consumer)}'` });
+  }
+  if (Object.hasOwn(item, "rationale") && typeof item["rationale"] !== "string") {
+    issues.push({ code: "invalid_type", path: "rationale", message: "rationale must be a string" });
+  }
+  if (validScope && (!hasConsumer || validConsumer)) {
+    const expected = WORKSPACE_CONTEXT_EXPECTED_CONSUMER[scope as WorkspaceContextScope];
+    const actual = hasConsumer ? consumer as WorkspaceContextConsumer : undefined;
+    if (actual !== expected) {
+      issues.push({
+        code: "invalid_scope_consumer",
+        path: "contextConsumer",
+        message: `scope '${scope}' requires contextConsumer '${expected ?? "none"}'`,
+      });
+    }
+  }
+  return issues;
 }
 
 export type WorkspaceExecutionContextResolutionSource =

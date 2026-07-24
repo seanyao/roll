@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -431,6 +431,25 @@ describe("US-WS-035 Workspace-local tool context", () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
     expect(existsSync(join(repo, "created", "new.txt"))).toBe(false);
+  });
+
+  it("rejects write targets whose inode has a Workspace-external hard-link alias", async () => {
+    const root = tmp("filesystem-hard-link");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    const outside = tmp("filesystem-hard-link-outside");
+    mkdirSync(repo, { recursive: true });
+    const outsideFile = join(outside, "shared.txt");
+    writeFileSync(outsideFile, "outside");
+    linkSync(outsideFile, join(repo, "target.txt"));
+    const executionContext = context(root, [repository("product", repo)]);
+
+    const result = await new FsTool("filesystem.write", { root: repo, access: "write" }).execute(
+      fsInvocation<FsWriteInput>("filesystem.write", { path: "target.txt", content: "blocked" }, executionContext, "product"),
+      fsDeps(),
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(readFileSync(outsideFile, "utf8")).toBe("outside");
   });
 
   it("requires git cwd to equal the explicitly selected Issue worktree and preserves dirty status", async () => {

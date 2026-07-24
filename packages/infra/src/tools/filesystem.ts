@@ -201,7 +201,8 @@ async function writeAnchoredFile(
     const contained = resolveContainedPath(repositoryRoot, path, true) === path;
     if (
       !contained || !descriptorStat.isFile() || pathStat.isSymbolicLink() || !pathStat.isFile() ||
-      descriptorStat.dev !== pathStat.dev || descriptorStat.ino !== pathStat.ino
+      descriptorStat.dev !== pathStat.dev || descriptorStat.ino !== pathStat.ino ||
+      descriptorStat.nlink !== 1 || pathStat.nlink !== 1
     ) {
       return undefined;
     }

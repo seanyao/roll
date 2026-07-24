@@ -72,6 +72,8 @@ export interface ApplyWorkspaceEditPlanInput {
 export interface WorkspaceEditTransactionDeps {
   readonly afterPhase?: (phase: WorkspaceEditTransactionPhase) => void;
   readonly crashPoint?: (phase: WorkspaceEditTransactionPhase) => void;
+  readonly fsyncFile?: (descriptor: number, path: string) => void;
+  readonly renameFile?: (from: string, to: string) => void;
 }
 
 export interface WorkspaceEditTransactionResult {
@@ -116,7 +118,7 @@ function syncDirectory(path: string): void {
   }
 }
 
-function durableAtomicWrite(path: string, content: string): void {
+function durableAtomicWrite(path: string, content: string, deps: WorkspaceEditTransactionDeps): void {
   const parent = dirname(path);
   mkdirSync(parent, { recursive: true });
   const temporary = join(parent, `.${randomUUID()}.tmp`);
@@ -124,10 +126,10 @@ function durableAtomicWrite(path: string, content: string): void {
   try {
     descriptor = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     writeFileSync(descriptor, content, "utf8");
-    fsyncSync(descriptor);
+    (deps.fsyncFile ?? ((fd: number) => fsyncSync(fd)))(descriptor, temporary);
     closeSync(descriptor);
     descriptor = undefined;
-    renameSync(temporary, path);
+    (deps.renameFile ?? renameSync)(temporary, path);
     syncDirectory(parent);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
@@ -283,13 +285,15 @@ async function applyUnderLock(
     referenceIndexSha256: rebuilt.referenceIndexSha256,
     afterManifest: preview.afterManifest,
   };
-  durableAtomicWrite(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  durableAtomicWrite(journalPath, `${JSON.stringify(journal, null, 2)}\n`, deps);
   emitPhase(deps, "journal_prepared");
 
   const content = serializeWorkspaceManifest(journal.afterManifest);
   const parent = dirname(journal.manifestPath);
   const temporary = join(parent, `.workspace.yaml.${journal.transactionId}.tmp`);
   let descriptor: number | undefined;
+  let temporaryDurable = false;
+  let manifestPublished = false;
   try {
     if (existsSync(temporary)) {
       let temporaryDigest: string;
@@ -305,24 +309,36 @@ async function applyUnderLock(
     }
     descriptor = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
     writeFileSync(descriptor, content, "utf8");
-    fsyncSync(descriptor);
+    (deps.fsyncFile ?? ((fd: number) => fsyncSync(fd)))(descriptor, temporary);
+    temporaryDurable = true;
     closeSync(descriptor);
     descriptor = undefined;
     emitPhase(deps, "manifest_temp_fsynced");
-    renameSync(temporary, journal.manifestPath);
+    (deps.renameFile ?? renameSync)(temporary, journal.manifestPath);
+    manifestPublished = true;
     syncDirectory(parent);
     emitPhase(deps, "manifest_renamed");
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
-    rmSync(temporary, { force: true });
+    if (!temporaryDurable || manifestPublished) rmSync(temporary, { force: true });
   }
 
-  const verified = input.reloadCurrent().manifest;
+  let verified: WorkspaceManifest;
+  try {
+    verified = input.reloadCurrent().manifest;
+  } catch (error) {
+    throw new WorkspaceEditTransactionError(
+      "partial_apply_recovered",
+      "Workspace manifest could not be parsed and verified after atomic replacement",
+      `roll workspace doctor ${preview.workspaceId}`,
+      { cause: error },
+    );
+  }
   if (sha256(serializeWorkspaceManifest(verified)) !== journal.afterSha256) {
     throw partial(preview.workspaceId, "Workspace manifest did not verify after atomic replacement");
   }
   emitPhase(deps, "manifest_verified");
-  durableAtomicWrite(journalPath, `${JSON.stringify({ ...journal, status: "committed" }, null, 2)}\n`);
+  durableAtomicWrite(journalPath, `${JSON.stringify({ ...journal, status: "committed" }, null, 2)}\n`, deps);
   emitPhase(deps, "journal_committed");
   removeDurably(journalPath);
   emitPhase(deps, "journal_removed");

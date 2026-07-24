@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, fsyncSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -143,6 +143,10 @@ function transactionInput(f: ReturnType<typeof fixture>, preview: WorkspaceEditP
   };
 }
 
+function readJournal(f: ReturnType<typeof fixture>): Record<string, unknown> {
+  return JSON.parse(readFileSync(workspaceEditJournalPath(f.rollHome, "ws-demo"), "utf8")) as Record<string, unknown>;
+}
+
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -221,6 +225,96 @@ describe("US-WS-026 Workspace edit transaction", () => {
 
     await expect(applyWorkspaceEditPlan(input)).resolves.toMatchObject({ outcome: "reused" });
     expect(existsSync(workspaceEditJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+  });
+
+  it.each([
+    ["journal_prepared", "before", "prepared", "applied"],
+    ["manifest_temp_fsynced", "before", "prepared", "applied"],
+    ["manifest_renamed", "after", "prepared", "reused"],
+    ["manifest_verified", "after", "prepared", "reused"],
+    ["journal_committed", "after", "committed", "reused"],
+    ["journal_removed", "after", "absent", "reused"],
+  ] as const)("converges after a crash at public phase %s", async (crashPhase, manifestState, journalState, retryOutcome) => {
+    const f = fixture();
+    const preview = plan(f);
+    const input = transactionInput(f, preview);
+    const manifestBefore = readFileSync(f.manifestPath);
+    const issueBefore = readFileSync(f.issuePath);
+    const requirementBefore = readFileSync(f.requirementPath);
+    const journalPath = workspaceEditJournalPath(f.rollHome, "ws-demo");
+
+    await expect(applyWorkspaceEditPlan(input, {
+      crashPoint: (phase) => { if (phase === crashPhase) throw new Error(`crash:${phase}`); },
+    })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "io_failure" }));
+
+    expect(readFileSync(f.manifestPath)).toEqual(
+      manifestState === "before" ? manifestBefore : Buffer.from(serializeWorkspaceManifest(preview.afterManifest), "utf8"),
+    );
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
+    expect(existsSync(journalPath)).toBe(journalState !== "absent");
+    if (journalState !== "absent") {
+      const journal = readJournal(f);
+      expect(journal["status"]).toBe(journalState);
+      const temporary = join(f.workspaceRoot, `.workspace.yaml.${String(journal["transactionId"])}.tmp`);
+      expect(existsSync(temporary)).toBe(crashPhase === "manifest_temp_fsynced");
+      if (crashPhase === "manifest_temp_fsynced") {
+        expect(readFileSync(temporary)).toEqual(Buffer.from(serializeWorkspaceManifest(preview.afterManifest), "utf8"));
+      }
+    }
+
+    await expect(applyWorkspaceEditPlan(input)).resolves.toMatchObject({ outcome: retryOutcome });
+    expect(readFileSync(f.manifestPath)).toEqual(Buffer.from(serializeWorkspaceManifest(preview.afterManifest), "utf8"));
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
+    expect(existsSync(journalPath)).toBe(false);
+  });
+
+  it("fsyncs the manifest temp before the filesystem rename seam publishes it", async () => {
+    const f = fixture();
+    const preview = plan(f);
+    const events: string[] = [];
+
+    await applyWorkspaceEditPlan(transactionInput(f, preview), {
+      fsyncFile: (descriptor, path) => {
+        fsyncSync(descriptor);
+        events.push(`fsync:${path}`);
+      },
+      renameFile: (from, to) => {
+        events.push(`rename:${from}->${to}`);
+        renameSync(from, to);
+      },
+    });
+
+    const manifestRename = events.findIndex((event) => event.endsWith(`->${f.manifestPath}`));
+    expect(manifestRename).toBeGreaterThan(0);
+    const manifestTemporary = events[manifestRename]?.slice("rename:".length).split("->")[0];
+    expect(manifestTemporary).toMatch(/\.workspace\.yaml\.[0-9a-f-]+\.tmp$/u);
+    expect(events.indexOf(`fsync:${manifestTemporary}`)).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf(`fsync:${manifestTemporary}`)).toBeLessThan(manifestRename);
+  });
+
+  it("fails closed when the renamed manifest is corrupted before transaction verification", async () => {
+    const f = fixture();
+    const preview = plan(f);
+    const issueBefore = readFileSync(f.issuePath);
+    const requirementBefore = readFileSync(f.requirementPath);
+    const journalPath = workspaceEditJournalPath(f.rollHome, "ws-demo");
+
+    await expect(applyWorkspaceEditPlan(transactionInput(f, preview), {
+      afterPhase: (phase) => {
+        if (phase === "manifest_renamed") writeFileSync(f.manifestPath, "{corrupt manifest\n", "utf8");
+      },
+    })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({
+      code: "partial_apply_recovered",
+      action: "roll workspace doctor ws-demo",
+    }));
+
+    expect(readFileSync(f.manifestPath, "utf8")).toBe("{corrupt manifest\n");
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
+    expect(readJournal(f)["status"]).toBe("prepared");
+    expect(existsSync(journalPath)).toBe(true);
   });
 
   it("resumes from a durable prepared journal while the manifest still proves the before state", async () => {
@@ -329,6 +423,8 @@ describe("US-WS-026 Workspace edit transaction", () => {
     const f = fixture();
     const preview = plan(f);
     const input = transactionInput(f, preview);
+    const issueBefore = readFileSync(f.issuePath);
+    const requirementBefore = readFileSync(f.requirementPath);
     await expect(applyWorkspaceEditPlan(input, {
       crashPoint: (phase) => { if (phase === "journal_prepared") throw new Error("crash"); },
     })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "io_failure" }));
@@ -341,12 +437,16 @@ describe("US-WS-026 Workspace edit transaction", () => {
       }),
     );
     expect(existsSync(workspaceEditJournalPath(f.rollHome, "ws-demo"))).toBe(true);
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
   });
 
   it("fails loud when a committed journal conflicts with an externally restored before manifest", async () => {
     const f = fixture();
     const preview = plan(f);
     const input = transactionInput(f, preview);
+    const issueBefore = readFileSync(f.issuePath);
+    const requirementBefore = readFileSync(f.requirementPath);
     await expect(applyWorkspaceEditPlan(input, {
       crashPoint: (phase) => { if (phase === "journal_committed") throw new Error("crash"); },
     })).rejects.toEqual(expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "io_failure" }));
@@ -355,5 +455,7 @@ describe("US-WS-026 Workspace edit transaction", () => {
     await expect(applyWorkspaceEditPlan(input)).rejects.toEqual(
       expect.objectContaining<Partial<WorkspaceEditTransactionError>>({ code: "partial_apply_recovered" }),
     );
+    expect(readFileSync(f.issuePath)).toEqual(issueBefore);
+    expect(readFileSync(f.requirementPath)).toEqual(requirementBefore);
   });
 });

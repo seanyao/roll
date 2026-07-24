@@ -250,6 +250,14 @@ describe("Context Agent handoff", () => {
       },
       handoff: { snapshot: { snapshotId: adoptedSnapshot.snapshotId } },
     });
+    expect(adoptedHost.observe).toHaveBeenCalledWith(expect.objectContaining({
+      type: "context:revision_decision",
+      decision: expect.objectContaining({
+        decision: "adopt_new_snapshot",
+        handoffSnapshot: blocked.previousHandoff?.snapshot,
+        freshSnapshot: expect.objectContaining({ snapshotId: adoptedSnapshot.snapshotId }),
+      }),
+    }));
 
     const continuedSnapshot = snapshot(workspaceValue, "4", "d".repeat(40), [file(ref, "index-v4")], "build");
     const continuedHost = adapter(workspaceValue, [continuedSnapshot]);
@@ -283,6 +291,14 @@ describe("Context Agent handoff", () => {
       previousHandoff: blocked.previousHandoff,
       decision: { decision: "needs_reconciliation", useSnapshot: "none" },
     });
+    expect(reconciliationHost.observe).toHaveBeenCalledWith(expect.objectContaining({
+      type: "context:revision_decision",
+      decision: expect.objectContaining({
+        decision: "needs_reconciliation",
+        handoffSnapshot: blocked.previousHandoff?.snapshot,
+        freshSnapshot: expect.objectContaining({ snapshotId: reconciliationSnapshot.snapshotId }),
+      }),
+    }));
   });
 
   it("encodes hostile page text as one length-delimited JSON data value and never promotes Wiki commands", async () => {

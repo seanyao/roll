@@ -45,17 +45,24 @@ export interface ContextStageReadInputV1 {
   readonly allowRestrictedReferences?: boolean;
 }
 
-export interface ContextHostObservationV1 {
-  readonly type: "context:stage_handoff";
-  readonly workspaceId: string;
-  readonly storyId?: string;
-  readonly stage: ContextStage;
-  readonly source: "fresh" | "handoff_snapshot";
-  readonly snapshotId: string;
-  readonly snapshotDigest: string;
-  readonly providerRevisions: readonly { readonly providerId: string; readonly revision: string }[];
-  readonly revisionDecision?: ContextRevisionDecisionV1;
-}
+export type ContextHostObservationV1 =
+  | {
+      readonly type: "context:stage_handoff";
+      readonly workspaceId: string;
+      readonly storyId?: string;
+      readonly stage: ContextStage;
+      readonly source: "fresh" | "handoff_snapshot";
+      readonly snapshotId: string;
+      readonly snapshotDigest: string;
+      readonly providerRevisions: readonly { readonly providerId: string; readonly revision: string }[];
+    }
+  | {
+      readonly type: "context:revision_decision";
+      readonly workspaceId: string;
+      readonly storyId?: string;
+      readonly stage: ContextStage;
+      readonly decision: ContextStageDecisionRecordV1;
+    };
 
 export interface CreateContextHostAdapterOptions {
   readonly freshRead: (request: ContextReadRequestV1) => Promise<ContextReadResultV1>;
@@ -197,7 +204,6 @@ function observeReady(
   input: ContextStageReadInputV1,
   source: "fresh" | "handoff_snapshot",
   snapshot: ContextReadResultV1,
-  decision?: ContextRevisionDecisionV1,
 ): void {
   options.observe?.({
     type: "context:stage_handoff",
@@ -211,7 +217,20 @@ function observeReady(
       providerId: provider.providerId,
       revision: provider.revision,
     })),
-    ...(decision === undefined ? {} : { revisionDecision: decision }),
+  });
+}
+
+function observeDecision(
+  options: CreateContextHostAdapterOptions,
+  input: ContextStageReadInputV1,
+  decision: ContextStageDecisionRecordV1,
+): void {
+  options.observe?.({
+    type: "context:revision_decision",
+    workspaceId: input.workspace.workspace.workspaceId,
+    ...(input.storyId === undefined ? {} : { storyId: input.storyId }),
+    stage: input.stage,
+    decision,
   });
 }
 
@@ -228,7 +247,7 @@ function ready(
     return { status: "blocked", diagnostic: built.diagnostic ?? invalidContextHandoff() };
   }
   const handoff = createContextStageHandoff(snapshot);
-  observeReady(options, input, source, snapshot, decision?.decision);
+  observeReady(options, input, source, snapshot);
   return {
     status: "ready",
     source,
@@ -297,6 +316,7 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
         ...decision.record,
         useSnapshot: decision.useSnapshot,
       };
+      observeDecision(options, input, record);
       if (decision.useSnapshot === "none") {
         return {
           status: "needs_reconciliation",

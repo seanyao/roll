@@ -50,6 +50,62 @@ function run(p: string, args: string[]): { code: number; out: string; err: strin
   }
 }
 
+describe("roll story validate — US-CYCLE-005 granularity gate", () => {
+  // A new-regime card declares est_min; the granularity lint self-scopes to those.
+  const goodEval =
+    "\n\n## Evaluation contract\n\n**Expected evidence:**\n- `test` — unit\n\n**Scorer focus:** works\n";
+
+  it("NEGATIVE: an oversized new-regime card is rejected (exit 1) with itemized violations + fix", () => {
+    const p = project(
+      "US-BIG-1",
+      "cli-visual",
+      "---\nid: US-BIG-1\ndeliverable_cmd: roll backlog\nest_min: 40\nrisk_tier: low\n---\n# US-BIG-1\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" +
+        goodEval,
+    );
+    const r = run(p, ["US-BIG-1"]);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("granularity:");
+    expect(r.out).toContain("FAIL");
+    expect(r.out).toContain("est_min = 40");
+    expect(r.out).toContain("↳"); // actionable fix (怎么拆)
+  });
+
+  it("NEGATIVE: a new-regime card missing risk_tier is rejected", () => {
+    const p = project(
+      "US-BIG-2",
+      "cli-visual",
+      "---\nid: US-BIG-2\ndeliverable_cmd: roll backlog\nest_min: 10\n---\n# US-BIG-2\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" + goodEval,
+    );
+    const r = run(p, ["US-BIG-2"]);
+    expect(r.code).toBe(1);
+    expect(r.out + r.err).toContain("risk_tier");
+  });
+
+  it("a small, well-formed new-regime card passes the granularity gate (exit 0)", () => {
+    const p = project(
+      "US-SM-1",
+      "cli-visual",
+      "---\nid: US-SM-1\ndeliverable_cmd: roll backlog\nest_min: 15\nrisk_tier: high\n---\n# US-SM-1\n\n## AC\n- [ ] terminal screenshot of `roll backlog`" + goodEval,
+    );
+    const r = run(p, ["US-SM-1"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("granularity:");
+    expect(r.out).toContain("ok");
+  });
+
+  it("存量卡不追溯: a LEGACY card (no est_min) is NOT granularity-gated", () => {
+    const p = project(
+      "FIX-LEGACY",
+      "cli-visual",
+      // Oversized-looking (no eval contract, no risk_tier) but legacy → gate inert.
+      "---\nid: FIX-LEGACY\ndeliverable_cmd: roll backlog\n---\n# FIX-LEGACY\n\n## Acceptance Criteria\n- [ ] terminal screenshot of `roll backlog`\n",
+    );
+    const r = run(p, ["FIX-LEGACY"]);
+    expect(r.code).toBe(0); // passes as before — no granularity line
+    expect(r.out).not.toContain("granularity:");
+  });
+});
+
 describe("roll story validate — FIX-339 AC7", () => {
   it("a card with a declared deliverable_url + a web visual-evidence AC ⇒ ok (exit 0)", () => {
     const p = project(

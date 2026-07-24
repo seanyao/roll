@@ -156,7 +156,8 @@ function parseCreatedNodes(value: unknown): readonly CreatedNode[] | null {
       typeof candidate["path"] !== "string" || !isAbsolute(candidate["path"]) || resolve(candidate["path"]) !== candidate["path"] ||
       (candidate["kind"] !== "file" && candidate["kind"] !== "directory") ||
       (candidate["digest"] !== undefined && (typeof candidate["digest"] !== "string" || !/^[0-9a-f]{64}$/u.test(candidate["digest"]))) ||
-      (candidate["kind"] === "file" && candidate["digest"] === undefined) || paths.has(candidate["path"])) {
+      (candidate["kind"] === "file" && candidate["digest"] === undefined) ||
+      (candidate["kind"] === "directory" && candidate["digest"] !== undefined) || paths.has(candidate["path"])) {
       return null;
     }
     paths.add(candidate["path"]);
@@ -169,8 +170,27 @@ function parseCreatedNodes(value: unknown): readonly CreatedNode[] | null {
   return nodes;
 }
 
-function parseStringArray(value: unknown): readonly string[] | null {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+function parseStringArray(value: unknown, allowed: (entry: string) => boolean): readonly string[] | null {
+  if (!Array.isArray(value)) return null;
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry === "" || seen.has(entry) || !allowed(entry)) return null;
+    seen.add(entry);
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function parsePreservedPaths(value: unknown, created: readonly CreatedNode[]): readonly string[] | null {
+  const createdPaths = new Set(created.map((node) => node.path));
+  return parseStringArray(value, (entry) =>
+    isAbsolute(entry) && resolve(entry) === entry && createdPaths.has(entry));
+}
+
+function parsePreservedCaches(value: unknown, config: WorkspaceCreateConfig): readonly string[] | null {
+  const repositoryIds = new Set(config.manifest.repositories.map((repository) => repository.repoId));
+  return parseStringArray(value, (entry) => repositoryIds.has(entry));
 }
 
 function readCreateJournal(config: WorkspaceCreateConfig): ParsedJournal<CreateJournal> {
@@ -178,9 +198,31 @@ function readCreateJournal(config: WorkspaceCreateConfig): ParsedJournal<CreateJ
   if (!existsSync(path)) return { state: "absent" };
   try {
     const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (!isRecord(value) || value["schema"] !== JOURNAL_V1 || value["workspaceId"] !== config.workspaceId ||
-      value["root"] !== config.root || value["configDigest"] !== configDigest(config)) return { state: "conflict", path };
-    return { state: "valid", value: value as unknown as CreateJournal, path };
+    if (!isRecord(value) || !exactKeys(value, ["schema", "transactionId", "workspaceId", "root", "configDigest", "status", "created", "preserved", "preservedCaches"]) ||
+      value["schema"] !== JOURNAL_V1 || typeof value["transactionId"] !== "string" || value["transactionId"] === "" ||
+      value["workspaceId"] !== config.workspaceId || value["root"] !== config.root || value["configDigest"] !== configDigest(config) ||
+      (value["status"] !== "applying" && value["status"] !== "repair_required")) return { state: "conflict", path };
+    const created = parseCreatedNodes(value["created"]);
+    const preserved = created === null ? null : parsePreservedPaths(value["preserved"], created);
+    const preservedCaches = parsePreservedCaches(value["preservedCaches"], config);
+    if (created === null || !createdNodesAllowed(config, created) || preserved === null || preservedCaches === null) {
+      return { state: "conflict", path };
+    }
+    return {
+      state: "valid",
+      path,
+      value: {
+        schema: JOURNAL_V1,
+        transactionId: value["transactionId"],
+        workspaceId: config.workspaceId,
+        root: config.root,
+        configDigest: value["configDigest"],
+        status: value["status"],
+        created,
+        preserved,
+        preservedCaches,
+      },
+    };
   } catch {
     return { state: "conflict", path };
   }
@@ -196,8 +238,8 @@ function readLegacyJournal(config: WorkspaceCreateConfig): ParsedJournal<LegacyC
       value["workspaceId"] !== config.workspaceId || value["root"] !== config.root || value["configDigest"] !== configDigest(config) ||
       (value["status"] !== "applying" && value["status"] !== "repair_required")) return { state: "conflict", path };
     const created = parseCreatedNodes(value["created"]);
-    const preserved = parseStringArray(value["preserved"]);
-    const preservedCaches = parseStringArray(value["preservedCaches"]);
+    const preserved = created === null ? null : parsePreservedPaths(value["preserved"], created);
+    const preservedCaches = parsePreservedCaches(value["preservedCaches"], config);
     if (created === null || preserved === null || preservedCaches === null) return { state: "conflict", path };
     return {
       state: "valid",
@@ -277,15 +319,20 @@ function createdDirectoryAllowed(config: WorkspaceCreateConfig, path: string): b
   return contains(config.rollHome, path) && contains(path, config.root);
 }
 
+function createdNodesAllowed(config: WorkspaceCreateConfig, nodes: readonly CreatedNode[]): boolean {
+  const files = expectedFiles(config);
+  return nodes.every((node) => node.kind === "file"
+    ? files[node.path] !== undefined
+    : createdDirectoryAllowed(config, node.path));
+}
+
 function legacyCreatedNodesMatch(
   config: WorkspaceCreateConfig,
   journal: LegacyCreateJournal,
   requirePresent: boolean,
 ): boolean {
-  const files = expectedFiles(config);
+  if (!createdNodesAllowed(config, journal.created)) return false;
   for (const node of journal.created) {
-    if (node.kind === "file" && files[node.path] === undefined) return false;
-    if (node.kind === "directory" && !createdDirectoryAllowed(config, node.path)) return false;
     if (!existsSync(node.path)) {
       if (requirePresent) return false;
       continue;
@@ -352,6 +399,13 @@ function classifyJournal(
     };
   }
   if (legacyJournal.state === "absent") return { state: "absent" };
+  if (legacyJournal.value.preserved.length > 0) {
+    return {
+      state: "conflict",
+      target: legacyJournal.path,
+      recovery: { kind: "legacy_recovery_required", journalPath: legacyJournal.path, nextAction: recoveryNextAction },
+    };
+  }
 
   const layoutCompatible = Object.values(pathProbe).every((state) => state === "compatible");
   const cachesCompatible = Object.values(caches).every((state) => state === "compatible");

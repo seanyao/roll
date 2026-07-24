@@ -79,6 +79,7 @@ function legacyConfigDigest(f: ReturnType<typeof fixture>): string {
 function writeLegacyJournal(
   f: ReturnType<typeof fixture>,
   created: readonly { readonly path: string; readonly kind: "file" | "directory"; readonly digest?: string }[],
+  overrides: Readonly<Record<string, unknown>> = {},
 ): string {
   const path = workspaceLegacyCreateJournalPath(f.rollHome, "ws-demo");
   mkdirSync(dirname(path), { recursive: true });
@@ -92,6 +93,28 @@ function writeLegacyJournal(
     created,
     preserved: [],
     preservedCaches: [],
+    ...overrides,
+  }, null, 2)}\n`, "utf8");
+  return path;
+}
+
+function writeCreateJournal(
+  f: ReturnType<typeof fixture>,
+  overrides: Readonly<Record<string, unknown>> = {},
+): string {
+  const path = workspaceCreateJournalPath(f.rollHome, "ws-demo");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({
+    schema: "roll.workspace-create-journal/v1",
+    transactionId: "create-transaction",
+    workspaceId: "ws-demo",
+    root: f.root,
+    configDigest: legacyConfigDigest(f),
+    status: "repair_required",
+    created: [],
+    preserved: [],
+    preservedCaches: [],
+    ...overrides,
   }, null, 2)}\n`, "utf8");
   return path;
 }
@@ -429,6 +452,67 @@ describe("Workspace filesystem transaction", () => {
       ensureCache: async () => ({ action: "created" as const }),
     })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
     expect(tree(conflict.rollHome)).toEqual(beforeConflict);
+  });
+
+  it("fails closed for malformed new create journals without overwriting them", async () => {
+    const cases: readonly [string, (f: ReturnType<typeof fixture>) => Readonly<Record<string, unknown>>][] = [
+      ["unknown key", () => ({ unexpected: true })],
+      ["unknown status", () => ({ status: "completed" })],
+      ["empty transaction", () => ({ transactionId: "" })],
+      ["relative created path", () => ({ created: [{ path: "workspace.yaml", kind: "file", digest: sha256("x") }] })],
+      ["unexpected absolute created path", (f) => ({ created: [{ path: join(f.rollHome, "operator-owned"), kind: "directory" }] })],
+      ["directory digest", (f) => ({ created: [{ path: f.root, kind: "directory", digest: sha256("x") }] })],
+      ["relative preserved path", () => ({ preserved: ["workspace.yaml"] })],
+      ["unknown preserved cache", () => ({ preservedCaches: ["unknown-repo"] })],
+      ["duplicate created path", (f) => ({ created: [
+        { path: f.root, kind: "directory" },
+        { path: f.root, kind: "directory" },
+      ] })],
+    ];
+
+    for (const [name, overrides] of cases) {
+      const f = fixture();
+      const journalPath = writeCreateJournal(f, overrides(f));
+      const before = tree(f.rollHome);
+      const beforeJournal = readFileSync(journalPath, "utf8");
+
+      const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+      expect(preview, name).toMatchObject({ outcome: "rejected" });
+      await expect(applyWorkspaceCreation(f.config, {
+        inspectCache: async () => "absent",
+        ensureCache: async () => ({ action: "created" as const }),
+      }), name).rejects.toMatchObject({ code: "rejected" });
+      expect(tree(f.rollHome), name).toEqual(before);
+      expect(readFileSync(journalPath, "utf8"), name).toBe(beforeJournal);
+    }
+  });
+
+  it("requires doctor when a legacy journal records preserved authority residue", async () => {
+    const f = fixture();
+    mkdirSync(f.root, { recursive: true });
+    const manifestPath = join(f.root, "workspace.yaml");
+    const manifest = `${JSON.stringify(f.config.manifest, null, 2)}\n`;
+    writeFileSync(manifestPath, manifest, "utf8");
+    const legacyPath = writeLegacyJournal(f, [
+      { path: f.root, kind: "directory" },
+      { path: manifestPath, kind: "file", digest: sha256(manifest) },
+    ], { preserved: [manifestPath] });
+    const before = tree(f.rollHome);
+
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+    expect(preview).toMatchObject({
+      outcome: "rejected",
+      recovery: {
+        kind: "legacy_recovery_required",
+        journalPath: legacyPath,
+        nextAction: "roll workspace doctor ws-demo --json",
+      },
+    });
+    await expect(applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
+    expect(tree(f.rollHome)).toEqual(before);
   });
 
   it("invalidates an exact authorization when the lock-in plan digest changes", async () => {

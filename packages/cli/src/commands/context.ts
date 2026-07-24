@@ -690,7 +690,8 @@ async function runRead(args: ParsedReadArgs, deps: ContextCommandDeps): Promise<
     try {
       deps.recordAudit(event, scopedWorkspace);
     } catch {
-      return emitError("snapshot_failure", args.json);
+      // Audit persistence is observational and must not replace the primary
+      // Context read/snapshot result.
     }
   }
   renderRead(result, args.json);

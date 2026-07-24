@@ -408,14 +408,18 @@ export async function withFreshGitLlmWikiRead<T>(
     }
     throw operation.error;
   }
-  await input.audit?.({
-    type: "context:git-llm-wiki-read",
-    providerId: identity.providerId,
-    remoteIdentity: identity.remoteIdentity,
-    branch: identity.branch,
-    ...timing,
-    outcome: "completed",
-    revision: operation.revision.revision,
-  });
+  try {
+    await input.audit?.({
+      type: "context:git-llm-wiki-read",
+      providerId: identity.providerId,
+      remoteIdentity: identity.remoteIdentity,
+      branch: identity.branch,
+      ...timing,
+      outcome: "completed",
+      revision: operation.revision.revision,
+    });
+  } catch {
+    // Audit sinks are observational and must not mask a completed read.
+  }
   return { revision: operation.revision, value: operation.value };
 }

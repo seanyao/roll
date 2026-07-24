@@ -20,6 +20,7 @@ import {
   type RunnerPaths,
 } from "../src/runner/index.js";
 import type { AgentSpawn } from "../src/runner/agent-spawn.js";
+import { createNodeContextStageHost } from "../src/runner/context-stage-host.js";
 
 const STORY_ID = "US-CONTEXT-008";
 
@@ -166,6 +167,21 @@ function fixture(): { root: string; workspace: WorkspaceExecutionContextV1; path
 }
 
 describe("Context production runner boundary", () => {
+  it("leaves legacy YAML Workspaces without Context disabled instead of failing runner construction", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-context-disabled-yaml-")));
+    writeFileSync(join(root, "workspace.yaml"), [
+      "schema: roll.workspace/v1",
+      "workspaceId: roll-context-disabled-yaml",
+      "displayName: Legacy YAML fixture",
+      "requirements: []",
+      "repositories: []",
+      "",
+    ].join("\n"));
+
+    expect(() => createNodeContextStageHost(root)).not.toThrow();
+    expect(createNodeContextStageHost(root)).toBeUndefined();
+  });
+
   it("restores only the exact typed handoff through nodePorts and injects its encoded envelope into the Builder prompt", async () => {
     const f = fixture();
     const ports = nodePorts({

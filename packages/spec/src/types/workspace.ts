@@ -8,6 +8,7 @@ export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
 export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
 export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" as const;
 export const REQUIREMENT_HINT_V1 = "roll.requirement-hint/v1" as const;
+export const WORKSPACE_INTENT_V1 = "roll.workspace-intent/v1" as const;
 export const WORKSPACE_MIGRATION_FACTS_V1 = "roll.workspace-migration-facts/v1" as const;
 export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as const;
 export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
@@ -324,6 +325,87 @@ export interface WorkspaceMatchEvidence {
   readonly provenance: RequirementHintProvenance;
   readonly detail: string;
 }
+
+export type WorkspaceContextScope =
+  | "machine_only"
+  | "workspace_optional_read"
+  | "workspace_required_read"
+  | "workspace_required_mutation"
+  | "issue_required"
+  | "legacy_migration_only";
+
+export interface WorkspaceIntentV1 {
+  readonly schema: typeof WORKSPACE_INTENT_V1;
+  readonly operation: "read" | "mutation";
+  readonly interaction: "interactive" | "non_interactive";
+  readonly scope: WorkspaceContextScope;
+  readonly cwd: string;
+  readonly explicitSelector?: {
+    readonly workspaceId?: string;
+    readonly path?: string;
+  };
+  readonly requirement: RequirementHintV1;
+}
+
+export interface WorkspaceMatchCandidateV1 {
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly lifecycle: WorkspaceLifecycle;
+  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly hardMatch: boolean;
+  readonly score: number;
+}
+
+export type WorkspaceDiscoveryDiagnosticCode =
+  | "stale_registry"
+  | "identity_mismatch"
+  | "invalid_workspace_manifest"
+  | "invalid_issue_manifest"
+  | "symlink_escape"
+  | "discovery_io_failure";
+
+export interface WorkspaceDiscoveryDiagnosticV1 {
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly code: WorkspaceDiscoveryDiagnosticCode;
+  readonly authorityPath: string;
+  readonly message: string;
+}
+
+export type WorkspaceDiscoveryDecisionV1 = (
+  | {
+      readonly ok: true;
+      readonly kind: "selected";
+      readonly target: WorkspaceMatchCandidateV1;
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "choice_required";
+      readonly code: "requirement_match_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "create_required";
+      readonly code: "create_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "activation_required";
+      readonly code: "workspace_activation_required";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+  | {
+      readonly ok: false;
+      readonly kind: "conflict";
+      readonly code:
+        | "ambiguous_requirement_match"
+        | "invalid_requirement_hint"
+        | "workspace_discovery_incomplete";
+      readonly candidates: readonly WorkspaceMatchCandidateV1[];
+    }
+) & { readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[] };
 
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;

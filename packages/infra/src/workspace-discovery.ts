@@ -12,7 +12,7 @@ import {
   writeFileSync,
   type Stats,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import {
   foldWorkspaceLifecycles,
   type WorkspaceDiscoveryFactsV1,
@@ -218,16 +218,40 @@ function rebuildDerivedIndex(
   authoritySha256: string,
   issueCount: number,
 ): void {
-  const path = workspaceDiscoveryIndexPath(rollHome, workspaceId);
   const value = {
     schema: WORKSPACE_DISCOVERY_INDEX_V1,
     workspaceId,
     authoritySha256,
     issueCount,
   };
+  let path: string;
+  try {
+    mkdirSync(rollHome, { recursive: true });
+    const canonicalHome = realpathSync(rollHome);
+    if (lstatSync(canonicalHome).isSymbolicLink()) return;
+    const cacheRoot = join(canonicalHome, "cache");
+    if (existsSync(cacheRoot)) {
+      const cacheStat = lstatSync(cacheRoot);
+      if (cacheStat.isSymbolicLink() || !cacheStat.isDirectory() || realpathSync(cacheRoot) !== cacheRoot) return;
+    } else {
+      mkdirSync(cacheRoot);
+    }
+    const discoveryRoot = join(cacheRoot, "workspace-discovery");
+    if (existsSync(discoveryRoot)) {
+      const discoveryStat = lstatSync(discoveryRoot);
+      if (
+        discoveryStat.isSymbolicLink() || !discoveryStat.isDirectory() ||
+        realpathSync(discoveryRoot) !== discoveryRoot
+      ) return;
+    } else {
+      mkdirSync(discoveryRoot);
+    }
+    path = join(discoveryRoot, `${workspaceId}.json`);
+  } catch {
+    return;
+  }
   const temp = `${path}.tmp.${process.pid}`;
   try {
-    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
     renameSync(temp, path);
   } catch {

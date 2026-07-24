@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -211,6 +212,22 @@ describe("US-WS-028 registry-bound Workspace discovery loader", () => {
     });
     expect(rebuilt["authoritySha256"]).not.toBe(firstIndex.authoritySha256);
     expect(rebuilt).not.toHaveProperty("forgedSelection");
+  });
+
+  it("treats the derived index as disposable and never follows a cache-directory symlink", () => {
+    const base = sandbox();
+    const rollHome = join(base, "home");
+    const fields = createWorkspace(join(base, "fields"), "fields", ["APE-234"]);
+    register(rollHome, fields, "fields");
+    const outside = join(base, "outside-cache");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(rollHome, "cache"));
+
+    const result = loadWorkspaceDiscovery({ rollHome });
+
+    expect(result.workspaces).toHaveLength(1);
+    expect(result.diagnostics).toEqual([]);
+    expect(existsSync(join(outside, "workspace-discovery", "fields.json"))).toBe(false);
   });
 
   it("reports bounded-directory I/O failures instead of degrading to an empty candidate", () => {

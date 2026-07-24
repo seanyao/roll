@@ -8,7 +8,8 @@ import {
   serializeWorkspaceManifest,
   type WorkspaceMetadataReferenceIndex,
 } from "../src/workspace/edit-plan.js";
-import type { WorkspaceManifest } from "@roll/spec";
+import { normalizeRequirementSourceReference } from "../src/workspace/requirement-source.js";
+import { repositoryIdFromRemote, type WorkspaceManifest } from "@roll/spec";
 
 const current: WorkspaceManifest = {
   schema: "roll.workspace/v1",
@@ -287,6 +288,47 @@ repositories:
     });
   });
 
+  it("canonicalizes an aliased Requirement addition while preserving referenced identity semantics", () => {
+    const added = normalizeRequirementSourceReference("github-issue", "Owner/Repo#12");
+    const removed = normalizeRequirementSourceReference("JIRA", "sot-15499");
+    if (!added.ok || !removed.ok) throw new Error("fixture Requirement identities must normalize");
+    const parsed = parseWorkspaceEditConfig(configText({
+      requirements: [{ provider: "github-issue", ref: "Owner/Repo#12" }],
+    }), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    const plan = buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references({ issues: [{
+        storyId: "US-REQUIREMENT",
+        manifestSha256: "a".repeat(64),
+        requirementKeys: [{ provider: "JIRA", ref: "sot-15499" }],
+        repoIds: [],
+      }] }),
+      manifestPath: "/workspace/workspace.yaml",
+    });
+
+    expect(added.value.requirementId).toBe("req-1aed8113153b");
+    expect(removed.value.requirementId).toBe("req-c78ccf14ea21");
+    expect(plan.afterManifest.requirements).toEqual([{
+      provider: added.value.provider,
+      ref: added.value.ref,
+    }]);
+    expect(plan.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "requirements[github_issue:owner/repo#12]", operation: "added", safety: "safe" }),
+      expect.objectContaining({ path: "requirements[jira:SOT-15499]", operation: "removed", safety: "blocked" }),
+    ]));
+    expect(plan.blockers).toContainEqual(expect.objectContaining({
+      code: "metadata_referenced",
+      path: "requirements[jira:SOT-15499]",
+      references: [expect.objectContaining({
+        kind: "issue_requirement",
+        authorityPath: "issues/US-REQUIREMENT/manifest.json",
+      })],
+    }));
+    expect(plan.warnings).toEqual([]);
+  });
+
   it.each(["delivery", "runtime", "event", "migration"] as const)(
     "blocks Requirement deletion referenced by an additional %s authority",
     (kind) => {
@@ -337,7 +379,9 @@ repositories:
       }] }),
       manifestPath: "/workspace/workspace.yaml",
     });
-    expect(plan.afterManifest.repositories[0]?.repoId).not.toBe("repo-ff7a87ddbb2b");
+    const replacement = repositoryIdFromRemote("https://example.test/owner/replacement");
+    if (!replacement.ok) throw new Error("fixture replacement remote must normalize");
+    expect(plan.afterManifest.repositories[0]?.repoId).toBe(replacement.value);
     expect(plan.blockers).toContainEqual(expect.objectContaining({
       code: "metadata_referenced",
       path: "repositories[repo-ff7a87ddbb2b].remote",
@@ -380,7 +424,7 @@ repositories:
     expect(plan.blockers).toContainEqual(expect.objectContaining({ path: `repositories[repo-ff7a87ddbb2b].${field}` }));
   });
 
-  it.each(["delivery", "runtime"] as const)("blocks repository identity changes referenced by %s facts", (kind) => {
+  it.each(["delivery", "runtime", "event", "migration"] as const)("blocks repository identity changes referenced by %s facts", (kind) => {
     const parsed = parseWorkspaceEditConfig(configText({ repositories: [{
       alias: "product",
       remote: "https://example.test/owner/replacement",
@@ -441,6 +485,17 @@ repositories:
     ] }), { workspaceId: "ws-demo" })).toMatchObject({
       ok: false,
       errors: expect.arrayContaining([expect.objectContaining({ code: "duplicate_identity", path: "repositories" })]),
+    });
+  });
+
+  it("reports an unsupported config schema as exactly unknown_version", () => {
+    expect(parseWorkspaceEditConfig(configText({ schema: "roll.workspace-edit/v2" }), { workspaceId: "ws-demo" })).toEqual({
+      ok: false,
+      errors: [{
+        code: "unknown_version",
+        path: "schema",
+        message: `expected ${WORKSPACE_EDIT_CONFIG_V1}`,
+      }],
     });
   });
 

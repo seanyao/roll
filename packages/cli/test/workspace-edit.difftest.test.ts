@@ -153,20 +153,47 @@ describe("US-WS-025 roll workspace edit --check", () => {
     expect(first).toEqual(second);
     expect(first).toMatchObject({ status: 0, stderr: "" });
     const plan = JSON.parse(first.stdout) as Record<string, unknown>;
-    expect(plan).toMatchObject({
+    expect(Object.keys(plan).sort()).toEqual([
+      "afterManifest",
+      "afterSha256",
+      "beforeManifest",
+      "beforeSha256",
+      "blockers",
+      "changes",
+      "manifestPath",
+      "nextAction",
+      "outcome",
+      "referenceIndexSha256",
+      "schema",
+      "warnings",
+      "workspaceId",
+    ]);
+    expect(plan).toEqual({
       schema: "roll.workspace-edit-plan/v1",
       outcome: "ready",
       workspaceId: "ws-demo",
       manifestPath: join(f.workspace, "workspace.yaml"),
-      beforeManifest: { displayName: "Demo" },
-      afterManifest: { displayName: "Renamed Demo" },
-      changes: [{ path: "displayName", safety: "safe" }],
+      beforeSha256: digest(serializeWorkspaceManifest(f.manifest)),
+      afterSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      referenceIndexSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      beforeManifest: f.manifest,
+      afterManifest: { ...f.manifest, displayName: "Renamed Demo" },
+      changes: [{
+        kind: "display_name",
+        path: "displayName",
+        operation: "updated",
+        before: "Demo",
+        after: "Renamed Demo",
+        safety: "safe",
+      }],
       blockers: [],
+      warnings: [],
       nextAction: {
         kind: "apply",
         command: `roll workspace edit ws-demo --config ${f.config} --json`,
       },
     });
+    expect(plan["afterSha256"]).toBe(digest(serializeWorkspaceManifest(plan["afterManifest"] as WorkspaceManifest)));
     expect(snapshotState(f)).toEqual(before);
   });
 
@@ -275,9 +302,11 @@ describe("US-WS-025 roll workspace edit --check", () => {
   it.each([
     ["apply is not part of this Story", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--json"], "invalid_arguments"],
     ["unknown config field", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--check", "--json"], "unknown_field"],
+    ["unknown config version", ["workspace", "edit", "ws-demo", "--config", "<CONFIG>", "--check", "--json"], "unknown_version"],
   ])("fails without writes when %s", async (name, rawArgs, code) => {
     const f = fixture();
     if (name === "unknown config field") write(f.config, f.configValue({ root: "/escape" }));
+    if (name === "unknown config version") write(f.config, f.configValue({ schema: "roll.workspace-edit/v2" }));
     const args = rawArgs.map((arg) => arg === "<CONFIG>" ? f.config : arg);
     const before = snapshotState(f);
 

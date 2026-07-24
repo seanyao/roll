@@ -41,6 +41,15 @@ import { computeArtifactSha256 } from "../delta-team/artifact-protocol.js";
 export const DEFAULT_REPAIR_BRIEFING_MAX_CHARS = 6000;
 
 /**
+ * The MINIMUM budget a briefing is allowed to run with. The instruction header +
+ * a truncation declaration + a body pointer is ~700-800 chars for typical inputs;
+ * below this a budget could only be honored by slicing the header (dropping the
+ * required truncation declaration), so {@link buildRepairBriefing} CLAMPS any
+ * smaller request UP to this floor. Chosen with headroom over the header frame.
+ */
+export const MIN_REPAIR_BRIEFING_MAX_CHARS = 900;
+
+/**
  * The explicit warm-start instruction that ALWAYS leads a repair briefing. It is
  * the whole point of the artifact: the fresh session starts from the findings +
  * the changed files + the contract, and does NOT burn time re-exploring the tree.
@@ -183,24 +192,35 @@ function finalize(content: string, truncation: RepairBriefingTruncation | undefi
  *     after the fixed frame + a truncation marker, and DECLARE it in the header
  *     (`section: findings`, kept/total chars, path to the full text).
  *   - Defensive hard-cap: if even the fixed frame (diff-stat/files/contracts) plus
- *     the header exceeds the budget, hard-truncate the whole briefing to the cap
- *     and declare `section: whole`. `content` is ALWAYS ≤ `maxChars`.
+ *     the header exceeds the budget, truncate the BODY (never the header) and
+ *     declare `section: whole`.
+ *
+ * HEADER INVARIANT: the header + its truncation declaration ALWAYS survive intact
+ * — a sliced header would drop the required explicit/traceable declaration. The
+ * requested budget is therefore CLAMPED UP to {@link MIN_REPAIR_BRIEFING_MAX_CHARS}
+ * (and, defensively, to whatever THIS input's header itself needs), so `content`
+ * is ≤ that effective budget, never a header fragment. A caller passing a tiny or
+ * zero `maxChars` gets a valid header-only briefing that points at the full text,
+ * not a truncated header.
  */
 export function buildRepairBriefing(
   input: RepairBriefingInput,
   budget: RepairBriefingBudget = { maxChars: DEFAULT_REPAIR_BRIEFING_MAX_CHARS },
 ): RepairBriefing {
-  const max = Math.max(0, budget.maxChars);
   const findings = input.findings ?? "";
+  // Clamp UP to the floor: a budget below the header/declaration frame cannot
+  // yield a valid briefing without slicing the header. Never go below the floor.
+  const max = Math.max(budget.maxChars, MIN_REPAIR_BRIEFING_MAX_CHARS);
 
   // 1) Try the full briefing.
   const full = `${renderHeader(input)}\n\n${renderBody(input, findings)}`;
   if (full.length <= max) return finalize(full, undefined);
 
-  // 2) Over budget → truncate the findings. Size the fixed frame with an EMPTY
-  //    findings body plus a header carrying a truncation declaration whose numbers
-  //    are widened to the total (an upper bound on the eventual kept-digits), so
-  //    the final content can only be SHORTER than this sizing frame.
+  // 2) Over budget → truncate the FINDINGS (largest, most variable section). Size
+  //    the fixed frame with an EMPTY findings body plus a header carrying a
+  //    truncation declaration whose numbers are widened to the total (an upper
+  //    bound on the eventual kept-digits), so the final content can only be
+  //    SHORTER than this sizing frame.
   const marker = `\n…[findings truncated — full text at ${input.fullFindingsPath}]`;
   const sizing: RepairBriefingTruncation = {
     section: "findings",
@@ -210,29 +230,38 @@ export function buildRepairBriefing(
   };
   const frame = `${renderHeader(input, sizing)}\n\n${renderBody(input, "")}`;
   const room = max - frame.length - marker.length;
-  const kept = Math.max(0, room);
-  const truncatedFindings = findings.slice(0, kept);
-  const truncation: RepairBriefingTruncation = {
-    section: "findings",
-    keptChars: truncatedFindings.length,
+  if (room >= 0) {
+    const truncatedFindings = findings.slice(0, room);
+    const truncation: RepairBriefingTruncation = {
+      section: "findings",
+      keptChars: truncatedFindings.length,
+      totalChars: findings.length,
+      fullTextPath: input.fullFindingsPath,
+    };
+    // content ≤ frame length (header(truncation) ≤ header(sizing) since keptChars ≤
+    // totalChars ⇒ ≤ digits), so it stays within `max`.
+    const content = `${renderHeader(input, truncation)}\n\n${renderBody(input, `${truncatedFindings}${marker}`)}`;
+    return finalize(content, truncation);
+  }
+
+  // 3) The fixed frame ALONE exceeds the budget (large diff-stat/file list). The
+  //    HEADER + its declaration survive intact; only the BODY is truncated, with a
+  //    pointer to the full text. Never slice the header — if the header itself is
+  //    larger than `max` (a pathologically long path), the body room is 0 and the
+  //    content is the header + pointer (slightly over `max`, but the declaration is
+  //    preserved), honoring the header invariant over a hard byte cap.
+  const wholeTrunc: RepairBriefingTruncation = {
+    section: "whole",
+    keptChars: 0,
     totalChars: findings.length,
     fullTextPath: input.fullFindingsPath,
   };
-  let content = `${renderHeader(input, truncation)}\n\n${renderBody(input, `${truncatedFindings}${marker}`)}`;
-
-  // 3) Defensive hard-cap: the fixed frame alone may exceed the budget (large
-  //    diff-stat/file list). Trim the BODY tail so the header (with its truncation
-  //    declaration) survives, and record `whole`.
-  if (content.length > max) {
-    const header = renderHeader(input, { ...truncation, section: "whole" });
-    const hardMarker = `\n…[briefing hard-truncated to ${max} chars — full text at ${input.fullFindingsPath}]`;
-    const body = renderBody(input, `${truncatedFindings}${marker}`);
-    const bodyRoom = Math.max(0, max - header.length - 2 - hardMarker.length);
-    content = `${header}\n\n${body.slice(0, bodyRoom)}${hardMarker}`;
-    if (content.length > max) content = content.slice(0, max); // absolute guarantee
-    return finalize(content, { ...truncation, section: "whole" });
-  }
-  return finalize(content, truncation);
+  const header = renderHeader(input, wholeTrunc);
+  const hardMarker = `\n…[briefing body hard-truncated — full findings at ${input.fullFindingsPath}]`;
+  const body = renderBody(input, "");
+  const bodyRoom = Math.max(0, max - header.length - 2 - hardMarker.length);
+  const content = `${header}\n\n${body.slice(0, bodyRoom)}${hardMarker}`;
+  return finalize(content, wholeTrunc);
 }
 
 /**

@@ -124,11 +124,18 @@ function resolveContractRefs(repoCwd: string, storyId: string): string[] {
 }
 
 /**
- * Build the repair-round briefing for the current cycle and persist it + its v2
- * manifest under the evidence dir. Returns the prompt-ready lead text (the SOLE
- * context entry point for the fresh session) and the relative artifact path.
- * Returns null when there is nothing to brief (no story / no prior findings) or on
- * any failure — the caller then falls back to the plain fix-forward prompt.
+ * Build the repair-round briefing for the current cycle, PERSIST it together with
+ * its v2 manifest under the evidence dir, and return the prompt-ready lead text
+ * (the SOLE context entry point for the fresh session) + the relative artifact
+ * path.
+ *
+ * AC1 contract: a briefing is only valid TOGETHER WITH its recorded v2 manifest —
+ * a lead text used as context must have its manifest on disk. So this returns null
+ * (⇒ caller falls back to the plain fix-forward prompt, no inline briefing) when:
+ *   - there is no story / no prior findings to warm-start from, OR
+ *   - there is NO evidence dir to record the manifest in, OR
+ *   - persisting the briefing or its manifest FAILS.
+ * It never returns an UNRECORDED inline briefing.
  */
 export async function buildRepairRoundBriefing(
   ports: Ports,
@@ -138,6 +145,11 @@ export async function buildRepairRoundBriefing(
 ): Promise<{ leadText: string; artifactPath: string } | null> {
   const storyId = ctx.storyId ?? "";
   if (storyId === "") return null;
+  // No evidence dir ⇒ nowhere to RECORD the manifest ⇒ no valid briefing. Bail
+  // BEFORE any gather so the caller falls back to the plain fix-forward prompt.
+  const evidenceRunDir = ctx.evidenceRunDir ?? "";
+  if (evidenceRunDir === "") return null;
+
   // Repair round index: one prior peer score note per repair re-dispatch.
   let round = 1;
   try {
@@ -164,31 +176,30 @@ export async function buildRepairRoundBriefing(
 
   const artifactPath = join(BRIEFING_REL_DIR, BRIEFING_FILE);
 
-  // Persist the artifact + its v2 manifest (best-effort; the lead text is returned
-  // regardless so the warm-start still happens even if the evidence write blips).
-  if (ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
-    try {
-      const dir = join(ctx.evidenceRunDir, BRIEFING_REL_DIR);
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, BRIEFING_FILE), briefing.content, "utf8");
-      const manifest = buildRepairBriefingManifest({
-        storyId,
-        cycleId: ctx.cycleId,
-        delegationId: ctx.cycleId ?? "cycle",
-        hostId: hostname(),
-        roleInstanceId: `${ctx.cycleId ?? "cycle"}:repair-briefing:${ctx.agent ?? "runner"}`,
-        modelId: ctx.model !== undefined && ctx.model !== "" ? ctx.model : ctx.agent ?? "unknown",
-        sessionId: `${ctx.cycleId ?? "cycle"}:repair-briefing:${ports.clock()}`,
-        adapter: ctx.agent ?? "runner",
-        qualityProfile: ctx.selectedProfile ?? "standard",
-        artifactPath,
-        briefing,
-        createdAt: new Date().toISOString(),
-      });
-      writeFileSync(join(dir, BRIEFING_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-    } catch {
-      /* evidence write is best-effort — the warm-start lead text still returns */
-    }
+  // Persist the artifact + its v2 manifest. This is REQUIRED, not best-effort: a
+  // write failure ⇒ the briefing has no recorded manifest ⇒ return null so the
+  // caller uses the plain fix-forward prompt instead of an unrecorded briefing.
+  try {
+    const dir = join(evidenceRunDir, BRIEFING_REL_DIR);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, BRIEFING_FILE), briefing.content, "utf8");
+    const manifest = buildRepairBriefingManifest({
+      storyId,
+      cycleId: ctx.cycleId,
+      delegationId: ctx.cycleId ?? "cycle",
+      hostId: hostname(),
+      roleInstanceId: `${ctx.cycleId ?? "cycle"}:repair-briefing:${ctx.agent ?? "runner"}`,
+      modelId: ctx.model !== undefined && ctx.model !== "" ? ctx.model : ctx.agent ?? "unknown",
+      sessionId: `${ctx.cycleId ?? "cycle"}:repair-briefing:${ports.clock()}`,
+      adapter: ctx.agent ?? "runner",
+      qualityProfile: ctx.selectedProfile ?? "standard",
+      artifactPath,
+      briefing,
+      createdAt: new Date().toISOString(),
+    });
+    writeFileSync(join(dir, BRIEFING_MANIFEST), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  } catch {
+    return null; // no recorded manifest ⇒ no valid briefing ⇒ fall back to plain prompt
   }
 
   return { leadText: briefing.content, artifactPath };

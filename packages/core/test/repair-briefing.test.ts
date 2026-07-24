@@ -18,6 +18,7 @@ import {
   buildRepairBriefing,
   buildRepairBriefingManifest,
   DEFAULT_REPAIR_BRIEFING_MAX_CHARS,
+  MIN_REPAIR_BRIEFING_MAX_CHARS,
   parseInvolvedFilesFromDiff,
   REPAIR_BRIEFING_INSTRUCTION,
   repairBriefingArtifactRef,
@@ -123,18 +124,41 @@ describe("buildRepairBriefing — context budget (AC3)", () => {
     expect(b.sha256).toBe(computeArtifactSha256(b.content));
   });
 
-  it("hard-caps even when the fixed frame alone exceeds the budget", () => {
-    // A budget that fits the header (instruction + declaration) but NOT the fixed
-    // diff-stat/files/contract frame → the whole briefing is hard-capped.
-    const budget = { maxChars: 900 };
-    const b = buildRepairBriefing(BASE_INPUT, budget);
-    expect(b.content.length).toBeLessThanOrEqual(budget.maxChars);
+  it("hard-caps the BODY (never the header) when the fixed frame exceeds the budget", () => {
+    // At the floor budget the header (instruction + declaration) fits but the fixed
+    // diff-stat/files/contract frame does not → the BODY is hard-capped.
+    const b = buildRepairBriefing(BASE_INPUT, { maxChars: MIN_REPAIR_BRIEFING_MAX_CHARS });
+    expect(b.content.length).toBeLessThanOrEqual(MIN_REPAIR_BRIEFING_MAX_CHARS);
     expect(b.truncated).toBe(true);
     expect(b.truncation?.section).toBe("whole");
     // The truncation declaration (with the full-text path) survives in the header.
     expect(b.content).toContain("CONTEXT-BUDGET TRUNCATION");
     expect(b.content).toContain(BASE_INPUT.fullFindingsPath);
+    // The header (title + instruction + declaration) is intact and leads the content.
+    expect(b.content.startsWith(`# Repair briefing — ${BASE_INPUT.storyId}`)).toBe(true);
+    expect(b.content).toContain(REPAIR_BRIEFING_INSTRUCTION);
+    // Body was truncated with a pointer to the full findings.
+    expect(b.content).toContain(`full findings at ${BASE_INPUT.fullFindingsPath}`);
     expect(b.sha256).toBe(computeArtifactSha256(b.content));
+  });
+
+  it("boundary: tiny/zero maxChars keeps the header + declaration intact (never a sliced header)", () => {
+    for (const maxChars of [0, 1, 50, 300]) {
+      const b = buildRepairBriefing(BASE_INPUT, { maxChars });
+      // Clamped UP to the floor — a valid header-bearing briefing, never a fragment.
+      expect(b.truncated).toBe(true);
+      expect(b.content.length).toBeLessThanOrEqual(MIN_REPAIR_BRIEFING_MAX_CHARS);
+      // Header invariant: title + instruction + explicit traceable declaration all present.
+      expect(b.content.startsWith(`# Repair briefing — ${BASE_INPUT.storyId}`)).toBe(true);
+      expect(b.content).toContain(REPAIR_BRIEFING_INSTRUCTION);
+      expect(b.content).toContain("CONTEXT-BUDGET TRUNCATION");
+      expect(b.content).toContain(BASE_INPUT.fullFindingsPath);
+      // The declaration must appear WITHIN the surviving content, not be sliced off.
+      const declIdx = b.content.indexOf("CONTEXT-BUDGET TRUNCATION");
+      expect(declIdx).toBeGreaterThan(0);
+      expect(b.content.slice(declIdx)).toContain(BASE_INPUT.fullFindingsPath);
+      expect(b.sha256).toBe(computeArtifactSha256(b.content));
+    }
   });
 
   it("uses the default budget when none is supplied", () => {

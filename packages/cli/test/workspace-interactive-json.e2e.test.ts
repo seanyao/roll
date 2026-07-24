@@ -3,15 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { WorkspaceDiscoveryFactsV1 } from "@roll/core";
-import { WorkspaceRegistry } from "@roll/infra";
+import { loadWorkspaceDiscovery, WorkspaceRegistry } from "@roll/infra";
 import {
   REPOSITORY_BINDING_V1,
   WORKSPACE_MANIFEST_V1,
   repositoryIdFromRemote,
 } from "@roll/spec";
 import { deliveryCommand } from "../src/commands/delivery.js";
-import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
-import { dispatch } from "../src/bridge.js";
+import { backlogCommand } from "../src/commands/backlog.js";
+import { resolveBacklogCommandTarget, type BacklogTargetDecision } from "../src/commands/backlog-target.js";
+import { dispatch, registerPorted } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
 
 function facts(workspaceId: string): WorkspaceDiscoveryFactsV1 {
@@ -264,6 +265,64 @@ describe("US-WS-030 delivery interactive JSON", () => {
       expect(deliveryAlias).toEqual(deliveryCanonical);
       expect(backlogCanonical.status).toBe(0);
       expect(deliveryCanonical.status).toBe(0);
+    } finally {
+      process.chdir(previousCwd);
+      if (saved.rollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = saved.rollHome;
+      if (saved.rollLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saved.rollLang;
+      if (saved.noColor === undefined) delete process.env["NO_COLOR"];
+      else process.env["NO_COLOR"] = saved.noColor;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces a stale public selector after clarification for canonical and alias paths", async () => {
+    registerAll();
+    const home = mkdtempSync(join(tmpdir(), "roll-ws030-reselect-"));
+    const rollHome = join(home, ".roll");
+    const root = join(home, "fields");
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify(facts("fields").manifest)}\n`);
+    writeFileSync(join(root, "backlog", "index.md"), "| Story | Description | Status |\n|---|---|---|\n| US-1 | fields story | 📋 Todo |\n");
+    const registry = new WorkspaceRegistry({ rollHome });
+    registry.register({ workspaceId: "fields", root });
+    registry.activate("fields");
+    const interaction = {
+      cwd: home,
+      capabilities: { stdinTTY: true, stderrTTY: true, agentQuestionCapable: false },
+      ask: () => "1",
+      loadDiscovery: () => loadWorkspaceDiscovery({ rollHome }),
+    } as const;
+    registerPorted("backlog", (args) => backlogCommand([...args], {
+      resolveTarget: resolveBacklogCommandTarget,
+      interaction,
+    }));
+    registerPorted("delivery", (args) => deliveryCommand([...args], { interaction }));
+    const saved = {
+      rollHome: process.env["ROLL_HOME"],
+      rollLang: process.env["ROLL_LANG"],
+      noColor: process.env["NO_COLOR"],
+    };
+    const previousCwd = process.cwd();
+    process.env["ROLL_HOME"] = rollHome;
+    process.env["ROLL_LANG"] = "en";
+    process.env["NO_COLOR"] = "1";
+    process.chdir(home);
+    try {
+      for (const selector of ["--workspace", "--ws"] as const) {
+        const backlog = await captureDispatch(["backlog", selector, "does-not-exist", "--no-color"]);
+        const delivery = await captureDispatch(["delivery", "list", selector, "does-not-exist", "--json"]);
+        expect(backlog.status, `${selector} backlog`).toBe(0);
+        expect(backlog.stderr, `${selector} backlog`).toBe("");
+        expect(backlog.stdout, `${selector} backlog`).toContain("fields story");
+        expect(delivery.status, `${selector} delivery`).toBe(0);
+        expect(delivery.stderr, `${selector} delivery`).toBe("");
+        expect(JSON.parse(delivery.stdout), `${selector} delivery`).toMatchObject({
+          schema: "roll.delivery-list/v1",
+          workspaces: [{ workspaceId: "fields" }],
+        });
+      }
     } finally {
       process.chdir(previousCwd);
       if (saved.rollHome === undefined) delete process.env["ROLL_HOME"];

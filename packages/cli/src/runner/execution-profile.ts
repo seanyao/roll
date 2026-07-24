@@ -422,11 +422,16 @@ export async function runDesignerStage(
         observeCwd: execCwd,
         run: () =>
           // AC5: the Designer runs READ-ONLY on the product worktree. `readOnly`
-          // makes sandbox-capable adapters (codex → --sandbox read-only;
-          // reasonix/Seatbelt → allow_write limited to `writableRoots`) refuse
+          // makes SANDBOX-CAPABLE adapters (codex → --sandbox read-only;
+          // reasonix/Seatbelt → allow_write limited to `writableRoots`) OS-refuse
           // product writes; `writableRoots` is JUST the Designer's own artifact
           // dir, so it can emit its design contract but cannot touch product code.
-          // Only the Builder spawn (spawn-agent-handler) gets product write roots.
+          // NOTE (codex review): non-sandbox adapters (kimi/agy/claude/pi) have no
+          // OS write jail in roll, so for those the read-only is ADVISORY — the
+          // prompt framing + zero granted product write roots, not a kernel block.
+          // Full OS enforcement across all adapters is a separate infra card
+          // (see FIX in roll-meta backlog). Only the Builder spawn
+          // (spawn-agent-handler) is ever granted product worktree write roots.
           ports.agentSpawn(designerAgent, {
             cwd: execCwd,
             skillBody: buildDesignerPrompt(storyId, contractPath),

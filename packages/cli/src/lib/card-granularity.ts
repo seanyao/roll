@@ -54,15 +54,26 @@ function frontmatter(spec: string): string {
 }
 
 /**
- * A NEW-regime card that MUST satisfy the granularity contract: created on or
- * after {@link GRANULARITY_CUTOVER_DATE}. Keyed on the intrinsic `created:` date
- * so a new card cannot dodge the gate by omitting `est_min`/`risk_tier`. A card
- * with no parseable `created:` is treated as legacy (conservative — can't prove
- * it is new). IDEA-* cards are exempt: an idea is a speculative seed, not sized
- * work — it gets sized when promoted to a US.
+ * A NEW-regime card that MUST satisfy the granularity contract. Gated when EITHER
+ *   (a) `created:` >= {@link GRANULARITY_CUTOVER_DATE} — the tool mint channels
+ *       (`roll story new`, `roll idea`) always stamp `created:` today, so every
+ *       tool-minted card is caught regardless of whether it filled est_min /
+ *       risk_tier (this closes the omit-metadata dodge), OR
+ *   (b) the card already declares any granularity field (`est_min` / `risk_tier`)
+ *       — a partially-filled contract signals new-regime intent even on a
+ *       hand-authored spec with no `created:`.
+ * IDEA-* cards are exempt (a speculative seed, sized when promoted to a US).
+ *
+ * Residual (irreducible): a spec that has NO `created:` AND NO granularity field
+ * is indistinguishable from a legacy card, so it is treated as legacy — there is
+ * no signal that separates "brand-new bare hand-authored" from "old". The mint
+ * channels never produce that shape; a human who hand-writes a spec bypassing all
+ * tooling owns the granularity discipline manually.
  */
 export function isNewRegimeCard(spec: string, id?: string): boolean {
   if (id !== undefined && /^IDEA-/i.test(id)) return false;
+  const fm = frontmatter(spec);
+  if (/^\s*est_min\s*:/m.test(fm) || /^\s*risk_tier\s*:/m.test(fm)) return true;
   const created = fmValue(spec, "created");
   if (created === undefined || !/^\d{4}-\d{2}-\d{2}/.test(created)) return false;
   return created.slice(0, 10) >= GRANULARITY_CUTOVER_DATE;

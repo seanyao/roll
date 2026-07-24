@@ -24,10 +24,15 @@ describe("isNewRegimeCard — self-scoping by created date (not a dodgeable fiel
     // A new card that omits est_min/risk_tier is STILL new-regime (cannot dodge).
     expect(isNewRegimeCard(`---\nid: US-N\ntype: us\ncreated: ${GRANULARITY_CUTOVER_DATE}\n---\n# n\n`)).toBe(true);
   });
-  it("false for legacy (created before cutover / no created) and for IDEA-*", () => {
+  it("true for a hand-authored card with a granularity field but NO created (partial-contract intent)", () => {
+    expect(isNewRegimeCard("---\nid: US-HAND\ntype: us\nrisk_tier: low\n---\n# hand\n")).toBe(true);
+    expect(isNewRegimeCard("---\nid: US-HAND2\ntype: us\nest_min: 12\n---\n# hand\n")).toBe(true);
+  });
+  it("false for legacy (created before cutover / bare spec) and for IDEA-*", () => {
     expect(isNewRegimeCard("---\nid: US-OLD\ntype: us\ncreated: 2026-01-01\n---\n# old\n")).toBe(false);
+    // bare spec: no created AND no granularity field ⇒ indistinguishable from legacy.
     expect(isNewRegimeCard("---\nid: US-NODATE\ntype: us\n---\n# nodate\n")).toBe(false);
-    expect(isNewRegimeCard(`---\nid: IDEA-9\ntype: idea\ncreated: ${GRANULARITY_CUTOVER_DATE}\n---\n# idea\n`, "IDEA-9")).toBe(false);
+    expect(isNewRegimeCard(`---\nid: IDEA-9\ntype: idea\ncreated: ${GRANULARITY_CUTOVER_DATE}\nest_min: 5\n---\n# idea\n`, "IDEA-9")).toBe(false);
   });
 });
 

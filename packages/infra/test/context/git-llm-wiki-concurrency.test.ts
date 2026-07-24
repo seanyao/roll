@@ -129,4 +129,20 @@ describe("Git LLM Wiki provider read lease", () => {
       releaseLock(identity.lockPath);
     }
   });
+
+  it("releases the provider lock after a fetch timeout", async () => {
+    const rollHome = sandbox();
+    const identity = resolveContextCacheIdentity({ rollHome, provider: provider() });
+    const base = successfulGit();
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options) => {
+      if (args.slice(12)[0] === "fetch") {
+        return { code: 1, stdout: "", stderr: "credential-bearing detail", timedOut: true };
+      }
+      return base(args, cwd, options);
+    });
+
+    await expect(withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit }, async () => "unreachable"))
+      .rejects.toMatchObject({ code: "fetch_timeout" });
+    expect(readLockOwner(identity.lockPath)).toBeUndefined();
+  });
 });

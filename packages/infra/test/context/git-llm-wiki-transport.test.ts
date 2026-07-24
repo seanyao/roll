@@ -179,4 +179,93 @@ describe("withFreshGitLlmWikiRead", () => {
     expect(first.revision.revision).toBe(second.revision.revision);
     expect(first.revision.fetchedAt).not.toBe(second.revision.fetchedAt);
   });
+
+  it("accepts an equivalent normalized origin identity in an existing managed cache", async () => {
+    const rollHome = sandbox();
+    mkdirSync(join(rollHome, "context-cache", "bipo-enterprise.git"), { recursive: true });
+    const fake = successfulGit("https://github.com/bipo/context-wiki.git");
+
+    await expect(withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit: fake.runGit }, async () => "ok"))
+      .resolves.toMatchObject({ value: "ok" });
+  });
+
+  it("fails on remote mismatch without rewriting origin, fetching or exposing cached content", async () => {
+    const rollHome = sandbox();
+    mkdirSync(join(rollHome, "context-cache", "bipo-enterprise.git"), { recursive: true });
+    const fake = successfulGit("https://example.test/other/wiki");
+    const readCached = vi.fn(async () => "stale");
+
+    await expect(withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit: fake.runGit }, readCached))
+      .rejects.toMatchObject({ code: "remote_identity_mismatch" });
+    expect(readCached).not.toHaveBeenCalled();
+    const operations = fake.calls.map((call) => call.args.slice(12));
+    expect(operations.some((args) => args[0] === "fetch")).toBe(false);
+    expect(operations.some((args) => args[0] === "remote" && ["add", "set-url", "remove"].includes(args[1] ?? "")))
+      .toBe(false);
+  });
+
+  it.each([
+    {
+      label: "fetch failure",
+      result: { code: 1, stdout: "", stderr: "fatal: https://secret-token@example.test failed" },
+      code: "fetch_failed",
+    },
+    {
+      label: "fetch timeout",
+      result: { code: 1, stdout: "", stderr: "secret-token", timedOut: true },
+      code: "fetch_timeout",
+    },
+    {
+      label: "missing branch",
+      result: { code: 128, stdout: "", stderr: "fatal: couldn't find remote ref main" },
+      code: "branch_not_found",
+    },
+  ])("returns a redacted $code diagnostic for $label and never falls back", async ({ result, code }) => {
+    const rollHome = sandbox();
+    const fake = successfulGit();
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options) => {
+      if (args.slice(12)[0] === "fetch") return result;
+      return fake.runGit(args, cwd, options);
+    });
+    const readCached = vi.fn(async () => "stale");
+    let caught: unknown;
+    try {
+      await withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit }, readCached);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({ code });
+    expect(String(caught)).not.toContain("secret-token");
+    expect(JSON.stringify(caught)).not.toContain("secret-token");
+    expect(readCached).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["abbreviated revision", "0123456", "commit"],
+    ["non-commit revision", REVISION, "blob"],
+  ])("rejects %s before the fixed-SHA callback", async (_label, revision, objectType) => {
+    const rollHome = sandbox();
+    const fake = successfulGit();
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options) => {
+      const operation = args.slice(12);
+      if (operation[0] === "rev-parse" && operation[1] === "--verify") {
+        return { code: 0, stdout: `${revision}\n`, stderr: "" };
+      }
+      if (operation[0] === "cat-file") return { code: 0, stdout: `${objectType}\n`, stderr: "" };
+      return fake.runGit(args, cwd, options);
+    });
+    const readCached = vi.fn(async () => "stale");
+    await expect(withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit }, readCached))
+      .rejects.toMatchObject({ code: "revision_missing" });
+    expect(readCached).not.toHaveBeenCalled();
+  });
+
+  it("never invokes checkout, hook execution or submodule update Git operations", async () => {
+    const fake = successfulGit();
+    await withFreshGitLlmWikiRead({ rollHome: sandbox(), provider: provider(), runGit: fake.runGit }, async () => "ok");
+    const operationText = fake.calls.map((call) => call.args.slice(12).join(" ")).join("\n");
+    expect(operationText).not.toMatch(/(?:^|\s)checkout(?:\s|$)/u);
+    expect(operationText).not.toMatch(/submodule\s+(?:update|init)/u);
+    expect(operationText).not.toMatch(/(?:^|\s)hook(?:\s|$)/u);
+  });
 });

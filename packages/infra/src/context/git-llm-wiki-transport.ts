@@ -6,7 +6,7 @@ import {
   rmSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { GitLlmWikiProviderConfigV1 } from "@roll/spec";
+import { normalizeContextGitRemote, type GitLlmWikiProviderConfigV1 } from "@roll/spec";
 import { git, type GitExecutionOptions, type GitResult } from "../git.js";
 import { acquireLock, readLockOwner, releaseLock } from "../process.js";
 import {
@@ -200,7 +200,8 @@ async function validateCache(
     { operation: "remote validation", timeoutMs },
   );
   const remotes = origin.stdout.split("\n").map((value) => value.trim()).filter(Boolean);
-  if (remotes.length !== 1 || remotes[0] !== identity.remoteIdentity) {
+  const normalizedRemote = remotes.length === 1 ? normalizeContextGitRemote(remotes[0]) : undefined;
+  if (normalizedRemote === undefined || !normalizedRemote.ok || normalizedRemote.value !== identity.remoteIdentity) {
     throw new ContextTransportError(
       "remote_identity_mismatch",
       "Managed Context cache remote identity does not match Provider configuration",

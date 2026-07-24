@@ -473,7 +473,7 @@ least-recent 状态决策。需要诊断快照时使用
 
 调度前，Supervisor 还会从持久事件流中归类 agent 工具链健康信号：auth block、
 network block、setup/skill-root 污染、worktree 权限失败。污染类信号会被作为 FIX
-路由给 delta team，而不会被误标为 auth 失败。可用 `roll supervisor health` 查看
+路由给 delivery team，而不会被误标为 auth 失败。可用 `roll supervisor health` 查看
 专用面板，或从 `roll supervisor next` / `roll supervisor why` 读取摘要。
 
 ### Agent 自降级（too_big 判定）

@@ -6969,6 +6969,42 @@ describe("US-DELTA-007 — Full Delta Evaluator authors its own report (no assem
     expect(r.reasons.join(" ")).toContain("eval-report.md missing");
   });
 
+  it("codex-r1 finding 2: a PLANTED report can NEVER satisfy the gate — the Evaluator ALWAYS spawns and authorship is required THIS run", async () => {
+    const repo = newRepo();
+    const ctx = evalCtx(repo, "US-E2b", "verified");
+    // Pre-plant a fully-valid authored report BEFORE the stage runs.
+    const evalDir = join(ctx.evidenceRunDir as string, "role-artifacts", "evaluator");
+    mkdirSync(evalDir, { recursive: true });
+    writeFileSync(join(evalDir, "eval-report.md"), AUTHORED_REPORT);
+    // The real evaluator spawn writes NOTHING → the planted file is discarded.
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, null) });
+    const r = await runEvaluatorStage(ports, ctx, EVAL_DEPS);
+    // The stage STILL spawned the independent Evaluator (no existsSync skip)...
+    expect(spawns).toHaveLength(1);
+    // ...and the planted report did NOT satisfy the gate.
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(r.reasons.join(" ")).toContain("eval-report.md missing");
+  });
+
+  it("codex-r1 finding 1: an UNWRITABLE on-disk manifest FAILS CLOSED (validation reads disk, not the in-memory object)", async () => {
+    const repo = newRepo();
+    const ctx = evalCtx(repo, "US-E2c", "verified");
+    // Plant a FILE where the evaluator artifact DIR must be → mkdir + manifest
+    // write both fail on disk; the in-memory manifest is well-formed but must NOT
+    // be trusted as the gate.
+    const roleArtifacts = join(ctx.evidenceRunDir as string, "role-artifacts");
+    mkdirSync(roleArtifacts, { recursive: true });
+    writeFileSync(join(roleArtifacts, "evaluator"), "not a directory");
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports } = fakePorts({ repoCwd: repo, agentSpawn: spawnWriting(spawns, AUTHORED_REPORT) });
+    const r = await runEvaluatorStage(ports, ctx, EVAL_DEPS);
+    expect(r.ok).toBe(false);
+    expect(r.blockReason).toBe("artifact_invalid");
+    expect(r.reasons.join(" ")).toContain("could not be written");
+  });
+
   it("AC5/AC6: a LEGACY assembled report is recognised, labeled legacy, and REJECTED (never satisfies the Evaluator)", async () => {
     const repo = newRepo();
     const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];

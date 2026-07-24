@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import {
@@ -518,26 +518,19 @@ export async function runEvaluatorStage(
   const modelId = resolved.model !== undefined && resolved.model !== "" ? resolved.model : evaluatorAgent;
   const execCwd = resolveExecutionCwd(ports, ctx);
 
-  // AC4 (identity_collision): the Evaluator's opaque sessionId AND roleInstanceId
-  // must BOTH differ from the Builder's — a same-session evaluation is a
-  // self-grade, rejected BEFORE any spawn. The Builder's roleInstanceId mirrors
-  // the designer/evaluator token shape (`<cycle>:builder:<agent>`).
+  // AC4 (identity_collision): the Evaluator's opaque sessionId must differ from
+  // the Builder's — a same-session evaluation is a self-grade, rejected BEFORE any
+  // spawn. `ctx.builderSessionId` is the loop's ACTUAL builder identity token
+  // (`<cycle>:build:<agent>:<clock>`, minted in spawn-agent-handler). The loop
+  // exposes no separate builder roleInstanceId, so the sessionId inequality IS the
+  // real independence signal (a builder/evaluator roleInstanceId literal compare
+  // could never fire — dropped rather than kept as dead code).
   const builderSessionId = ctx.builderSessionId ?? "";
-  const builderRoleInstanceId = `${ctx.cycleId ?? "cycle"}:builder:${ctx.agent ?? ""}`;
   if (builderSessionId !== "" && evaluatorSessionId === builderSessionId) {
     return {
       ran: false,
       ok: false,
       reasons: [`evaluator stage: evaluator sessionId equals builder sessionId ('${evaluatorSessionId}') — a same-session evaluation is a self-grade`],
-      blockReason: "identity_collision",
-      evaluatorAgent,
-    };
-  }
-  if (roleInstanceId === builderRoleInstanceId) {
-    return {
-      ran: false,
-      ok: false,
-      reasons: [`evaluator stage: evaluator roleInstanceId equals builder roleInstanceId ('${roleInstanceId}')`],
       blockReason: "identity_collision",
       evaluatorAgent,
     };
@@ -585,32 +578,36 @@ export async function runEvaluatorStage(
     };
   }
 
-  if (!existsSync(reportPath)) {
-    try {
-      mkdirSync(dir, { recursive: true });
-      // The evaluator sub-spawn goes through the shared watchdog (evaluator
-      // role cap). READ-ONLY on the product worktree; its ONLY writable root is
-      // its own artifact dir — it authors the report but cannot touch product
-      // code (advisory for non-sandbox adapters, same note as the Designer).
-      await spawnWatched({
-        ports,
-        ctx,
-        purpose: "evaluator",
-        agent: evaluatorAgent,
-        observeCwd: execCwd,
-        run: () =>
-          ports.agentSpawn(evaluatorAgent, {
-            cwd: execCwd,
-            skillBody: buildEvaluatorPrompt(storyId, reportPath),
-            storyId,
-            runDir: dir,
-            readOnly: true,
-            writableRoots: [dir],
-          }),
-      });
-    } catch {
-      /* an evaluator spawn blip -> no report -> validation below fails closed */
-    }
+  // The Evaluator must AUTHOR the report in THIS run. We ALWAYS spawn (no
+  // existsSync skip) and DELETE any pre-existing report + manifest first, so a
+  // planted/assembled artifact can never satisfy the gate by pre-existing — only
+  // a file the real Evaluator wrote this cycle survives to validation.
+  try {
+    mkdirSync(dir, { recursive: true });
+    rmSync(reportPath, { force: true });
+    rmSync(manifestPath, { force: true });
+    // The evaluator sub-spawn goes through the shared watchdog (evaluator
+    // role cap). READ-ONLY on the product worktree; its ONLY writable root is
+    // its own artifact dir — it authors the report but cannot touch product
+    // code (advisory for non-sandbox adapters, same note as the Designer).
+    await spawnWatched({
+      ports,
+      ctx,
+      purpose: "evaluator",
+      agent: evaluatorAgent,
+      observeCwd: execCwd,
+      run: () =>
+        ports.agentSpawn(evaluatorAgent, {
+          cwd: execCwd,
+          skillBody: buildEvaluatorPrompt(storyId, reportPath),
+          storyId,
+          runDir: dir,
+          readOnly: true,
+          writableRoots: [dir],
+        }),
+    });
+  } catch {
+    /* an evaluator spawn blip -> no report -> validation below fails closed */
   }
 
   // AC3: the Evaluator's OWN v2 manifest (role="evaluator", read-only access).
@@ -641,20 +638,41 @@ export async function runEvaluatorStage(
     outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
     createdAt: new Date(eventTs(ports)).toISOString(),
   };
+  // VALIDATE (never assemble) the ON-DISK artifacts, not the in-memory objects.
+  // A write failure, an absent/unparseable manifest, a non-evaluator manifest,
+  // or a report that is not a REAL authored evaluation (## Inputs checked +
+  // ## Rationale — a legacy assembled or peer-only artifact is rejected) all
+  // FAIL CLOSED. The manifest is re-read from disk so a swallowed write error or
+  // corrupted file cannot masquerade as a valid evaluation.
+  const reasons: string[] = [];
+  let wrote = true;
   try {
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
-  } catch {
-    /* best-effort manifest record */
+  } catch (e) {
+    wrote = false;
+    reasons.push(`evaluator manifest could not be written: ${e instanceof Error ? e.message : String(e)}`);
   }
-
-  // VALIDATE (never assemble): the manifest must be a read-only evaluator
-  // manifest and the report must be a REAL authored evaluation (## Inputs
-  // checked + ## Rationale). A legacy assembled report or a peer-only artifact
-  // is recognised + rejected by validateAuthoredEvalReport.
-  const reasons: string[] = [];
-  if (manifest.role !== "evaluator") reasons.push(`evaluator manifest role '${manifest.role}' ≠ 'evaluator'`);
-  const access = validateRoleAccess(manifest);
-  if (!access.ok) reasons.push(access.detail ?? "evaluator manifest role-access violation");
+  if (wrote) {
+    let onDisk: unknown;
+    try {
+      onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch {
+      onDisk = undefined;
+    }
+    if (typeof onDisk !== "object" || onDisk === null) {
+      reasons.push("evaluator manifest missing or unparseable on disk");
+    } else {
+      const m = onDisk as Partial<DeltaArtifactManifest>;
+      if (m.role !== "evaluator") {
+        reasons.push(`evaluator manifest role '${String(m.role)}' ≠ 'evaluator'`);
+      } else if (!Array.isArray(m.inputs)) {
+        reasons.push("evaluator manifest missing inputs array on disk");
+      } else {
+        const access = validateRoleAccess(m as DeltaArtifactManifest);
+        if (!access.ok) reasons.push(access.detail ?? "evaluator manifest role-access violation");
+      }
+    }
+  }
   const reportMd = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
   const rep = validateAuthoredEvalReport(reportMd);
   reasons.push(...rep.reasons);

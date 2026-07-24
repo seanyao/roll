@@ -8,7 +8,9 @@ import type {
   ToolPolicy,
   ToolRequirementResolution,
   ToolResult,
+  WorkspaceExecutionContextV1,
 } from "@roll/spec";
+import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry, type Tool, type ToolRegistryEventSink, type ToolRegistryPolicyEngine } from "../src/index.js";
 
@@ -72,6 +74,48 @@ function request(input: unknown = "ok") {
     invocationId: "inv-1",
     input,
     caller: { cycleId: "cycle-1", storyId: "US-TOOL-002", agent: "codex" },
+  };
+}
+
+function workspaceContext(): WorkspaceExecutionContextV1 {
+  return {
+    schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+    workspace: { workspaceId: "roll", root: "/ws/roll", canonicalRoot: "/ws/roll", lifecycle: "active" },
+    resolution: { source: "explicit", evidence: [] },
+    bindings: [],
+    issue: {
+      storyId: "US-WS-035",
+      manifestPath: "/ws/roll/issues/US-WS-035/manifest.json",
+      execution: {
+        workspaceId: "roll",
+        issueRoot: "/ws/roll/issues/US-WS-035",
+        repositories: {
+          "repo-product": {
+            repoId: "repo-product",
+            alias: "product",
+            access: "write",
+            requiredDelivery: true,
+            noChangePolicy: "changes_required",
+            worktreePath: "/ws/roll/issues/US-WS-035/product",
+            baseSha: "a".repeat(40),
+            headSha: "b".repeat(40),
+            commands: { test: [], integration: [] },
+          },
+        },
+      },
+    },
+    authorities: {
+      backlog: "/ws/roll/backlog",
+      features: "/ws/roll/features",
+      design: "/ws/roll/design",
+      requirements: "/ws/roll/requirements",
+      policy: "/ws/roll/policy",
+      evidence: "/ws/roll/evidence",
+      toolDumps: "/ws/roll/tool-dumps",
+      events: "/ws/roll/events",
+      runtime: "/ws/roll/runtime",
+      locks: "/ws/roll/locks",
+    },
   };
 }
 
@@ -170,6 +214,32 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(emitted).toBeDefined();
     expect(JSON.stringify(emitted)).not.toContain("stdout should not leak");
     expect(JSON.stringify(emitted)).not.toContain("output");
+  });
+
+  it("redacts nested invocation input before emitting tool:invoke", async () => {
+    const events = sink();
+    const registry = new ToolRegistry({
+      deps: { ...deps(), redact: (value) => value.replaceAll("SECRET", "[REDACTED]") },
+      policyEngine: policyEngine(),
+      events,
+    });
+    registry.register(tool());
+
+    const input = {
+      command: "echo",
+      args: ["SECRET", { nested: "prefix-SECRET-suffix" }],
+      env: { TOKEN: "SECRET", password: "plain-password", privateKey: "plain-key" },
+    };
+    const result = await registry.invoke(TOOL_ID, request(input));
+
+    expect(result).toMatchObject({ ok: true, output: input });
+    const emitted = events.events.find((event) => event.type === "tool:invoke");
+    expect(emitted).toBeDefined();
+    const serialized = JSON.stringify(emitted);
+    expect(serialized).not.toContain("SECRET");
+    expect(serialized).not.toContain("plain-password");
+    expect(serialized).not.toContain("plain-key");
+    expect(serialized).toContain("[REDACTED]");
   });
 
   it("emits a sanitized failure result even when emitsEvents:false suppresses success events", async () => {
@@ -454,6 +524,72 @@ describe("US-TOOL-002 ToolRegistry", () => {
 
     expect(result).toMatchObject({ ok: true, output: "ok" });
     expect(calls).toBe(2);
+  });
+
+  it("freezes Workspace context and repo selection across adapter retries", async () => {
+    const context = workspaceContext();
+    const seen: Array<{ context: WorkspaceExecutionContextV1 | undefined; repoId: string | undefined }> = [];
+    let calls = 0;
+    const registry = new ToolRegistry({
+      deps: deps(),
+      policyEngine: policyEngine({ retry: { attempts: 2, backoffMs: 0 } }),
+    });
+    registry.register(tool({
+      async execute(invocation) {
+        calls += 1;
+        seen.push({ context: invocation.context, repoId: invocation.repoId });
+        if (calls === 1) {
+          return {
+            ok: false,
+            error: { code: "timeout", message: "retry", retryable: true },
+            meta: {
+              invocationId: invocation.invocationId,
+              toolId: invocation.toolId,
+              caller: invocation.caller,
+              startedAt: 100,
+              endedAt: 101,
+              durationMs: 1,
+            },
+          };
+        }
+        return okResult(invocation, "ok");
+      },
+    }));
+
+    const result = await registry.invoke(TOOL_ID, {
+      ...request("x"),
+      context,
+      repoId: "repo-product",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      meta: { correlation: { workspaceId: "roll", storyId: "US-WS-035", repoId: "repo-product" } },
+    });
+    expect(seen).toEqual([
+      { context, repoId: "repo-product" },
+      { context, repoId: "repo-product" },
+    ]);
+    expect(seen[0]?.context).toBe(context);
+    expect(seen[1]?.context).toBe(context);
+  });
+
+  it("correlates registry failures without exposing Workspace paths", async () => {
+    const context = workspaceContext();
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });
+
+    const result = await registry.invoke(TOOL_ID, {
+      ...request(),
+      context,
+      repoId: "repo-product",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "not_found" },
+      meta: { correlation: { workspaceId: "roll", storyId: "US-WS-035", repoId: "repo-product" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("/ws/roll");
   });
 
   it("shutdown disposes initialized tools once and is idempotent", async () => {

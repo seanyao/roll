@@ -46,13 +46,13 @@ function fakeBin(name: string, script: string): void {
 }
 
 describe("US-TOOL-014 infra tool delegation", () => {
-  it("delegates public process execFile calls through the bash tool and appends events.ndjson entries", async () => {
+  it("fails closed when public process execFile has no Issue context and still appends governed events", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);
 
     const result = await execFile("node", ["-e", "process.stdout.write('ok')"], { cwd: dir });
 
-    expect(result).toMatchObject({ exitCode: 0, stdout: "ok", timedOut: false });
+    expect(result).toMatchObject({ exitCode: 1, stdout: "", stderr: "tool invocation requires an Issue execution context", timedOut: false });
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["bash", "bash"]);
   });
 
@@ -158,5 +158,48 @@ node -e 'const fs=require("fs"); const input=JSON.parse(process.argv[1]); fs.wri
     }
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["test.delegated", "test.delegated"]);
     expect(events(eventsPath).at(-1)).toMatchObject({ type: "tool:result", result: { ok: false, errorCode: "invalid_input" } });
+  });
+
+  it("redacts structured and embedded secrets before persisting invoke events", async () => {
+    const dir = tmp("invoke-redaction");
+    const eventsPath = setEventsPath(dir);
+    const declaration: ToolDeclaration = {
+      id: "test.redaction" as ToolDeclaration["id"],
+      kind: "bash",
+      title: "Redaction Test",
+      inputSchema: { type: "object", additionalProperties: true },
+      defaults: { enabled: true },
+    };
+    const input = {
+      password: "hunter2",
+      nested: {
+        apiKey: "plain-key",
+        authorization: "Bearer bearer-secret-value",
+        message: "use sk-ABCDEFGHIJKLMNOPQRSTUVWX",
+      },
+    };
+
+    await invokeInfraTool({
+      declaration,
+      input,
+      run: async (invocation) => ({
+        ok: true,
+        output: invocation.input,
+        meta: {
+          invocationId: invocation.invocationId,
+          toolId: invocation.toolId,
+          caller: invocation.caller,
+          startedAt: invocation.ts,
+          endedAt: invocation.ts,
+          durationMs: 0,
+        },
+      }),
+    });
+
+    const persisted = readFileSync(eventsPath, "utf8");
+    for (const secret of ["hunter2", "plain-key", "bearer-secret-value", "sk-ABCDEFGHIJKLMNOPQRSTUVWX"]) {
+      expect(persisted).not.toContain(secret);
+    }
+    expect(persisted).toContain("[REDACTED]");
   });
 });

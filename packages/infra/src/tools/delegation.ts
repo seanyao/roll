@@ -39,7 +39,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     await appendToolEvent({
       type: "tool:invoke",
       cycleId: caller.cycleId,
-      invocation,
+      invocation: sanitizeInvocation(invocation),
       declaration: options.declaration,
       ts: Date.now(),
     });
@@ -123,7 +123,11 @@ export async function infraToolExecFile(command: string, args: readonly string[]
 }
 
 export function redactInfraToolValue(value: string): string {
-  return value.replace(/(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)/g, "[REDACTED]");
+  return value
+    .replace(/(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,})/g, "[REDACTED]")
+    .replace(/(Bearer\s+)[^\s"']+/gi, "$1[REDACTED]")
+    .replace(/((?:password|passwd|token|secret|api[_-]?key)\s*[=:]\s*)[^\s,;"']+/gi, "$1[REDACTED]")
+    .replace(/("(?:password|passwd|token|secret|api[_-]?key)"\s*:\s*")[^"]+/gi, "$1[REDACTED]");
 }
 
 function resolveCaller(overrides: Partial<ToolCaller> | undefined): ToolCaller {
@@ -180,4 +184,29 @@ type SanitizedToolResult =
 function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
   if (result.ok) return { ok: true, meta: result.meta };
   return { ok: false, errorCode: result.error.code, meta: result.meta };
+}
+
+function sanitizeInvocation<I>(invocation: ToolInvocation<I>): ToolInvocation<I> {
+  return {
+    ...invocation,
+    input: sanitizeInvocationValue(invocation.input, undefined, new WeakSet<object>()) as I,
+  };
+}
+
+function sanitizeInvocationValue(value: unknown, key: string | undefined, seen: WeakSet<object>): unknown {
+  if (key !== undefined && sensitiveInvocationKey(key)) return "[REDACTED]";
+  if (typeof value === "string") return redactInfraToolValue(value);
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeInvocationValue(item, undefined, seen));
+  return Object.fromEntries(
+    Object.entries(value).map(([childKey, item]) => [childKey, sanitizeInvocationValue(item, childKey, seen)]),
+  );
+}
+
+function sensitiveInvocationKey(key: string): boolean {
+  const segments = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase().split(/[_-]+/u);
+  return segments.some((segment) => ["authorization", "cookie", "credential", "password", "passwd", "secret", "token"].includes(segment)) ||
+    segments.some((segment, index) => ["api", "private"].includes(segment) && segments[index + 1] === "key");
 }

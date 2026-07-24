@@ -1,4 +1,5 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname as pathDirname, isAbsolute, join, relative, resolve } from "node:path";
 import { PHYSICAL_SCREENSHOT_TOOL_CONTRACT } from "@roll/spec";
 import type { ExecResult, RollCaptureRequestV1, RollCaptureResponseV1, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
@@ -310,10 +311,43 @@ export class BrowserTool {
 
 function workspaceArtifactPathAllowed(path: string, context: NonNullable<ToolInvocation["context"]>): boolean {
   if (!isAbsolute(path)) return false;
+  const declaredWorkspaceRoot = resolve(context.workspace.canonicalRoot);
+  if (!existsSync(declaredWorkspaceRoot)) {
+    return [context.authorities.evidence, context.authorities.toolDumps].some((authority) =>
+      pathContained(resolve(authority), resolve(path)),
+    );
+  }
+  const canonicalWorkspaceRoot = canonicalizeAllowMissing(declaredWorkspaceRoot);
+  if (canonicalWorkspaceRoot === undefined || canonicalWorkspaceRoot !== declaredWorkspaceRoot) return false;
+  const canonicalTarget = canonicalizeAllowMissing(path);
+  if (canonicalTarget === undefined) return false;
   return [context.authorities.evidence, context.authorities.toolDumps].some((authority) => {
-    const descendant = relative(resolve(authority), resolve(path));
-    return descendant === "" || (descendant !== ".." && !descendant.startsWith("../") && !isAbsolute(descendant));
+    const canonicalAuthority = canonicalizeAllowMissing(authority);
+    return canonicalAuthority !== undefined &&
+      pathContained(canonicalWorkspaceRoot, canonicalAuthority) &&
+      pathContained(canonicalAuthority, canonicalTarget);
   });
+}
+
+function canonicalizeAllowMissing(path: string): string | undefined {
+  let ancestor = resolve(path);
+  const suffix: string[] = [];
+  while (!existsSync(ancestor)) {
+    const parent = pathDirname(ancestor);
+    if (parent === ancestor) return undefined;
+    suffix.unshift(basename(ancestor));
+    ancestor = parent;
+  }
+  try {
+    return resolve(realpathSync.native(ancestor), ...suffix);
+  } catch {
+    return undefined;
+  }
+}
+
+function pathContained(root: string, target: string): boolean {
+  const descendant = relative(root, target);
+  return descendant === "" || (descendant !== ".." && !descendant.startsWith("../") && !isAbsolute(descendant));
 }
 
 function browserInputSchema(id: BrowserToolId): ToolDeclaration["inputSchema"] {

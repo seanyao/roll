@@ -1,7 +1,7 @@
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
-import { isCanonicalPathContained, resolveContainedExistingPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
+import { isCanonicalPathContained, resolveContainedExistingPath, resolveContainedPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
 
 export interface BashInput {
   command: string;
@@ -67,6 +67,18 @@ export class BashTool {
         error: {
           code: "sandbox_denied",
           message: "bash cwd is outside allowedPaths",
+          retryable: false,
+        },
+        meta: meta(boundInvocation, startedAt, deps.now()),
+        warnings,
+      };
+    }
+    if (!argumentsContained(input.args ?? [], cwd, repository.canonicalWorktreePath)) {
+      return {
+        ok: false,
+        error: {
+          code: "sandbox_denied",
+          message: "bash path argument is outside the selected Issue repository",
           retryable: false,
         },
         meta: meta(boundInvocation, startedAt, deps.now()),
@@ -150,6 +162,22 @@ function allowed(cwd: string, repositoryRoot: string, allowedPaths: readonly str
 function advisoryWarnings(command: string, blockedCommands: readonly string[] | undefined): string[] {
   if (blockedCommands === undefined) return [];
   return blockedCommands.includes(command) ? [`blocked command advisory: ${command}`] : [];
+}
+
+function argumentsContained(args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
+    const equalsValue = argument.startsWith("-") && argument.includes("=")
+      ? argument.slice(argument.indexOf("=") + 1)
+      : undefined;
+    const candidate = args[index - 1] === "-C" ? argument : equalsValue ?? argument;
+    const pathLike = isAbsolute(candidate) || candidate === ".." || candidate.startsWith("../") || candidate.includes("/../");
+    if (!pathLike) continue;
+    const base = isAbsolute(candidate) ? repositoryRoot : cwd;
+    const resolved = resolveContainedPath(repositoryRoot, resolve(base, candidate), true);
+    if (resolved === undefined) return false;
+  }
+  return true;
 }
 
 function redactEnv(env: Record<string, string> | undefined, deps: ToolDeps): Record<string, string> | undefined {

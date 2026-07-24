@@ -1,4 +1,8 @@
-import { parseWorkspaceExecutionContext, type ToolInvokeRequest } from "@roll/core";
+import {
+  parseWorkspaceExecutionContext,
+  resolveWorkspaceExecutionContextScope,
+  type ToolInvokeRequest,
+} from "@roll/core";
 import type { WorkspaceExecutionContextV1 } from "@roll/spec";
 
 export interface WorkspaceToolCycleContext {
@@ -27,7 +31,11 @@ export interface WorkspaceToolInvocationFactory {
 export function createWorkspaceToolInvocationFactory(input: WorkspaceToolCycleContext): WorkspaceToolInvocationFactory {
   const parsed = parseWorkspaceExecutionContext(input.workspace);
   if (!parsed.ok) throw invalid("runner Workspace execution context is invalid");
-  const cloned = structuredClone(parsed.value);
+  const scoped = resolveWorkspaceExecutionContextScope({ scope: "issue_required", context: parsed.value });
+  if (!scoped.ok || scoped.context === undefined) {
+    throw invalid("runner Workspace execution context is invalid");
+  }
+  const cloned = structuredClone(scoped.context);
   const issue = cloned.issue;
   if (
     input.cycleId.trim() === "" ||

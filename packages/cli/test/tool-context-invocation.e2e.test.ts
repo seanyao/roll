@@ -1,10 +1,10 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolRegistry, type ToolRegistryEventSink } from "@roll/core";
+import { deriveWorkspaceExecutionAuthorities, ToolRegistry, type ToolRegistryEventSink } from "@roll/core";
 import { BashTool } from "@roll/infra";
 import type { ExecOpts, MinimalFs, ToolDeps, ToolEvent, WorkspaceExecutionContextV1 } from "@roll/spec";
-import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
+import { REPOSITORY_BINDING_V1, WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { afterAll, describe, expect, it } from "vitest";
 import { createWorkspaceToolInvocationFactory } from "../src/runner/tool-context-invocation.js";
 
@@ -26,7 +26,15 @@ function workspace(root: string, repositories: Readonly<Record<string, { path: s
     schema: WORKSPACE_EXECUTION_CONTEXT_V1,
     workspace: { workspaceId: "roll", root, canonicalRoot: root, lifecycle: "active" },
     resolution: { source: "explicit", evidence: [] },
-    bindings: [],
+    bindings: Object.keys(repositories).map((repoId) => ({
+      schema: REPOSITORY_BINDING_V1,
+      repoId,
+      alias: repoId,
+      remote: `git@github.com:example/${repoId}.git`,
+      integrationBranch: "idea-074-workspace",
+      provider: "github" as const,
+      workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+    })),
     issue: {
       storyId: "US-WS-035",
       manifestPath: join(issueRoot, "manifest.json"),
@@ -49,18 +57,7 @@ function workspace(root: string, repositories: Readonly<Record<string, { path: s
         ])),
       },
     },
-    authorities: {
-      backlog: join(root, "backlog"),
-      features: join(root, "features"),
-      design: join(root, "design"),
-      requirements: join(root, "requirements"),
-      policy: join(root, "policy"),
-      evidence: join(root, "evidence"),
-      toolDumps: join(root, "tool-dumps"),
-      events: join(root, "events"),
-      runtime: join(root, "runtime"),
-      locks: join(root, "locks"),
-    },
+    authorities: deriveWorkspaceExecutionAuthorities(root),
   };
 }
 
@@ -172,6 +169,21 @@ describe("US-WS-035 runner to adapter Workspace context", () => {
       cycleId: "cycle-3",
       storyId: "US-OTHER",
       workspace: workspace(root, { product: { path: repo, access: "write" } }),
+    })).toThrowError(/invalid_execution_context/u);
+  });
+
+  it("rejects a schema-valid context whose repository escapes the canonical Issue root", () => {
+    const root = tmp("forged-repository");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    const outside = tmp("forged-outside");
+    mkdirSync(repo, { recursive: true });
+    const forged = workspace(root, { product: { path: repo, access: "write" } });
+    (forged.issue!.execution.repositories.product as { worktreePath: string }).worktreePath = outside;
+
+    expect(() => createWorkspaceToolInvocationFactory({
+      cycleId: "cycle-forged",
+      storyId: "US-WS-035",
+      workspace: forged,
     })).toThrowError(/invalid_execution_context/u);
   });
 });

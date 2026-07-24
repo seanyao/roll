@@ -27,7 +27,7 @@ const declaration: ToolDeclaration = {
   },
 };
 
-function deps(): ToolDeps {
+function deps(redact: ToolDeps["redact"] = (value) => value): ToolDeps {
   const fs: MinimalFs = {
     readFile: async () => "",
     writeFile: async () => undefined,
@@ -37,7 +37,7 @@ function deps(): ToolDeps {
     fs,
     now: () => 100,
     execFile: async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }),
-    redact: (value) => value,
+    redact,
   };
 }
 
@@ -215,6 +215,27 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(emitted).toBeDefined();
     expect(JSON.stringify(emitted)).not.toContain("stdout should not leak");
     expect(JSON.stringify(emitted)).not.toContain("output");
+  });
+
+  it("redacts nested invocation input in events without changing adapter input", async () => {
+    const events = sink();
+    const secret = "token-secret";
+    const registry = new ToolRegistry({
+      deps: deps((value) => value.replaceAll(secret, "[REDACTED]")),
+      policyEngine: policyEngine(),
+      events,
+    });
+    registry.register(tool());
+
+    const input = { token: secret, nested: { headers: [secret] } };
+    const result = await registry.invoke(TOOL_ID, request(input));
+
+    expect(result).toMatchObject({ ok: true, output: input });
+    const emitted = events.events.find((event) => event.type === "tool:invoke");
+    expect(JSON.stringify(emitted)).not.toContain(secret);
+    expect(emitted).toMatchObject({
+      invocation: { input: { token: "[REDACTED]", nested: { headers: ["[REDACTED]"] } } },
+    });
   });
 
   it("emits a sanitized failure result even when emitsEvents:false suppresses success events", async () => {

@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
-import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
+import { REPOSITORY_BINDING_V1, WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   FsTool,
@@ -23,9 +24,11 @@ afterAll(() => {
 });
 
 function tmpRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "roll-fs-tool-"));
-  dirs.push(dir);
-  return dir;
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "roll-fs-tool-"));
+  const repositoryRoot = join(workspaceRoot, "issues", "US-TOOL-008", "repo");
+  mkdirSync(repositoryRoot, { recursive: true });
+  dirs.push(workspaceRoot);
+  return repositoryRoot;
 }
 
 const policy = (sandbox: ToolPolicy["sandbox"] = {}): ToolPolicy => ({
@@ -35,6 +38,8 @@ const policy = (sandbox: ToolPolicy["sandbox"] = {}): ToolPolicy => ({
 });
 
 function invocation<I>(toolId: FsToolId, input: I, root: string, sandbox: ToolPolicy["sandbox"] = {}): ToolInvocation<I> {
+  const issueRoot = dirname(root);
+  const workspaceRoot = resolve(root, "../../..");
   return {
     invocationId: `inv-${toolId}`,
     toolId: toolId as ToolInvocation<I>["toolId"],
@@ -44,15 +49,23 @@ function invocation<I>(toolId: FsToolId, input: I, root: string, sandbox: ToolPo
     ts: 100,
     context: {
       schema: WORKSPACE_EXECUTION_CONTEXT_V1,
-      workspace: { workspaceId: "roll", root, canonicalRoot: root, lifecycle: "active" },
+      workspace: { workspaceId: "roll", root: workspaceRoot, canonicalRoot: workspaceRoot, lifecycle: "active" },
       resolution: { source: "explicit", evidence: [] },
-      bindings: [],
+      bindings: [{
+        schema: REPOSITORY_BINDING_V1,
+        repoId: "repo",
+        alias: "repo",
+        remote: "git@github.com:example/repo.git",
+        integrationBranch: "main",
+        provider: "github",
+        workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+      }],
       issue: {
         storyId: "US-TOOL-008",
-        manifestPath: join(root, "manifest.json"),
+        manifestPath: join(issueRoot, "manifest.json"),
         execution: {
           workspaceId: "roll",
-          issueRoot: root,
+          issueRoot,
           repositories: {
             repo: {
               repoId: "repo",
@@ -68,18 +81,7 @@ function invocation<I>(toolId: FsToolId, input: I, root: string, sandbox: ToolPo
           },
         },
       },
-      authorities: {
-        backlog: join(root, "backlog"),
-        features: join(root, "features"),
-        design: join(root, "design"),
-        requirements: join(root, "requirements"),
-        policy: join(root, "policy"),
-        evidence: join(root, "evidence"),
-        toolDumps: join(root, "tool-dumps"),
-        events: join(root, "events"),
-        runtime: join(root, "runtime"),
-        locks: join(root, "locks"),
-      },
+      authorities: deriveWorkspaceExecutionAuthorities(workspaceRoot),
     },
     repoId: "repo",
   };

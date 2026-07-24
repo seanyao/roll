@@ -1,3 +1,5 @@
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import {
@@ -25,8 +27,8 @@ const root = "/workspaces/alpha";
 const storyId = "US-WS-036";
 const repoId = "repo-product";
 
-function context(workspaceId = "alpha"): WorkspaceExecutionContextV1 {
-  const canonicalRoot = workspaceId === "alpha" ? root : `/workspaces/${workspaceId}`;
+function context(workspaceId = "alpha", rootOverride?: string): WorkspaceExecutionContextV1 {
+  const canonicalRoot = rootOverride ?? (workspaceId === "alpha" ? root : `/workspaces/${workspaceId}`);
   const issueRoot = join(canonicalRoot, "issues", storyId);
   return {
     schema: WORKSPACE_EXECUTION_CONTEXT_V1,
@@ -167,6 +169,33 @@ describe("US-WS-036 external tools consume frozen Workspace authority", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
     expect(dependencies.calls).toHaveLength(0);
     expect(dependencies.writes.size).toBe(0);
+  });
+
+  it("rejects a browser artifact path that escapes through an authority symlink", async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "roll-tool-artifact-workspace-"));
+    const outside = mkdtempSync(join(tmpdir(), "roll-tool-artifact-outside-"));
+    const executionContext = context("symlink", workspaceRoot);
+    const escape = join(executionContext.authorities.toolDumps, "escape");
+    mkdirSync(executionContext.authorities.toolDumps, { recursive: true });
+    symlinkSync(outside, escape);
+    const dependencies = deps();
+
+    try {
+      const result = await new BrowserTool("browser.screenshot").execute(
+        invocation<BrowserScreenshotInput>("browser.screenshot", {
+          url: "https://example.test",
+          screenshotPath: join(escape, "outside.png"),
+        }, executionContext),
+        dependencies,
+      );
+
+      expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+      expect(dependencies.calls).toHaveLength(0);
+      expect(dependencies.writes.size).toBe(0);
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("rejects a physical capture path outside Workspace authorities before provider mutation", async () => {

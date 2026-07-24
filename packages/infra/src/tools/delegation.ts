@@ -22,6 +22,7 @@ const execFileAsync = promisify(nodeExecFile);
 export interface InfraToolOptions<I, O> {
   declaration: ToolDeclaration;
   input: I;
+  scope: WorkspaceContextScope;
   caller?: Partial<ToolCaller>;
   context?: WorkspaceExecutionContextV1;
   repoId?: string;
@@ -33,16 +34,10 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
   const caller = resolveCaller(options.caller);
   const environmentContext = options.context === undefined ? executionContextFromEnvironment() : undefined;
   const context = options.context ?? (environmentContext?.ok === true ? environmentContext.context : undefined);
-  // Legacy infrastructure helpers also use this seam for machine bootstrap. Once a
-  // Story identity or repository selector is present, the call is agent-facing and
-  // must carry the frozen Workspace context instead of falling back to host cwd.
-  const scope = context !== undefined || caller.storyId !== undefined || options.repoId !== undefined
-    ? delegatedScope(options.declaration, options.repoId)
-    : "machine_only";
   const contextResolution = environmentContext?.ok === false
     ? environmentContext
     : resolveWorkspaceExecutionContextScope({
-        scope,
+        scope: options.scope,
         context,
       });
   const frozenContext = contextResolution.ok ? contextResolution.context : undefined;
@@ -62,7 +57,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
       await appendToolEvent({
         type: "tool:invoke",
         cycleId: caller.cycleId,
-        invocation,
+        invocation: sanitizeInvocation(invocation),
         declaration: options.declaration,
         ts: Date.now(),
       });
@@ -92,7 +87,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     await appendToolEvent({
       type: "tool:invoke",
       cycleId: caller.cycleId,
-      invocation,
+      invocation: sanitizeInvocation(invocation),
       declaration: options.declaration,
       ts: Date.now(),
     }, invocation.context);
@@ -150,16 +145,6 @@ function executionContextFromEnvironment():
   } catch {
     return { ok: false, error: { code: "invalid_execution_context", message: "ROLL_WORKSPACE_EXECUTION_CONTEXT is invalid" } };
   }
-}
-
-function delegatedScope(declaration: ToolDeclaration, repoId: string | undefined): WorkspaceContextScope {
-  if (repoId !== undefined || ["bash", "filesystem", "git"].includes(String(declaration.kind))) {
-    return "repository_required";
-  }
-  if (["browser", "physical", "github", "mcp", "network"].includes(String(declaration.kind))) {
-    return "issue_required";
-  }
-  return "workspace_required_read";
 }
 
 function invocationMeta(
@@ -274,4 +259,22 @@ type SanitizedToolResult =
 function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
   if (result.ok) return { ok: true, meta: result.meta };
   return { ok: false, errorCode: result.error.code, meta: result.meta };
+}
+
+function sanitizeInvocation<I>(invocation: ToolInvocation<I>): ToolInvocation<I> {
+  return {
+    ...invocation,
+    input: sanitizeInvocationValue(invocation.input) as I,
+  };
+}
+
+function sanitizeInvocationValue(value: unknown): unknown {
+  if (typeof value === "string") return redactInfraToolValue(value);
+  if (Array.isArray(value)) return value.map(sanitizeInvocationValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeInvocationValue(item)]),
+    );
+  }
+  return value;
 }

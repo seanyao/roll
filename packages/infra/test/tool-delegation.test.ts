@@ -63,6 +63,7 @@ describe("US-TOOL-014 infra tool delegation", () => {
     const result = await invokeInfraTool({
       declaration,
       input: { url: "https://example.test" },
+      scope: "repository_required",
       caller: { cycleId: "cycle-context", storyId: "US-WS-036", agent: "codex" },
       context: executionContext,
       repoId: TOOL_TEST_REPO_ID,
@@ -110,6 +111,7 @@ describe("US-TOOL-014 infra tool delegation", () => {
     const result = await invokeInfraTool({
       declaration,
       input: { url: "https://example.test" },
+      scope: "repository_required",
       caller: { cycleId: "cycle-context", storyId: "US-WS-036", agent: "codex" },
       context: executionContext,
       repoId: TOOL_TEST_REPO_ID,
@@ -132,14 +134,13 @@ describe("US-TOOL-014 infra tool delegation", () => {
     expect(existsSync(redirected)).toBe(false);
   });
 
-  it("fails closed when public process execFile has no Issue context and still appends governed events", async () => {
+  it("keeps the legacy machine process wrapper explicit even when Story environment is present", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);
 
     const result = await execFile("node", ["-e", "process.stdout.write('ok')"], { cwd: dir });
 
-    expect(result).toMatchObject({ exitCode: 1, stdout: "", timedOut: false });
-    expect(result.stderr).toContain("Workspace execution context");
+    expect(result).toMatchObject({ exitCode: 0, stdout: "ok", timedOut: false });
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["bash", "bash"]);
   });
 
@@ -157,6 +158,7 @@ describe("US-TOOL-014 infra tool delegation", () => {
     const result = await invokeInfraTool({
       declaration,
       input: { command: "pwd" },
+      scope: "repository_required",
       run: async (invocation) => {
         ran = true;
         return {
@@ -179,7 +181,7 @@ describe("US-TOOL-014 infra tool delegation", () => {
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["bash.test", "bash.test"]);
   });
 
-  it("fails closed when public git commit has no Workspace context", async () => {
+  it("keeps the legacy machine git wrapper available without Workspace context", async () => {
     const repo = tmp("git");
     const eventsPath = setEventsPath(repo);
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
@@ -190,13 +192,12 @@ describe("US-TOOL-014 infra tool delegation", () => {
 
     const result = await commit(repo, "add file");
 
-    expect(result).toMatchObject({ code: 1, stdout: "" });
-    expect(result.stderr).toContain("Workspace execution context");
-    expect(() => execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repo })).toThrow();
+    expect(result).toMatchObject({ code: 0 });
+    expect(execFileSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toMatch(/^[0-9a-f]{40}$/u);
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["git.commit", "git.commit"]);
   });
 
-  it("fails closed when public GitHub PR creation has no Workspace context", async () => {
+  it("keeps the legacy machine GitHub wrapper available without Workspace context", async () => {
     const dir = tmp("gh");
     const eventsPath = setEventsPath(dir);
     fakeBin("gh", `#!/bin/sh
@@ -210,7 +211,7 @@ exit 2
 
     const url = await prCreate({ slug: "o/r", head: "topic", title: "Title", body: "Body" });
 
-    expect(url).toBe("");
+    expect(url).toBe("https://github.com/o/r/pull/42");
     expect(events(eventsPath).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual(["github.pr", "github.pr"]);
   });
 
@@ -258,6 +259,7 @@ node -e 'const fs=require("fs"); const input=JSON.parse(process.argv[1]); fs.wri
     const result = await invokeInfraTool({
       declaration,
       input: { args: ["--version"] },
+      scope: "repository_required",
       context: executionContext,
       repoId: TOOL_TEST_REPO_ID,
       run: async (invocation) => {

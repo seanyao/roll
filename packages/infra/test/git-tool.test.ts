@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
-import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
+import { REPOSITORY_BINDING_V1, WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   GitTool,
@@ -32,7 +33,9 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 function initRepo(tag: string): string {
-  const dir = tmp(tag);
+  const workspaceRoot = tmp(tag);
+  const dir = join(workspaceRoot, "issues", "US-TOOL-006", "repo");
+  mkdirSync(dir, { recursive: true });
   git(dir, "init", "-q", "-b", "main");
   git(dir, "config", "user.email", "t@t");
   git(dir, "config", "user.name", "t");
@@ -44,6 +47,8 @@ const policy = (): ToolPolicy => ({ enabled: true, timeoutMs: 1000, sandbox: {} 
 
 function invocation<I>(toolId: GitToolId, input: I): ToolInvocation<I> {
   const cwd = (input as { cwd: string }).cwd;
+  const issueRoot = dirname(cwd);
+  const workspaceRoot = resolve(cwd, "../../..");
   return {
     invocationId: `inv-${toolId}`,
     toolId: toolId as ToolInvocation<I>["toolId"],
@@ -53,15 +58,23 @@ function invocation<I>(toolId: GitToolId, input: I): ToolInvocation<I> {
     ts: 100,
     context: {
       schema: WORKSPACE_EXECUTION_CONTEXT_V1,
-      workspace: { workspaceId: "roll", root: cwd, canonicalRoot: cwd, lifecycle: "active" },
+      workspace: { workspaceId: "roll", root: workspaceRoot, canonicalRoot: workspaceRoot, lifecycle: "active" },
       resolution: { source: "explicit", evidence: [] },
-      bindings: [],
+      bindings: [{
+        schema: REPOSITORY_BINDING_V1,
+        repoId: "repo",
+        alias: "repo",
+        remote: "git@github.com:example/repo.git",
+        integrationBranch: "main",
+        provider: "github",
+        workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+      }],
       issue: {
         storyId: "US-TOOL-006",
-        manifestPath: join(cwd, "manifest.json"),
+        manifestPath: join(issueRoot, "manifest.json"),
         execution: {
           workspaceId: "roll",
-          issueRoot: cwd,
+          issueRoot,
           repositories: {
             repo: {
               repoId: "repo",
@@ -77,18 +90,7 @@ function invocation<I>(toolId: GitToolId, input: I): ToolInvocation<I> {
           },
         },
       },
-      authorities: {
-        backlog: join(cwd, "backlog"),
-        features: join(cwd, "features"),
-        design: join(cwd, "design"),
-        requirements: join(cwd, "requirements"),
-        policy: join(cwd, "policy"),
-        evidence: join(cwd, "evidence"),
-        toolDumps: join(cwd, "tool-dumps"),
-        events: join(cwd, "events"),
-        runtime: join(cwd, "runtime"),
-        locks: join(cwd, "locks"),
-      },
+      authorities: deriveWorkspaceExecutionAuthorities(workspaceRoot),
     },
     repoId: "repo",
   };
@@ -149,7 +151,9 @@ describe("US-TOOL-006 GitTool", () => {
 
   it("pushes a branch to a configured remote", async () => {
     const origin = initRepo("push-origin");
-    const repo = tmp("push-clone");
+    const cloneWorkspace = tmp("push-clone");
+    const repo = join(cloneWorkspace, "issues", "US-TOOL-006", "repo");
+    mkdirSync(dirname(repo), { recursive: true });
     git(tmp("push-base"), "clone", "-q", origin, repo);
     git(repo, "config", "user.email", "t@t");
     git(repo, "config", "user.name", "t");

@@ -190,7 +190,7 @@ export class ToolRegistry {
       await this.emit({
         type: "tool:invoke",
         cycleId: request.caller.cycleId,
-        invocation,
+        invocation: sanitizeInvocation(invocation, this.options.deps.redact),
         declaration: state.tool.declaration,
         ts: startedAt,
       } as ToolEvent);
@@ -333,6 +333,24 @@ export class ToolRegistry {
       outputBytes: (current.outputBytes ?? 0) + jsonBytes(output),
     });
   }
+}
+
+function sanitizeInvocation<I>(invocation: ToolInvocation<I>, redact: ToolDeps["redact"]): ToolInvocation<I> {
+  return {
+    ...invocation,
+    input: sanitizeInvocationValue(invocation.input, redact) as I,
+  };
+}
+
+function sanitizeInvocationValue(value: unknown, redact: ToolDeps["redact"]): unknown {
+  if (typeof value === "string") return redact(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeInvocationValue(item, redact));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeInvocationValue(item, redact)]),
+    );
+  }
+  return value;
 }
 
 function toolCostKey(toolId: ToolId, value: ToolContextCorrelation | undefined): string {

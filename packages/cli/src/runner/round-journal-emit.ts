@@ -44,26 +44,33 @@ function resolveEra(): string {
 export function recordSpawnRound(ports: Ports, ctx: CycleContext, turn: RoundTurn): void {
   const storyId = ctx.storyId ?? "";
   if (storyId === "") return; // story-less cycles have no card to journal into
+  const repoCwd = ports.repoCwd;
   const model = turn.model ?? (ctx.model !== undefined && ctx.model !== "" ? ctx.model : undefined);
   const cycleId = ctx.cycleId;
-  let cardDir: string;
-  try {
-    cardDir = cardArchiveDir(ports.repoCwd, storyId);
-  } catch {
-    return; // cannot resolve a card dir → nothing to journal
-  }
-  // Fire-and-forget async append — never awaited, never blocks the hot path.
-  void appendRoundEntryAsync(cardDir, {
-    card: storyId,
-    role: turn.role,
-    ...(model !== undefined ? { model } : {}),
-    start: turn.start,
-    durMs: turn.durMs,
-    outcome: turn.outcome,
-    ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
-    era: resolveEra(),
-    ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
-  }).catch(() => {
-    /* best-effort observability — never affect the cycle */
+  // The ENTIRE journal write — including cardArchiveDir (which resolves the epic
+  // via a synchronous .roll/features scan / index read) and the async append —
+  // is deferred off the caller's tick via setImmediate. So the delivery critical
+  // path (the spawn handler continuing + returning) is never delayed by any
+  // filesystem work, and the append itself is async (yields the event loop).
+  setImmediate(() => {
+    let cardDir: string;
+    try {
+      cardDir = cardArchiveDir(repoCwd, storyId);
+    } catch {
+      return; // cannot resolve a card dir → nothing to journal
+    }
+    void appendRoundEntryAsync(cardDir, {
+      card: storyId,
+      role: turn.role,
+      ...(model !== undefined ? { model } : {}),
+      start: turn.start,
+      durMs: turn.durMs,
+      outcome: turn.outcome,
+      ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
+      era: resolveEra(),
+      ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
+    }).catch(() => {
+      /* best-effort observability — never affect the cycle */
+    });
   });
 }

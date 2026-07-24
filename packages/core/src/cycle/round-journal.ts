@@ -142,9 +142,12 @@ export interface ReadResult {
  * (derived purely from already-read entries).
  */
 export function deriveRounds(entries: readonly RoundJournalEntry[]): (RoundJournalEntry & { round: number })[] {
+  // Single monotonic counter shared by BOTH cycle groups and cycle-less entries,
+  // so a stored/legacy `round` can never collide with a cycle-derived one. Turns
+  // sharing a `cycleId` map to the same round; each cycle-less entry gets its own.
   const cycleRound = new Map<string, number>();
   let next = 0;
-  return entries.map((e, idx) => {
+  return entries.map((e) => {
     let round: number;
     if (typeof e.cycleId === "string" && e.cycleId !== "") {
       const seen = cycleRound.get(e.cycleId);
@@ -155,7 +158,8 @@ export function deriveRounds(entries: readonly RoundJournalEntry[]): (RoundJourn
         round = next;
       }
     } else {
-      round = typeof e.round === "number" ? e.round : idx + 1;
+      next += 1;
+      round = next;
     }
     return { ...e, round };
   });

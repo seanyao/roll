@@ -296,6 +296,10 @@ describe("US-WS-010 repository Builder context", () => {
     };
 
     const repositories = ports.repositories?.bind(ctx);
+    expect(await repositories?.git.commitsAhead(fixture.repoId)).toBe(0);
+    expect(await repositories?.git.tcrCount(fixture.repoId)).toBe(0);
+    expect(await repositories?.git.recentCommits(fixture.repoId)).toEqual([]);
+    expect(await repositories?.git.headSha(fixture.repoId)).toBe(fixture.headSha);
     const verification = await repositories?.verification.runRepository(
       fixture.repoId,
       ["node", "-e", "process.stdout.write('verified')"],
@@ -308,7 +312,11 @@ describe("US-WS-010 repository Builder context", () => {
     const toolEventsPath = join(fixture.root, "runtime", "events", "tools.ndjson");
     const events = readFileSync(toolEventsPath, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(events.filter((event) => event["type"] === "tool:invoke")).toEqual([
+    const invocations = events.filter((event) => event["type"] === "tool:invoke");
+    expect(invocations.filter((event) => (
+      event["invocation"] as Record<string, unknown> | undefined
+    )?.["toolId"] === "runner.git.query")).toHaveLength(4);
+    expect(invocations).toEqual(expect.arrayContaining([
       expect.objectContaining({
         type: "tool:invoke",
         cycleId: ctx.cycleId,
@@ -326,7 +334,7 @@ describe("US-WS-010 repository Builder context", () => {
         cycleId: ctx.cycleId,
         invocation: expect.objectContaining({ toolId: "git.push", repoId: fixture.repoId }),
       }),
-    ]);
+    ]));
     expect(readFileSync(toolEventsPath, "utf8")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz");
   });
 

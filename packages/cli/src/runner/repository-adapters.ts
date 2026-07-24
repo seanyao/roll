@@ -2,14 +2,18 @@ import { execFile } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { ToolRegistry, type CycleContext, type ObservedCommit } from "@roll/core";
+import { ToolRegistry, type CycleContext, type ObservedCommit, type Tool } from "@roll/core";
 import {
-  BashTool, GitTool, ghRepoSlug, infraToolExecFile, infraToolFs, prViewMergeInfo,
+  BashTool, GitTool, canonicalExistingPath, ghRepoSlug, infraToolExecFile, infraToolFs, prViewMergeInfo,
   prViewState, push as gitPush, redactInfraToolValue, remoteUrl,
+  resolveWorkspaceLocalRepository,
   type BashInput, type BashOutput, type GitCommandOutput, type GitPushInput,
   type GitStatusInput, type GitStatusOutput,
 } from "@roll/infra";
-import type { CycleRepositoryExecutionContext, RepositoryExecutionContext, ToolDeps, ToolEvent } from "@roll/spec";
+import type {
+  CycleRepositoryExecutionContext, RepositoryExecutionContext, ToolDeclaration, ToolDeps,
+  ToolEvent, ToolInvocation, ToolMeta, ToolResult,
+} from "@roll/spec";
 import type { RepositoryPortAdapters } from "./ports.js";
 import { buildRepositoryWorkspaceExecutionContext } from "./repository-context.js";
 import { createWorkspaceToolInvocationFactory } from "./tool-context-invocation.js";
@@ -87,10 +91,78 @@ async function runRepositoryCommand(cwd: string, command: readonly string[], env
 }
 
 interface RepositoryToolRuntime {
+  commitsAhead(repository: RepositoryExecutionContext): Promise<number>;
+  tcrCount(repository: RepositoryExecutionContext): Promise<number>;
+  recentCommits(repository: RepositoryExecutionContext): Promise<ObservedCommit[]>;
   dirty(repository: RepositoryExecutionContext): Promise<boolean>;
+  headSha(repository: RepositoryExecutionContext): Promise<string>;
   push(repository: RepositoryExecutionContext, branch: string): Promise<{ code: number }>;
   runRepository(repository: RepositoryExecutionContext, command: readonly string[], env: Readonly<Record<string, string>>): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   runIntegration(execution: CycleRepositoryExecutionContext, command: readonly string[], env: Readonly<Record<string, string>>): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+}
+
+type GitQueryOperation = "commits_ahead" | "tcr_count" | "recent_commits" | "head_sha";
+interface GitQueryInput { cwd: string; operation: GitQueryOperation; baseSha?: string }
+interface GitQueryOutput { exitCode: number; stdout: string; stderr: string }
+
+class RepositoryGitQueryTool implements Tool<GitQueryInput, GitQueryOutput> {
+  readonly declaration: ToolDeclaration = {
+    id: "runner.git.query" as ToolDeclaration["id"],
+    kind: "git",
+    title: "Runner Git Query",
+    description: "Run fixed read-only repository observations in a bound Workspace context.",
+    defaults: { enabled: true, timeoutMs: 30_000 },
+    requirements: [{ kind: "executable", name: "git", optional: false }],
+  };
+
+  async init(): Promise<void> { return undefined; }
+  async dispose(): Promise<void> { return undefined; }
+
+  async execute(invocation: ToolInvocation<GitQueryInput>, deps: ToolDeps): Promise<ToolResult<GitQueryOutput>> {
+    const startedAt = deps.now();
+    const repository = resolveWorkspaceLocalRepository(invocation, "read");
+    if (!repository.ok) return queryFailure(invocation, startedAt, deps.now(), repository.code, repository.message);
+    const cwd = canonicalExistingPath(invocation.input.cwd);
+    if (cwd === undefined || cwd !== repository.canonicalWorktreePath) {
+      return queryFailure(invocation, startedAt, deps.now(), "invalid_execution_context", "git query cwd does not match the selected Issue repository");
+    }
+    const args = gitQueryArgs(invocation.input);
+    if (args === undefined) return queryFailure(invocation, startedAt, deps.now(), "invalid_input", "git query input is invalid");
+    try {
+      const output = await deps.execFile("git", args, { cwd, timeoutMs: invocation.policy.timeoutMs });
+      return {
+        ok: true,
+        output: { exitCode: output.exitCode, stdout: output.stdout, stderr: output.stderr },
+        meta: queryMeta(invocation, startedAt, deps.now()),
+      };
+    } catch {
+      return queryFailure(invocation, startedAt, deps.now(), "adapter_error", "git query execution failed", true);
+    }
+  }
+}
+
+function gitQueryArgs(input: GitQueryInput): string[] | undefined {
+  if (input.operation === "head_sha") return ["rev-parse", "HEAD"];
+  if (input.baseSha === undefined || !/^[0-9a-f]{40,64}$/u.test(input.baseSha)) return undefined;
+  const range = `${input.baseSha}..HEAD`;
+  if (input.operation === "commits_ahead") return ["rev-list", "--count", range];
+  if (input.operation === "tcr_count") return ["log", "--oneline", range];
+  return ["log", "--reverse", "--format=%H%x09%ct%x09%s", range];
+}
+
+function queryMeta(invocation: ToolInvocation<GitQueryInput>, startedAt: number, endedAt: number): ToolMeta {
+  return {
+    invocationId: invocation.invocationId, toolId: invocation.toolId, caller: invocation.caller,
+    startedAt, endedAt, durationMs: Math.max(0, endedAt - startedAt),
+  };
+}
+
+function queryFailure(
+  invocation: ToolInvocation<GitQueryInput>, startedAt: number, endedAt: number,
+  code: "missing_execution_context" | "invalid_execution_context" | "invalid_input" | "adapter_error",
+  message: string, retryable = false,
+): ToolResult<never> {
+  return { ok: false, error: { code, message, retryable }, meta: queryMeta(invocation, startedAt, endedAt) };
 }
 
 function createRepositoryToolRuntime(ctx: CycleContext): RepositoryToolRuntime {
@@ -127,6 +199,7 @@ function createRepositoryToolRuntime(ctx: CycleContext): RepositoryToolRuntime {
   registry.register(new BashTool());
   registry.register(new GitTool("git.status"));
   registry.register(new GitTool("git.push"));
+  registry.register(new RepositoryGitQueryTool());
   let invocation = 0;
   const invocationId = (toolId: string): string => `${ctx.cycleId}:${toolId}:${++invocation}`;
   const runRepository = async (repository: RepositoryExecutionContext, command: readonly string[], env: Readonly<Record<string, string>>) => {
@@ -139,13 +212,38 @@ function createRepositoryToolRuntime(ctx: CycleContext): RepositoryToolRuntime {
     if (!result.ok) throw new Error(`repository_tool_failed: ${result.error.code}`);
     return { exitCode: result.output.exitCode, stdout: result.output.stdout, stderr: result.output.stderr };
   };
+  const query = async (repository: RepositoryExecutionContext, operation: GitQueryOperation): Promise<GitQueryOutput> => {
+    const result = await registry.invoke<GitQueryInput, GitQueryOutput>("runner.git.query", requests.request({
+      invocationId: invocationId("runner.git.query"), repoId: repository.repoId,
+      input: { cwd: repository.worktreePath, operation, ...(operation === "head_sha" ? {} : { baseSha: repository.baseSha }) },
+    }));
+    if (!result.ok) throw new Error(`repository_tool_failed: ${result.error.code}`);
+    if (result.output.exitCode !== 0) throw new Error(`repository_git_query_failed: ${operation}`);
+    return result.output;
+  };
   return {
+    async commitsAhead(repository) {
+      const count = Number((await query(repository, "commits_ahead")).stdout.trim());
+      if (!Number.isInteger(count) || count < 0) throw new Error("invalid commits-ahead result");
+      return count;
+    },
+    async tcrCount(repository) {
+      return (await query(repository, "tcr_count")).stdout.split("\n").filter((line) => line.includes(" tcr:")).length;
+    },
+    async recentCommits(repository) {
+      return parseRecentCommits((await query(repository, "recent_commits")).stdout);
+    },
     async dirty(repository) {
       const result = await registry.invoke<GitStatusInput, GitStatusOutput>("git.status", requests.request({
         invocationId: invocationId("git.status"), repoId: repository.repoId, input: { cwd: repository.worktreePath },
       }));
       if (!result.ok) throw new Error(`repository_tool_failed: ${result.error.code}`);
       return !result.output.clean;
+    },
+    async headSha(repository) {
+      const head = (await query(repository, "head_sha")).stdout.trim();
+      if (!/^[0-9a-f]{40,64}$/u.test(head)) throw new Error("invalid repository head");
+      return head;
     },
     async push(repository, branch) {
       const result = await registry.invoke<GitPushInput, GitCommandOutput>("git.push", requests.request({
@@ -166,13 +264,26 @@ function createRepositoryToolRuntime(ctx: CycleContext): RepositoryToolRuntime {
   };
 }
 
+function parseRecentCommits(stdout: string): ObservedCommit[] {
+  return stdout.split("\n").flatMap((line) => {
+    if (line.trim() === "") return [];
+    const [hash, rawTs, ...message] = line.split("\t");
+    if (hash === undefined || hash === "") throw new Error("invalid recent-commit result");
+    const tsSec = Number(rawTs ?? "0");
+    if (!Number.isFinite(tsSec)) throw new Error("invalid recent-commit timestamp");
+    return [{ hash, message: message.join("\t"), tsSec }];
+  });
+}
+
 export function defaultRepositoryAdapters(ctx?: CycleContext): RepositoryPortAdapters {
   const tools = ctx === undefined ? undefined : createRepositoryToolRuntime(ctx);
   return {
     git: {
-      commitsAhead: repositoryCommitsAhead, tcrCount: repositoryTcrCount,
-      recentCommits: repositoryRecentCommits, dirty: tools?.dirty ?? repositoryDirty,
-      headSha: repositoryHeadSha,
+      commitsAhead: tools?.commitsAhead ?? repositoryCommitsAhead,
+      tcrCount: tools?.tcrCount ?? repositoryTcrCount,
+      recentCommits: tools?.recentCommits ?? repositoryRecentCommits,
+      dirty: tools?.dirty ?? repositoryDirty,
+      headSha: tools?.headSha ?? repositoryHeadSha,
       push: tools?.push ?? ((repository, branch) => gitPush(repository.worktreePath, branch)),
     },
     verification: {

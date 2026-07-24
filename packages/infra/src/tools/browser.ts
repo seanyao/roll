@@ -11,6 +11,7 @@ import {
   browserScreenshotInputSchema,
   browserScreenshotOutputSchema,
 } from "./schema-contracts.js";
+import { resolveToolExecutionContext, toolCorrelation } from "./workspace-context.js";
 
 export type BrowserToolId = "browser.screenshot" | "browser.console" | "browser.dom-query" | "physical.screenshot";
 
@@ -132,26 +133,31 @@ export class BrowserTool {
 
   private async executeQueued(invocation: ToolInvocation<BrowserInput>, deps: ToolDeps): Promise<ToolResult<BrowserOutput>> {
     const startedAt = deps.now();
+    const scoped = resolveToolExecutionContext(invocation, "issue_required");
+    if (!scoped.ok) {
+      return fail(invocation, startedAt, deps.now(), scoped.error.code, scoped.error.message, false);
+    }
+    const effectiveInvocation = { ...invocation, context: scoped.context };
     if (this.id === "physical.screenshot") {
-      const result = await this.executePhysicalScreenshot(invocation as ToolInvocation<RollCaptureRequestV1>, deps, startedAt);
+      const result = await this.executePhysicalScreenshot(effectiveInvocation as ToolInvocation<RollCaptureRequestV1>, deps, startedAt);
       return result as ToolResult<BrowserOutput>;
     }
-    const input = invocation.input as BrowserWebInput;
+    const input = effectiveInvocation.input as BrowserWebInput;
     const origin = originOf(input.url);
-    if (origin === undefined) return fail(invocation, startedAt, deps.now(), "invalid_input", `invalid URL: ${deps.redact(input.url)}`, false);
-    if (!originAllowed(origin, invocation.policy.sandbox?.allowedOrigins)) {
-      return fail(invocation, startedAt, deps.now(), "sandbox_denied", `origin is outside allowedOrigins: ${origin}`, false);
+    if (origin === undefined) return fail(effectiveInvocation, startedAt, deps.now(), "invalid_input", `invalid URL: ${deps.redact(input.url)}`, false);
+    if (!originAllowed(origin, effectiveInvocation.policy.sandbox?.allowedOrigins)) {
+      return fail(effectiveInvocation, startedAt, deps.now(), "sandbox_denied", `origin is outside allowedOrigins: ${origin}`, false);
     }
 
     if (this.id === "browser.screenshot") {
-      const result = await this.executeScreenshot(invocation as ToolInvocation<BrowserScreenshotInput>, deps, startedAt);
+      const result = await this.executeScreenshot(effectiveInvocation as ToolInvocation<BrowserScreenshotInput>, deps, startedAt);
       return result as ToolResult<BrowserOutput>;
     }
     if (this.id === "browser.console") {
-      const result = await this.executeHeadlessJson<BrowserConsoleInput, BrowserConsoleOutput>(invocation as ToolInvocation<BrowserConsoleInput>, deps, "console", startedAt);
+      const result = await this.executeHeadlessJson<BrowserConsoleInput, BrowserConsoleOutput>(effectiveInvocation as ToolInvocation<BrowserConsoleInput>, deps, "console", startedAt);
       return result as ToolResult<BrowserOutput>;
     }
-    const result = await this.executeHeadlessJson<BrowserDomQueryInput, BrowserDomQueryOutput>(invocation as ToolInvocation<BrowserDomQueryInput>, deps, "dom-query", startedAt);
+    const result = await this.executeHeadlessJson<BrowserDomQueryInput, BrowserDomQueryOutput>(effectiveInvocation as ToolInvocation<BrowserDomQueryInput>, deps, "dom-query", startedAt);
     return result as ToolResult<BrowserOutput>;
   }
 
@@ -161,7 +167,10 @@ export class BrowserTool {
     startedAt: number,
   ): Promise<ToolResult<BrowserScreenshotOutput>> {
     const input = invocation.input;
-    const screenshotPath = input.screenshotPath ?? join(process.cwd(), ".roll", "tool-dumps", `${invocation.invocationId}.png`);
+    const screenshotPath = input.screenshotPath ?? join(
+      invocation.context!.authorities.toolDumps,
+      `${invocation.invocationId}.png`,
+    );
     if (shouldUseHeadless(invocation)) return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
 
     const aqua = await hasAquaSession(deps, invocation.policy.timeoutMs);
@@ -469,6 +478,7 @@ function fail(
 }
 
 function meta(invocation: ToolInvocation<BrowserInput>, startedAt: number, endedAt: number): ToolMeta {
+  const correlation = toolCorrelation(invocation);
   return {
     invocationId: invocation.invocationId,
     toolId: invocation.toolId,
@@ -476,6 +486,7 @@ function meta(invocation: ToolInvocation<BrowserInput>, startedAt: number, ended
     startedAt,
     endedAt,
     durationMs: Math.max(0, endedAt - startedAt),
+    ...(correlation === undefined ? {} : { correlation }),
   };
 }
 

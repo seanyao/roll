@@ -7,3 +7,4 @@ export * from "./git.js";
 export * from "./github.js";
 export * from "./mcp.js";
 export * from "./network.js";
+export * from "./workspace-context.js";

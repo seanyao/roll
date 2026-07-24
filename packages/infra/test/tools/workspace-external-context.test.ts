@@ -1,0 +1,199 @@
+import { join } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
+import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_EXECUTION_CONTEXT_V1,
+  type MinimalFs,
+  type ToolDeps,
+  type ToolInvocation,
+  type ToolPolicy,
+  type WorkspaceExecutionContextV1,
+} from "@roll/spec";
+import { describe, expect, it } from "vitest";
+import {
+  BrowserTool,
+  GitHubTool,
+  McpTool,
+  NetworkTool,
+  type BrowserScreenshotInput,
+  type McpConnection,
+  type McpInput,
+} from "../../src/index.js";
+
+const root = "/workspaces/alpha";
+const storyId = "US-WS-036";
+const repoId = "repo-product";
+
+function context(workspaceId = "alpha"): WorkspaceExecutionContextV1 {
+  const canonicalRoot = workspaceId === "alpha" ? root : `/workspaces/${workspaceId}`;
+  const issueRoot = join(canonicalRoot, "issues", storyId);
+  return {
+    schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+    workspace: {
+      workspaceId,
+      root: canonicalRoot,
+      canonicalRoot,
+      lifecycle: "active",
+    },
+    resolution: { source: "explicit", evidence: [] },
+    bindings: [{
+      schema: REPOSITORY_BINDING_V1,
+      repoId,
+      alias: "product",
+      remote: "git@github.com:example/product.git",
+      integrationBranch: "idea-074-workspace",
+      provider: "github",
+      workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+    }],
+    issue: {
+      storyId,
+      manifestPath: join(issueRoot, "manifest.json"),
+      execution: {
+        workspaceId,
+        issueRoot,
+        repositories: {
+          [repoId]: {
+            repoId,
+            alias: "product",
+            access: "write",
+            requiredDelivery: true,
+            noChangePolicy: "changes_required",
+            worktreePath: join(issueRoot, "product"),
+            baseSha: "a".repeat(40),
+            headSha: "b".repeat(40),
+            commands: { test: [], integration: [] },
+          },
+        },
+      },
+    },
+    authorities: deriveWorkspaceExecutionAuthorities(canonicalRoot),
+  };
+}
+
+const policy = (overrides: Partial<ToolPolicy> = {}): ToolPolicy => ({
+  enabled: true,
+  timeoutMs: 1000,
+  sandbox: { headlessOnly: true },
+  ...overrides,
+});
+
+function invocation<I>(
+  toolId: string,
+  input: I,
+  executionContext: WorkspaceExecutionContextV1 | null = context(),
+): ToolInvocation<I> {
+  return {
+    invocationId: `inv-${toolId}`,
+    toolId: toolId as ToolInvocation<I>["toolId"],
+    input,
+    caller: { cycleId: "cycle-1", storyId, agent: "codex" },
+    policy: policy(),
+    ts: 100,
+    ...(executionContext === null ? {} : { context: executionContext, repoId }),
+  };
+}
+
+function deps(files: Record<string, string> = {}): ToolDeps & {
+  calls: Array<{ command: string; args: readonly string[] }>;
+  writes: Map<string, string>;
+} {
+  const calls: Array<{ command: string; args: readonly string[] }> = [];
+  const writes = new Map<string, string>();
+  const fs: MinimalFs = {
+    readFile: async (path) => {
+      const value = files[path];
+      if (value === undefined) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return value;
+    },
+    writeFile: async (path, data) => {
+      writes.set(path, data);
+    },
+    mkdir: async () => undefined,
+  };
+  return {
+    calls,
+    writes,
+    fs,
+    now: () => 100,
+    execFile: async (command, args) => {
+      calls.push({ command, args });
+      return command === "npx"
+        ? { exitCode: 0, stdout: JSON.stringify({ finalUrl: "https://example.test", statusCode: 200, png: "PNG" }), stderr: "", timedOut: false }
+        : { exitCode: 0, stdout: "", stderr: "", timedOut: false };
+    },
+    redact: (value) => value.replaceAll("SECRET", "[REDACTED]"),
+  };
+}
+
+describe("US-WS-036 external tools consume frozen Workspace authority", () => {
+  it("fails before browser execution when Issue context is missing", async () => {
+    const dependencies = deps();
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation<BrowserScreenshotInput>("browser.screenshot", { url: "https://example.test" }, null),
+      dependencies,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "missing_execution_context" } });
+    expect(dependencies.calls).toHaveLength(0);
+  });
+
+  it("writes default browser evidence beneath the frozen toolDumps authority", async () => {
+    const dependencies = deps();
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation<BrowserScreenshotInput>("browser.screenshot", { url: "https://example.test" }),
+      dependencies,
+    );
+
+    const expected = join(root, "runtime", "tool-dumps", "inv-browser.screenshot.png");
+    expect(result).toMatchObject({
+      ok: true,
+      output: { screenshotPath: expected },
+      meta: { correlation: { workspaceId: "alpha", storyId, repoId } },
+    });
+    expect(dependencies.writes.get(expected)).toBe("PNG");
+  });
+
+  it.each([
+    ["github", new GitHubTool("github.ci"), { action: "status", slug: "example/product", commit: "a".repeat(40) }],
+    ["network", new NetworkTool(), { url: "https://example.test" }],
+  ] as const)("fails closed for %s before an external call without context", async (_name, tool, input) => {
+    const dependencies = deps();
+    const result = await tool.execute(invocation(tool.declaration.id, input, null) as never, dependencies);
+
+    expect(result).toMatchObject({ ok: false, error: { code: "missing_execution_context" } });
+    expect(dependencies.calls).toHaveLength(0);
+  });
+
+  it("reads MCP servers from Workspace policy authority instead of cwd project state", async () => {
+    const executionContext = context();
+    const policyPath = executionContext.authorities.policy;
+    const connection: McpConnection = {
+      callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      close: async () => undefined,
+    };
+    const connected: string[] = [];
+    const tool = new McpTool({
+      projectRoot: "/unrelated-cwd",
+      connect: async (config) => {
+        connected.push(config.command);
+        return connection;
+      },
+    });
+    const input: McpInput = { serverName: "jira", toolName: "issue.get" };
+    const result = await tool.execute(invocation("mcp.call", input, executionContext), deps({
+      [policyPath]: [
+        "tools:",
+        "  mcp:",
+        "    servers:",
+        "      jira:",
+        "        command: workspace-jira-mcp",
+      ].join("\n"),
+      [join("/unrelated-cwd", ".roll", "mcp-servers.json")]: JSON.stringify({
+        servers: { jira: { command: "cwd-jira-mcp" } },
+      }),
+    }));
+
+    expect(result.ok).toBe(true);
+    expect(connected).toEqual(["workspace-jira-mcp"]);
+  });
+});

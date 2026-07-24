@@ -12,6 +12,7 @@ import type {
   ToolInvocation,
   ToolPolicy,
   ToolResult,
+  WorkspaceExecutionContextV1,
 } from "@roll/spec";
 
 const execFileAsync = promisify(nodeExecFile);
@@ -20,6 +21,8 @@ export interface InfraToolOptions<I, O> {
   declaration: ToolDeclaration;
   input: I;
   caller?: Partial<ToolCaller>;
+  context?: WorkspaceExecutionContextV1;
+  repoId?: string;
   policy?: Partial<ToolPolicy>;
   run(invocation: ToolInvocation<I>): Promise<ToolResult<O>>;
 }
@@ -33,6 +36,8 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     caller,
     policy: resolvePolicy(options.declaration, options.policy),
     ts: Date.now(),
+    ...(options.context === undefined ? {} : { context: options.context }),
+    ...(options.repoId === undefined ? {} : { repoId: options.repoId }),
   };
   const emitEvents = options.declaration.emitsEvents !== false;
   if (emitEvents) {
@@ -42,7 +47,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
       invocation,
       declaration: options.declaration,
       ts: Date.now(),
-    });
+    }, invocation.context);
   }
 
   const inputValidation = validateJsonSchemaValue(options.declaration.inputSchema, options.input);
@@ -72,7 +77,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
         toolId: invocation.toolId,
         result: sanitizeResult(result),
         ts: Date.now(),
-      });
+      }, invocation.context);
     }
     return result;
   }
@@ -86,7 +91,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
       toolId: invocation.toolId,
       result: sanitizeResult(result),
       ts: Date.now(),
-    });
+    }, invocation.context);
   }
   return result;
 }
@@ -158,16 +163,17 @@ function nextInvocationId(toolId: ToolDeclaration["id"]): string {
   return `${String(toolId).replace(/[^a-z0-9._-]/gi, "-")}-${Date.now()}-${rand}`;
 }
 
-async function appendToolEvent(event: unknown): Promise<void> {
-  const path = eventPath();
+async function appendToolEvent(event: unknown, context?: WorkspaceExecutionContextV1): Promise<void> {
+  const path = eventPath(context);
   if (path === undefined) return;
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(event)}\n`, { encoding: "utf8", flag: "a" });
 }
 
-function eventPath(): string | undefined {
+function eventPath(context?: WorkspaceExecutionContextV1): string | undefined {
   const direct = (process.env["ROLL_TOOL_EVENTS_PATH"] ?? "").trim();
   if (direct !== "") return direct;
+  if (context !== undefined) return join(context.authorities.events, "tools.ndjson");
   const runtime = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
   if (runtime !== "") return join(runtime, "events.ndjson");
   return undefined;

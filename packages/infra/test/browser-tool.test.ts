@@ -14,6 +14,7 @@ import {
   type BrowserScreenshotOutput,
   type BrowserToolId,
 } from "../src/index.js";
+import { TOOL_TEST_REPO_ID, toolWorkspaceContext } from "./tool-workspace-context.js";
 
 const policy = (sandbox: ToolPolicy["sandbox"] = {}): ToolPolicy => ({
   enabled: true,
@@ -29,6 +30,8 @@ function invocation<I>(toolId: BrowserToolId, input: I, sandbox: ToolPolicy["san
     caller: { cycleId: "cycle-1", storyId: "US-TOOL-005", agent: "codex" },
     policy: policy(sandbox),
     ts: 100,
+    context: toolWorkspaceContext("US-TOOL-005"),
+    repoId: TOOL_TEST_REPO_ID,
   };
 }
 

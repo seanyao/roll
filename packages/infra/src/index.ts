@@ -37,3 +37,6 @@ export * from "./browser-operations/mcp-diagnostic-facade.js";
 export * from "./browser-operations/managed-fixture.js";
 export * from "./browser-operations/interactive-chrome-adapter.js";
 export * from "./browser-operations/mcp-probe.js";
+export * from "./context/context-cache.js";
+export * from "./context/git-llm-wiki-transport.js";
+export * from "./context/snapshot-store.js";

@@ -1,4 +1,5 @@
 /** Ported-command registry — one line per migrated subcommand. */
+import { join } from "node:path";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
@@ -170,6 +171,19 @@ function workspaceProjectRoot(args: readonly string[], operation: "read" | "muta
     return 1;
   }
   return target.workspaceRoot;
+}
+
+function removeWorkspaceSelector(args: readonly string[]): string[] {
+  const remaining: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--workspace") {
+      index += 1;
+      continue;
+    }
+    const arg = args[index];
+    if (arg !== undefined) remaining.push(arg);
+  }
+  return remaining;
 }
 
 function isHelp(arg: string | undefined): boolean {
@@ -353,7 +367,15 @@ export function registerAll(): void {
   // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of
   // a score note is that Reviewer path, which always sets `scoring: 'pair'`.
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
-  registerPorted("index", (args) => (args[0] === "--rebuild" ? indexCommand(args) : unknownTopLevel("index")), { hidden: true });
+  registerPorted("index", (args) => {
+    if (args[0] !== "--rebuild") return unknownTopLevel("index");
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return indexCommand(removeWorkspaceSelector(args), { projectPath: root });
+  }, {
+    hidden: true,
+    operations: [cliSelectorOperation("index", "rebuild", ["--rebuild"], ["--rebuild", "--workspace", "roll"])],
+  });
   // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
   // from ~/.roll/projects.json; --json echoes the file verbatim. ONE registry, two
   // faces (this + the web switcher); missing/stale rows flagged, never dropped.
@@ -460,7 +482,19 @@ export function registerAll(): void {
   // appends through BacklogStore's optimistic atomic write (与 backlog 存取同源).
   // A lint violation reports and refuses — no bad card is ever written.
   // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
-  registerPorted("idea", ideaCommand, { operations: [cliPositionalOperation("idea", "capture")] });
+  registerPorted("idea", (args) => {
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return ideaCommand(args, {
+      projectPath: root,
+      backlogPath: join(root, "backlog", "index.md"),
+      featuresDir: join(root, "features"),
+      canonical: true,
+      remoteBacklogIds: () => [],
+    });
+  }, {
+    operations: [cliOperation("idea", "capture", [], true, ["Improve backlog", "--workspace", "roll"], true)],
+  });
   // `release`: v3-native read-only release guidance (US-PORT-004). Computes the
   // next calver version from package.json + today, surfaces changelog readiness,
   // and prints the PR/tag flow + the CI consistency-gate note. It NEVER bumps,
@@ -546,7 +580,14 @@ export function registerAll(): void {
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.
-  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: [cliPositionalOperation("design", "design")] });
+  registerPorted("design", (args) => {
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return designCommand(removeWorkspaceSelector(args), { cwd: root });
+  }, {
+    help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。",
+    operations: [cliOperation("design", "design", [], true, ["Improve backlog", "--workspace", "roll"], true)],
+  });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.

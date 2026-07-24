@@ -52,6 +52,7 @@ const CLI_POLICY_SHAPES: Readonly<Record<string, PolicyShape>> = {
   "backlog:unstick": workspaceMutation, "backlog:sync": workspaceMutation,
   "story:new": workspaceMutation, "story:validate": workspaceRead,
   "attest:audit": workspaceRead, "attest:render": workspaceMutation,
+  "index:rebuild": workspaceMutation,
   "config:read": machine, "config:write": machine, "config:prices": machine, "config:tune": workspaceOptional,
   "release:release": workspaceMutation, "release:showcase": issue, "release:consistency": repository, "release:verify": repository,
   "design:design": workspaceMutation,

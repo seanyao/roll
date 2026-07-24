@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { storyNewCommand } from "../src/commands/story-new.js";
+import { ideaCommand } from "../src/commands/idea.js";
+import { designCommand } from "../src/commands/design.js";
+import { indexCommand } from "../src/commands/index-gen.js";
 import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 
 const dirs: string[] = [];
@@ -98,5 +101,59 @@ describe("US-WS-034 planning authority", () => {
     } finally {
       process.chdir(previous);
     }
+  });
+
+  it("captures an idea only in the selected Workspace and excludes selector tokens from the description", () => {
+    const f = fixture();
+    const previous = process.cwd();
+    process.chdir(f.cwd);
+    try {
+      const result = capture(() => ideaCommand(
+        ["workspace backlog improvement", "--workspace", "alpha", "--no-color"],
+        {
+          projectPath: f.workspaceRoot,
+          backlogPath: join(f.workspaceRoot, "backlog", "index.md"),
+          featuresDir: join(f.workspaceRoot, "features"),
+          canonical: true,
+          remoteBacklogIds: () => [],
+        },
+      ));
+      expect(result.code).toBe(0);
+      const backlog = readFileSync(join(f.workspaceRoot, "backlog", "index.md"), "utf8");
+      expect(backlog).toContain("workspace backlog improvement");
+      expect(backlog).not.toContain("workspace backlog improvement alpha");
+      expect(existsSync(join(f.workspaceRoot, "features", "backlog-lifecycle", "IDEA-001", "spec.md"))).toBe(true);
+      expect(existsSync(join(f.cwd, ".roll"))).toBe(false);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it("reads the selected Workspace backlog for the bounded bare-design path", () => {
+    const f = fixture();
+    writeFileSync(
+      join(f.workspaceRoot, "backlog", "index.md"),
+      "| ID | Description | Status |\n|----|----|----|\n| US-DESIGN-1 | design me | 📋 Todo |\n",
+      "utf8",
+    );
+    const result = capture(() => designCommand([], { cwd: f.workspaceRoot }) as number);
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("roll design");
+    expect(existsSync(join(f.workspaceRoot, ".roll"))).toBe(false);
+  });
+
+  it("regenerates the canonical derived index idempotently", () => {
+    const f = fixture();
+    expect(storyNewCommand(
+      ["US-INDEX-1", "--title", "indexed card", "--epic", "planning", "--workspace", "alpha"],
+      { resolveTarget: () => f.target },
+    )).toBe(0);
+    expect(indexCommand(["--rebuild"], { projectPath: f.workspaceRoot })).toBe(0);
+    const path = join(f.workspaceRoot, "index.json");
+    const first = readFileSync(path, "utf8");
+    expect(indexCommand(["--rebuild"], { projectPath: f.workspaceRoot })).toBe(0);
+    expect(readFileSync(path, "utf8")).toBe(first);
+    expect(JSON.parse(first)).toMatchObject({ stories: { "US-INDEX-1": "planning" } });
+    expect(existsSync(join(f.workspaceRoot, ".roll"))).toBe(false);
   });
 });

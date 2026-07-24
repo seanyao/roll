@@ -31,12 +31,11 @@ import { join } from "node:path";
 import type { BacklogItem } from "@roll/core";
 import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, inferEpic, parseBacklog, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
-import { generateIndex } from "../lib/archive.js";
+import { generateIndex, projectDataPath } from "../lib/archive.js";
 import { UNCATEGORIZED } from "../lib/archive.js";
 import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
 import { c, renderState } from "../render.js";
 
-const BACKLOG_PATH = ".roll/backlog.md";
 const STORY_ID_DIR_RE = /^(?:US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)$/;
 
 /** Locale label, single-language: v3 keys fall back to v2 keys then the key. */
@@ -46,7 +45,7 @@ function label(lang: Lang, key: string, ...args: ReadonlyArray<string | number>)
 }
 
 function readCardFolderIds(projectPath: string): string[] {
-  const featuresDir = join(projectPath, ".roll", "features");
+  const featuresDir = projectDataPath(projectPath, "features");
   try {
     const epics = readdirSync(featuresDir, { withFileTypes: true });
     const ids: string[] = [];
@@ -72,6 +71,10 @@ function cardIdsAsBacklogItems(ids: readonly string[]): BacklogItem[] {
 /** FIX-1481: injectable seams so id allocation can see the REMOTE authoritative
  *  backlog (not just the possibly-stale local file) and be unit-tested. */
 export interface IdeaCommandDeps {
+  readonly projectPath?: string;
+  readonly backlogPath?: string;
+  readonly featuresDir?: string;
+  readonly canonical?: boolean;
   /** Ids present on the remote (`origin/main`) backlog. Best-effort: returns []
    *  when the remote is unreachable so allocation degrades to local, never blocks.
    *  Called with `fetch:true` for BOTH the allocation pool and the pre-write
@@ -145,7 +148,16 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
     return 0;
   }
 
-  const text = args.filter((a) => !a.startsWith("-")).join(" ").trim();
+  const textParts: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--workspace") {
+      index += 1;
+      continue;
+    }
+    if (arg !== undefined && !arg.startsWith("-")) textParts.push(arg);
+  }
+  const text = textParts.join(" ").trim();
   if (text === "") {
     process.stderr.write(`${label(lang, "ideav3.empty")}\n${label(lang, "ideav3.usage")}\n`);
     return 1;
@@ -153,7 +165,10 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
 
   const RED = noColor ? "" : "\x1b[0;31m";
   const NC = noColor ? "" : "\x1b[0m";
-  if (!existsSync(BACKLOG_PATH)) {
+  const projectPath = deps.projectPath ?? process.cwd();
+  const backlogPath = deps.backlogPath ?? join(projectPath, ".roll", "backlog.md");
+  const featuresDir = deps.featuresDir ?? projectDataPath(projectPath, "features");
+  if (!existsSync(backlogPath)) {
     process.stderr.write(
       `${RED}[roll]${NC} ${t(v2Catalog, lang, "backlog.roll_backlog_md_not_found_run")}\n`,
     );
@@ -161,8 +176,7 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   }
 
   const store = new BacklogStore();
-  const snap = store.readBacklog(BACKLOG_PATH);
-  const projectPath = process.cwd();
+  const snap = store.readBacklog(backlogPath);
   const occupiedCardItems = cardIdsAsBacklogItems(readCardFolderIds(projectPath));
   const extraOccupiedIds: string[] = [];
   // FIX-1481: fold ids from the REMOTE authoritative backlog into the allocation
@@ -188,14 +202,14 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   // REFACTOR-050 AC1/AC3: create the full story card folder, same as `story new`.
   // Epic is inferred from the description text; falls back to "uncategorized".
   const epic = inferEpic(text) ?? UNCATEGORIZED;
-  let cardDir = join(projectPath, ".roll", "features", epic, plan.id);
+  let cardDir = join(featuresDir, epic, plan.id);
   while (existsSync(join(cardDir, "spec.md"))) {
     extraOccupiedIds.push(plan.id);
     plan = planIdea(
       [...snap.items, ...occupiedCardItems, ...remoteItems, ...cardIdsAsBacklogItems(extraOccupiedIds)],
       text,
     );
-    cardDir = join(projectPath, ".roll", "features", epic, plan.id);
+    cardDir = join(featuresDir, epic, plan.id);
   }
 
   // FIX-1481 AC2: fail-loud if the chosen id was taken on the remote between the
@@ -213,7 +227,7 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   }
 
   try {
-    store.writeBacklog(BACKLOG_PATH, snap.hash, (content) =>
+    store.writeBacklog(backlogPath, snap.hash, (content) =>
       appendIdea(content, plan.id, plan.kind, text).content,
     );
   } catch (e) {

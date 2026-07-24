@@ -8,6 +8,7 @@ import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, r
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
 import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
+import { buildRepairRoundBriefing } from "./repair-briefing-handler.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startBuilderLivenessProbe, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
@@ -187,10 +188,32 @@ export async function executeSpawnAgentCommand(
       const lowScoreFeedback = ctx.storyId !== undefined && ctx.storyId !== ""
         ? buildLowScoreFixForwardPrompt(ports.repoCwd, ctx.storyId)
         : "";
+      // US-CYCLE-007: a non-empty lowScoreFeedback means THIS is a REPAIR round
+      // (a re-dispatch after evaluator findings). Package the repair inputs as a
+      // checksummed BRIEFING artifact (findings + git diff --stat + involved
+      // files:lines + design-contract refs) and LEAD the skill body with it — the
+      // fresh session's SOLE context entry point, prefixed with "start from these
+      // findings; do NOT re-explore the whole repository". The briefing SUPERSEDES
+      // the plain fix-forward prompt (it already carries the findings + the
+      // branch-discipline instructions), so we never prepend both (no context
+      // bloat). GUARDRAIL: this whole block only runs on a repair round — a
+      // first/normal cycle has lowScoreFeedback === "" and finalSkillBody stays
+      // byte-identical to skillBodyForSpawn.
+      let repairBriefingLead = "";
+      if (lowScoreFeedback !== "") {
+        try {
+          const briefing = await buildRepairRoundBriefing(ports, ctx, execCwd, execRepoCwd);
+          if (briefing !== null && briefing.leadText !== "") repairBriefingLead = briefing.leadText;
+        } catch {
+          /* briefing is a warm-start AID — never fail the spawn; fall back below */
+        }
+      }
       const finalSkillBody =
-        lowScoreFeedback !== ""
-          ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
-          : skillBodyForSpawn;
+        repairBriefingLead !== ""
+          ? `${repairBriefingLead}\n\n${skillBodyForSpawn}`
+          : lowScoreFeedback !== ""
+            ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
+            : skillBodyForSpawn;
       // lever-4 (cross-card warm-context): after the pool was narrowed to
       // 国产/开源 agents (kimi/pi/reasonix), NO current engine declares a
       // warm-reuse capability — every cycle runs COLD. The resume-resolution +

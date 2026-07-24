@@ -98,7 +98,7 @@ describe("Workspace repository identity", () => {
     expect(imports).toEqual([
       { kind: "value", source: "node:crypto" },
       { kind: "type", source: "./json-schema.js" },
-      { kind: "value", source: "./context.js" },
+      { kind: "value", source: "./context-binding.js" },
     ]);
     expect(source).not.toMatch(/\b(?:process|globalThis|fetch|console|Date|setTimeout|setInterval)\b/u);
   });

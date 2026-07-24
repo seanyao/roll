@@ -37,6 +37,9 @@ type SchemaView = {
   properties?: Record<string, SchemaView>;
   items?: SchemaView;
   required?: readonly string[];
+  maxLength?: number;
+  pattern?: string;
+  maximum?: number;
 };
 
 function registry() {
@@ -145,6 +148,18 @@ describe("Context v1 contracts", () => {
     expect(plan).toMatchObject({ type: "object", additionalProperties: false });
     expect(plan.properties?.provider).toMatchObject({ type: "object", additionalProperties: false });
     expect(plan.properties?.binding).toMatchObject({ type: "object", additionalProperties: false });
+    for (const digestSchema of [
+      result.properties?.snapshotDigest,
+      result.properties?.providers?.items?.properties?.providerConfigDigest,
+      result.properties?.providers?.items?.properties?.bindingDigest,
+      result.properties?.providers?.items?.properties?.files?.items?.properties?.sha256,
+      plan.properties?.providerConfigDigest,
+      plan.properties?.bindingDigest,
+    ]) {
+      expect(digestSchema).toMatchObject({ type: "string", maxLength: 64, pattern: "^[0-9a-f]{64}$" });
+    }
+    expect((contextProviderRegistryV1Schema as SchemaView).properties?.providers?.items?.properties?.fetch_timeout_seconds)
+      .toMatchObject({ maximum: 300 });
   });
 
   it("binds Context requests to the complete versioned Workspace authority contract", () => {
@@ -236,12 +251,44 @@ describe("Context v1 contracts", () => {
     ["long timeout", { ...registry().providers[0], fetch_timeout_seconds: 301 }, "providers[0].fetch_timeout_seconds"],
     ["option branch", { ...registry().providers[0], branch: "--upload-pack=evil" }, "providers[0].branch"],
     ["refspec branch", { ...registry().providers[0], branch: "refs/heads/main:refs/heads/x" }, "providers[0].branch"],
+    ["uppercase SHA-1 branch", { ...registry().providers[0], branch: "A".repeat(40) }, "providers[0].branch"],
+    ["SHA-256 branch", { ...registry().providers[0], branch: "b".repeat(64) }, "providers[0].branch"],
   ])("rejects invalid %s", (_label, provider, path) => {
     const parsed = parseContextProviderRegistry({ ...registry(), providers: [provider] });
     expect(parsed).toMatchObject({
       ok: false,
       errors: expect.arrayContaining([expect.objectContaining({ path })]),
     });
+  });
+
+  it("normalizes disabled registries and Workspace contexts without validating dormant values", () => {
+    expect(parseContextProviderRegistry({
+      ...registry(),
+      enabled: false,
+      providers: [{ ...registry().providers[0], remote: "file:///stale", branch: "A".repeat(40) }],
+    })).toEqual({
+      ok: true,
+      value: { schema: CONTEXT_PROVIDER_REGISTRY_V1, enabled: false, providers: [] },
+    });
+    expect(parseWorkspaceContexts({
+      enabled: false,
+      bindings: [{ providerId: "OLD", enabled: false, required: true, entrypoints: ["../stale"] }],
+    })).toEqual({ ok: true, value: { enabled: false, bindings: [] } });
+  });
+
+  it("keeps disabled configuration closed and rejects dormant secret fields without echoing values", () => {
+    const registryResult = parseContextProviderRegistry({
+      ...registry(),
+      enabled: false,
+      providers: [{ ...registry().providers[0], credential: "disabled-secret-sentinel" }],
+    });
+    const contextsResult = parseWorkspaceContexts({
+      enabled: false,
+      bindings: [{ ...contexts().bindings[0], cachePath: "disabled-secret-sentinel" }],
+    });
+    expect(registryResult).toMatchObject({ ok: false, errors: [expect.objectContaining({ path: "providers[0].credential" })] });
+    expect(contextsResult).toMatchObject({ ok: false, errors: [expect.objectContaining({ path: "contexts.bindings[0].cachePath" })] });
+    expect(JSON.stringify([registryResult, contextsResult])).not.toContain("disabled-secret-sentinel");
   });
 
   it.each([

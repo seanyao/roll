@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   CONTEXT_PROVIDER_REGISTRY_V1,
+  WORKSPACE_EXECUTION_CONTEXT_V1,
   type ContextProviderRegistryV1,
+  type WorkspaceContextBindingV1,
+  type WorkspaceExecutionContextV1,
   type WorkspaceContextsV1,
 } from "@roll/spec";
 import { compileContextProviderExecutionPlans } from "../src/context/execution-plan.js";
@@ -27,8 +30,8 @@ function registry(overrides: Partial<ContextProviderRegistryV1> = {}): ContextPr
   };
 }
 
-function contexts(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceContextsV1 {
-  return {
+function workspace(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceExecutionContextV1 & WorkspaceContextsV1 {
+  const contextConfig: WorkspaceContextsV1 = {
     enabled: true,
     bindings: [{
       providerId: "bipo-enterprise",
@@ -37,6 +40,26 @@ function contexts(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceContex
       entrypoints: ["wiki/index.md"],
     }],
     ...overrides,
+  };
+  return {
+    schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+    workspace: { workspaceId: "roll", root: "/ws/roll", canonicalRoot: "/ws/roll", lifecycle: "active" },
+    resolution: { source: "explicit", evidence: [] },
+    bindings: [],
+    contexts: contextConfig,
+    authorities: {
+      backlog: "/ws/roll/backlog",
+      features: "/ws/roll/features",
+      design: "/ws/roll/design",
+      requirements: "/ws/roll/requirements",
+      policy: "/ws/roll/policy",
+      evidence: "/ws/roll/evidence",
+      toolDumps: "/ws/roll/tool-dumps",
+      events: "/ws/roll/events",
+      runtime: "/ws/roll/runtime",
+      locks: "/ws/roll/runtime/locks",
+    },
+    ...contextConfig,
   };
 }
 
@@ -48,7 +71,7 @@ describe("compileContextProviderExecutionPlans", () => {
       "@roll/spec",
     ]);
     expect(source).not.toMatch(/(?:node:fs|node:child_process|node:http|node:https|node:net|process\.cwd|\bfetch\s*\(|\bimport\s*\()/u);
-    const result = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    const result = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] });
     expect(result).not.toBeInstanceOf(Promise);
   });
 
@@ -60,12 +83,12 @@ describe("compileContextProviderExecutionPlans", () => {
     try {
       const invalid = compileContextProviderExecutionPlans({
         registry: registry(),
-        contexts: contexts(),
+        workspace: workspace(),
         refs: ["not-a-context-ref"],
       });
       const unbound = compileContextProviderExecutionPlans({
         registry: registry(),
-        contexts: contexts(),
+        workspace: workspace(),
         refs: ["context://other/wiki/index.md"],
       });
       expect(invalid).toMatchObject({ outcome: "blocked", plans: [] });
@@ -79,15 +102,15 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it.each([
-    ["missing registry", undefined, contexts()],
-    ["registry disabled", registry({ enabled: false }), contexts()],
+    ["missing registry", undefined, workspace()],
+    ["registry disabled", registry({ enabled: false }), workspace()],
     ["missing Workspace contexts", registry(), undefined],
-    ["Workspace contexts disabled", registry(), contexts({ enabled: false })],
-    ["all bindings disabled", registry(), contexts({ bindings: [{ ...contexts().bindings[0]!, enabled: false, required: false }] })],
+    ["Workspace contexts disabled", registry(), workspace({ enabled: false })],
+    ["all bindings disabled", registry(), workspace({ bindings: [{ ...workspace().bindings[0]!, enabled: false, required: false }] })],
   ])("returns an explicit disabled plan for %s", (_label, providerRegistry, workspaceContexts) => {
     expect(compileContextProviderExecutionPlans({
       registry: providerRegistry,
-      contexts: workspaceContexts,
+      workspace: workspaceContexts,
       refs: [],
     })).toEqual({
       outcome: "disabled",
@@ -99,8 +122,8 @@ describe("compileContextProviderExecutionPlans", () => {
   it("lets the explicit global disabled state dominate malformed dormant bindings and refs", () => {
     expect(compileContextProviderExecutionPlans({
       registry: registry({ enabled: false }),
-      contexts: contexts({
-        bindings: [{ ...contexts().bindings[0]!, enabled: false, required: true }],
+      workspace: workspace({
+        bindings: [{ ...workspace().bindings[0]!, enabled: false, required: true }],
       }),
       refs: ["not-a-context-ref"],
     })).toEqual({
@@ -111,7 +134,7 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it("blocks a required missing Provider and degrades an optional missing Provider without a plan", () => {
-    const required = compileContextProviderExecutionPlans({ registry: registry({ providers: [] }), contexts: contexts(), refs: [] });
+    const required = compileContextProviderExecutionPlans({ registry: registry({ providers: [] }), workspace: workspace(), refs: [] });
     expect(required).toMatchObject({
       outcome: "blocked",
       plans: [],
@@ -120,7 +143,7 @@ describe("compileContextProviderExecutionPlans", () => {
 
     const optional = compileContextProviderExecutionPlans({
       registry: registry({ providers: [] }),
-      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
       refs: [],
     });
     expect(optional).toMatchObject({
@@ -132,14 +155,14 @@ describe("compileContextProviderExecutionPlans", () => {
 
   it("blocks a required disabled Provider and skips an optional disabled Provider", () => {
     const disabledRegistry = registry({ providers: [{ ...provider(), enabled: false }] });
-    expect(compileContextProviderExecutionPlans({ registry: disabledRegistry, contexts: contexts(), refs: [] })).toMatchObject({
+    expect(compileContextProviderExecutionPlans({ registry: disabledRegistry, workspace: workspace(), refs: [] })).toMatchObject({
       outcome: "blocked",
       plans: [],
       diagnostics: [expect.objectContaining({ code: "provider_disabled", severity: "blocking" })],
     });
     expect(compileContextProviderExecutionPlans({
       registry: disabledRegistry,
-      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
       refs: [],
     })).toMatchObject({
       outcome: "ready",
@@ -151,7 +174,7 @@ describe("compileContextProviderExecutionPlans", () => {
   it("blocks invalid and unbound explicit refs before producing any executable plan", () => {
     expect(compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts(),
+      workspace: workspace(),
       refs: ["context://other/wiki/index.md"],
     })).toMatchObject({
       outcome: "blocked",
@@ -160,7 +183,7 @@ describe("compileContextProviderExecutionPlans", () => {
     });
     expect(compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts(),
+      workspace: workspace(),
       refs: ["context://bipo-enterprise/../wiki/index.md"],
     })).toMatchObject({
       outcome: "blocked",
@@ -172,7 +195,7 @@ describe("compileContextProviderExecutionPlans", () => {
   it("treats an explicit ref to a disabled binding as not bound", () => {
     expect(compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, enabled: false, required: false }] }),
+      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, enabled: false, required: false }] }),
       refs: ["context://bipo-enterprise/wiki/systems/axis.md"],
     })).toMatchObject({
       outcome: "blocked",
@@ -182,26 +205,26 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it("defensively blocks duplicate or contradictory bindings instead of merging them", () => {
-    const duplicate = contexts({
-      bindings: [contexts().bindings[0]!, { ...contexts().bindings[0]!, required: false }],
+    const duplicate = workspace({
+      bindings: [workspace().bindings[0]!, { ...workspace().bindings[0]!, required: false }],
     });
-    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: duplicate, refs: [] })).toMatchObject({
+    expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: duplicate, refs: [] })).toMatchObject({
       outcome: "blocked",
       plans: [],
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
     });
-    const contradictory = contexts({
-      bindings: [{ ...contexts().bindings[0]!, enabled: false, required: true }],
+    const contradictory = workspace({
+      bindings: [{ ...workspace().bindings[0]!, enabled: false, required: true }],
     });
-    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: contradictory, refs: [] })).toMatchObject({
+    expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: contradictory, refs: [] })).toMatchObject({
       outcome: "blocked",
       plans: [],
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
     });
-    const unsafeEntrypoint = contexts({
-      bindings: [{ ...contexts().bindings[0]!, entrypoints: ["../wiki/index.md"] }],
+    const unsafeEntrypoint = workspace({
+      bindings: [{ ...workspace().bindings[0]!, entrypoints: ["../wiki/index.md"] }],
     });
-    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: unsafeEntrypoint, refs: [] })).toMatchObject({
+    expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: unsafeEntrypoint, refs: [] })).toMatchObject({
       outcome: "blocked",
       plans: [],
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
@@ -212,10 +235,10 @@ describe("compileContextProviderExecutionPlans", () => {
     const second = provider("platform-handbook");
     const result = compileContextProviderExecutionPlans({
       registry: registry({ providers: [second, provider()] }),
-      contexts: contexts({
+      workspace: workspace({
         bindings: [
           {
-            ...contexts().bindings[0]!,
+            ...workspace().bindings[0]!,
             entrypoints: ["wiki/index.md", "wiki/systems/axis.md", "wiki/index.md"],
           },
           {
@@ -251,10 +274,10 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it("pins lowercase SHA-256 digests to canonical provider and binding content", () => {
-    const first = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    const first = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] });
     const same = compileContextProviderExecutionPlans({
       registry: structuredClone(registry()),
-      contexts: structuredClone(contexts()),
+      workspace: structuredClone(workspace()),
       refs: [],
     });
     expect(first).toEqual(same);
@@ -264,12 +287,12 @@ describe("compileContextProviderExecutionPlans", () => {
 
     const changedProvider = compileContextProviderExecutionPlans({
       registry: registry({ providers: [{ ...provider(), branch: "release" }] }),
-      contexts: contexts(),
+      workspace: workspace(),
       refs: [],
     });
     const changedBinding = compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
       refs: [],
     });
     expect(changedProvider.plans[0]?.providerConfigDigest).not.toBe(first.plans[0]?.providerConfigDigest);
@@ -277,15 +300,15 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it("normalizes equivalent Provider remotes before planning and digesting", () => {
-    const https = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    const https = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] });
     const scp = compileContextProviderExecutionPlans({
       registry: registry({ providers: [{ ...provider(), remote: "git@GitHub.com:Bipo/bipo-enterprise.git" }] }),
-      contexts: contexts(),
+      workspace: workspace(),
       refs: [],
     });
     const ssh = compileContextProviderExecutionPlans({
       registry: registry({ providers: [{ ...provider(), remote: "ssh://deploy@github.com:22/Bipo/bipo-enterprise" }] }),
-      contexts: contexts(),
+      workspace: workspace(),
       refs: [],
     });
     expect(scp.plans[0]?.provider.remote).toBe("ssh://github.com/Bipo/bipo-enterprise");
@@ -302,7 +325,7 @@ describe("compileContextProviderExecutionPlans", () => {
       required: true,
       entrypoints: ["wiki/index.md", "wiki/systems/axis.md", "wiki/index.md"],
     } as const;
-    const contextsInput = contexts({ bindings: [bindingInput] });
+    const contextsInput = workspace({ bindings: [bindingInput] });
     const before = structuredClone({ registryInput, contextsInput });
     const oldWorkspace = process.env["ROLL_WORKSPACE"];
     vi.useFakeTimers();
@@ -311,7 +334,7 @@ describe("compileContextProviderExecutionPlans", () => {
       process.env["ROLL_WORKSPACE"] = "one";
       const first = compileContextProviderExecutionPlans({
         registry: registryInput,
-        contexts: contextsInput,
+        workspace: contextsInput,
         refs: ["context://bipo-enterprise/wiki/workflows/release.md"],
       });
       vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
@@ -326,7 +349,7 @@ describe("compileContextProviderExecutionPlans", () => {
       };
       const second = compileContextProviderExecutionPlans({
         registry: registry({ providers: [reorderedProvider] }),
-        contexts: contexts({
+        workspace: workspace({
           bindings: [{ ...bindingInput, entrypoints: ["wiki/index.md", "wiki/systems/axis.md"] }],
         }),
         refs: [],
@@ -342,7 +365,7 @@ describe("compileContextProviderExecutionPlans", () => {
   });
 
   it("changes only the digest owned by changed Provider or binding content", () => {
-    const base = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] }).plans[0]!;
+    const base = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] }).plans[0]!;
     for (const changed of [
       { ...provider(), fetch_timeout_seconds: 60 },
       { ...provider(), remote: "https://github.com/Bipo/other-context" },
@@ -350,20 +373,20 @@ describe("compileContextProviderExecutionPlans", () => {
     ]) {
       const plan = compileContextProviderExecutionPlans({
         registry: registry({ providers: [changed] }),
-        contexts: contexts(),
+        workspace: workspace(),
         refs: [],
       }).plans[0]!;
       expect(plan.providerConfigDigest).not.toBe(base.providerConfigDigest);
       expect(plan.bindingDigest).toBe(base.bindingDigest);
     }
     for (const changed of [
-      { ...contexts().bindings[0]!, required: false },
-      { ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md"] },
-      { ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] },
+      { ...workspace().bindings[0]!, required: false },
+      { ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md"] },
+      { ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] },
     ]) {
       const plan = compileContextProviderExecutionPlans({
         registry: registry(),
-        contexts: contexts({ bindings: [changed] }),
+        workspace: workspace({ bindings: [changed] }),
         refs: [],
       }).plans[0]!;
       expect(plan.providerConfigDigest).toBe(base.providerConfigDigest);
@@ -372,19 +395,57 @@ describe("compileContextProviderExecutionPlans", () => {
 
     const ordered = compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts({
-        bindings: [{ ...contexts().bindings[0]!, entrypoints: ["wiki/index.md", "wiki/overview.md"] }],
+      workspace: workspace({
+        bindings: [{ ...workspace().bindings[0]!, entrypoints: ["wiki/index.md", "wiki/overview.md"] }],
       }),
       refs: [],
     }).plans[0]!;
     const reordered = compileContextProviderExecutionPlans({
       registry: registry(),
-      contexts: contexts({
-        bindings: [{ ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] }],
+      workspace: workspace({
+        bindings: [{ ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] }],
       }),
       refs: [],
     }).plans[0]!;
     expect(reordered.providerConfigDigest).toBe(ordered.providerConfigDigest);
     expect(reordered.bindingDigest).not.toBe(ordered.bindingDigest);
+  });
+
+  it("projects closed Provider and binding fields before planning or digesting", () => {
+    const secret = "plan-secret-sentinel";
+    const providerWithExtras = {
+      ...provider(),
+      credential: secret,
+      cachePath: `/tmp/${secret}`,
+    } as ReturnType<typeof provider> & { credential: string; cachePath: string };
+    const bindingWithExtras = {
+      ...workspace().bindings[0]!,
+      credentialRef: secret,
+      cachePath: `/tmp/${secret}`,
+    } as WorkspaceContextBindingV1 & { credentialRef: string; cachePath: string };
+    const result = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [providerWithExtras] }),
+      workspace: workspace({ bindings: [bindingWithExtras] }),
+      refs: [],
+    });
+    expect(result).toMatchObject({ outcome: "ready", plans: [{
+      provider: {
+        id: "bipo-enterprise",
+        type: "git_llm_wiki",
+        enabled: true,
+        remote: "https://github.com/Bipo/bipo-enterprise",
+        branch: "main",
+        fetch_timeout_seconds: 30,
+      },
+      binding: {
+        providerId: "bipo-enterprise",
+        enabled: true,
+        required: true,
+        entrypoints: ["wiki/index.md"],
+      },
+    }] });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result.plans[0]?.provider).not.toHaveProperty("credential");
+    expect(result.plans[0]?.binding).not.toHaveProperty("credentialRef");
   });
 });

@@ -7,11 +7,15 @@
  */
 import { parseEventLine, resolveLang, type CycleRoleSummary, type RollEvent } from "@roll/spec";
 import {
+  aggregateRounds,
   analyzeCycleActivity,
   buildCycleRoleSummary,
   cycleActivitySignalsFromEvents,
+  formatRoundReadout,
   projectCollabCycle,
+  readRoundEntries,
   renderCycleRolesForTerminal,
+  renderRoundJournalMd,
   type ActivitySignal,
   type CycleActivityAnalysis,
 } from "@roll/core";
@@ -20,6 +24,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable } from "node:stream";
 import { join } from "node:path";
+import { cardArchiveDir } from "../lib/archive.js";
 import { collectCycleLedger, formatBuilderIdentity, type CycleLedgerRow, type CycleTapeSegment } from "../lib/cycle-ledger.js";
 import { collectGitDossierFacts } from "../lib/story-dossier.js";
 import { cycleNo } from "./cycles.js";
@@ -35,8 +40,11 @@ export const CYCLE_USAGE =
   "       roll cycle <id> --collab [--json] [--no-color]\n" +
   "       roll cycle --legend [--no-color]\n" +
   "       roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
+  "       roll cycle journal <card-id> [--json]\n" +
   "  One cycle's full trace tape, a read-only ActivitySignal watch window, a\n" +
   "  supervisor-facing activity explanation, or a collaboration relay view.\n" +
+  "  journal <card>  Round-journal readout for a card: median/mean/p90 duration +\n" +
+  "                  gate-time share, split by era window (US-CYCLE-004).\n" +
   "  --activity  Explain why this cycle is active, silent, or advisory (US-OBS-042).\n" +
   "  --roles     Show the execution cast (builder, reviewers, evaluators, gates).\n" +
   "  --collab    Show the cycle as a protocol relay (assign → build → peer → score → gate).\n" +
@@ -607,12 +615,57 @@ function cycleActivityCommand(handle: string, json: boolean): number {
   return 0;
 }
 
+/**
+ * US-CYCLE-004 — `roll cycle journal <cardId> [--json]`: read a card's
+ * round-journal and print the readout (median/mean/p90 duration + gate share,
+ * split by era window). Data source is `.roll/features/<epic>/<cardId>/
+ * round-journal.jsonl`; malformed lines are skipped + counted.
+ */
+export function cycleJournalCommand(args: string[], lang: "en" | "zh"): number {
+  const json = args.includes("--json");
+  const cardId = args.find((a) => !a.startsWith("-"));
+  if (cardId === undefined || cardId === "") {
+    process.stderr.write(
+      lang === "zh"
+        ? "用法：roll cycle journal <卡号> [--json]\n"
+        : "Usage: roll cycle journal <card-id> [--json]\n",
+    );
+    return 1;
+  }
+  const cardDir = cardArchiveDir(process.cwd(), cardId);
+  // Regenerate the derived human `.md` table on demand (append is kept O(1) on
+  // the hot path, so the .md is produced here from the jsonl source of truth).
+  try {
+    renderRoundJournalMd(cardDir, readRoundEntries(cardDir).entries);
+  } catch {
+    /* .md is derived; a render failure never blocks the readout */
+  }
+  const agg = aggregateRounds(cardDir);
+  if (json) {
+    process.stdout.write(`${JSON.stringify(agg, null, 2)}\n`);
+    return 0;
+  }
+  if (agg.overall.count === 0) {
+    process.stdout.write(
+      lang === "zh"
+        ? `${cardId}: 暂无 round-journal 记录\n`
+        : `${cardId}: no round-journal entries yet\n`,
+    );
+    return 0;
+  }
+  process.stdout.write(`${cardId} round-journal\n${formatRoundReadout(agg)}\n`);
+  return 0;
+}
+
 export function cycleCommand(args: string[]): number | Promise<number> {
   const noColor = args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
   const lang = resolveLang({ rollLang: process.env["ROLL_LANG"], lcAll: process.env["LC_ALL"], lang: process.env["LANG"] });
   if (args[0] === "watch") {
     return cycleWatchCommand(args.slice(1).filter((a) => a !== "--no-color"));
+  }
+  if (args[0] === "journal") {
+    return cycleJournalCommand(args.slice(1), lang);
   }
   if (args.includes("--help") || args.includes("-h") || args.length === 0) {
     process.stdout.write(`${CYCLE_USAGE}\n`);

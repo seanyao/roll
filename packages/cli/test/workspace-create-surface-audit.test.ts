@@ -14,6 +14,18 @@ const publicRoots = [
   "packages/spec/src/i18n/catalog-v3.ts",
   "packages/cli/test/fixtures",
 ] as const;
+const runtimeSurfaceRoots = [
+  "README.md",
+  "README_CN.md",
+  "docs",
+  "guide",
+  "template",
+  "skills",
+  "packages/cli/src",
+  "packages/core/src",
+  "packages/infra/src",
+  "packages/spec/src",
+] as const;
 const legacyEvidenceAllowlist = new Set([
   "packages/cli/test/fixtures/workspace/us-ws-023-terminal-evidence/transcript.txt",
 ]);
@@ -56,6 +68,47 @@ describe("US-WS-023 public create-only surface audit", () => {
 
     expect(completionSources, "No completion generator/source is shipped; help and command registries are the canonical discoverability surfaces.")
       .toEqual([]);
+  });
+
+  it("blocks retired init symbols, routes, i18n keys, plan modules and skill identifiers", () => {
+    const paths = textFiles(runtimeSurfaceRoots);
+    const forbidden = paths.flatMap((path) => {
+      const text = readFileSync(join(repoRoot, path), "utf8");
+      const reasons = [
+        /roll ws init/u.test(text) ? "roll ws init" : null,
+        /\bWorkspaceInit[A-Za-z0-9_]*/u.test(text) ? "WorkspaceInit*" : null,
+        /\bworkspaceInit[A-Za-z0-9_]*/u.test(text) ? "workspaceInit*" : null,
+        /\bWORKSPACE_INIT[A-Za-z0-9_]*/u.test(text) ? "WORKSPACE_INIT*" : null,
+        /["'`]workspace\.init\./u.test(text) ? "workspace.init.* i18n key" : null,
+        /roll-ws-init/u.test(text) ? "roll-ws-init" : null,
+        /workspace\/init-plan|workspace-init\.js/u.test(text) ? "workspace init module" : null,
+      ].filter((reason): reason is string => reason !== null);
+      return reasons.map((reason) => `${path}: ${reason}`);
+    });
+    const retiredFiles = paths.filter((path) => path.endsWith("/workspace-init.ts") || path.endsWith("/workspace/init-plan.ts"));
+    const router = readFileSync(join(repoRoot, "packages", "cli", "src", "commands", "workspace.ts"), "utf8");
+
+    expect(forbidden).toEqual([]);
+    expect(retiredFiles).toEqual([]);
+    expect(router).not.toMatch(/subcommand === "init"\)\s*return workspaceCreateCommand/u);
+    expect(router).toMatch(/subcommand === "init"\) \{[\s\S]{0,180}workspace\.error\.legacy_init_subcommand[\s\S]{0,80}return 1;/u);
+  });
+
+  it("keeps legacy schema recognition and correction copy on one narrow allowlist", () => {
+    const legacyLines = textFiles(runtimeSurfaceRoots).flatMap((path) => readFileSync(join(repoRoot, path), "utf8")
+      .split(/\r?\n/u)
+      .map((line, index) => ({ path, line: index + 1, text: line.trim() }))
+      .filter((entry) => /roll\.workspace-init\/v1|Legacy Workspace init config|legacy_init_subcommand/u.test(entry.text))
+      .map((entry) => `${entry.path}:${entry.line}:${entry.text}`));
+
+    expect(legacyLines).toEqual([
+      "packages/cli/src/commands/workspace.ts:298:process.stderr.write(`${msg(\"workspace.error.legacy_init_subcommand\")}\\n`);",
+      "packages/core/src/workspace/create-plan.ts:291:if (raw.schema === \"roll.workspace-init/v1\") {",
+      "packages/core/src/workspace/create-plan.ts:297:message: \"Legacy Workspace init config must be converted before create\",",
+      "packages/core/src/workspace/create-plan.ts:298:conversions: [{ path: \"schema\", from: \"roll.workspace-init/v1\", to: WORKSPACE_CREATE_CONFIG_V1 }],",
+      "packages/spec/src/i18n/catalog-v3.ts:218:\"workspace.error.legacy_init_subcommand\": { en: \"Unknown workspace subcommand \\\"init\\\". Use \\\"roll workspace create\\\".\", zh: \"未知工作区子命令“init”。请使用“roll workspace create”。\" },",
+      "packages/spec/src/i18n/catalog-v3.ts:228:\"workspace.create.error.legacy_create_config\": { en: \"Legacy Workspace init config must be converted before create\", zh: \"旧版工作区 init 配置必须转换后才能创建\" },",
+    ]);
   });
 
   it("keeps the installed skill gitlink on a create-only route manifest", () => {

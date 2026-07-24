@@ -66,6 +66,14 @@ function resetCreateState(fixture: CreateFixture): void {
   rmSync(fixture.workspace, { recursive: true, force: true });
 }
 
+function collectNextActions(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value.flatMap(collectNextActions);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, entry]) => key === "nextAction" && typeof entry === "string"
+    ? [entry]
+    : collectNextActions(entry));
+}
+
 function tree(root: string): readonly string[] {
   if (!existsSync(root)) return [];
   const rows: string[] = [];
@@ -120,6 +128,11 @@ describe("US-WS-023 create-only CLI", () => {
       const seeded = await run(["workspace", ...createArgs(fixture.config, ["--json"])], fixture.home);
       expect(seeded.status, seeded.stderr).toBe(0);
     };
+    const prepareRejected = (): void => {
+      resetCreateState(fixture);
+      mkdirSync(fixture.workspace, { recursive: true });
+      writeFileSync(join(fixture.workspace, "workspace.yaml"), "operator-owned conflict\n", "utf8");
+    };
     const cases: readonly {
       readonly name: string;
       readonly args: readonly string[];
@@ -154,6 +167,18 @@ describe("US-WS-023 create-only CLI", () => {
         prepare: prepareReuse,
         expectedStatus: 0,
         verify: (result) => expect(JSON.parse(result.stdout)).toMatchObject({ schema: "roll.workspace-create-result/v1", mode: "apply", outcome: "reused" }),
+      },
+      {
+        name: "rejected plan",
+        args: createArgs(fixture.config, ["--check", "--json"]),
+        prepare: prepareRejected,
+        expectedStatus: 1,
+        verify: (result) => expect(JSON.parse(result.stdout)).toMatchObject({
+          schema: "roll.workspace-create-result/v1",
+          mode: "check",
+          outcome: "rejected",
+          steps: expect.arrayContaining([expect.objectContaining({ action: "rejected" })]),
+        }),
       },
       {
         name: "legacy config",
@@ -191,10 +216,19 @@ describe("US-WS-023 create-only CLI", () => {
       await testCase.prepare();
       const alias = await run(["ws", ...testCase.args], fixture.home);
 
-      expect(alias, testCase.name).toEqual(canonical);
+      expect(alias.status, `${testCase.name} status`).toBe(canonical.status);
+      expect(alias.stdout, `${testCase.name} stdout`).toBe(canonical.stdout);
+      expect(alias.stderr, `${testCase.name} stderr`).toBe(canonical.stderr);
       expect(canonical.status, testCase.name).toBe(testCase.expectedStatus);
       testCase.verify(canonical);
       expect(`${canonical.stdout}${canonical.stderr}`, testCase.name).not.toContain("roll ws create");
+      for (const stream of [canonical.stdout, canonical.stderr]) {
+        if (!stream.trimStart().startsWith("{")) continue;
+        for (const action of collectNextActions(JSON.parse(stream))) {
+          expect(action, `${testCase.name} nextAction`).toContain("roll workspace create");
+          expect(action, `${testCase.name} nextAction`).not.toContain("roll ws create");
+        }
+      }
     }
   });
 

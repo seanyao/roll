@@ -115,6 +115,12 @@ export interface GitPort {
     worktreeCwd: string,
     integrationBranch?: string,
   ): Promise<{ code: number; sha: string; landedBranch: string; method: "created" | "fast_forward" | "merge"; stderr: string }>;
+  /** US-CYCLE-009: the real tip sha of `origin/<branch>` via `git ls-remote`
+   *  (the git plane — proof against the PR-API-head-lag trap). Used to
+   *  head-sha-pin the auto-merge attach. LENIENT: `undefined` on any failure /
+   *  unknown branch (the caller simply drops the pin). Optional so fakes that do
+   *  not implement it keep the pre-US-CYCLE-009 (unpinned) behavior. */
+  remoteBranchTip?(repoCwd: string, branch: string): Promise<string | undefined>;
 }
 
 /** GitHub facet — the publish-plan executor + slug resolution. */
@@ -124,7 +130,7 @@ export interface GithubPort {
   /** Execute a publish PLAN (core planPublishPr/DocPr) → publish status. */
   runPublishPlan(
     plan: ReadonlyArray<{ kind: string; tool: "git" | "gh"; argv: string[] }>,
-  ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean; degraded?: boolean; rootCauseKey?: string }>;
+  ): Promise<{ status: 0 | 1 | 2; prUrl: string; ok: boolean; degraded?: boolean; rootCauseKey?: string; autoMergeUnavailable?: boolean }>;
   /** Poll a PR's merge state (sync merge-wait). Returns the gh state string. */
   prState(repoCwd: string, branch: string): Promise<string>;
   /** Poll a PR's full merge info (state, mergedAt, mergeCommit). Returns undefined on gh failure. */

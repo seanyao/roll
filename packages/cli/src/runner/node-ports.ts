@@ -30,6 +30,7 @@ import {
   fetchRemoteBranch,
   ghRepoSlug,
   landLocalDelivery,
+  lsRemote,
   openEvidenceFrame,
   prListOpenTitles,
   prViewMergeInfo,
@@ -327,6 +328,17 @@ export function nodePorts(opts: {
       async landLocalDelivery(repoCwd, worktreeCwd, integrationBranch) {
         return landLocalDelivery(repoCwd, worktreeCwd, integrationBranch);
       },
+      // US-CYCLE-009: the real tip of origin/<branch> from the git plane, used to
+      // head-sha-pin the auto-merge attach. LENIENT — undefined on any failure.
+      async remoteBranchTip(repoCwd, branch) {
+        try {
+          const refs = await lsRemote(repoCwd, "origin", [`refs/heads/${branch}`]);
+          const tip = refs.find((r) => r.ref === `refs/heads/${branch}`) ?? refs[0];
+          return tip !== undefined && tip.sha !== "" ? tip.sha : undefined;
+        } catch {
+          return undefined;
+        }
+      },
     },
     github: {
       async repoSlug(repoCwd) {
@@ -341,6 +353,7 @@ export function nodePorts(opts: {
           ok: r.ok,
           degraded: r.degraded,
           rootCauseKey: r.rootCauseKey,
+          autoMergeUnavailable: r.autoMergeUnavailable,
         };
       },
       async prState(repoCwd, branch) {

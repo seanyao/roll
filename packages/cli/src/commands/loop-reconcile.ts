@@ -26,7 +26,6 @@ import { resolveLang, parseEventLine } from "@roll/spec";
 import type { DeliveryLease, RollEvent, DeliveryState } from "@roll/spec";
 import {
   EventBus,
-  BacklogStore,
   reconcileDelivery,
   projectDeliveryState,
   leaseStateFor,
@@ -63,7 +62,7 @@ import {
 // the SAME facts (one truth engine, no parallel probes).
 import { branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence, resolveRepoSlug } from "../lib/delivery-facts.js";
 import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
-import { markDoneGuarded } from "../runner/done-guard.js";
+import { finalizeDeliveredWriteBack } from "./loop-reconcile-merge.js";
 
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
@@ -279,29 +278,6 @@ function readAwaitingCycles(cwd: string, includeDelivered = false): CycleSnapsho
   }
 
   return snapshots;
-}
-
-function markDeliveredBacklog(
-  cwd: string,
-  storyId: string,
-  bus: EventBus,
-  eventsPath: string,
-  now: number,
-): void {
-  if (storyId === "") return;
-  try {
-    markDoneGuarded(cwd, storyId, { mergedToMain: true }, {
-      markStatus: (projectCwd, id, status) => {
-        const backlogPath = join(projectCwd, ".roll", "backlog.md");
-        const store = new BacklogStore();
-        const snapshot = store.readBacklog(backlogPath);
-        store.markExact(backlogPath, snapshot.hash, id, status);
-      },
-      alert: (message) => bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
-    });
-  } catch {
-    // Delivery truth remains recorded even if the convenience status write-back fails.
-  }
 }
 
 // ── Result types ──────────────────────────────────────────────────────────────
@@ -708,7 +684,24 @@ export async function runReconcileTick(
           bus.appendEvent(eventsPath, ev);
         }
       }
-      markDeliveredBacklog(cwd, cyc.storyId, bus, eventsPath, now);
+      // US-CYCLE-009: bounded-retry backlog flip + git-plane merge_confirmed
+      // record (replaces the former single-try flip). Idempotent — a re-run does
+      // not double-flip or double-record.
+      await finalizeDeliveredWriteBack({
+        cwd,
+        eventsPath,
+        now,
+        events: readAllEvents(eventsPath),
+        appendEvent: (p, ev) => bus.appendEvent(p, ev),
+        alert: (message) => bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
+        cycleId: cyc.cycleId,
+        storyId: cyc.storyId,
+        branch: cyc.branch,
+        prNumber: cyc.prNumber,
+        result,
+        dossierFacts: gitFacts,
+        ...(result.kind === "delivered" && result.mergeCommit !== undefined ? { mergeCommit: result.mergeCommit } : {}),
+      });
     }
     if (result.kind === "terminal") {
       bus.appendEvent(eventsPath, {
@@ -963,7 +956,26 @@ export async function loopReconcileCommand(
           }
         }
       }
-      markDeliveredBacklog(cwd, cyc.storyId, deps.bus, eventsPath, now);
+      // US-CYCLE-009: bounded-retry backlog flip + git-plane merge_confirmed
+      // record — GATED on git-plane merge truth. --dry-run mutates NOTHING
+      // (no backlog flip, no branch delete, no event writes): report only.
+      if (!dryRun) {
+        await finalizeDeliveredWriteBack({
+          cwd,
+          eventsPath,
+          now,
+          events: readAllEvents(eventsPath),
+          appendEvent: (p, ev) => deps.bus.appendEvent(p, ev),
+          alert: (message) => deps.bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
+          cycleId: cyc.cycleId,
+          storyId: cyc.storyId,
+          branch: cyc.branch,
+          prNumber: cyc.prNumber,
+          result,
+          dossierFacts: gitFacts,
+          ...(result.kind === "delivered" && result.mergeCommit !== undefined ? { mergeCommit: result.mergeCommit } : {}),
+        });
+      }
     }
     if (result.kind === "terminal" && !dryRun) {
       deps.bus.appendEvent(eventsPath, {

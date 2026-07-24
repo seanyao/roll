@@ -117,10 +117,38 @@ export async function executeTerminalCommand(
         const pub: PublishResult = { status: 1, manualMerge, ...(cmd.draft === true ? { draft: true } : {}) };
         return { event: { type: "published", result: pub } };
       }
-      const plan = cmd.docOnly
-        ? planPublishDocPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft })
-        : planPublishPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft });
+      // US-CYCLE-009: resolve the branch's real tip from the git plane (the sha
+      // just pushed to origin) so the auto-merge attach is head-sha-pinned —
+      // GitHub refuses the merge if the tip moves past it (PR-API-head-lag
+      // guard).
+      const headSha = ports.git.remoteBranchTip !== undefined
+        ? await ports.git.remoteBranchTip(ports.repoCwd, cmd.branch).catch(() => undefined)
+        : undefined;
+      let plan = cmd.docOnly
+        ? planPublishDocPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft, headSha })
+        : planPublishPr({ branch: cmd.branch, slug, body, manualMerge, draft: cmd.draft, headSha });
+      // US-CYCLE-009: if the real tip could NOT be resolved, refuse to arm an
+      // UNPINNED auto-merge — an unpinned squash can merge a stale head. Strip
+      // the merge step (the PR still opens) and alert; the reconcile path
+      // self-merges once CI is green. (manualMerge plans already carry no merge
+      // step, so this only affects the auto/admin merge tail.)
+      if (headSha === undefined && !manualMerge) {
+        plan = plan.filter((s) => s.kind !== "gh-pr-merge-auto" && s.kind !== "gh-pr-merge-admin");
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `US-CYCLE-009: could not resolve origin/${cmd.branch} tip via ls-remote — auto-merge NOT armed (refusing an unpinned merge); PR opened, reconcile self-merges once CI is green (cycle ${ctx.cycleId ?? "?"})`,
+        );
+      }
       const r = await ports.github.runPublishPlan(plan);
+      // US-CYCLE-009: the repo does not have auto-merge enabled — the PR is open
+      // and healthy; the reconcile path self-merges it once CI is green. Alert
+      // (graceful degrade) instead of crashing or silently dropping the merge.
+      if (r.autoMergeUnavailable === true) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `US-CYCLE-009: auto-merge is not enabled for ${slug} — PR for ${cmd.branch} (${ctx.storyId ?? "?"}) left open; reconcile will self-merge once CI is green (cycle ${ctx.cycleId ?? "?"})`,
+        );
+      }
       // US-V4-001: publish no longer mounts a PR link onto a story `index.html`
       // dossier page — the global dossier/story-page refresh is not a v4 delivery
       // side effect. The PR fact lives in the DeliveryRecord + events below and is

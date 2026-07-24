@@ -1058,6 +1058,9 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       branchMergedIntoMain: vi.fn(async () => false),
       branchCleanlyRebasesOntoMain: vi.fn(async () => true),
       resetWorktreeHard: vi.fn(async () => ({ code: 0 })),
+      // US-CYCLE-009: the real tip resolves (production node-ports has this) so
+      // the auto-merge attach is head-sha-pinned in these publish tests.
+      remoteBranchTip: vi.fn(async () => "cafebabecafebabecafebabecafebabecafebabe"),
     },
     github: {
       repoSlug: vi.fn(async () => "o/r"),

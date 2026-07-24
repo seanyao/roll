@@ -82,6 +82,7 @@ export * from "./policy/language-surface.js";
 export * from "./reconcile/engine.js";
 export * from "./release/plan.js";
 export * from "./release/flow.js";
+export * from "./release/verify.js";
 export * from "./attest/ac-parser.js";
 export * from "./attest/contract-projection.js";
 export * from "./attest/gc.js";

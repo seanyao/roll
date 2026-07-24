@@ -67,6 +67,14 @@ interface ProviderExecutionResult {
   readonly gap?: ContextDiagnosticV1;
 }
 
+const SAFE_SCOPE_DIMENSIONS = new Set([
+  "workspace_ids",
+  "repository_ids",
+  "environment_ids",
+  "story_ids",
+  "stages",
+]);
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
     return JSON.stringify(value);
@@ -95,10 +103,37 @@ function providerDiagnostic(
   plan: ContextProviderExecutionPlanV1,
   diagnostic: ContextDiagnosticV1,
 ): ContextDiagnosticV1 {
+  const parsedRef = diagnostic.ref === undefined ? undefined : parseContextRef(diagnostic.ref);
+  const safeRef = parsedRef?.ok === true && parsedRef.value.providerId === plan.provider.id
+    ? parsedRef.value.ref
+    : undefined;
+  const mismatchedDimensions = diagnostic.mismatchedDimensions?.filter((dimension) => SAFE_SCOPE_DIMENSIONS.has(dimension));
   return {
-    ...diagnostic,
+    code: diagnostic.code,
     severity: severityFor(plan),
     providerId: plan.provider.id,
+    ...(safeRef === undefined ? {} : { ref: safeRef }),
+    message: `Context Provider read failed (${diagnostic.code})`,
+    ...(mismatchedDimensions === undefined || mismatchedDimensions.length === 0 ? {} : { mismatchedDimensions }),
+  };
+}
+
+function providerWarning(
+  plan: ContextProviderExecutionPlanV1,
+  diagnostic: ContextDiagnosticV1,
+): ContextDiagnosticV1 {
+  const parsedRef = diagnostic.ref === undefined ? undefined : parseContextRef(diagnostic.ref);
+  const safeRef = parsedRef?.ok === true && parsedRef.value.providerId === plan.provider.id
+    ? parsedRef.value.ref
+    : undefined;
+  const mismatchedDimensions = diagnostic.mismatchedDimensions?.filter((dimension) => SAFE_SCOPE_DIMENSIONS.has(dimension));
+  return {
+    code: diagnostic.code,
+    severity: "warning",
+    providerId: plan.provider.id,
+    ...(safeRef === undefined ? {} : { ref: safeRef }),
+    message: `Context Provider warning (${diagnostic.code})`,
+    ...(mismatchedDimensions === undefined || mismatchedDimensions.length === 0 ? {} : { mismatchedDimensions }),
   };
 }
 
@@ -267,7 +302,7 @@ async function executeProvider(
       providerConfigDigest: plan.providerConfigDigest,
       bindingDigest: plan.bindingDigest,
       files: processed.files,
-      warnings: [...read.warnings, ...processed.warnings],
+      warnings: [...read.warnings.map((warning) => providerWarning(plan, warning)), ...processed.warnings],
     },
   };
 }

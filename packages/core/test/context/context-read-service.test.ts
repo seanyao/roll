@@ -83,6 +83,17 @@ function registry(): ContextProviderRegistryV1 {
   };
 }
 
+function providerConfig(id: string) {
+  return {
+    id,
+    type: "git_llm_wiki" as const,
+    enabled: true,
+    remote: `https://example.test/team/${id}`,
+    branch: "main",
+    fetch_timeout_seconds: 30,
+  };
+}
+
 function request(overrides: Partial<ContextReadRequestV1> = {}): ContextReadRequestV1 {
   return {
     schema: CONTEXT_READ_REQUEST_V1,
@@ -135,6 +146,30 @@ function success(paths: readonly string[]): ContextProviderReadSuccessV1 {
     files: paths.map((path) => file(path, path === "wiki/overview.md" || path === "wiki/systems/axis.md" ? metadata() : undefined)),
     warnings: [],
   };
+}
+
+function providerSuccess(providerId: string, paths: readonly string[], page?: ContextPageMetadataV1): ContextProviderReadSuccessV1 {
+  return {
+    ok: true,
+    revision: {
+      providerId,
+      remoteIdentity: `https://example.test/team/${providerId}`,
+      branch: "main",
+      fetchedAt: "2026-07-24T05:00:00.000Z",
+      revision: providerId === "required-wiki"
+        ? "1111111111111111111111111111111111111111"
+        : "2222222222222222222222222222222222222222",
+    },
+    files: paths.map((path) => ({
+      ...file(path, path.startsWith("wiki/systems/") ? page : undefined),
+      ref: `context://${providerId}/${path}`,
+    })),
+    warnings: [],
+  };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 describe("ContextReadService", () => {
@@ -208,5 +243,190 @@ describe("ContextReadService", () => {
       workspace: { ...workspace(), contexts: { enabled: false, bindings: [] } },
     }))).resolves.toMatchObject({ outcome: "disabled", providers: [] });
     expect(adapter.read).not.toHaveBeenCalled();
+  });
+
+  it("reads required layout and entrypoints without explicit refs and stays deterministic for a fixed clock", async () => {
+    const expectedPaths = ["purpose.md", "schema.md", "wiki/index.md", "wiki/log.md", "wiki/overview.md"];
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => {
+        expect(input.refs).toEqual([]);
+        expect(input.paths).toEqual(expectedPaths);
+        return success(expectedPaths);
+      }),
+    };
+    const service = createContextReadService({
+      registry: registry(),
+      adapter,
+      now: () => Date.parse("2026-07-24T05:01:02.003Z"),
+    });
+    const noRefs = request({ refs: [] });
+
+    const first = await service.read(noRefs);
+    const second = await service.read(noRefs);
+
+    expect(adapter.read).toHaveBeenCalledTimes(2);
+    expect(second).toEqual(first);
+  });
+
+  it("runs Providers concurrently but preserves execution-plan order in snapshots", async () => {
+    const bindings = [
+      contextBinding({ providerId: "required-wiki", entrypoints: ["wiki/index.md"] }),
+      contextBinding({ providerId: "optional-wiki", required: false, entrypoints: ["wiki/index.md"] }),
+    ];
+    let active = 0;
+    let maxActive = 0;
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await delay(input.plan.provider.id === "required-wiki" ? 20 : 5);
+        active -= 1;
+        return providerSuccess(input.plan.provider.id, input.paths);
+      }),
+    };
+    const service = createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [providerConfig("optional-wiki"), providerConfig("required-wiki")],
+      },
+      adapter,
+    });
+
+    const result = await service.read(request({ workspace: workspace(bindings), refs: [] }));
+
+    expect(maxActive).toBe(2);
+    expect(result.outcome).toBe("completed");
+    expect(result.providers.map((provider) => provider.providerId)).toEqual(["required-wiki", "optional-wiki"]);
+  });
+
+  it("blocks required failures, degrades optional failures and redacts adapter details", async () => {
+    const bindings = [
+      contextBinding({ providerId: "required-wiki", entrypoints: ["wiki/index.md"] }),
+      contextBinding({ providerId: "optional-wiki", required: false, entrypoints: ["wiki/index.md"] }),
+    ];
+    const registryValue: ContextProviderRegistryV1 = {
+      schema: CONTEXT_PROVIDER_REGISTRY_V1,
+      enabled: true,
+      providers: [providerConfig("required-wiki"), providerConfig("optional-wiki")],
+    };
+    const optionalFailure: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => input.plan.provider.id === "required-wiki"
+        ? providerSuccess(input.plan.provider.id, input.paths)
+        : {
+            ok: false as const,
+            diagnostic: {
+              code: "fetch_failed" as const,
+              severity: "blocking" as const,
+              providerId: "optional-wiki",
+              ref: "https://secret-token@example.test/private",
+              message: "fatal token=secret-token",
+            },
+          }),
+    };
+    const partial = await createContextReadService({ registry: registryValue, adapter: optionalFailure })
+      .read(request({ workspace: workspace(bindings), refs: [] }));
+    expect(partial).toMatchObject({
+      outcome: "partial",
+      providers: [{ providerId: "required-wiki" }],
+      gaps: [expect.objectContaining({ code: "fetch_failed", severity: "gap", providerId: "optional-wiki" })],
+    });
+    expect(JSON.stringify(partial)).not.toContain("secret-token");
+
+    const requiredFailure: ContextProviderReadAdapter = {
+      read: vi.fn(async () => ({
+        ok: false,
+        diagnostic: { code: "context_budget_exceeded", severity: "blocking", message: "budget" },
+      })),
+    };
+    const blocked = await createContextReadService({ registry: registry(), adapter: requiredFailure }).read(request({ refs: [] }));
+    expect(blocked).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({ code: "context_budget_exceeded", severity: "blocking" })],
+    });
+  });
+
+  it("redacts adapter warning details before publishing a Provider snapshot", async () => {
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async (input) => ({
+        ...providerSuccess(input.plan.provider.id, input.paths),
+        warnings: [{
+          code: "scope_mismatch",
+          severity: "warning",
+          providerId: input.plan.provider.id,
+          ref: "https://secret-token@example.test/private",
+          message: "warning token=secret-token",
+          mismatchedDimensions: ["environment_ids", "secret-token"],
+        }],
+      })),
+    };
+
+    const result = await createContextReadService({ registry: registry(), adapter }).read(request({ refs: [] }));
+
+    expect(result).toMatchObject({
+      outcome: "completed",
+      providers: [{
+        warnings: [{
+          code: "scope_mismatch",
+          severity: "warning",
+          providerId: "enterprise-wiki",
+          message: "Context Provider warning (scope_mismatch)",
+          mismatchedDimensions: ["environment_ids"],
+        }],
+      }],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-token");
+  });
+
+  it("blocks scope mismatch without retaining the Provider files", async () => {
+    const paths = ["purpose.md", "schema.md", "wiki/index.md", "wiki/log.md", "wiki/systems/axis.md"];
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async () => ({
+        ...success(paths),
+        files: paths.map((path) => file(
+          path,
+          path.endsWith("axis.md") ? metadata({ scope: { environment_ids: ["prod"] } }) : undefined,
+        )),
+      })),
+    };
+    const result = await createContextReadService({ registry: registry(), adapter }).read(request({
+      workspace: workspace([contextBinding({ entrypoints: ["wiki/index.md"] })]),
+    }));
+    expect(result).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({ code: "scope_mismatch", mismatchedDimensions: ["environment_ids"] })],
+    });
+    expect(JSON.stringify(result)).not.toContain("# wiki/systems/axis.md");
+  });
+
+  it("requires explicit flag and operation authorization for restricted references", async () => {
+    const paths = ["purpose.md", "schema.md", "wiki/index.md", "wiki/log.md", "wiki/systems/axis.md"];
+    const restricted = metadata({ sensitivity: "restricted_reference" });
+    const adapter: ContextProviderReadAdapter = {
+      read: vi.fn(async () => ({
+        ...success(paths),
+        files: paths.map((path) => file(path, path.endsWith("axis.md") ? restricted : undefined)),
+      })),
+    };
+    const denied = await createContextReadService({ registry: registry(), adapter }).read(request({
+      workspace: workspace([contextBinding({ entrypoints: ["wiki/index.md"] })]),
+    }));
+    expect(denied).toMatchObject({ outcome: "blocked", providers: [], gaps: [expect.objectContaining({ code: "restricted_context_denied" })] });
+    expect(JSON.stringify(denied)).not.toContain("# wiki/systems/axis.md");
+
+    const allowed = await createContextReadService({
+      registry: registry(),
+      adapter,
+      authorizeRestrictedReference: () => true,
+    }).read(request({
+      workspace: workspace([contextBinding({ entrypoints: ["wiki/index.md"] })]),
+      includeRestrictedReferences: true,
+    }));
+    expect(allowed).toMatchObject({
+      outcome: "completed",
+      providers: [{ files: expect.arrayContaining([expect.objectContaining({ path: "wiki/systems/axis.md", page: restricted })]) }],
+    });
   });
 });

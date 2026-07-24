@@ -40,3 +40,4 @@ export * from "./browser-operations/mcp-probe.js";
 export * from "./context/context-cache.js";
 export * from "./context/git-llm-wiki-transport.js";
 export * from "./context/snapshot-store.js";
+export * from "./context/context-read-adapter.js";

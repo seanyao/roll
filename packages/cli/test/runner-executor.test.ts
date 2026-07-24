@@ -1055,7 +1055,9 @@ describe("US-WS-033 — unexpected terminal fallback restores frozen context", (
       heartbeatPath: join(runtimeRoot, "heartbeat"),
       worktreePath: join(runtimeRoot, "worktree"),
     };
+    let leaseObservedBeforeCrash = false;
     const markStatus = vi.fn(() => {
+      leaseObservedBeforeCrash = readLeases(join(runtimeRoot, "leases"))["US-WS-033"] !== undefined;
       throw new Error("fixture crash after context persistence");
     });
     const { ports, calls } = fakePorts({
@@ -1084,6 +1086,7 @@ describe("US-WS-033 — unexpected terminal fallback restores frozen context", (
     const runCall = calls["run"]?.[0];
     expect(runCall?.[1]).toEqual({ storyId: "US-WS-033", cycleId });
     expect(runCall?.[2]).toMatchObject({ workspace_id: "roll", status: "aborted" });
+    expect(leaseObservedBeforeCrash).toBe(true);
     expect(readLeases(join(runtimeRoot, "leases"))["US-WS-033"]).toBeUndefined();
   });
 });

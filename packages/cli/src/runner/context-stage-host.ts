@@ -54,7 +54,15 @@ function workspaceExecutionContext(workspaceRoot: string): WorkspaceExecutionCon
  * typed handoff (or explicitly request a fresh read with a revision decision).
  */
 export function createNodeContextStageHost(workspaceRoot: string): ContextStageHostPort | undefined {
-  const workspace = workspaceExecutionContext(workspaceRoot);
+  let workspace: WorkspaceExecutionContextV1;
+  try {
+    workspace = workspaceExecutionContext(workspaceRoot);
+  } catch {
+    // Context is an optional runner capability. Legacy Workspace fixtures and
+    // installations may still use the earlier YAML manifest form, so failing
+    // to decode their manifest must not break unrelated runner construction.
+    return undefined;
+  }
   if (workspace.contexts?.enabled !== true || !workspace.contexts.bindings.some((binding) => binding.enabled)) {
     return undefined;
   }

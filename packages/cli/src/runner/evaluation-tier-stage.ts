@@ -15,7 +15,7 @@
  * There is NO tier override in any of these — the tier is read ONLY from the spec
  * (anti-Goodhart, AC3).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CycleContext } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
@@ -58,12 +58,17 @@ export function resolveCycleEvaluationTier(repoCwd: string, storyId: string): Cy
   } catch {
     return NO_TIER; // cannot locate the card archive → treat as legacy (default serial)
   }
-  if (!existsSync(specPath)) return NO_TIER; // no spec on disk → cannot be new-regime
   let specText: string;
   try {
     specText = readFileSync(specPath, "utf8");
-  } catch {
-    return BLOCKED; // spec exists but is unreadable → fail-closed, never silent serial
+  } catch (e) {
+    // Read-first (codex r2): ONLY a truly absent file (ENOENT) is legacy → default
+    // serial (a card is new-regime only by DECLARING it in spec content, so no file
+    // ⇒ not new-regime). ANY OTHER read failure (EACCES permission-denied, EISDIR,
+    // I/O error) means the spec EXISTS but is unreadable → fail-closed BLOCK, never
+    // a silent serial pass. existsSync could not distinguish these.
+    if ((e as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return NO_TIER;
+    return BLOCKED;
   }
   const decision = resolveEvaluationTier(specText, storyId);
   if (decision.kind === "tier") return { tier: decision.tier, blocked: false, fanout: tierFanoutReason(decision.tier) };
@@ -106,7 +111,7 @@ export function emitTierMissingBlock(sinks: TierGateSinks, cycleId: string, stor
   sinks.alert(
     `evaluation tier gate (hard): new-regime card ${storyId} declares no valid risk_tier (low|high) in its lint-validated spec — evaluation depth is unresolved; cycle ${cycleId} BLOCKED (fail-loud, NOT defaulted to low). Add \`risk_tier: low\` or \`risk_tier: high\` to the card frontmatter.`,
   );
-  sinks.event({ type: "eval:tier-missing", cycleId, card: storyId, ts: sinks.now() } as unknown as RollEvent);
+  sinks.event({ type: "eval:tier-missing", cycleId, card: storyId, ts: sinks.now() });
 }
 
 /**

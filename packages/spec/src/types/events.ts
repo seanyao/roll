@@ -96,6 +96,10 @@ export type RollEvent =
   // to feed the sizing error back to the design side. Signal only: no backlog /
   // spec mutation. `rounds` is the distinct-round count observed in the journal.
   | { type: "split:advice"; card: string; rounds: number; path: string; ts: number }
+  // US-CYCLE-008 — a NEW-regime card reached the evaluate stage without a valid
+  // risk_tier in its lint-validated spec, so the tier gate FAILED CLOSED and
+  // blocked evaluation before any evaluator ran (never a silent default to low).
+  | { type: "eval:tier-missing"; cycleId: string; card: string; ts: number }
   // US-CYCLE-012 — a (role × model) rig failed the same card >= threshold times
   // in a row, so a MODEL-SWAP CANDIDATE was surfaced (candidate file written).
   // Signal only — never an automatic swap; a heterogeneous consensus adjudicates.

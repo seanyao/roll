@@ -48,6 +48,21 @@ export interface RoundJournalEntry {
   era?: string;
   /** Owning cycle id, when known. */
   cycleId?: string;
+  /**
+   * US-CYCLE-008 — the DECLARED evaluation risk tier for this turn (`low` = single
+   * evaluator, `high` = parallel adversarial panel). Present on the evaluator turn
+   * so a readout can audit declared-vs-actual evaluation depth. Optional +
+   * forward-tolerant (older rows have none; a non-`low|high` value is dropped by
+   * the reader).
+   */
+  tier?: "low" | "high";
+  /**
+   * US-CYCLE-008 — the ACTUAL panel composition: the evaluator peers a fresh
+   * session was spawned for this turn. A one-element list for a low-tier serial
+   * evaluation; the bounded parallel pool for a high-tier panel. Paired with
+   * `tier` it lets a readout reconcile "declared high → really fanned out to N".
+   */
+  panel?: string[];
 }
 
 /** Fields a caller supplies; schemaVersion is stamped automatically. */
@@ -197,6 +212,13 @@ export function readRoundEntries(cardDir: string): ReadResult {
         if (typeof raw["model"] !== "string") delete (norm as { model?: unknown }).model;
         if (typeof raw["outcome"] !== "string") norm.outcome = String(raw["outcome"] ?? "");
         if (typeof raw["round"] !== "number") delete (norm as { round?: unknown }).round;
+        // US-CYCLE-008: forward-tolerant normalization for the tier-audit fields.
+        // A hand-corrupted `tier` (anything but "low"/"high") or a non-string-array
+        // `panel` is dropped so downstream readouts/rendering can never crash on it.
+        if (raw["tier"] !== "low" && raw["tier"] !== "high") delete (norm as { tier?: unknown }).tier;
+        if (!Array.isArray(raw["panel"]) || !(raw["panel"] as unknown[]).every((p) => typeof p === "string")) {
+          delete (norm as { panel?: unknown }).panel;
+        }
         entries.push(norm);
       } else {
         skipped += 1;

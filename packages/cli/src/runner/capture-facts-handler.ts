@@ -20,6 +20,7 @@ import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
+import { applyEvaluationTierGate, recordEvaluatorPanelRound } from "./evaluation-tier-stage.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
 import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
 import {
@@ -40,7 +41,7 @@ import {
   type PairEvent,
   type PairScore,
 } from "./pairing-gate.js";
-import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
+import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate, type PeerGateResult } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
@@ -172,6 +173,11 @@ export async function executeCaptureFactsCommand(
       // project-config allowlist. Scoring and pairing must not auto-enable
       // machine-detected agents outside this set (e.g. codex or claude).
       const peerGateAllowedAgents = projectAllowedAgents(ports.repoCwd);
+      // US-CYCLE-008 — evaluation depth from the card's lint-validated risk_tier
+      // (high → panel, low/legacy → serial default, missing-on-new-regime →
+      // fail-loud). Read ONLY from the spec — see evaluation-tier-stage.ts.
+      const tierInfo = applyEvaluationTierGate(ports, ctx, { commitsAhead, cycleId: cycleIdStr, now: () => eventTs(ports) });
+      const evalFanout = tierInfo.fanout;
       // FIX-312: hetero-availability drives the gate (owner ruling: "hetero
       // available → must use it; self only when hetero is truly impossible").
       // Computed uniformly by vendor through the standard model (no per-agent
@@ -244,10 +250,13 @@ export async function executeCaptureFactsCommand(
           now: () => eventTs(ports),
           // FIX-935: respect project-config agent allowlist.
           allowedAgents: peerGateAllowedAgents,
+          // US-CYCLE-008: high-tier → parallel review panel; else serial default.
+          ...(evalFanout !== undefined ? { fanout: evalFanout } : {}),
         };
         // Iterate the enabled stages (config order). file-absent/disabled → [] →
         // the loop body never runs, so a repo without pairing.yaml is untouched.
-        for (const stage of enabledPairingStages(ports.repoCwd)) {
+        // US-CYCLE-008: a tier-blocked cycle dispatches NO evaluators (fail-loud).
+        for (const stage of tierInfo.blocked ? [] : enabledPairingStages(ports.repoCwd)) {
           // E4: the pairing reviewer diffs + reviews the delivery in the execution
           // worktree (the submodule cycle worktree for a submodule story).
           await runPairing(ports.repoCwd, execCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", stage, pairingDeps);
@@ -257,7 +266,11 @@ export async function executeCaptureFactsCommand(
       // (.pair.json), so a genuinely hetero-reviewed delivery reads as `consulted`
       // and is NOT blocked. When pairing is OFF (no pairing.yaml) no evidence exists,
       // so the gate's own retryPeerConsult fallback runs (single-agent path, unchanged).
-      let peerGate = await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+      // US-CYCLE-008: on a tier-blocked cycle the peer gate (and its retry consult,
+      // which SPAWNS a peer) must not run. A non-blocking stub keeps peerBlocked=false.
+      let peerGate: PeerGateResult = tierInfo.blocked
+        ? { verdict: "skipped", mode: peerGateMode, reasons: ["eval_tier_unresolved: evaluate stage skipped"], blocked: false }
+        : await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
       let peerBlocked = peerGate.blocked;
       if (peerGate.blocked) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
@@ -361,7 +374,8 @@ export async function executeCaptureFactsCommand(
       // interest). When no peer can score (no candidate / timeout / error) NO note is
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
-      if (commitsAhead > 0 && storyId !== "") {
+      // US-CYCLE-008: skipped when the tier is unresolvable (no evaluator spawn).
+      if (commitsAhead > 0 && storyId !== "" && !tierInfo.blocked) {
         // FIX-910 — emit a per-attempt score-stage failure event so every null
         // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
         // The cause distinguishes unparseable / timeout / auth-block / exit-error.
@@ -527,6 +541,7 @@ export async function executeCaptureFactsCommand(
         // (work preserved) rather than plain `failed` + orphaned branch. The score
         // note itself is still written ONLY by runScorePairing — we synthesize
         // nothing here (the independence red line stands).
+        const scoreStartMs = Date.now();
         const scoreResult = await runScorePairing(ports.repoCwd, dirname(ports.paths.eventsPath), ctx.cycleId ?? "", ctx.agent ?? "", storyId, skill, summary, {
           installed: ports.installedAgents?.() ?? agentsInstalled(realAgentEnv()),
           // Historical auth streaks do not shrink the fair candidate pool.
@@ -536,11 +551,16 @@ export async function executeCaptureFactsCommand(
           now: () => eventTs(ports),
           // FIX-935: respect project-config agent allowlist.
           allowedAgents: peerGateAllowedAgents,
+          // US-CYCLE-008: high-tier → parallel adversarial panel; else serial default.
+          ...(evalFanout !== undefined ? { fanout: evalFanout } : {}),
         });
         scoreStatus = scoreResult.status;
+        // US-CYCLE-008 (AC4): journal the DECLARED tier + ACTUAL panel composition.
+        recordEvaluatorPanelRound(ports, ctx, { tier: tierInfo.tier, panel: scoreResult.panel, outcome: scoreStatus, startMs: scoreStartMs, endMs: Date.now() });
       }
       let attestRenderExitCode = 0;
-      if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+      // US-CYCLE-008: skipped on a tier-blocked cycle (ac-map self-heal spawns).
+      if (commitsAhead > 0 && storyId !== "" && !tierInfo.blocked && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
         const remediationAgent = ctx.agent ?? "claude";
         const selfHeal = await runAcMapSelfHeal({
           // E4: the remediation agent inspects the delivery + collects git evidence
@@ -606,7 +626,8 @@ export async function executeCaptureFactsCommand(
       // Capture the attest reasons so the Full Delta repair decision can frame
       // the Evaluator→Builder signal with the cycle's blocking findings.
       let attestReasons: readonly string[] = [];
-      if (commitsAhead > 0 && storyId !== "") {
+      // US-CYCLE-008: skipped on a tier-blocked cycle (tier block dominates).
+      if (commitsAhead > 0 && storyId !== "" && !tierInfo.blocked) {
         const mode = readAttestGateMode(ports.repoCwd);
         const res = runAttestGate(
           ports.paths.worktreePath,
@@ -671,7 +692,9 @@ export async function executeCaptureFactsCommand(
       if (
         (ctx.selectedProfile === "verified" || ctx.selectedProfile === "designed") &&
         commitsAhead > 0 &&
-        storyId !== ""
+        storyId !== "" &&
+        // US-CYCLE-008: the Full Delta Evaluator spawns — skip on a tier-blocked cycle.
+        !tierInfo.blocked
       ) {
         const ev = await runEvaluatorStage(ports, ctx);
         const evReasons = attestBlocked || peerBlocked ? attestReasons : [];
@@ -709,7 +732,9 @@ export async function executeCaptureFactsCommand(
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
       // US-V4-005: a verified/designed cycle with an invalid Evaluator artifact is
       // gate-blocked (fail-closed) alongside the attest/peer gates.
-      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
+      // US-CYCLE-008: a new-regime card with no valid risk_tier is hard-blocked
+      // (tierInfo.blocked) — evaluation depth unresolved, fail-loud not low-default.
+      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked || tierInfo.blocked;
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR

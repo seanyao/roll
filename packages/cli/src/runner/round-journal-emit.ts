@@ -27,6 +27,10 @@ export interface RoundTurn {
   gateTimeMs?: number;
   /** Override the model (defaults to ctx.model). */
   model?: string;
+  /** US-CYCLE-008 — the DECLARED evaluation risk tier for an evaluator turn. */
+  tier?: "low" | "high";
+  /** US-CYCLE-008 — the ACTUAL evaluator panel composition for this turn. */
+  panel?: string[];
 }
 
 /** The comparison-window label (dogfood era) — from env, else "unknown". */
@@ -72,6 +76,8 @@ export function recordSpawnRound(ports: Ports, ctx: CycleContext, turn: RoundTur
       durMs: turn.durMs,
       outcome: turn.outcome,
       ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
+      ...(turn.tier !== undefined ? { tier: turn.tier } : {}),
+      ...(turn.panel !== undefined ? { panel: turn.panel } : {}),
       era: resolveEra(),
       ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
     })

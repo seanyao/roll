@@ -7659,3 +7659,62 @@ describe("FIX-1267 — resolve_route enforces the builder no-consecutive-repeat 
     expect((result.event as { reason: string }).reason).toContain("pi");
   });
 });
+
+describe("US-CYCLE-008 — a tier-blocked cycle skips the evaluation dispatch (no run-then-block)", () => {
+  function captureRepo(id: string, specText: string): string {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-c008-")));
+    execDirs.push(repo);
+    const specDir = join(repo, ".roll", "features", "uncategorized", id);
+    mkdirSync(specDir, { recursive: true });
+    writeFileSync(join(specDir, "spec.md"), specText);
+    return repo;
+  }
+  const evalEvents = (calls: Record<string, unknown[]>): RollEvent[] =>
+    (calls["event"] ?? []).map((a) => (a as unknown[])[1] as RollEvent);
+  const alertText = (calls: Record<string, unknown[]>): string =>
+    (calls["alert"] ?? []).map((a) => String((a as unknown[])[1])).join("\n");
+  // A card that IS subject to the new-regime granularity contract (declares est_min)
+  // but declares NO risk_tier — the fail-loud case.
+  const NEW_REGIME_NO_TIER = `---\nid: US-RUN-001\nest_min: 5\n---\n\n# US-RUN-001\n\n## Evaluation contract\n**Expected evidence:**\n- test\n`;
+  const LOW_TIER = `---\nid: US-RUN-001\nest_min: 5\nrisk_tier: low\n---\n\n# US-RUN-001\n\n## Evaluation contract\n**Expected evidence:**\n- test\n`;
+
+  it("new-regime card with NO risk_tier: BLOCKS and NEVER dispatches an evaluator", async () => {
+    const repo = captureRepo("US-RUN-001", NEW_REGIME_NO_TIER);
+    const spawn = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, alertsPath: join(repo, "alerts.log") },
+      // A full scorer pool IS available — yet nothing must be spawned.
+      installedAgents: () => ["kimi", "pi"],
+      agentSpawn: spawn,
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    // The score/pairing dispatch was NOT invoked (proof beyond the end-state block):
+    expect(spawn).not.toHaveBeenCalled();
+    const evs = evalEvents(calls);
+    expect(evs.some((e) => e.type === "pair:selected")).toBe(false);
+    expect(evs.some((e) => e.type === "pair:score")).toBe(false);
+    // The cycle fails loud (blocked + auditable alert/event), never defaulting to low.
+    expect((r.event as { facts?: { gateBlocked?: boolean } }).facts?.gateBlocked).toBe(true);
+    expect(evs.some((e) => e.type === "eval:tier-missing")).toBe(true);
+    expect(alertText(calls)).toContain("risk_tier");
+    expect(alertText(calls)).toContain("fail-loud");
+  });
+
+  it("low-tier card is NOT blocked and DOES dispatch the serial single evaluator", async () => {
+    const repo = captureRepo("US-RUN-001", LOW_TIER);
+    const spawn = vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: false }));
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      paths: { ...fakePorts().ports.paths, alertsPath: join(repo, "alerts.log") },
+      installedAgents: () => ["kimi", "pi"],
+      agentSpawn: spawn,
+    });
+    const r = await executeCommand({ kind: "capture_facts" }, ports, CTX);
+    // The evaluate stage ran: a scorer was selected (dispatch invoked) and no tier block.
+    const evs = evalEvents(calls);
+    expect(evs.some((e) => e.type === "pair:selected")).toBe(true);
+    expect(evs.some((e) => e.type === "eval:tier-missing")).toBe(false);
+    expect((r.event as { facts?: { gateBlocked?: boolean } }).facts?.gateBlocked ?? false).toBe(false);
+  });
+});

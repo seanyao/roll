@@ -189,3 +189,54 @@ describe("aggregateRounds", () => {
     expect(agg.byEra).toEqual([]);
   });
 });
+
+describe("US-CYCLE-008 — tier + panel audit fields", () => {
+  it("round-trips a declared tier + actual panel composition", () => {
+    const dir = cardDir();
+    expect(
+      appendRoundEntry(dir, entry({ role: "evaluator", outcome: "scored", tier: "high", panel: ["kimi", "pi", "reasonix"] })),
+    ).toBe(true);
+    const { entries } = readRoundEntries(dir);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.tier).toBe("high");
+    expect(entries[0]?.panel).toEqual(["kimi", "pi", "reasonix"]);
+  });
+
+  it("a low-tier evaluator records tier=low + its single panel member", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry({ role: "evaluator", outcome: "scored", tier: "low", panel: ["kimi"] }));
+    const { entries } = readRoundEntries(dir);
+    expect(entries[0]?.tier).toBe("low");
+    expect(entries[0]?.panel).toEqual(["kimi"]);
+  });
+
+  it("forward-tolerant: a corrupt tier or non-string-array panel is dropped, the row survives", () => {
+    const dir = cardDir();
+    // Hand-write rows with corrupted tier/panel values (a forward-schema hazard).
+    appendFileSync(
+      join(dir, "round-journal.jsonl"),
+      JSON.stringify({ schemaVersion: 1, card: "US-X-1", role: "evaluator", start: 1, durMs: 5, outcome: "scored", tier: "medium", panel: [1, 2] }) + "\n",
+      "utf8",
+    );
+    appendFileSync(
+      join(dir, "round-journal.jsonl"),
+      JSON.stringify({ schemaVersion: 1, card: "US-X-1", role: "evaluator", start: 1, durMs: 5, outcome: "scored", tier: 3, panel: "kimi" }) + "\n",
+      "utf8",
+    );
+    const { entries, skipped } = readRoundEntries(dir);
+    expect(skipped).toBe(0); // rows are valid (role + durMs) — only the bad fields drop
+    expect(entries).toHaveLength(2);
+    for (const e of entries) {
+      expect(e.tier).toBeUndefined();
+      expect(e.panel).toBeUndefined();
+    }
+  });
+
+  it("legacy rows without tier/panel read back unchanged (older schema tolerance)", () => {
+    const dir = cardDir();
+    appendRoundEntry(dir, entry({ role: "builder", outcome: "delivered" }));
+    const { entries } = readRoundEntries(dir);
+    expect(entries[0]?.tier).toBeUndefined();
+    expect(entries[0]?.panel).toBeUndefined();
+  });
+});

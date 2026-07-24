@@ -1,4 +1,5 @@
-import { stat as nodeStat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open, stat as nodeStat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { fsReadInputSchema, fsReadOutputSchema, fsStatInputSchema, fsStatOutputSchema, fsWriteInputSchema, fsWriteOutputSchema } from "./schema-contracts.js";
@@ -181,8 +182,51 @@ async function writeOutput(
   await deps.fs.mkdir(dirname(path), { recursive: true });
   const revalidated = resolveContainedPath(repositoryRoot, path, true);
   if (revalidated !== path) return undefined;
-  await deps.fs.writeFile(path, content, "utf8");
-  return { bytesWritten: Buffer.byteLength(content, "utf8") };
+  return writeAnchoredFile(path, content, repositoryRoot);
+}
+
+async function writeAnchoredFile(
+  path: string,
+  content: string,
+  repositoryRoot: string,
+): Promise<FsWriteOutput | undefined> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let created = false;
+  try {
+    try {
+      handle = await open(path, constants.O_WRONLY | constants.O_NOFOLLOW);
+    } catch (cause) {
+      if (!isNotFound(cause)) return undefined;
+      handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      created = true;
+    }
+    const descriptorStat = await handle.stat();
+    const pathStat = await lstat(path);
+    const contained = resolveContainedPath(repositoryRoot, path, true) === path;
+    if (
+      !contained || !descriptorStat.isFile() || pathStat.isSymbolicLink() || !pathStat.isFile() ||
+      descriptorStat.dev !== pathStat.dev || descriptorStat.ino !== pathStat.ino
+    ) {
+      await handle.close();
+      handle = undefined;
+      if (created) await unlinkCreatedFile(path, descriptorStat.dev, descriptorStat.ino);
+      return undefined;
+    }
+    await handle.truncate(0);
+    await handle.writeFile(content, "utf8");
+    return { bytesWritten: Buffer.byteLength(content, "utf8") };
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function unlinkCreatedFile(path: string, device: number, inode: number): Promise<void> {
+  try {
+    const current = await lstat(path);
+    if (!current.isSymbolicLink() && current.dev === device && current.ino === inode) await unlink(path);
+  } catch {
+    // The path has already disappeared or changed ownership; never unlink a replacement.
+  }
 }
 
 function countLines(content: string): number {

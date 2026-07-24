@@ -238,6 +238,28 @@ describe("US-WS-035 Workspace-local tool context", () => {
     expect(deps.calls).toHaveLength(0);
   });
 
+  it("rejects dynamic shell code and bare relative symlinks before process execution", async () => {
+    const root = tmp("bash-argv-escape");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    const outside = tmp("bash-argv-escape-outside");
+    mkdirSync(repo, { recursive: true });
+    writeFileSync(join(outside, "secret.txt"), "outside\n");
+    symlinkSync(join(outside, "secret.txt"), join(repo, "escape"));
+    const executionContext = context(root, [repository("product", repo)]);
+
+    for (const input of [
+      { command: "sh", args: ["-c", "cat /etc/passwd"] },
+      { command: "node", args: ["--dns-result-order", "ipv4first", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "cat", args: ["escape"] },
+    ]) {
+      const deps = bashDeps();
+      const result = await new BashTool().execute(bashInvocation({ ...input, cwd: repo }, executionContext), deps);
+
+      expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+      expect(deps.calls).toHaveLength(0);
+    }
+  });
+
   it("contains filesystem writes to the selected repository and never treats Workspace metadata as a generic root", async () => {
     const root = tmp("filesystem-write");
     const repo = join(root, "issues", "US-WS-035", "product");
@@ -372,6 +394,35 @@ describe("US-WS-035 Workspace-local tool context", () => {
     );
 
     expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(existsSync(join(outside, "result.txt"))).toBe(false);
+  });
+
+  it("does not delegate the final write through a swappable pathname callback", async () => {
+    const root = tmp("filesystem-final-write-swap");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    const outside = tmp("filesystem-final-write-swap-outside");
+    mkdirSync(join(repo, "created"), { recursive: true });
+    const executionContext = context(root, [repository("product", repo)]);
+    const deps: ToolDeps = {
+      ...fsDeps(),
+      fs: {
+        readFile: async (path, encoding = "utf8") => readFileSync(path, encoding),
+        mkdir: async () => undefined,
+        writeFile: async () => {
+          rmSync(join(repo, "created"), { recursive: true, force: true });
+          symlinkSync(outside, join(repo, "created"));
+          writeFileSync(join(outside, "result.txt"), "leaked");
+        },
+      },
+    };
+
+    const result = await new FsTool("filesystem.write", { root: repo, access: "write" }).execute(
+      fsInvocation<FsWriteInput>("filesystem.write", { path: "created/result.txt", content: "safe" }, executionContext, "product"),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: true, output: { bytesWritten: 4 } });
+    expect(readFileSync(join(repo, "created", "result.txt"), "utf8")).toBe("safe");
     expect(existsSync(join(outside, "result.txt"))).toBe(false);
   });
 

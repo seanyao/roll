@@ -228,7 +228,7 @@ describe("US-TOOL-002 ToolRegistry", () => {
     const input = {
       command: "echo",
       args: ["SECRET", { nested: "prefix-SECRET-suffix" }],
-      env: { TOKEN: "SECRET" },
+      env: { TOKEN: "SECRET", password: "plain-password", privateKey: "plain-key" },
     };
     const result = await registry.invoke(TOOL_ID, request(input));
 
@@ -237,6 +237,8 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(emitted).toBeDefined();
     const serialized = JSON.stringify(emitted);
     expect(serialized).not.toContain("SECRET");
+    expect(serialized).not.toContain("plain-password");
+    expect(serialized).not.toContain("plain-key");
     expect(serialized).toContain("[REDACTED]");
   });
 

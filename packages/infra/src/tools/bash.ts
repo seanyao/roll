@@ -1,4 +1,5 @@
-import { isAbsolute, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
 import {
@@ -78,7 +79,7 @@ export class BashTool {
         warnings,
       };
     }
-    if (!argumentsContained(input.args ?? [], cwd, repository.canonicalWorktreePath)) {
+    if (!argumentsContained(input.command, input.args ?? [], cwd, repository.canonicalWorktreePath)) {
       return {
         ok: false,
         error: {
@@ -164,24 +165,73 @@ function allowed(cwd: string, repositoryRoot: string, allowedPaths: readonly str
   return { ok: false };
 }
 
-const PATH_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--super-prefix"]);
-
-function argumentsContained(args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+function argumentsContained(command: string, args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+  if (dynamicInterpreterDenied(command, args)) return false;
   for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? "";
-    const previous = index === 0 ? undefined : args[index - 1];
-    const equals = arg.startsWith("-") ? arg.indexOf("=") : -1;
-    const candidate = equals > 0 ? arg.slice(equals + 1) : arg;
-    const forcedPath = previous !== undefined && PATH_VALUE_FLAGS.has(previous);
-    if (!forcedPath && !looksLikePath(candidate)) continue;
-    const target = resolve(cwd, candidate);
-    if (resolveContainedPath(repositoryRoot, target, true) === undefined) return false;
+    const argument = args[index] ?? "";
+    const equalsValue = argument.startsWith("-") && argument.includes("=")
+      ? argument.slice(argument.indexOf("=") + 1)
+      : undefined;
+    const candidate = args[index - 1] === "-C" ? argument : equalsValue ?? argument;
+    const localCandidate = resolve(cwd, candidate);
+    const pathLike = isAbsolute(candidate) || candidate === ".." || candidate.startsWith("../") ||
+      candidate.includes("/../") || (candidate.includes("/") && !candidate.includes("://")) ||
+      (!candidate.startsWith("-") && existsSync(localCandidate));
+    if (!pathLike) continue;
+    const base = isAbsolute(candidate) ? repositoryRoot : cwd;
+    if (resolveContainedPath(repositoryRoot, resolve(base, candidate), true) === undefined) return false;
   }
   return true;
 }
 
-function looksLikePath(value: string): boolean {
-  return isAbsolute(value) || value === ".." || value.startsWith("./") || value.startsWith("../") || value.includes("/");
+function dynamicInterpreterDenied(command: string, args: readonly string[]): boolean {
+  const executable = basename(command).toLowerCase();
+  if (executable === "env") {
+    if (args.some((argument) => argument === "-S" || argument === "--split-string" || argument.startsWith("--split-string="))) return true;
+    const nested = envCommandIndex(args);
+    return nested >= 0 && dynamicInterpreterDenied(args[nested] ?? "", args.slice(nested + 1));
+  }
+  if (["bash", "dash", "fish", "sh", "zsh"].includes(executable)) {
+    return args.some((argument) => /^-[^-]*c/u.test(argument));
+  }
+  if (executable === "node") return nodeEvalDenied(args);
+  if (["perl", "ruby"].includes(executable)) return args.some((argument) => argument.startsWith("-e"));
+  if (["python", "python2", "python3"].includes(executable)) return args.some((argument) => argument.startsWith("-c"));
+  if (executable === "php") return args.some((argument) => argument.startsWith("-r"));
+  return false;
+}
+
+function envCommandIndex(args: readonly string[]): number {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
+    if (["-u", "--unset", "-C", "--chdir"].includes(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--unset=") || argument.startsWith("--chdir=") || argument.startsWith("-") || argument.includes("=")) continue;
+    return index;
+  }
+  return -1;
+}
+
+function nodeEvalDenied(args: readonly string[]): boolean {
+  let ambiguousOptionValue = false;
+  for (const argument of args) {
+    if (argument === "--") return false;
+    if (
+      argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=") ||
+      argument === "-p" || argument.startsWith("-p") || argument === "--print" || argument.startsWith("--print=")
+    ) return true;
+    if (!argument.startsWith("-")) {
+      if (ambiguousOptionValue) {
+        ambiguousOptionValue = false;
+        continue;
+      }
+      return false;
+    }
+    ambiguousOptionValue = argument.startsWith("--") ? !argument.includes("=") : argument.length === 2;
+  }
+  return false;
 }
 
 function advisoryWarnings(command: string, blockedCommands: readonly string[] | undefined): string[] {

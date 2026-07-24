@@ -339,19 +339,26 @@ function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
 function sanitizeInvocation<I>(invocation: ToolInvocation<I>, redact: ToolDeps["redact"]): ToolInvocation<I> {
   return {
     ...invocation,
-    input: sanitizeInvocationValue(invocation.input, redact, new WeakSet<object>()) as I,
+    input: sanitizeInvocationValue(invocation.input, redact, undefined, new WeakSet<object>()) as I,
   };
 }
 
-function sanitizeInvocationValue(value: unknown, redact: ToolDeps["redact"], seen: WeakSet<object>): unknown {
+function sanitizeInvocationValue(value: unknown, redact: ToolDeps["redact"], key: string | undefined, seen: WeakSet<object>): unknown {
+  if (key !== undefined && sensitiveInvocationKey(key)) return "[REDACTED]";
   if (typeof value === "string") return redact(value);
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return "[Circular]";
   seen.add(value);
-  if (Array.isArray(value)) return value.map((entry) => sanitizeInvocationValue(entry, redact, seen));
+  if (Array.isArray(value)) return value.map((entry) => sanitizeInvocationValue(entry, redact, undefined, seen));
   return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, sanitizeInvocationValue(entry, redact, seen)]),
+    Object.entries(value).map(([childKey, entry]) => [childKey, sanitizeInvocationValue(entry, redact, childKey, seen)]),
   );
+}
+
+function sensitiveInvocationKey(key: string): boolean {
+  const segments = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase().split(/[_-]+/u);
+  return segments.some((segment) => ["authorization", "cookie", "credential", "password", "passwd", "secret", "token"].includes(segment)) ||
+    segments.some((segment, index) => ["api", "private"].includes(segment) && segments[index + 1] === "key");
 }
 
 function formatRequirement(requirement: ToolRequirement): string {

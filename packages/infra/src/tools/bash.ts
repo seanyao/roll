@@ -218,7 +218,7 @@ function envCommandIndex(args: readonly string[]): number {
 }
 
 function nodeEvalDenied(args: readonly string[]): boolean {
-  let ambiguousOptionValue = false;
+  let ambiguousOption: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? "";
     if (argument === "--") return false;
@@ -227,20 +227,39 @@ function nodeEvalDenied(args: readonly string[]): boolean {
       argument === "-p" || argument.startsWith("-p") || argument === "--print" || argument.startsWith("--print=")
     ) return true;
     if (!argument.startsWith("-")) {
-      if (ambiguousOptionValue) {
-        ambiguousOptionValue = false;
+      if (ambiguousOption !== undefined) {
+        if (nodeInlineModuleDenied(ambiguousOption, argument)) return true;
+        ambiguousOption = undefined;
         continue;
       }
       return false;
     }
+    if (argument === "--run" || argument.startsWith("--run=")) return true;
+    if (argument.startsWith("-r") && !argument.startsWith("--") && argument.length > 2) {
+      if (inlineModuleSpecifier(argument.slice(2))) return true;
+      ambiguousOption = undefined;
+      continue;
+    }
+    const equals = argument.indexOf("=");
+    const option = equals < 0 ? argument : argument.slice(0, equals);
+    if (equals >= 0 && nodeInlineModuleDenied(option, argument.slice(equals + 1))) return true;
     // Node's long option set changes between releases. Treat a separate token
     // after any option as a possible option value, so an incomplete allowlist
     // cannot turn that value into a false script boundary before -e/--print.
-    ambiguousOptionValue = argument.startsWith("--")
-      ? !argument.includes("=")
-      : argument.length === 2;
+    ambiguousOption = equals < 0 && (argument.startsWith("--") || argument.length === 2)
+      ? option
+      : undefined;
   }
   return false;
+}
+
+function nodeInlineModuleDenied(option: string, value: string): boolean {
+  return ["-r", "--require", "--import", "--loader", "--experimental-loader"].includes(option) &&
+    inlineModuleSpecifier(value);
+}
+
+function inlineModuleSpecifier(value: string): boolean {
+  return /^(?:data|file|https?|javascript):/iu.test(value);
 }
 
 function redactEnv(env: Record<string, string> | undefined, deps: ToolDeps): Record<string, string> | undefined {

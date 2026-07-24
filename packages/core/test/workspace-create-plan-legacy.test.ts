@@ -1,14 +1,14 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  WORKSPACE_INIT_CONFIG_V1,
-  buildWorkspaceInitPlan,
-  parseWorkspaceInitConfig,
-  type WorkspaceInitProbe,
-} from "../src/workspace/init-plan.js";
+  WORKSPACE_CREATE_CONFIG_V1,
+  buildWorkspaceCreatePlan,
+  parseWorkspaceCreateConfig,
+  type WorkspaceCreateProbe,
+} from "../src/workspace/create-plan.js";
 
 const config = `
-schema: roll.workspace-init/v1
+schema: roll.workspace-create/v1
 id: ws-demo
 root: ~/.roll/workspaces/ws-demo
 display_name: Demo Workspace
@@ -26,7 +26,7 @@ repositories:
     integration_branch: release
 `;
 
-function probe(overrides: Partial<WorkspaceInitProbe> = {}): WorkspaceInitProbe {
+function probe(overrides: Partial<WorkspaceCreateProbe> = {}): WorkspaceCreateProbe {
   return {
     paths: {},
     caches: {},
@@ -36,18 +36,18 @@ function probe(overrides: Partial<WorkspaceInitProbe> = {}): WorkspaceInitProbe 
   };
 }
 
-describe("WorkspaceInitializationPlan", () => {
+describe("WorkspaceCreationPlan", () => {
   it("parses the closed YAML config and produces one stable ordered create plan", () => {
-    const parsed = parseWorkspaceInitConfig(config, {
+    const parsed = parseWorkspaceCreateConfig(config, {
       workspaceId: "ws-demo",
-      configPath: "/tmp/config/workspace-init.yaml",
+      configPath: "/tmp/config/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
     expect(parsed).toMatchObject({
       ok: true,
       value: {
-        schema: WORKSPACE_INIT_CONFIG_V1,
+        schema: WORKSPACE_CREATE_CONFIG_V1,
         workspaceId: "ws-demo",
         root: "/tmp/home/.roll/workspaces/ws-demo",
         manifest: {
@@ -64,10 +64,10 @@ describe("WorkspaceInitializationPlan", () => {
     });
     if (!parsed.ok) throw new Error("fixture must parse");
 
-    const plan = buildWorkspaceInitPlan(parsed.value, probe());
+    const plan = buildWorkspaceCreatePlan(parsed.value, probe());
     expect(plan.outcome).toBe("created");
     expect(plan.steps.map((step) => `${step.kind}:${step.action}:${step.target}`)).toEqual([
-      "journal:created:/tmp/home/.roll/workspace-init/ws-demo.pending.json",
+      "journal:created:/tmp/home/.roll/workspace-create/ws-demo.pending.json",
       "directory:created:/tmp/home/.roll/workspaces/ws-demo",
       "file:created:/tmp/home/.roll/workspaces/ws-demo/workspace.yaml",
       "file:created:/tmp/home/.roll/workspaces/ws-demo/charter.md",
@@ -91,20 +91,20 @@ describe("WorkspaceInitializationPlan", () => {
   });
 
   it("summarizes compatible retries deterministically as reused or repaired", () => {
-    const parsed = parseWorkspaceInitConfig(config, {
+    const parsed = parseWorkspaceCreateConfig(config, {
       workspaceId: "ws-demo",
-      configPath: "/tmp/workspace-init.yaml",
+      configPath: "/tmp/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
     if (!parsed.ok) throw new Error("fixture must parse");
     const compatiblePaths = Object.fromEntries(
-      buildWorkspaceInitPlan(parsed.value, probe()).steps
+      buildWorkspaceCreatePlan(parsed.value, probe()).steps
         .filter((step) => step.kind === "directory" || step.kind === "file")
         .map((step) => [step.target, "compatible" as const]),
     );
     const cacheIds = parsed.value.manifest.repositories.map((repo) => repo.repoId);
-    const reused = buildWorkspaceInitPlan(parsed.value, probe({
+    const reused = buildWorkspaceCreatePlan(parsed.value, probe({
       paths: compatiblePaths,
       caches: Object.fromEntries(cacheIds.map((id) => [id, "compatible" as const])),
       registry: { state: "compatible" },
@@ -112,7 +112,7 @@ describe("WorkspaceInitializationPlan", () => {
     expect(reused.outcome).toBe("reused");
     expect(reused.steps.every((step) => step.kind === "journal" || step.action === "reused")).toBe(true);
 
-    const repaired = buildWorkspaceInitPlan(parsed.value, probe({
+    const repaired = buildWorkspaceCreatePlan(parsed.value, probe({
       paths: { ...compatiblePaths, [join(parsed.value.root, "runtime", "alerts")]: "absent" },
       caches: Object.fromEntries(cacheIds.map((id) => [id, "compatible" as const])),
       registry: { state: "compatible" },
@@ -123,14 +123,14 @@ describe("WorkspaceInitializationPlan", () => {
   });
 
   it.each([
-    ["unknown schema", config.replace(WORKSPACE_INIT_CONFIG_V1, "roll.workspace-init/v2"), "unknown_version"],
+    ["unknown schema", config.replace(WORKSPACE_CREATE_CONFIG_V1, "roll.workspace-create/v2"), "unknown_version"],
     ["mismatched id", config.replace("id: ws-demo", "id: ws-other"), "identity_mismatch"],
     ["unsafe remote", config.replace("file:///tmp/remotes/api.git", "https://token@example.test/team/api.git"), "unsafe_remote"],
     ["duplicate alias", config.replace("alias: web", "alias: api"), "duplicate_identity"],
   ])("rejects %s before a plan can be applied", (_name, text, code) => {
-    const parsed = parseWorkspaceInitConfig(text, {
+    const parsed = parseWorkspaceCreateConfig(text, {
       workspaceId: "ws-demo",
-      configPath: "/tmp/workspace-init.yaml",
+      configPath: "/tmp/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
@@ -138,9 +138,9 @@ describe("WorkspaceInitializationPlan", () => {
   });
 
   it("rejects an unsafe Workspace ID before deriving mutation paths", () => {
-    const parsed = parseWorkspaceInitConfig(config.replaceAll("ws-demo", "../../escape"), {
+    const parsed = parseWorkspaceCreateConfig(config.replaceAll("ws-demo", "../../escape"), {
       workspaceId: "../../escape",
-      configPath: "/tmp/workspace-init.yaml",
+      configPath: "/tmp/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
@@ -150,21 +150,21 @@ describe("WorkspaceInitializationPlan", () => {
   });
 
   it("does not derive manifest identity from config file metadata", () => {
-    const original = parseWorkspaceInitConfig(config, {
-      workspaceId: "ws-demo", configPath: "/tmp/original/workspace-init.yaml", homeDir: "/tmp/home",
+    const original = parseWorkspaceCreateConfig(config, {
+      workspaceId: "ws-demo", configPath: "/tmp/original/workspace-create.yaml", homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
-    const copied = parseWorkspaceInitConfig(config, {
-      workspaceId: "ws-demo", configPath: "/tmp/copied/workspace-init.yaml", homeDir: "/tmp/home",
+    const copied = parseWorkspaceCreateConfig(config, {
+      workspaceId: "ws-demo", configPath: "/tmp/copied/workspace-create.yaml", homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
     expect(original).toEqual(copied);
   });
 
   it("rejects a Workspace root that contains the machine cache root", () => {
-    const parsed = parseWorkspaceInitConfig(config.replace("~/.roll/workspaces/ws-demo", "~/.roll"), {
+    const parsed = parseWorkspaceCreateConfig(config.replace("~/.roll/workspaces/ws-demo", "~/.roll"), {
       workspaceId: "ws-demo",
-      configPath: "/tmp/workspace-init.yaml",
+      configPath: "/tmp/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
@@ -172,14 +172,14 @@ describe("WorkspaceInitializationPlan", () => {
   });
 
   it("returns an ordered rejected plan when any probed target conflicts", () => {
-    const parsed = parseWorkspaceInitConfig(config, {
+    const parsed = parseWorkspaceCreateConfig(config, {
       workspaceId: "ws-demo",
-      configPath: "/tmp/workspace-init.yaml",
+      configPath: "/tmp/workspace-create.yaml",
       homeDir: "/tmp/home",
       rollHome: "/tmp/home/.roll",
     });
     if (!parsed.ok) throw new Error("fixture must parse");
-    const plan = buildWorkspaceInitPlan(parsed.value, probe({
+    const plan = buildWorkspaceCreatePlan(parsed.value, probe({
       paths: { [join(parsed.value.root, "workspace.yaml")]: "conflict" },
     }));
     expect(plan.outcome).toBe("rejected");

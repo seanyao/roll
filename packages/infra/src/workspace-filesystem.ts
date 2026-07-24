@@ -12,13 +12,13 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  buildWorkspaceInitPlan,
+  buildWorkspaceCreatePlan,
   renderDefaultWorkspaceAgentScope,
-  type WorkspaceInitConfig,
-  type WorkspaceInitPlan,
-  type WorkspaceInitPlanStep,
-  type WorkspaceInitProbe,
-  type WorkspaceInitState,
+  type WorkspaceCreateConfig,
+  type WorkspaceCreatePlan,
+  type WorkspaceCreatePlanStep,
+  type WorkspaceCreateProbe,
+  type WorkspaceCreateState,
 } from "@roll/core";
 import type { RepositoryBinding } from "@roll/spec";
 import {
@@ -32,19 +32,19 @@ import {
 } from "./workspace-registry.js";
 import { acquireLock, releaseLock } from "./process.js";
 
-const JOURNAL_V1 = "roll.workspace-init-journal/v1" as const;
+const JOURNAL_V1 = "roll.workspace-create-journal/v1" as const;
 
-export class WorkspaceInitializationError extends Error {
-  constructor(readonly code: "rejected" | "concurrent_init" | "apply_failed", message: string, options?: ErrorOptions) {
+export class WorkspaceCreationError extends Error {
+  constructor(readonly code: "rejected" | "concurrent_create" | "apply_failed", message: string, options?: ErrorOptions) {
     super(message, options);
-    this.name = "WorkspaceInitializationError";
+    this.name = "WorkspaceCreationError";
   }
 }
 
-interface WorkspaceInitDeps {
+interface WorkspaceCreateDeps {
   readonly inspectCache?: (binding: RepositoryBinding, rollHome: string) => Promise<RepositoryCacheProbeState>;
   readonly ensureCache?: (binding: RepositoryBinding, rollHome: string) => Promise<{ readonly action: "created" | "reused" | "repaired" }>;
-  readonly afterStep?: (step: WorkspaceInitPlanStep) => void;
+  readonly afterStep?: (step: WorkspaceCreatePlanStep) => void;
   readonly renameFile?: (from: string, to: string) => void;
 }
 
@@ -54,7 +54,7 @@ interface CreatedNode {
   readonly digest?: string;
 }
 
-interface InitJournal {
+interface CreateJournal {
   readonly schema: typeof JOURNAL_V1;
   readonly transactionId: string;
   readonly workspaceId: string;
@@ -66,24 +66,24 @@ interface InitJournal {
   readonly preservedCaches: readonly string[];
 }
 
-export function workspaceInitJournalPath(rollHome: string, workspaceId: string): string {
-  return join(resolve(rollHome), "workspace-init", `${workspaceId}.pending.json`);
+export function workspaceCreateJournalPath(rollHome: string, workspaceId: string): string {
+  return join(resolve(rollHome), "workspace-create", `${workspaceId}.pending.json`);
 }
 
-export function workspaceInitLockPath(rollHome: string, workspaceId: string): string {
+export function workspaceCreateLockPath(rollHome: string, workspaceId: string): string {
   void workspaceId;
-  return join(resolve(rollHome), "locks", "workspace-init.lock");
+  return join(resolve(rollHome), "locks", "workspace-create.lock");
 }
 
 function digest(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-function manifestText(config: WorkspaceInitConfig): string {
+function manifestText(config: WorkspaceCreateConfig): string {
   return `${JSON.stringify(config.manifest, null, 2)}\n`;
 }
 
-function expectedFiles(config: WorkspaceInitConfig): Readonly<Record<string, string>> {
+function expectedFiles(config: WorkspaceCreateConfig): Readonly<Record<string, string>> {
   return {
     [join(config.root, "workspace.yaml")]: manifestText(config),
     [join(config.root, "charter.md")]: `# ${config.manifest.displayName}\n\nWorkspace charter.\n`,
@@ -104,12 +104,12 @@ function atomicWrite(path: string, text: string, renameFile: (from: string, to: 
   }
 }
 
-function configDigest(config: WorkspaceInitConfig): string {
+function configDigest(config: WorkspaceCreateConfig): string {
   return digest(JSON.stringify({ workspaceId: config.workspaceId, root: config.root, manifest: config.manifest }));
 }
 
-function readJournal(config: WorkspaceInitConfig): "absent" | "repairable" | "conflict" {
-  const path = workspaceInitJournalPath(config.rollHome, config.workspaceId);
+function readJournal(config: WorkspaceCreateConfig): "absent" | "repairable" | "conflict" {
+  const path = workspaceCreateJournalPath(config.rollHome, config.workspaceId);
   if (!existsSync(path)) return "absent";
   try {
     const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
@@ -121,7 +121,7 @@ function readJournal(config: WorkspaceInitConfig): "absent" | "repairable" | "co
   }
 }
 
-function nodeState(path: string, expectedKind: "file" | "directory", expectedText: string | undefined, repairable: boolean): WorkspaceInitState {
+function nodeState(path: string, expectedKind: "file" | "directory", expectedText: string | undefined, repairable: boolean): WorkspaceCreateState {
   if (!existsSync(path)) return repairable ? "repairable" : "absent";
   const stat = lstatSync(path);
   if (stat.isSymbolicLink()) return "conflict";
@@ -130,7 +130,7 @@ function nodeState(path: string, expectedKind: "file" | "directory", expectedTex
   return readFileSync(path, "utf8") === expectedText ? "compatible" : "conflict";
 }
 
-function registryState(config: WorkspaceInitConfig): WorkspaceInitState {
+function registryState(config: WorkspaceCreateConfig): WorkspaceCreateState {
   if (existsSync(workspaceRegistryTransactionPath(config.rollHome))) return "conflict";
   try {
     const snapshot = new WorkspaceRegistry({ rollHome: config.rollHome }).read();
@@ -168,19 +168,19 @@ function contains(parent: string, child: string): boolean {
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
-function hasCanonicalPathConflict(config: WorkspaceInitConfig): boolean {
+function hasCanonicalPathConflict(config: WorkspaceCreateConfig): boolean {
   const root = canonicalProspectivePath(config.root);
   const reposRoot = canonicalProspectivePath(join(config.rollHome, "repos"));
   return contains(root, reposRoot) || contains(reposRoot, root);
 }
 
-export async function inspectWorkspaceInitialization(
-  config: WorkspaceInitConfig,
-  deps: Pick<WorkspaceInitDeps, "inspectCache"> = {},
-): Promise<WorkspaceInitPlan> {
+export async function inspectWorkspaceCreation(
+  config: WorkspaceCreateConfig,
+  deps: Pick<WorkspaceCreateDeps, "inspectCache"> = {},
+): Promise<WorkspaceCreatePlan> {
   const journal = readJournal(config);
   if (hasCanonicalPathConflict(config)) {
-    return buildWorkspaceInitPlan(config, {
+    return buildWorkspaceCreatePlan(config, {
       paths: { [config.root]: "conflict" },
       caches: {},
       registry: { state: registryState(config) },
@@ -192,12 +192,12 @@ export async function inspectWorkspaceInitialization(
   if (rootExists) {
     const stat = lstatSync(config.root);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      return buildWorkspaceInitPlan(config, { paths: { [config.root]: "conflict" }, caches: {}, registry: { state: registryState(config) }, journal: { state: journal } });
+      return buildWorkspaceCreatePlan(config, { paths: { [config.root]: "conflict" }, caches: {}, registry: { state: registryState(config) }, journal: { state: journal } });
     }
   }
   const files = expectedFiles(config);
-  const pathProbe: Record<string, WorkspaceInitState> = {};
-  const planned = buildWorkspaceInitPlan(config, { paths: {}, caches: {}, registry: { state: "absent" }, journal: { state: journal } });
+  const pathProbe: Record<string, WorkspaceCreateState> = {};
+  const planned = buildWorkspaceCreatePlan(config, { paths: {}, caches: {}, registry: { state: "absent" }, journal: { state: journal } });
   for (const step of planned.steps) {
     if (step.kind !== "file" && step.kind !== "directory") continue;
     pathProbe[step.target] = nodeState(step.target, step.kind, files[step.target], rootExists && repairable);
@@ -206,13 +206,13 @@ export async function inspectWorkspaceInitialization(
     pathProbe[config.root] = "conflict";
   }
   const inspectCache = deps.inspectCache ?? ((binding: RepositoryBinding, rollHome: string) => inspectRepositoryCache({ binding, rollHome }));
-  const caches: Record<string, WorkspaceInitState> = {};
+  const caches: Record<string, WorkspaceCreateState> = {};
   for (const binding of config.manifest.repositories) caches[binding.repoId] = await inspectCache(binding, config.rollHome);
-  const probe: WorkspaceInitProbe = { paths: pathProbe, caches, registry: { state: registryState(config) }, journal: { state: journal } };
-  return buildWorkspaceInitPlan(config, probe);
+  const probe: WorkspaceCreateProbe = { paths: pathProbe, caches, registry: { state: registryState(config) }, journal: { state: journal } };
+  return buildWorkspaceCreatePlan(config, probe);
 }
 
-function journalText(journal: InitJournal): string {
+function journalText(journal: CreateJournal): string {
   return `${JSON.stringify(journal, null, 2)}\n`;
 }
 
@@ -253,28 +253,28 @@ function mkdirTracked(path: string, created: CreatedNode[]): void {
   for (const target of missing.reverse()) created.push({ path: target, kind: "directory" });
 }
 
-export async function applyWorkspaceInitialization(
-  config: WorkspaceInitConfig,
-  deps: WorkspaceInitDeps = {},
-): Promise<{ readonly outcome: WorkspaceInitPlan["outcome"]; readonly plan: WorkspaceInitPlan }> {
-  const initialPlan = await inspectWorkspaceInitialization(config, deps);
-  if (initialPlan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
-  const lockPath = workspaceInitLockPath(config.rollHome, config.workspaceId);
+export async function applyWorkspaceCreation(
+  config: WorkspaceCreateConfig,
+  deps: WorkspaceCreateDeps = {},
+): Promise<{ readonly outcome: WorkspaceCreatePlan["outcome"]; readonly plan: WorkspaceCreatePlan }> {
+  const initialPlan = await inspectWorkspaceCreation(config, deps);
+  if (initialPlan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+  const lockPath = workspaceCreateLockPath(config.rollHome, config.workspaceId);
   const lock = acquireLock(lockPath, process.pid, {
-    cycleId: `workspace-init:${config.workspaceId}`,
+    cycleId: `workspace-create:${config.workspaceId}`,
     unparseableIsHeld: true,
   });
   if (!lock.acquired) {
-    throw new WorkspaceInitializationError("concurrent_init", `Workspace initialization is already running for ${config.workspaceId}`);
+    throw new WorkspaceCreationError("concurrent_create", `Workspace creation is already running for ${config.workspaceId}`);
   }
   try {
-    const plan = await inspectWorkspaceInitialization(config, deps);
-    if (plan.outcome === "rejected") throw new WorkspaceInitializationError("rejected", "Workspace initialization plan was rejected");
-    const journalPath = workspaceInitJournalPath(config.rollHome, config.workspaceId);
+    const plan = await inspectWorkspaceCreation(config, deps);
+    if (plan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+    const journalPath = workspaceCreateJournalPath(config.rollHome, config.workspaceId);
     const created: CreatedNode[] = [];
     const preservedCaches: string[] = [];
     let registered = false;
-    let journal: InitJournal = {
+    let journal: CreateJournal = {
       schema: JOURNAL_V1,
       transactionId: randomUUID(),
       workspaceId: config.workspaceId,
@@ -303,14 +303,14 @@ export async function applyWorkspaceInitialization(
           if (!existsSync(step.target)) mkdirTracked(step.target, created);
         } else if (step.kind === "file") {
           const text = files[step.target];
-          if (text === undefined) throw new WorkspaceInitializationError("apply_failed", `No content contract for ${step.target}`);
+          if (text === undefined) throw new WorkspaceCreationError("apply_failed", `No content contract for ${step.target}`);
           if (!existsSync(step.target)) {
             atomicWrite(step.target, text, deps.renameFile);
             created.push({ path: step.target, kind: "file", digest: digest(text) });
           }
         } else if (step.kind === "cache") {
           const binding = config.manifest.repositories.find((entry) => entry.repoId === step.target);
-          if (binding === undefined) throw new WorkspaceInitializationError("apply_failed", `Missing binding ${step.target}`);
+          if (binding === undefined) throw new WorkspaceCreationError("apply_failed", `Missing binding ${step.target}`);
           const result = await ensureCache(binding, config.rollHome);
           if (result.action === "created") preservedCaches.push(binding.repoId);
         }
@@ -321,7 +321,7 @@ export async function applyWorkspaceInitialization(
       const registry = new WorkspaceRegistry({ rollHome: config.rollHome });
       registry.register({ workspaceId: config.workspaceId, root: config.root });
       registered = true;
-      deps.afterStep?.(plan.steps.at(-1) as WorkspaceInitPlanStep);
+      deps.afterStep?.(plan.steps.at(-1) as WorkspaceCreatePlanStep);
       rmSync(journalPath, { force: true });
       return { outcome: plan.outcome, plan };
     } catch (error) {

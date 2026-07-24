@@ -11,7 +11,7 @@ import {
 } from "@roll/infra";
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
-import { workspaceInitCommand } from "./workspace-init.js";
+import { workspaceCreateCommand } from "./workspace-create.js";
 import { workspaceIssueCommand } from "./workspace-issue.js";
 import { workspaceRequirementCommand } from "./workspace-requirement.js";
 import { workspaceDoctorCommand } from "./workspace-doctor.js";
@@ -294,7 +294,11 @@ export function workspaceCommand(args: string[]): number | Promise<number> {
     return 0;
   }
   const rest = args.slice(1);
-  if (subcommand === "init") return workspaceInitCommand(rest);
+  if (subcommand === "create") return workspaceCreateCommand(rest);
+  if (subcommand === "init") {
+    process.stderr.write(`${msg("workspace.error.legacy_init_subcommand")}\n`);
+    return 1;
+  }
   if (subcommand === "issue") return workspaceIssueCommand(rest);
   if (subcommand === "requirement") return workspaceRequirementCommand(rest);
   if (subcommand === "doctor") return workspaceDoctorCommand(rest);

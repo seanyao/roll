@@ -28,17 +28,17 @@ cache。删除或重建 cache 不得改变 backlog、Issue 完成状态、merge 
 
 ## 创建并激活 Workspace
 
-先在目标目录外写一份版本化 `roll.workspace-init/v1` 配置，再预览确定性计划：
+先在目标目录外写一份版本化 `roll.workspace-create/v1` 配置，再预览确定性计划：
 
 ```bash
-roll workspace init ws-payments --config /absolute/path/workspace-init.yaml --check --json
+roll workspace create ws-payments --config /absolute/path/workspace-create.yaml --check --json
 ```
 
 `--check` 只读校验身份、root、需求绑定、repository remote、alias、integration branch、
 cache 决策与已有内容。只应用审阅过的配置：
 
 ```bash
-roll workspace init ws-payments --config /absolute/path/workspace-init.yaml --json
+roll workspace create ws-payments --config /absolute/path/workspace-create.yaml --json
 roll workspace activate ws-payments
 ```
 

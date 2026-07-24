@@ -3,12 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { hostname, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeAgentScopeConfig, parseWorkspaceInitConfig } from "@roll/core";
+import { normalizeAgentScopeConfig, parseWorkspaceCreateConfig } from "@roll/core";
 import {
-  applyWorkspaceInitialization,
-  inspectWorkspaceInitialization,
-  workspaceInitJournalPath,
-  workspaceInitLockPath,
+  applyWorkspaceCreation,
+  inspectWorkspaceCreation,
+  workspaceCreateJournalPath,
+  workspaceCreateLockPath,
   workspaceRegistryTransactionPath,
   workspaceRegistryPath,
 } from "../src/index.js";
@@ -20,12 +20,12 @@ afterEach(() => {
 });
 
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "roll-workspace-init-fs-"));
+  const home = mkdtempSync(join(tmpdir(), "roll-workspace-create-fs-"));
   roots.push(home);
   const rollHome = join(home, ".roll");
   const root = join(rollHome, "workspaces", "ws-demo");
-  const parsed = parseWorkspaceInitConfig(`
-schema: roll.workspace-init/v1
+  const parsed = parseWorkspaceCreateConfig(`
+schema: roll.workspace-create/v1
 id: ws-demo
 root: ${root}
 display_name: Demo
@@ -35,7 +35,7 @@ repositories:
     integration_branch: main
 `, {
     workspaceId: "ws-demo",
-    configPath: join(home, "workspace-init.yaml"),
+    configPath: join(home, "workspace-create.yaml"),
     homeDir: home,
     rollHome,
   });
@@ -68,7 +68,7 @@ describe("Workspace filesystem transaction", () => {
     const f = fixture();
     const beforeHome = tree(f.home);
     const beforeRoot = tree(f.root);
-    const plan = await inspectWorkspaceInitialization(f.config, {
+    const plan = await inspectWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
     });
     expect(plan.outcome).toBe("created");
@@ -79,7 +79,7 @@ describe("Workspace filesystem transaction", () => {
   it("creates the complete layout, registers last, and reuses an identical config", async () => {
     const f = fixture();
     const ensureCache = vi.fn(async () => ({ action: "created" as const }));
-    const first = await applyWorkspaceInitialization(f.config, {
+    const first = await applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache,
     });
@@ -104,10 +104,10 @@ describe("Workspace filesystem transaction", () => {
     expect(JSON.parse(readFileSync(workspaceRegistryPath(f.rollHome), "utf8"))).toMatchObject({
       entries: [{ workspaceId: "ws-demo", root: f.root }],
     });
-    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
 
     ensureCache.mockResolvedValue({ action: "reused" as const });
-    const second = await applyWorkspaceInitialization(f.config, {
+    const second = await applyWorkspaceCreation(f.config, {
       inspectCache: async () => "compatible",
       ensureCache,
     });
@@ -120,12 +120,12 @@ describe("Workspace filesystem transaction", () => {
     mkdirSync(f.rollHome, { recursive: true });
     const preExisting = join(f.rollHome, "operator-owned.txt");
     writeFileSync(preExisting, "keep\n", "utf8");
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
       afterStep: (step) => {
         if (step.target.endsWith("workspace.yaml")) {
-          expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(true);
+          expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(true);
           writeFileSync(step.target, "operator changed this file\n", "utf8");
         }
         if (step.target.endsWith(join("backlog", "index.md"))) {
@@ -143,9 +143,9 @@ describe("Workspace filesystem transaction", () => {
       expect(existsSync(join(f.root, cleanDirectory)), cleanDirectory).toBe(false);
     }
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(false);
-    const journal = JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")) as Record<string, unknown>;
+    const journal = JSON.parse(readFileSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"), "utf8")) as Record<string, unknown>;
     expect(journal).toMatchObject({
-      schema: "roll.workspace-init-journal/v1",
+      schema: "roll.workspace-create-journal/v1",
       workspaceId: "ws-demo",
       status: "repair_required",
     });
@@ -154,7 +154,7 @@ describe("Workspace filesystem transaction", () => {
 
   it("removes a failed atomic write temporary without exposing partial target content", async () => {
     const f = fixture();
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
       renameFile: (from, to) => {
@@ -165,7 +165,7 @@ describe("Workspace filesystem transaction", () => {
 
     expect(existsSync(join(f.root, "charter.md"))).toBe(false);
     expect(tree(f.home).filter((row) => row.includes(".tmp."))).toEqual([]);
-    expect(JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")))
+    expect(JSON.parse(readFileSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"), "utf8")))
       .toMatchObject({ status: "repair_required" });
   });
 
@@ -174,13 +174,13 @@ describe("Workspace filesystem transaction", () => {
     mkdirSync(f.root, { recursive: true });
     writeFileSync(join(f.root, "workspace.yaml"), "not the requested manifest\n", "utf8");
     const ensureCache = vi.fn(async () => ({ action: "created" as const }));
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache,
     })).rejects.toMatchObject({ code: "rejected" });
     expect(ensureCache).not.toHaveBeenCalled();
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(false);
-    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
   });
 
   it("rejects a root that aliases the machine cache through a symbolic link without writing state", async () => {
@@ -192,34 +192,34 @@ describe("Workspace filesystem transaction", () => {
     const config = { ...f.config, root: join(linked, "ws-demo") };
     const before = tree(f.rollHome);
 
-    const plan = await inspectWorkspaceInitialization(config, { inspectCache: async () => "absent" });
+    const plan = await inspectWorkspaceCreation(config, { inspectCache: async () => "absent" });
 
     expect(plan.outcome).toBe("rejected");
     expect(tree(f.rollHome)).toEqual(before);
   });
 
-  it("fails closed when another process holds the Workspace init lock", async () => {
+  it("fails closed when another process holds the Workspace create lock", async () => {
     const f = fixture();
-    const lock = workspaceInitLockPath(f.rollHome, "ws-other");
+    const lock = workspaceCreateLockPath(f.rollHome, "ws-other");
     mkdirSync(lock, { recursive: true });
     writeFileSync(join(lock, "meta.json"), `${JSON.stringify({
       pid: process.pid,
       hostname: hostname(),
       startedAt: Math.floor(Date.now() / 1000),
-      cycleId: "other-init",
+      cycleId: "other-create",
     })}\n`, "utf8");
 
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
-    })).rejects.toMatchObject({ code: "concurrent_init" });
+    })).rejects.toMatchObject({ code: "concurrent_create" });
     expect(existsSync(lock)).toBe(true);
-    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
   });
 
   it("rejects a second lexical root for an already registered canonical Workspace", async () => {
     const f = fixture();
-    await applyWorkspaceInitialization(f.config, {
+    await applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
     });
@@ -228,7 +228,7 @@ describe("Workspace filesystem transaction", () => {
     const aliased = { ...f.config, root: join(alias, "ws-demo") };
     const before = tree(f.rollHome);
 
-    await expect(applyWorkspaceInitialization(aliased, {
+    await expect(applyWorkspaceCreation(aliased, {
       inspectCache: async () => "compatible",
       ensureCache: async () => ({ action: "reused" as const }),
     })).rejects.toMatchObject({ code: "rejected" });
@@ -237,7 +237,7 @@ describe("Workspace filesystem transaction", () => {
 
   it("keeps the winner when another Workspace ID targets the same canonical root", async () => {
     const f = fixture();
-    await applyWorkspaceInitialization(f.config, {
+    await applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
     });
@@ -248,7 +248,7 @@ describe("Workspace filesystem transaction", () => {
       manifest: { ...f.config.manifest, workspaceId: "ws-other" },
     };
 
-    await expect(applyWorkspaceInitialization(loser, {
+    await expect(applyWorkspaceCreation(loser, {
       inspectCache: async () => "compatible",
       ensureCache: async () => ({ action: "reused" as const }),
     })).rejects.toMatchObject({ code: "rejected" });
@@ -258,16 +258,16 @@ describe("Workspace filesystem transaction", () => {
     expect(JSON.parse(readFileSync(workspaceRegistryPath(f.rollHome), "utf8"))).toMatchObject({
       entries: [{ workspaceId: "ws-demo", root: f.root }],
     });
-    expect(existsSync(workspaceInitJournalPath(f.rollHome, "ws-other"))).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-other"))).toBe(false);
   });
 
-  it("rejects a pending registry transaction before creating init state", async () => {
+  it("rejects a pending registry transaction before creating create state", async () => {
     const f = fixture();
     mkdirSync(f.rollHome, { recursive: true });
     writeFileSync(workspaceRegistryTransactionPath(f.rollHome), "{}\n", "utf8");
     const before = tree(f.rollHome);
 
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
     })).rejects.toMatchObject({ code: "rejected" });
@@ -276,7 +276,7 @@ describe("Workspace filesystem transaction", () => {
 
   it("preserves committed Workspace state when cleanup fails after registry commit", async () => {
     const f = fixture();
-    await expect(applyWorkspaceInitialization(f.config, {
+    await expect(applyWorkspaceCreation(f.config, {
       inspectCache: async () => "absent",
       ensureCache: async () => ({ action: "created" as const }),
       afterStep: (step) => {
@@ -286,7 +286,7 @@ describe("Workspace filesystem transaction", () => {
 
     expect(existsSync(join(f.root, "workspace.yaml"))).toBe(true);
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(true);
-    expect(JSON.parse(readFileSync(workspaceInitJournalPath(f.rollHome, "ws-demo"), "utf8")))
+    expect(JSON.parse(readFileSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"), "utf8")))
       .toMatchObject({ status: "repair_required" });
   });
 });

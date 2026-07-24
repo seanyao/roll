@@ -1,17 +1,17 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { parseWorkspaceInitConfig, type WorkspaceInitPlan } from "@roll/core";
+import { parseWorkspaceCreateConfig, type WorkspaceCreateParseError, type WorkspaceCreatePlan } from "@roll/core";
 import {
-  WorkspaceInitializationError,
-  applyWorkspaceInitialization,
-  inspectWorkspaceInitialization,
+  WorkspaceCreationError,
+  applyWorkspaceCreation,
+  inspectWorkspaceCreation,
 } from "@roll/infra";
 import { resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { configLang } from "./lang.js";
 
-const RESULT_V1 = "roll.workspace-init-result/v1" as const;
-const ERROR_V1 = "roll.workspace-init-error/v1" as const;
+const RESULT_V1 = "roll.workspace-create-result/v1" as const;
+const ERROR_V1 = "roll.workspace-create-error/v1" as const;
 
 function lang(): Lang {
   return resolveLang({
@@ -26,18 +26,30 @@ function msg(key: string, ...args: ReadonlyArray<string | number>): string {
   return t(v3Catalog, lang(), key, ...args);
 }
 
-function emitError(code: string, json: boolean): number {
-  const message = msg(`workspace.init.error.${code}`);
+function emitError(code: string, json: boolean, detail?: WorkspaceCreateParseError): number {
+  const message = msg(`workspace.create.error.${code}`);
+  const error = {
+    code,
+    message,
+    ...(detail?.conversions === undefined ? {} : { conversions: detail.conversions }),
+    ...(detail?.nextAction === undefined ? {} : { nextAction: detail.nextAction }),
+  };
   if (json) {
-    process.stderr.write(`${JSON.stringify({ schema: ERROR_V1, error: { code, message } }, null, 2)}\n`);
+    process.stderr.write(`${JSON.stringify({ schema: ERROR_V1, error }, null, 2)}\n`);
   } else {
-    process.stderr.write(`${msg("workspace.init.error.line", code, message)}\n`);
+    process.stderr.write(`${msg("workspace.create.error.line", code, message)}\n`);
+    if (detail?.conversions !== undefined) {
+      for (const conversion of detail.conversions) {
+        process.stderr.write(`${msg("workspace.create.error.conversion", conversion.path, conversion.from, conversion.to)}\n`);
+      }
+    }
+    if (detail?.nextAction !== undefined) process.stderr.write(`${msg("workspace.create.error.next_action", detail.nextAction)}\n`);
   }
   return 1;
 }
 
 function emitHelp(): number {
-  process.stdout.write(`${msg("workspace.init.error.invalid_arguments")}\n`);
+  process.stdout.write(`${msg("workspace.create.error.invalid_arguments")}\n`);
   return 0;
 }
 
@@ -57,17 +69,17 @@ function parseArgs(args: readonly string[]):
   return { ok: true, workspaceId: positional[0], configPath: resolve(configPath), check: args.includes("--check"), json };
 }
 
-function renderPlan(plan: WorkspaceInitPlan, mode: "check" | "apply"): string {
+function renderPlan(plan: WorkspaceCreatePlan, mode: "check" | "apply"): string {
   const lines = [
-    msg("workspace.init.title", plan.workspaceId, mode, plan.outcome),
-    msg("workspace.init.root", plan.root),
-    msg("workspace.init.header"),
+    msg("workspace.create.title", plan.workspaceId, mode, plan.outcome),
+    msg("workspace.create.root", plan.root),
+    msg("workspace.create.header"),
     ...plan.steps.map((step) => `${step.action}\t${step.kind}\t${step.target}`),
   ];
   return `${lines.join("\n")}\n`;
 }
 
-function emitResult(plan: WorkspaceInitPlan, mode: "check" | "apply", json: boolean): number {
+function emitResult(plan: WorkspaceCreatePlan, mode: "check" | "apply", json: boolean): number {
   if (json) {
     process.stdout.write(`${JSON.stringify({
       schema: RESULT_V1,
@@ -83,7 +95,7 @@ function emitResult(plan: WorkspaceInitPlan, mode: "check" | "apply", json: bool
   return plan.outcome === "rejected" ? 1 : 0;
 }
 
-export async function workspaceInitCommand(args: string[]): Promise<number> {
+export async function workspaceCreateCommand(args: string[]): Promise<number> {
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) return emitHelp();
   const parsedArgs = parseArgs(args);
   if (!parsedArgs.ok) return emitError("invalid_arguments", parsedArgs.json);
@@ -93,22 +105,25 @@ export async function workspaceInitCommand(args: string[]): Promise<number> {
   } catch {
     return emitError("config_read_failed", parsedArgs.json);
   }
-  const parsed = parseWorkspaceInitConfig(text, {
+  const parsed = parseWorkspaceCreateConfig(text, {
     workspaceId: parsedArgs.workspaceId,
     configPath: parsedArgs.configPath,
     homeDir: homedir(),
     rollHome: process.env["ROLL_HOME"] ?? resolve(homedir(), ".roll"),
   });
-  if (!parsed.ok) return emitError(parsed.errors[0]?.code ?? "invalid_config", parsedArgs.json);
+  if (!parsed.ok) {
+    const detail = parsed.errors[0];
+    return emitError(detail?.code ?? "invalid_config", parsedArgs.json, detail);
+  }
   try {
     if (parsedArgs.check) {
-      const plan = await inspectWorkspaceInitialization(parsed.value);
+      const plan = await inspectWorkspaceCreation(parsed.value);
       return emitResult(plan, "check", parsedArgs.json);
     }
-    const result = await applyWorkspaceInitialization(parsed.value);
+    const result = await applyWorkspaceCreation(parsed.value);
     return emitResult(result.plan, "apply", parsedArgs.json);
   } catch (error) {
-    if (error instanceof WorkspaceInitializationError) return emitError(error.code, parsedArgs.json);
+    if (error instanceof WorkspaceCreationError) return emitError(error.code, parsedArgs.json);
     return emitError("apply_failed", parsedArgs.json);
   }
 }

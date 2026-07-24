@@ -10,51 +10,57 @@ import {
   type WorkspaceManifest,
 } from "@roll/spec";
 
-export const WORKSPACE_INIT_CONFIG_V1 = "roll.workspace-init/v1" as const;
+export const WORKSPACE_CREATE_CONFIG_V1 = "roll.workspace-create/v1" as const;
 
-export interface WorkspaceInitConfig {
-  readonly schema: typeof WORKSPACE_INIT_CONFIG_V1;
+export interface WorkspaceCreateConfig {
+  readonly schema: typeof WORKSPACE_CREATE_CONFIG_V1;
   readonly workspaceId: string;
   readonly root: string;
   readonly rollHome: string;
   readonly manifest: WorkspaceManifest;
 }
 
-export type WorkspaceInitState = "absent" | "compatible" | "repairable" | "conflict";
-export type WorkspaceInitAction = "created" | "reused" | "repaired" | "rejected";
+export type WorkspaceCreateState = "absent" | "compatible" | "repairable" | "conflict";
+export type WorkspaceCreateAction = "created" | "reused" | "repaired" | "rejected";
 
-export interface WorkspaceInitProbe {
-  readonly paths: Readonly<Record<string, WorkspaceInitState>>;
-  readonly caches: Readonly<Record<string, WorkspaceInitState>>;
-  readonly registry: { readonly state: WorkspaceInitState };
+export interface WorkspaceCreateProbe {
+  readonly paths: Readonly<Record<string, WorkspaceCreateState>>;
+  readonly caches: Readonly<Record<string, WorkspaceCreateState>>;
+  readonly registry: { readonly state: WorkspaceCreateState };
   readonly journal: { readonly state: "absent" | "repairable" | "conflict" };
 }
 
-export interface WorkspaceInitPlanStep {
+export interface WorkspaceCreatePlanStep {
   readonly kind: "journal" | "directory" | "file" | "cache" | "registry";
   readonly target: string;
-  readonly action: WorkspaceInitAction;
+  readonly action: WorkspaceCreateAction;
 }
 
-export interface WorkspaceInitPlan {
-  readonly schema: "roll.workspace-init-plan/v1";
+export interface WorkspaceCreatePlan {
+  readonly schema: "roll.workspace-create-plan/v1";
   readonly workspaceId: string;
   readonly root: string;
-  readonly outcome: WorkspaceInitAction;
-  readonly steps: readonly WorkspaceInitPlanStep[];
+  readonly outcome: WorkspaceCreateAction;
+  readonly steps: readonly WorkspaceCreatePlanStep[];
 }
 
-export interface WorkspaceInitParseError {
-  readonly code: ContractErrorCode | "invalid_config" | "path_conflict";
+export interface WorkspaceCreateParseError {
+  readonly code: ContractErrorCode | "invalid_config" | "path_conflict" | "legacy_create_config";
   readonly path: string;
   readonly message: string;
+  readonly conversions?: readonly {
+    readonly path: string;
+    readonly from: string;
+    readonly to: string;
+  }[];
+  readonly nextAction?: string;
 }
 
-export type WorkspaceInitParseResult =
-  | { readonly ok: true; readonly value: WorkspaceInitConfig }
-  | { readonly ok: false; readonly errors: readonly WorkspaceInitParseError[] };
+export type WorkspaceCreateParseResult =
+  | { readonly ok: true; readonly value: WorkspaceCreateConfig }
+  | { readonly ok: false; readonly errors: readonly WorkspaceCreateParseError[] };
 
-export interface ParseWorkspaceInitOptions {
+export interface ParseWorkspaceCreateOptions {
   readonly workspaceId: string;
   readonly configPath: string;
   readonly homeDir: string;
@@ -128,7 +134,7 @@ function assignPair(target: Record<string, unknown>, text: string): void {
   target[key] = parseScalar(value);
 }
 
-/** Parse only the closed roll.workspace-init/v1 YAML shape; JSON is accepted as YAML 1.2 input. */
+/** Parse only the closed roll.workspace-create/v1 YAML shape; JSON is accepted as YAML 1.2 input. */
 function parseConfigDocument(text: string): unknown {
   try {
     return JSON.parse(text) as unknown;
@@ -139,7 +145,7 @@ function parseConfigDocument(text: string): unknown {
   let section: "requirements" | "repositories" | null = null;
   let item: Record<string, unknown> | null = null;
   for (const raw of text.replace(/^\uFEFF/u, "").split(/\r?\n/u)) {
-    if (raw.includes("\t")) throw new Error("tabs are not supported in Workspace init YAML");
+    if (raw.includes("\t")) throw new Error("tabs are not supported in Workspace create YAML");
     const line = stripComment(raw).trimEnd();
     if (line.trim() === "") continue;
     const indent = line.length - line.trimStart().length;
@@ -197,13 +203,13 @@ function contains(parent: string, child: string): boolean {
   return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
-function resolveRoot(value: string, options: ParseWorkspaceInitOptions): string {
+function resolveRoot(value: string, options: ParseWorkspaceCreateOptions): string {
   if (value === "~") return resolve(options.homeDir);
   if (value.startsWith("~/")) return resolve(options.homeDir, value.slice(2));
   return resolve(isAbsolute(value) ? value : join(dirname(options.configPath), value));
 }
 
-function parseRequirements(value: unknown, errors: WorkspaceInitParseError[]): RequirementSourceReference[] {
+function parseRequirements(value: unknown, errors: WorkspaceCreateParseError[]): RequirementSourceReference[] {
   if (!Array.isArray(value)) {
     errors.push({ code: "invalid_type", path: "requirements", message: "requirements must be an array" });
     return [];
@@ -218,7 +224,7 @@ function parseRequirements(value: unknown, errors: WorkspaceInitParseError[]): R
   });
 }
 
-function parseRepositories(value: unknown, errors: WorkspaceInitParseError[]): RepositoryBinding[] {
+function parseRepositories(value: unknown, errors: WorkspaceCreateParseError[]): RepositoryBinding[] {
   if (!Array.isArray(value) || value.length === 0) {
     errors.push({ code: "invalid_type", path: "repositories", message: "repositories must be a non-empty array" });
     return [];
@@ -271,7 +277,7 @@ function parseRepositories(value: unknown, errors: WorkspaceInitParseError[]): R
   return repositories;
 }
 
-export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceInitOptions): WorkspaceInitParseResult {
+export function parseWorkspaceCreateConfig(text: string, options: ParseWorkspaceCreateOptions): WorkspaceCreateParseResult {
   let value: unknown;
   try {
     value = parseConfigDocument(text);
@@ -282,10 +288,22 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
     return { ok: false, errors: [{ code: "invalid_type", path: "config", message: "config must be an object" }] };
   }
   const raw = value as RawConfig;
-  const errors: WorkspaceInitParseError[] = [];
+  if (raw.schema === "roll.workspace-init/v1") {
+    return {
+      ok: false,
+      errors: [{
+        code: "legacy_create_config",
+        path: "schema",
+        message: "Legacy Workspace init config must be converted before create",
+        conversions: [{ path: "schema", from: "roll.workspace-init/v1", to: WORKSPACE_CREATE_CONFIG_V1 }],
+        nextAction: `roll workspace create ${options.workspaceId} --config <converted-path>`,
+      }],
+    };
+  }
+  const errors: WorkspaceCreateParseError[] = [];
   const unknown = exactKeys(value, ["schema", "id", "root", "display_name", "created_at", "requirements", "repositories"]);
   if (unknown.length > 0) errors.push({ code: "unknown_field", path: unknown[0] ?? "config", message: "unknown config field" });
-  if (raw.schema !== WORKSPACE_INIT_CONFIG_V1) errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_INIT_CONFIG_V1}` });
+  if (raw.schema !== WORKSPACE_CREATE_CONFIG_V1) errors.push({ code: "unknown_version", path: "schema", message: `expected ${WORKSPACE_CREATE_CONFIG_V1}` });
   if (!nonEmptyString(raw.id)) errors.push({ code: "invalid_value", path: "id", message: "id is required" });
   else if (!safeWorkspaceId(raw.id)) {
     errors.push({ code: "invalid_value", path: "id", message: "Workspace ID contains unsafe characters" });
@@ -322,10 +340,10 @@ export function parseWorkspaceInitConfig(text: string, options: ParseWorkspaceIn
     requirements,
     repositories,
   };
-  return { ok: true, value: { schema: WORKSPACE_INIT_CONFIG_V1, workspaceId, root, rollHome, manifest } };
+  return { ok: true, value: { schema: WORKSPACE_CREATE_CONFIG_V1, workspaceId, root, rollHome, manifest } };
 }
 
-function action(state: WorkspaceInitState): WorkspaceInitAction {
+function action(state: WorkspaceCreateState): WorkspaceCreateAction {
   if (state === "absent") return "created";
   if (state === "compatible") return "reused";
   if (state === "repairable") return "repaired";
@@ -351,12 +369,12 @@ function layout(root: string): readonly { readonly kind: "directory" | "file"; r
   ];
 }
 
-export function buildWorkspaceInitPlan(config: WorkspaceInitConfig, probe: WorkspaceInitProbe): WorkspaceInitPlan {
-  const journalAction: WorkspaceInitAction = probe.journal.state === "absent" ? "created" :
+export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: WorkspaceCreateProbe): WorkspaceCreatePlan {
+  const journalAction: WorkspaceCreateAction = probe.journal.state === "absent" ? "created" :
     probe.journal.state === "repairable" ? "repaired" : "rejected";
-  const steps: WorkspaceInitPlanStep[] = [{
+  const steps: WorkspaceCreatePlanStep[] = [{
     kind: "journal",
-    target: join(config.rollHome, "workspace-init", `${config.workspaceId}.pending.json`),
+    target: join(config.rollHome, "workspace-create", `${config.workspaceId}.pending.json`),
     action: journalAction,
   }];
   for (const entry of layout(config.root)) {
@@ -367,8 +385,8 @@ export function buildWorkspaceInitPlan(config: WorkspaceInitConfig, probe: Works
   }
   steps.push({ kind: "registry", target: config.workspaceId, action: action(probe.registry.state) });
   const businessActions = steps.filter((step) => step.kind !== "journal").map((step) => step.action);
-  const outcome: WorkspaceInitAction = steps.some((step) => step.action === "rejected") ? "rejected" :
+  const outcome: WorkspaceCreateAction = steps.some((step) => step.action === "rejected") ? "rejected" :
     journalAction === "repaired" || businessActions.includes("repaired") ? "repaired" :
     businessActions.includes("created") ? "created" : "reused";
-  return { schema: "roll.workspace-init-plan/v1", workspaceId: config.workspaceId, root: config.root, outcome, steps };
+  return { schema: "roll.workspace-create-plan/v1", workspaceId: config.workspaceId, root: config.root, outcome, steps };
 }

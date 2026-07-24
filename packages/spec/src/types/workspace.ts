@@ -10,6 +10,9 @@ export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" 
 export const REQUIREMENT_HINT_V1 = "roll.requirement-hint/v1" as const;
 export const WORKSPACE_MIGRATION_FACTS_V1 = "roll.workspace-migration-facts/v1" as const;
 export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as const;
+export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
+export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-reference-index/v1" as const;
+export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
 
 export const REQUIREMENT_HINT_PROVENANCES = [
   "explicit_user",
@@ -396,6 +399,108 @@ export interface WorkspaceManifest {
   readonly createdAt?: string;
   readonly requirements: readonly RequirementSourceReference[];
   readonly repositories: readonly RepositoryBinding[];
+}
+
+export interface WorkspaceEditRepositoryInput extends RepositoryBinding {}
+
+export interface WorkspaceEditConfigV1 {
+  readonly schema: typeof WORKSPACE_EDIT_CONFIG_V1;
+  readonly workspaceId: string;
+  readonly expectedManifestSha256: Sha256Digest;
+  readonly displayName: string;
+  readonly requirements: readonly RequirementSourceReference[];
+  readonly repositories: readonly WorkspaceEditRepositoryInput[];
+}
+
+export interface WorkspaceMetadataIssueReference {
+  readonly storyId: string;
+  readonly manifestSha256: Sha256Digest;
+  readonly requirementKeys: readonly RequirementSourceReference[];
+  readonly repoIds: readonly string[];
+}
+
+export interface WorkspaceMetadataRequirementArchiveReference {
+  readonly requirementId: string;
+  readonly source: RequirementSourceReference;
+  readonly manifestSha256: Sha256Digest;
+}
+
+export interface WorkspaceMetadataAdditionalFact {
+  readonly kind: "delivery" | "runtime" | "event" | "migration";
+  readonly authorityPath: string;
+  readonly sha256: Sha256Digest;
+  readonly requirementKeys: readonly RequirementSourceReference[];
+  readonly repoIds: readonly string[];
+}
+
+export interface WorkspaceMetadataReferenceIndex {
+  readonly schema: typeof WORKSPACE_METADATA_REFERENCE_INDEX_V1;
+  readonly workspaceId: string;
+  readonly issues: readonly WorkspaceMetadataIssueReference[];
+  readonly requirementArchives: readonly WorkspaceMetadataRequirementArchiveReference[];
+  readonly additionalFacts: readonly WorkspaceMetadataAdditionalFact[];
+}
+
+export type WorkspaceEditChangeKind =
+  | "display_name"
+  | "requirement"
+  | "repository_identity"
+  | "repository_workflow"
+  | "repository";
+
+export interface WorkspaceEditChange {
+  readonly kind: WorkspaceEditChangeKind;
+  readonly path: string;
+  readonly operation: "added" | "removed" | "updated";
+  readonly before?: unknown;
+  readonly after?: unknown;
+  readonly safety: "safe" | "blocked";
+}
+
+export interface WorkspaceEditReference {
+  readonly kind: "issue_requirement" | "issue_repository" | "requirement_archive" | "additional_fact";
+  readonly authorityPath: string;
+  readonly storyId?: string;
+  readonly requirementId?: string;
+  readonly repoId?: string;
+}
+
+export type WorkspaceEditBlockerCode =
+  | "manifest_changed"
+  | "metadata_referenced"
+  | "normalization_failed"
+  | "reference_index_invalid";
+
+export interface WorkspaceEditBlocker {
+  readonly code: WorkspaceEditBlockerCode;
+  readonly path: string;
+  readonly message: string;
+  readonly references: readonly WorkspaceEditReference[];
+}
+
+export interface WorkspaceEditWarning {
+  readonly code: "requirement_capture_pending";
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface WorkspaceEditPlan {
+  readonly schema: typeof WORKSPACE_EDIT_PLAN_V1;
+  readonly outcome: "ready" | "blocked";
+  readonly workspaceId: string;
+  readonly manifestPath: string;
+  readonly beforeSha256: Sha256Digest;
+  readonly afterSha256: Sha256Digest;
+  readonly referenceIndexSha256: Sha256Digest;
+  readonly beforeManifest: WorkspaceManifest;
+  readonly afterManifest: WorkspaceManifest;
+  readonly changes: readonly WorkspaceEditChange[];
+  readonly blockers: readonly WorkspaceEditBlocker[];
+  readonly warnings: readonly WorkspaceEditWarning[];
+  readonly nextAction: {
+    readonly kind: "apply" | "blocked";
+    readonly command?: string;
+  };
 }
 
 export interface WorkspaceManifestExpectations {

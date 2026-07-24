@@ -217,6 +217,20 @@ export interface GitResult {
   readonly signal?: string;
 }
 
+/** Result of an argv-only raw Git invocation whose stdout must remain byte exact. */
+export interface GitBinaryResult {
+  /** Process exit code (0 = success). */
+  code: number;
+  stdout: Uint8Array;
+  stderr: string;
+  /** Present when Node terminated the process after the configured timeout. */
+  readonly timedOut?: boolean;
+  /** PID of a timed-out Git child, retained for termination evidence. */
+  readonly pid?: number;
+  /** Termination signal reported by Node for a failed Git child. */
+  readonly signal?: string;
+}
+
 export interface GitExecutionOptions {
   /** Maximum wall-clock time before the Git child is terminated. */
   readonly timeoutMs?: number;
@@ -278,6 +292,52 @@ export async function rawGit(
         code: typeof err.code === "number" ? err.code : 1,
         stdout,
         stderr,
+        ...detail,
+      });
+    });
+    pid = child.pid;
+  });
+}
+
+/**
+ * Run `git <args>` without a shell and preserve stdout as the exact bytes Git
+ * emitted. This is intentionally separate from {@link rawGit}: blob consumers
+ * must validate UTF-8 before any decoding or digest/byte accounting occurs.
+ */
+export async function rawGitBinary(
+  args: readonly string[],
+  cwd?: string,
+  options: GitExecutionOptions = {},
+): Promise<GitBinaryResult> {
+  return new Promise<GitBinaryResult>((resolveGit) => {
+    let pid: number | undefined;
+    const child = execFile("git", [...args], {
+      cwd,
+      encoding: "buffer",
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: options.timeoutMs,
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+    }, (error, stdout, stderr) => {
+      const stdoutBytes = new Uint8Array(stdout);
+      const stderrText = stderr.toString("utf8");
+      if (error === null) {
+        resolveGit({ code: 0, stdout: stdoutBytes, stderr: stderrText });
+        return;
+      }
+      const err = error as NodeJS.ErrnoException & {
+        readonly killed?: boolean;
+        readonly signal?: string;
+      };
+      const timedOut = err.killed === true && err.signal === "SIGTERM";
+      const detail = {
+        ...(timedOut ? { timedOut: true as const } : {}),
+        ...(timedOut && pid !== undefined ? { pid } : {}),
+        ...(err.signal === undefined ? {} : { signal: err.signal }),
+      };
+      resolveGit({
+        code: typeof err.code === "number" ? err.code : 1,
+        stdout: stdoutBytes,
+        stderr: stderrText,
         ...detail,
       });
     });

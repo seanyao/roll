@@ -97,13 +97,15 @@ describe("decideSwap — consensus routing (no auto-swap)", () => {
     const v: SwapVerdict[] = [{ agent: "kimi", verdict: "agree" }, { agent: "pi", verdict: "disagree" }];
     expect(decideSwap(v).decision).toBe("escalate");
   });
-  it("no valid verdicts (all error) ⇒ escalate", () => {
-    const v: SwapVerdict[] = [{ agent: "kimi", verdict: "error" }];
-    expect(decideSwap(v).decision).toBe("escalate");
+  it("any errored/unparseable selected voter ⇒ escalate (not a silent abstention)", () => {
+    expect(decideSwap([{ agent: "kimi", verdict: "error" }]).decision).toBe("escalate");
+    // one agree + one broken voter is NOT a consensus.
+    expect(decideSwap([{ agent: "kimi", verdict: "agree" }, { agent: "x", verdict: "error" }]).decision).toBe("escalate");
   });
-  it("errors ignored when the rest unanimously agree", () => {
-    const v: SwapVerdict[] = [{ agent: "kimi", verdict: "agree" }, { agent: "x", verdict: "error" }];
-    expect(decideSwap(v).decision).toBe("agree");
+  it("fewer than the minimum distinct voters ⇒ escalate (one voter is not consensus)", () => {
+    expect(decideSwap([{ agent: "kimi", verdict: "agree" }]).decision).toBe("escalate");
+    // same agent twice is still one distinct voter.
+    expect(decideSwap([{ agent: "kimi", verdict: "agree" }, { agent: "kimi", verdict: "agree" }]).decision).toBe("escalate");
   });
   void cand;
 });
@@ -140,7 +142,8 @@ describe("full chain (US-CYCLE-012 fixture): 2 fails → candidate → consensus
     const decision = decideSwap(verdicts);
     expect(decision.decision).toBe("agree");
     const { decisionPath, notePath } = recordSwapDecision(d, cands[0]!, decision);
-    expect(readFileSync(decisionPath, "utf8")).toContain("unanimous agree (2/2)");
+    expect(readFileSync(decisionPath, "utf8")).toContain("Decision: **agree**");
+    expect(readFileSync(decisionPath, "utf8")).toContain("2 distinct");
     expect(readFileSync(notePath, "utf8")).toContain("model-swap agree");
     // No agents.yaml is ever written by this flow.
     expect(existsSync(join(tmp, ".roll", "agents.yaml"))).toBe(false);

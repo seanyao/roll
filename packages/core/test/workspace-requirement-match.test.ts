@@ -163,6 +163,25 @@ describe("US-WS-027 workspace requirement evidence", () => {
     ]);
   });
 
+  it("does not produce issue_exact from a forged cwd_repository Story hint", () => {
+    const requirement = {
+      schema: REQUIREMENT_HINT_V1,
+      sources: [],
+      storyIds: [{ storyId: "US-WS-027", provenance: "cwd_repository" }],
+      repositoryRemotes: [],
+      paths: [],
+    } as unknown as RequirementHintV1;
+    expect(matchWorkspaceRequirement({
+      requirement,
+      facts: {
+        issues: [{ storyId: "US-WS-027", requirements: [] }],
+        requirementSources: [],
+        repositories: [],
+        roots: [],
+      },
+    })).toEqual({ evidence: [], hardMatch: false, score: 0, findings: [] });
+  });
+
   it("preserves persisted identity and emits migration findings instead of rewriting legacy refs", () => {
     const hint = normalizeRequirementHint({
       sources: [{ key: { provider: "jira", ref: "APE-234" }, provenance: "cli_argument" }],
@@ -484,6 +503,57 @@ describe("US-WS-027 workspace requirement evidence", () => {
       ],
       hardMatch: true,
       score: 140,
+      findings: [],
+    });
+  });
+
+  it("deduplicates CLI, issue-manifest and deterministic source/Story evidence to CLI in complete order", () => {
+    const requirement: RequirementHintV1 = {
+      schema: REQUIREMENT_HINT_V1,
+      sources: [
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "issue_manifest" },
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "deterministic_extraction" },
+        { key: { provider: "jira", ref: "APE-234" }, provenance: "cli_argument" },
+      ],
+      storyIds: [
+        { storyId: "US-WS-027", provenance: "issue_manifest" },
+        { storyId: "US-WS-027", provenance: "deterministic_extraction" },
+        { storyId: "US-WS-027", provenance: "cli_argument" },
+      ],
+      repositoryRemotes: [],
+      paths: [],
+    };
+    expect(matchWorkspaceRequirement({
+      requirement,
+      facts: {
+        issues: [{ storyId: "US-WS-027", requirements: [] }],
+        requirementSources: [{ provider: "jira", ref: "APE-234", requirementId: "req-2e4314b10317" }],
+        repositories: [],
+        roots: [],
+      },
+    })).toEqual({
+      evidence: [
+        {
+          kind: "issue_exact",
+          value: "US-WS-027",
+          hard: true,
+          score: 100,
+          source: "issue:US-WS-027",
+          provenance: "cli_argument",
+          detail: "Issue manifest storyId matched US-WS-027",
+        },
+        {
+          kind: "requirement_source_exact",
+          value: "jira:APE-234",
+          hard: true,
+          score: 90,
+          source: "requirement:jira/req-2e4314b10317",
+          provenance: "cli_argument",
+          detail: "Requirement source identity matched req-2e4314b10317",
+        },
+      ],
+      hardMatch: true,
+      score: 190,
       findings: [],
     });
   });

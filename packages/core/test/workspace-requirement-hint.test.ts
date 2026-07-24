@@ -121,6 +121,38 @@ describe("US-WS-027 RequirementHintV1 normalization", () => {
     });
   });
 
+  it("preserves representative Story IDs already accepted by validateStoryId", () => {
+    expect(normalizeRequirementHint({
+      storyIds: [
+        { storyId: "US-ONBOARD-NUDGE-004", provenance: "explicit_user" },
+        { storyId: "REFACTOR-47a", provenance: "explicit_user" },
+        { storyId: "FIX-204", provenance: "explicit_user" },
+      ],
+    })).toEqual({
+      ok: true,
+      value: {
+        schema: REQUIREMENT_HINT_V1,
+        sources: [],
+        storyIds: [
+          { storyId: "FIX-204", provenance: "explicit_user" },
+          { storyId: "REFACTOR-47a", provenance: "explicit_user" },
+          { storyId: "US-ONBOARD-NUDGE-004", provenance: "explicit_user" },
+        ],
+        repositoryRemotes: [],
+        paths: [],
+      },
+    });
+  });
+
+  it("rejects cwd_repository provenance for a structured Story ID", () => {
+    expect(normalizeRequirementHint({
+      storyIds: [{ storyId: "US-WS-027", provenance: "cwd_repository" }],
+    })).toMatchObject({
+      ok: false,
+      findings: [{ code: "invalid_provenance", path: "storyIds[0].provenance" }],
+    });
+  });
+
   it.each([
     ["provider URL", { sources: [{ key: { provider: "jira", ref: "https://example.atlassian.net/browse/APE-234" }, provenance: "explicit_user" }] }],
     ["incomplete Jira number", { sources: [{ key: { provider: "jira", ref: "234" }, provenance: "deterministic_extraction" }] }],

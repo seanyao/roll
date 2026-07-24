@@ -9,6 +9,7 @@ import type {
   RepositoryHintProvenance,
   RequirementHintProvenance,
   RequirementHintV1,
+  RequirementSourceKey,
   RepositoryIssueIdentity,
   RollEvent,
   StructuredRequirementProvenance,
@@ -92,9 +93,22 @@ const issueContainsNoAny: AssertFalse<ContainsAny<IssueManifest>> = false;
 const issueTargetContainsNoAny: AssertFalse<ContainsAny<IssueRepositoryTarget>> = false;
 const requirementHintIsNotAny: AssertFalse<IsAny<RequirementHintV1>> = false;
 const requirementHintContainsNoAny: AssertFalse<ContainsAny<RequirementHintV1>> = false;
+type RequirementHintSource = RequirementHintV1["sources"][number];
+type RequirementHintStory = RequirementHintV1["storyIds"][number];
+type RequirementHintRepository = RequirementHintV1["repositoryRemotes"][number];
+type RequirementHintPath = RequirementHintV1["paths"][number];
 const requirementHintKeysStayClosed: AssertTrue<Equal<
   keyof RequirementHintV1,
   "schema" | "sources" | "storyIds" | "repositoryRemotes" | "paths" | "semanticTerms"
+>> = true;
+const requirementHintSourceKeysStayClosed: AssertTrue<Equal<keyof RequirementHintSource, "key" | "provenance">> = true;
+const requirementHintStoryKeysStayClosed: AssertTrue<Equal<keyof RequirementHintStory, "storyId" | "provenance">> = true;
+const requirementHintRepositoryKeysStayClosed: AssertTrue<Equal<keyof RequirementHintRepository, "remote" | "provenance">> = true;
+const requirementHintPathKeysStayClosed: AssertTrue<Equal<keyof RequirementHintPath, "path" | "provenance">> = true;
+const requirementSourceKeyKeysStayClosed: AssertTrue<Equal<keyof RequirementSourceKey, "provider" | "ref">> = true;
+const requirementSourceProviderStaysClosed: AssertTrue<Equal<
+  RequirementSourceKey["provider"],
+  "jira" | "github_issue" | "local_file" | "user_input"
 >> = true;
 const requirementHintProvenanceStaysClosed: AssertTrue<Equal<
   RequirementHintProvenance,
@@ -212,6 +226,12 @@ void [
   requirementHintIsNotAny,
   requirementHintContainsNoAny,
   requirementHintKeysStayClosed,
+  requirementHintSourceKeysStayClosed,
+  requirementHintStoryKeysStayClosed,
+  requirementHintRepositoryKeysStayClosed,
+  requirementHintPathKeysStayClosed,
+  requirementSourceKeyKeysStayClosed,
+  requirementSourceProviderStaysClosed,
   requirementHintProvenanceStaysClosed,
   structuredProvenanceStaysClosed,
   repositoryProvenanceStaysClosed,

@@ -106,6 +106,7 @@ function safeAuthorityFile(
   workspaceRoot: string,
   path: string,
   dependencies: WorkspaceDiscoveryLoaderDependencies,
+  missingCode: "invalid_workspace_manifest" | "invalid_issue_manifest",
 ): Buffer {
   try {
     const before = lstatSync(path);
@@ -134,6 +135,9 @@ function safeAuthorityFile(
     return bytes;
   } catch (error) {
     if (error instanceof DiscoveryAuthorityError) throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new DiscoveryAuthorityError(missingCode, path, "Workspace discovery authority is missing", { cause: error });
+    }
     throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority could not be read", { cause: error });
   }
 }
@@ -195,7 +199,7 @@ function loadIssues(
     if (!existsSync(manifestPath)) {
       throw new DiscoveryAuthorityError("invalid_issue_manifest", manifestPath, "Workspace Issue manifest is missing");
     }
-    const bytes = safeAuthorityFile(workspaceRoot, manifestPath, dependencies);
+    const bytes = safeAuthorityFile(workspaceRoot, manifestPath, dependencies, "invalid_issue_manifest");
     const parsed = parseIssueManifest(parseJson(bytes, "invalid_issue_manifest", manifestPath), { workspaceId, storyId });
     if (!parsed.ok) {
       throw new DiscoveryAuthorityError("invalid_issue_manifest", manifestPath, "Workspace Issue manifest is invalid or mismatched");
@@ -328,7 +332,7 @@ export function loadWorkspaceDiscovery(
     try {
       const workspaceRoot = safeCanonicalRoot(entry);
       const manifestPath = join(workspaceRoot, "workspace.yaml");
-      const manifestBytes = safeAuthorityFile(workspaceRoot, manifestPath, dependencies);
+      const manifestBytes = safeAuthorityFile(workspaceRoot, manifestPath, dependencies, "invalid_workspace_manifest");
       const parsedManifest = parseWorkspaceManifest(parseJson(
         manifestBytes,
         "invalid_workspace_manifest",

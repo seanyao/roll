@@ -144,6 +144,24 @@ describe("US-WS-028 registry-bound Workspace discovery loader", () => {
     });
   });
 
+  it("classifies a missing registered workspace manifest as invalid authority", () => {
+    const base = sandbox();
+    const rollHome = join(base, "home");
+    const fields = createWorkspace(join(base, "fields"), "fields");
+    register(rollHome, fields, "fields");
+    const manifestPath = join(realpathSync(fields), "workspace.yaml");
+    rmSync(manifestPath);
+
+    expect(loadWorkspaceDiscovery({ rollHome })).toMatchObject({
+      workspaces: [],
+      diagnostics: [{
+        workspaceId: "fields",
+        code: "invalid_workspace_manifest",
+        authorityPath: manifestPath,
+      }],
+    });
+  });
+
   it("reports symlink escape and stale identity without following either authority", () => {
     const base = sandbox();
     const rollHome = join(base, "home");

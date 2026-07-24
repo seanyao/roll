@@ -5,6 +5,7 @@ export * from "./workspace/migration-facts.js";
 export * from "./workspace/migration.js";
 export * from "./workspace-reference-index.js";
 export * from "./workspace-authority-lock.js";
+export * from "./workspace-edit-transaction.js";
 export * from "./requirement-source-store.js";
 export * from "./requirement-archive-audit.js";
 export * from "./requirement-attest-store.js";

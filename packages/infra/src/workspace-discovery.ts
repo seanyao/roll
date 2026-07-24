@@ -194,6 +194,29 @@ function safeAuthorityFile(
   }
 }
 
+/** Reuse the discovery loader's FD-bound, bounded, no-follow authority read
+ * for another selected-Workspace host loader. The caller supplies a canonical
+ * Workspace root and one authority path inside it; no ambient cwd is used. */
+export function readWorkspaceAuthoritySnapshot(
+  input: {
+    readonly workspaceRoot: string;
+    readonly path: string;
+    readonly missingCode: "invalid_workspace_manifest" | "invalid_issue_manifest";
+  },
+  dependencies: WorkspaceDiscoveryLoaderDependencies = {},
+): Buffer {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = realpathSync(input.workspaceRoot);
+  } catch (error) {
+    throw new DiscoveryAuthorityError("stale_registry", input.workspaceRoot, "Workspace root could not be resolved", { cause: error });
+  }
+  if (canonicalRoot !== input.workspaceRoot || !contained(canonicalRoot, input.path)) {
+    throw new DiscoveryAuthorityError("symlink_escape", input.path, "Workspace authority escapes its canonical root");
+  }
+  return safeAuthorityFile(canonicalRoot, input.path, dependencies, input.missingCode);
+}
+
 function parseJson(bytes: Buffer, code: WorkspaceDiscoveryDiagnosticCode, path: string): unknown {
   try {
     return JSON.parse(bytes.toString("utf8")) as unknown;

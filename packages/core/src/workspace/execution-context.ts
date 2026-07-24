@@ -83,7 +83,7 @@ function sameAuthorities(
   actual: WorkspaceExecutionAuthorityPaths,
   expected: WorkspaceExecutionAuthorityPaths,
 ): boolean {
-  return Object.keys(expected).every((key) => (
+  return Object.keys(actual).length === Object.keys(expected).length && Object.keys(expected).every((key) => (
     actual[key as keyof WorkspaceExecutionAuthorityPaths] === expected[key as keyof WorkspaceExecutionAuthorityPaths]
   ));
 }
@@ -179,6 +179,66 @@ function immutableSerializableSnapshot<T>(value: T): T | undefined {
   }
 }
 
+function validateContextSnapshot(
+  context: WorkspaceExecutionContextV1,
+): WorkspaceExecutionContextError | undefined {
+  if (context.schema !== WORKSPACE_EXECUTION_CONTEXT_V1) {
+    return { code: "invalid_execution_context", message: "Workspace execution context schema is unsupported" };
+  }
+  if (
+    context.workspace.workspaceId === "" || !canonicalAbsolute(context.workspace.root) ||
+    !canonicalAbsolute(context.workspace.canonicalRoot) ||
+    !["registered", "active", "paused", "archived"].includes(context.workspace.lifecycle)
+  ) {
+    return { code: "invalid_execution_context", message: "Workspace execution context identity is invalid" };
+  }
+  if (
+    !["explicit", "environment", "cwd_manifest", "issue_manifest", "requirement_discovery"].includes(context.resolution.source) ||
+    !Array.isArray(context.resolution.evidence)
+  ) {
+    return { code: "invalid_execution_context", message: "Workspace execution context resolution evidence is invalid" };
+  }
+  if (!sameAuthorities(
+    context.authorities,
+    deriveWorkspaceExecutionAuthorities(context.workspace.canonicalRoot),
+  )) {
+    return { code: "authority_path_mismatch", message: "Workspace execution context authority paths are invalid" };
+  }
+  const bindings = bindingIndex(context.bindings);
+  if (bindings === undefined || context.bindings.length === 0) {
+    return { code: "repository_context_mismatch", message: "Workspace execution context bindings are invalid" };
+  }
+  const issue = context.issue;
+  if (issue === undefined) return undefined;
+  const issueRoot = join(context.workspace.canonicalRoot, "issues", issue.storyId);
+  if (
+    issue.storyId === "" || issue.manifestPath !== join(issueRoot, "manifest.json") ||
+    issue.execution.workspaceId !== context.workspace.workspaceId || issue.execution.issueRoot !== issueRoot
+  ) {
+    return { code: "issue_identity_mismatch", message: "Workspace execution context Issue identity is invalid" };
+  }
+  if (Object.keys(issue.execution.repositories).length === 0) {
+    return { code: "repository_context_mismatch", message: "Workspace execution context repository map is empty" };
+  }
+  for (const [repoId, repository] of Object.entries(issue.execution.repositories)) {
+    const binding = bindings.get(repoId);
+    if (
+      binding === undefined || repository.repoId !== repoId || binding.alias !== repository.alias ||
+      (repository.access !== "read" && repository.access !== "write") ||
+      (repository.access === "read" && (repository.requiredDelivery || repository.noChangePolicy !== undefined)) ||
+      (repository.access === "write" && repository.noChangePolicy === undefined) ||
+      repository.worktreePath !== join(issueRoot, repository.alias) ||
+      !contained(issueRoot, repository.worktreePath) ||
+      !validSha(repository.baseSha) || !validSha(repository.headSha) ||
+      !Array.isArray(repository.commands.test) || !repository.commands.test.every((part) => typeof part === "string") ||
+      !Array.isArray(repository.commands.integration) || !repository.commands.integration.every((part) => typeof part === "string")
+    ) {
+      return { code: "repository_context_mismatch", message: `Workspace execution context repository ${repoId} is invalid` };
+    }
+  }
+  return undefined;
+}
+
 export function buildWorkspaceExecutionContext(input: {
   readonly facts: WorkspaceExecutionContextFactsV1;
   readonly source: WorkspaceExecutionContextResolutionSource;
@@ -237,24 +297,30 @@ export function resolveWorkspaceExecutionContextScope(input: {
   readonly context: WorkspaceExecutionContextV1 | undefined;
 }): WorkspaceExecutionContextScopeResult {
   if (input.context === undefined) {
-    return input.scope === "machine_only"
+    return input.scope === "machine_only" || input.scope === "workspace_optional_read" || input.scope === "legacy_migration_only"
       ? { ok: true, context: undefined }
       : failure("missing_execution_context", `Scope ${input.scope} requires a Workspace execution context`);
   }
+  const validationError = validateContextSnapshot(input.context);
+  if (validationError !== undefined) return { ok: false, error: validationError };
+  const snapshot = immutableSerializableSnapshot(input.context);
+  if (snapshot === undefined) {
+    return failure("invalid_execution_context", "Workspace execution context is not serializable");
+  }
   if (
     (input.scope === "workspace_required_mutation" || input.scope === "issue_required" || input.scope === "repository_required") &&
-    input.context.workspace.lifecycle !== "active"
+    snapshot.workspace.lifecycle !== "active"
   ) {
     return failure("workspace_lifecycle_forbidden", `Scope ${input.scope} requires an active Workspace`);
   }
-  if (input.scope === "issue_required" && input.context.issue === undefined) {
+  if (input.scope === "issue_required" && snapshot.issue === undefined) {
     return failure("missing_issue_context", "Issue scope requires an Issue execution context");
   }
   if (
     input.scope === "repository_required" &&
-    (input.context.issue === undefined || Object.keys(input.context.issue.execution.repositories).length === 0)
+    (snapshot.issue === undefined || Object.keys(snapshot.issue.execution.repositories).length === 0)
   ) {
     return failure("missing_repository_context", "Repository scope requires a non-empty repository execution context");
   }
-  return { ok: true, context: input.context };
+  return { ok: true, context: snapshot };
 }

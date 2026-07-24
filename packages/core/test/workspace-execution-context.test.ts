@@ -55,7 +55,6 @@ function issueManifest(bindings: readonly RepositoryBinding[]): IssueManifest {
           alias: entry.alias,
           access: "read" as const,
           requiredDelivery: false,
-          dependsOnRepo: bindings[0]?.repoId,
         }),
     integrationAcceptance: { command: ["pnpm", "test:integration"] },
   };
@@ -175,7 +174,6 @@ describe("buildWorkspaceExecutionContext", () => {
               "repo-skills": {
                 access: "read",
                 requiredDelivery: false,
-                dependsOnRepo: "repo-product",
                 baseSha: sha("2"),
                 headSha: sha("3"),
               },
@@ -202,24 +200,43 @@ describe("buildWorkspaceExecutionContext", () => {
 });
 
 describe("resolveWorkspaceExecutionContextScope", () => {
-  it("allows only machine_only to proceed without a context", () => {
-    expect(resolveWorkspaceExecutionContextScope({ scope: "machine_only", context: undefined })).toEqual({
-      ok: true,
-      context: undefined,
-    });
+  it("keeps machine, optional read, and legacy migration explicitly context-free", () => {
+    for (const scope of ["machine_only", "workspace_optional_read", "legacy_migration_only"] as const) {
+      expect(resolveWorkspaceExecutionContextScope({ scope, context: undefined })).toEqual({
+        ok: true,
+        context: undefined,
+      });
+    }
     for (const scope of [
-      "workspace_optional_read",
       "workspace_required_read",
       "workspace_required_mutation",
       "issue_required",
       "repository_required",
-      "legacy_migration_only",
     ] as const) {
       expect(resolveWorkspaceExecutionContextScope({ scope, context: undefined })).toMatchObject({
         ok: false,
         error: { code: "missing_execution_context" },
       });
     }
+  });
+
+  it("revalidates an externally supplied context before applying scope policy", () => {
+    const built = buildWorkspaceExecutionContext({ facts: facts(), source: "explicit", evidence });
+    if (!built.ok) throw new Error("fixture failed");
+    const forgedSchema = { ...built.context, schema: "roll.workspace-execution-context/v0" } as unknown as typeof built.context;
+    const forgedAuthority = {
+      ...built.context,
+      authorities: { ...built.context.authorities, policy: "/tmp/policy.yaml" },
+    };
+
+    expect(resolveWorkspaceExecutionContextScope({ scope: "workspace_required_read", context: forgedSchema })).toMatchObject({
+      ok: false,
+      error: { code: "invalid_execution_context" },
+    });
+    expect(resolveWorkspaceExecutionContextScope({ scope: "workspace_required_read", context: forgedAuthority })).toMatchObject({
+      ok: false,
+      error: { code: "authority_path_mismatch" },
+    });
   });
 
   it("enforces lifecycle and Issue/repository requirements without fabricating empty objects", () => {

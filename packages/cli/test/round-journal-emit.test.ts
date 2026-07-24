@@ -50,6 +50,34 @@ describe("recordSpawnRound (US-CYCLE-004 auto-write)", () => {
     expect(deriveRounds([...entries, { ...entries[0]!, cycleId: "c2", role: "evaluator" }]).map((e) => e.round)).toEqual([1, 2, 2]);
   });
 
+  it("US-CYCLE-006 auto-trigger: crossing the repair-round threshold auto-writes split-advice.md + a split:advice event", async () => {
+    const project = proj();
+    const ports = { repoCwd: project } as unknown as Ports;
+    const rec = (cyc: string, outcome: string): void =>
+      recordSpawnRound(ports, { storyId: "US-BIG", model: "glm-5.2", cycleId: cyc } as unknown as CycleContext, { role: "builder", start: 1, durMs: 1, outcome });
+    // Two rounds → still under threshold → no advice yet.
+    rec("c1", "failed");
+    await flush();
+    rec("c2", "refuted");
+    await flush();
+    const advicePath = join(cardDirOf(project, "US-BIG"), "split-advice.md");
+    expect(existsSync(advicePath)).toBe(false);
+    // Third round crosses the threshold → advice auto-generated + event emitted.
+    rec("c3", "delivered");
+    await flush();
+    expect(existsSync(advicePath)).toBe(true);
+    expect(readFileSync(advicePath, "utf8")).toContain("ran **3 rounds**");
+    const eventsPath = join(project, ".roll", "loop", "events.ndjson");
+    expect(existsSync(eventsPath)).toBe(true);
+    const evLine = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.includes('"split:advice"'));
+    expect(evLine.length).toBe(1);
+    expect(evLine[0]).toContain('"card":"US-BIG"');
+    expect(evLine[0]).toContain('"rounds":3');
+    // (Idempotency of the write itself — same journal ⇒ no rewrite/re-emit — is
+    // pinned directly in split-advice.test.ts; here recordSpawnRound always
+    // appends, so any further call is a genuinely new journal state.)
+  });
+
   it("returns synchronously (non-blocking) — the write is deferred off the hot path", () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;

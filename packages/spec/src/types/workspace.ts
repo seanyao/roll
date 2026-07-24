@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { JsonSchema } from "./json-schema.js";
+import { parseWorkspaceContexts, workspaceContextsV1Schema, type WorkspaceContextsV1 } from "./context.js";
 
 export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
 export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
@@ -336,6 +337,7 @@ export interface WorkspaceManifest {
   readonly createdAt?: string;
   readonly requirements: readonly RequirementSourceReference[];
   readonly repositories: readonly RepositoryBinding[];
+  readonly contexts?: WorkspaceContextsV1;
 }
 
 export interface WorkspaceManifestExpectations {
@@ -480,6 +482,7 @@ export const workspaceManifestV1Schema: JsonSchema = objectSchema(
     createdAt: stringSchema,
     requirements: { type: "array", items: requirementSourceSchema },
     repositories: { type: "array", items: repositoryBindingV1Schema, minItems: 1 },
+    contexts: workspaceContextsV1Schema,
   },
   ["schema", "workspaceId", "displayName", "requirements", "repositories"],
 );
@@ -1091,7 +1094,7 @@ export function parseWorkspaceManifest(
   if (!isRecord(value)) return fail("invalid_type", "workspace", "Workspace manifest must be an object");
   const errors = unknownFieldErrors(
     value,
-    ["schema", "workspaceId", "displayName", "createdAt", "requirements", "repositories"],
+    ["schema", "workspaceId", "displayName", "createdAt", "requirements", "repositories", "contexts"],
     "",
   );
   if (value["schema"] !== WORKSPACE_MANIFEST_V1) {
@@ -1113,6 +1116,10 @@ export function parseWorkspaceManifest(
     }
   }
   errors.push(...duplicateErrors(repositories));
+  const parsedContexts = value["contexts"] === undefined
+    ? undefined
+    : parseWorkspaceContexts(value["contexts"]);
+  if (parsedContexts !== undefined && !parsedContexts.ok) errors.push(...parsedContexts.errors);
 
   if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
     errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });
@@ -1132,6 +1139,7 @@ export function parseWorkspaceManifest(
       ...(createdAt !== undefined ? { createdAt } : {}),
       requirements,
       repositories,
+      ...(parsedContexts?.ok === true ? { contexts: parsedContexts.value } : {}),
     },
   };
 }

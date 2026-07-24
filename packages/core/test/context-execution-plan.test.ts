@@ -30,15 +30,19 @@ function registry(overrides: Partial<ContextProviderRegistryV1> = {}): ContextPr
   };
 }
 
-function workspace(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceExecutionContextV1 & WorkspaceContextsV1 {
+function binding(): WorkspaceContextBindingV1 {
+  return {
+    providerId: "bipo-enterprise",
+    enabled: true,
+    required: true,
+    entrypoints: ["wiki/index.md"],
+  };
+}
+
+function workspace(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceExecutionContextV1 {
   const contextConfig: WorkspaceContextsV1 = {
     enabled: true,
-    bindings: [{
-      providerId: "bipo-enterprise",
-      enabled: true,
-      required: true,
-      entrypoints: ["wiki/index.md"],
-    }],
+    bindings: [binding()],
     ...overrides,
   };
   return {
@@ -59,7 +63,6 @@ function workspace(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceExecu
       runtime: "/ws/roll/runtime",
       locks: "/ws/roll/runtime/locks",
     },
-    ...contextConfig,
   };
 }
 
@@ -69,6 +72,7 @@ describe("compileContextProviderExecutionPlans", () => {
     expect([...source.matchAll(/from\s+["']([^"']+)["']/gu)].map((match) => match[1])).toEqual([
       "node:crypto",
       "@roll/spec",
+      "../tools/schema.js",
     ]);
     expect(source).not.toMatch(/(?:node:fs|node:child_process|node:http|node:https|node:net|process\.cwd|\bfetch\s*\(|\bimport\s*\()/u);
     const result = compileContextProviderExecutionPlans({ registry: registry(), workspace: workspace(), refs: [] });
@@ -106,7 +110,7 @@ describe("compileContextProviderExecutionPlans", () => {
     ["registry disabled", registry({ enabled: false }), workspace()],
     ["missing Workspace contexts", registry(), undefined],
     ["Workspace contexts disabled", registry(), workspace({ enabled: false })],
-    ["all bindings disabled", registry(), workspace({ bindings: [{ ...workspace().bindings[0]!, enabled: false, required: false }] })],
+    ["all bindings disabled", registry(), workspace({ bindings: [{ ...binding(), enabled: false, required: false }] })],
   ])("returns an explicit disabled plan for %s", (_label, providerRegistry, workspaceContexts) => {
     expect(compileContextProviderExecutionPlans({
       registry: providerRegistry,
@@ -123,7 +127,7 @@ describe("compileContextProviderExecutionPlans", () => {
     expect(compileContextProviderExecutionPlans({
       registry: registry({ enabled: false }),
       workspace: workspace({
-        bindings: [{ ...workspace().bindings[0]!, enabled: false, required: true }],
+        bindings: [{ ...binding(), enabled: false, required: true }],
       }),
       refs: ["not-a-context-ref"],
     })).toEqual({
@@ -143,7 +147,7 @@ describe("compileContextProviderExecutionPlans", () => {
 
     const optional = compileContextProviderExecutionPlans({
       registry: registry({ providers: [] }),
-      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...binding(), required: false }] }),
       refs: [],
     });
     expect(optional).toMatchObject({
@@ -162,7 +166,7 @@ describe("compileContextProviderExecutionPlans", () => {
     });
     expect(compileContextProviderExecutionPlans({
       registry: disabledRegistry,
-      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...binding(), required: false }] }),
       refs: [],
     })).toMatchObject({
       outcome: "ready",
@@ -195,7 +199,7 @@ describe("compileContextProviderExecutionPlans", () => {
   it("treats an explicit ref to a disabled binding as not bound", () => {
     expect(compileContextProviderExecutionPlans({
       registry: registry(),
-      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, enabled: false, required: false }] }),
+      workspace: workspace({ bindings: [{ ...binding(), enabled: false, required: false }] }),
       refs: ["context://bipo-enterprise/wiki/systems/axis.md"],
     })).toMatchObject({
       outcome: "blocked",
@@ -206,7 +210,7 @@ describe("compileContextProviderExecutionPlans", () => {
 
   it("defensively blocks duplicate or contradictory bindings instead of merging them", () => {
     const duplicate = workspace({
-      bindings: [workspace().bindings[0]!, { ...workspace().bindings[0]!, required: false }],
+      bindings: [binding(), { ...binding(), required: false }],
     });
     expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: duplicate, refs: [] })).toMatchObject({
       outcome: "blocked",
@@ -214,7 +218,7 @@ describe("compileContextProviderExecutionPlans", () => {
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
     });
     const contradictory = workspace({
-      bindings: [{ ...workspace().bindings[0]!, enabled: false, required: true }],
+      bindings: [{ ...binding(), enabled: false, required: true }],
     });
     expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: contradictory, refs: [] })).toMatchObject({
       outcome: "blocked",
@@ -222,7 +226,7 @@ describe("compileContextProviderExecutionPlans", () => {
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
     });
     const unsafeEntrypoint = workspace({
-      bindings: [{ ...workspace().bindings[0]!, entrypoints: ["../wiki/index.md"] }],
+      bindings: [{ ...binding(), entrypoints: ["../wiki/index.md"] }],
     });
     expect(compileContextProviderExecutionPlans({ registry: registry(), workspace: unsafeEntrypoint, refs: [] })).toMatchObject({
       outcome: "blocked",
@@ -238,7 +242,7 @@ describe("compileContextProviderExecutionPlans", () => {
       workspace: workspace({
         bindings: [
           {
-            ...workspace().bindings[0]!,
+            ...binding(),
             entrypoints: ["wiki/index.md", "wiki/systems/axis.md", "wiki/index.md"],
           },
           {
@@ -292,7 +296,7 @@ describe("compileContextProviderExecutionPlans", () => {
     });
     const changedBinding = compileContextProviderExecutionPlans({
       registry: registry(),
-      workspace: workspace({ bindings: [{ ...workspace().bindings[0]!, required: false }] }),
+      workspace: workspace({ bindings: [{ ...binding(), required: false }] }),
       refs: [],
     });
     expect(changedProvider.plans[0]?.providerConfigDigest).not.toBe(first.plans[0]?.providerConfigDigest);
@@ -380,9 +384,9 @@ describe("compileContextProviderExecutionPlans", () => {
       expect(plan.bindingDigest).toBe(base.bindingDigest);
     }
     for (const changed of [
-      { ...workspace().bindings[0]!, required: false },
-      { ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md"] },
-      { ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] },
+      { ...binding(), required: false },
+      { ...binding(), entrypoints: ["wiki/overview.md"] },
+      { ...binding(), entrypoints: ["wiki/overview.md", "wiki/index.md"] },
     ]) {
       const plan = compileContextProviderExecutionPlans({
         registry: registry(),
@@ -396,14 +400,14 @@ describe("compileContextProviderExecutionPlans", () => {
     const ordered = compileContextProviderExecutionPlans({
       registry: registry(),
       workspace: workspace({
-        bindings: [{ ...workspace().bindings[0]!, entrypoints: ["wiki/index.md", "wiki/overview.md"] }],
+        bindings: [{ ...binding(), entrypoints: ["wiki/index.md", "wiki/overview.md"] }],
       }),
       refs: [],
     }).plans[0]!;
     const reordered = compileContextProviderExecutionPlans({
       registry: registry(),
       workspace: workspace({
-        bindings: [{ ...workspace().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] }],
+        bindings: [{ ...binding(), entrypoints: ["wiki/overview.md", "wiki/index.md"] }],
       }),
       refs: [],
     }).plans[0]!;
@@ -411,21 +415,16 @@ describe("compileContextProviderExecutionPlans", () => {
     expect(reordered.bindingDigest).not.toBe(ordered.bindingDigest);
   });
 
-  it("projects closed Provider and binding fields before planning or digesting", () => {
+  it("projects closed Provider fields before planning or digesting", () => {
     const secret = "plan-secret-sentinel";
     const providerWithExtras = {
       ...provider(),
       credential: secret,
       cachePath: `/tmp/${secret}`,
     } as ReturnType<typeof provider> & { credential: string; cachePath: string };
-    const bindingWithExtras = {
-      ...workspace().bindings[0]!,
-      credentialRef: secret,
-      cachePath: `/tmp/${secret}`,
-    } as WorkspaceContextBindingV1 & { credentialRef: string; cachePath: string };
     const result = compileContextProviderExecutionPlans({
       registry: registry({ providers: [providerWithExtras] }),
-      workspace: workspace({ bindings: [bindingWithExtras] }),
+      workspace: workspace(),
       refs: [],
     });
     expect(result).toMatchObject({ outcome: "ready", plans: [{
@@ -446,6 +445,41 @@ describe("compileContextProviderExecutionPlans", () => {
     }] });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(result.plans[0]?.provider).not.toHaveProperty("credential");
-    expect(result.plans[0]?.binding).not.toHaveProperty("credentialRef");
+  });
+
+  it("validates the complete Workspace authority before producing plans", () => {
+    const secret = "workspace-secret-sentinel";
+    const bindingWithExtras = {
+      ...binding(),
+      credentialRef: secret,
+    } as WorkspaceContextBindingV1 & { credentialRef: string };
+    const rootWithExtras = {
+      ...workspace(),
+      enabled: true,
+      bindings: [binding()],
+    };
+    const inheritedAuthority = Object.create({
+      ...workspace(),
+      contexts: workspace({ bindings: [{ ...binding(), credentialRef: secret } as WorkspaceContextBindingV1] }).contexts,
+    }) as unknown;
+
+    for (const invalidWorkspace of [
+      workspace({ bindings: [bindingWithExtras] }),
+      rootWithExtras,
+      { ...workspace(), authorities: { ...workspace().authorities, runtime: "" } },
+      inheritedAuthority,
+    ]) {
+      const result = compileContextProviderExecutionPlans({
+        registry: registry(),
+        workspace: invalidWorkspace,
+        refs: [],
+      });
+      expect(result).toEqual({
+        outcome: "blocked",
+        plans: [],
+        diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
+      });
+      expect(JSON.stringify(result)).not.toContain(secret);
+    }
   });
 });

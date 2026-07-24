@@ -1,7 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { BrowserOperationLedger, BrowserTransportRegistry, isReservedBrowserTransport } from "@roll/core";
-import type { BrowserOperationEvent, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
+import type {
+  BrowserOperationEvent,
+  ToolDeclaration,
+  ToolDeps,
+  ToolInvocation,
+  ToolMeta,
+  ToolResult,
+  WorkspaceExecutionContextV1,
+} from "@roll/spec";
 import { mcpInputSchema, mcpOutputSchema } from "./schema-contracts.js";
 import { resolveToolExecutionContext, toolCorrelation } from "./workspace-context.js";
 
@@ -113,7 +121,12 @@ export class McpTool {
     }
 
     try {
-      const connection = await this.connectionFor(effectiveInvocation.input.serverName, config);
+      const connection = await this.connectionFor(
+        effectiveInvocation.input.serverName,
+        config,
+        scoped.context,
+        effectiveInvocation.repoId,
+      );
       const args = redactArgs(effectiveInvocation.input.arguments ?? {}, deps);
       const output = normalizeOutput(await connection.callTool(effectiveInvocation.input.toolName, args));
       return {
@@ -127,16 +140,42 @@ export class McpTool {
     }
   }
 
-  private connectionFor(serverName: string, config: McpServerConfig): Promise<McpConnection> {
-    const existing = this.connections.get(serverName);
+  private connectionFor(
+    serverName: string,
+    config: McpServerConfig,
+    context: WorkspaceExecutionContextV1,
+    repoId: string | undefined,
+  ): Promise<McpConnection> {
+    const cacheKey = mcpConnectionCacheKey(serverName, config, context, repoId);
+    const existing = this.connections.get(cacheKey);
     if (existing !== undefined) return existing;
     const pending = this.connect(config).catch((cause) => {
-      this.connections.delete(serverName);
+      this.connections.delete(cacheKey);
       throw cause;
     });
-    this.connections.set(serverName, pending);
+    this.connections.set(cacheKey, pending);
     return pending;
   }
+}
+
+function mcpConnectionCacheKey(
+  serverName: string,
+  config: McpServerConfig,
+  context: WorkspaceExecutionContextV1,
+  repoId: string | undefined,
+): string {
+  return JSON.stringify({
+    workspaceId: context.workspace.workspaceId,
+    storyId: context.issue?.storyId,
+    repoId,
+    serverName,
+    config: {
+      command: config.command,
+      args: config.args ?? [],
+      cwd: config.cwd,
+      env: Object.entries(config.env ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+    },
+  });
 }
 
 export function mcpTools(projectRoot?: string): McpTool[] {

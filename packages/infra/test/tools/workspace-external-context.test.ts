@@ -196,4 +196,43 @@ describe("US-WS-036 external tools consume frozen Workspace authority", () => {
     expect(result.ok).toBe(true);
     expect(connected).toEqual(["workspace-jira-mcp"]);
   });
+
+  it("does not reuse an MCP connection across Workspace contexts with the same server name", async () => {
+    const alpha = context("alpha");
+    const beta = context("beta");
+    const connected: string[] = [];
+    const tool = new McpTool({
+      connect: async (config) => {
+        connected.push(config.command);
+        return {
+          callTool: async () => ({ content: [{ type: "text", text: config.command }] }),
+          close: async () => undefined,
+        };
+      },
+    });
+    const dependencies = deps({
+      [alpha.authorities.policy]: [
+        "tools:",
+        "  mcp:",
+        "    servers:",
+        "      shared:",
+        "        command: alpha-mcp",
+      ].join("\n"),
+      [beta.authorities.policy]: [
+        "tools:",
+        "  mcp:",
+        "    servers:",
+        "      shared:",
+        "        command: beta-mcp",
+      ].join("\n"),
+    });
+    const input: McpInput = { serverName: "shared", toolName: "read" };
+
+    const alphaResult = await tool.execute(invocation("mcp.call", input, alpha), dependencies);
+    const betaResult = await tool.execute(invocation("mcp.call", input, beta), dependencies);
+
+    expect(connected).toEqual(["alpha-mcp", "beta-mcp"]);
+    expect(alphaResult).toMatchObject({ ok: true, output: { content: [{ text: "alpha-mcp" }] } });
+    expect(betaResult).toMatchObject({ ok: true, output: { content: [{ text: "beta-mcp" }] } });
+  });
 });

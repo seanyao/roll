@@ -262,6 +262,7 @@ export const v3Catalog: Catalog = {
   "workspace.create.error.invalid_apply_authorization": { en: "Workspace create authorization must be an exact owner-approved preview", zh: "工作区创建授权必须精确对应 owner 已批准的预览" },
   "workspace.create.error.apply_authorization_required": { en: "Workspace create apply requires an exact preview authorization", zh: "工作区创建应用需要精确的预览授权" },
   "workspace.create.error.apply_authorization_stale": { en: "Workspace create authorization is stale; preview again", zh: "工作区创建授权已过期；请重新预览" },
+  "workspace.create.error.legacy_create_recovery_required": { en: "Legacy Workspace init recovery is ambiguous; create stopped before mutation", zh: "旧版工作区 init 恢复状态不明确；创建已在变更前停止" },
   "workspace.create.error.invalid_config": { en: "Workspace create config is invalid", zh: "工作区创建配置无效" },
   "workspace.create.error.legacy_create_config": { en: "Legacy Workspace init config must be converted before create", zh: "旧版工作区 init 配置必须转换后才能创建" },
   "workspace.create.error.unknown_version": { en: "Workspace create config schema is unsupported", zh: "不支持该工作区创建配置版本" },

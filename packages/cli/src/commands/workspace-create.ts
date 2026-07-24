@@ -123,6 +123,7 @@ function emitResult(
       root: plan.root,
       configSha256: plan.configSha256,
       planSha256: plan.planSha256,
+      ...(plan.recovery === undefined ? {} : { recovery: plan.recovery }),
       ...(authorization === undefined ? {} : { authorizationSource: authorization.source }),
       steps: plan.steps,
     }, null, 2)}\n`);

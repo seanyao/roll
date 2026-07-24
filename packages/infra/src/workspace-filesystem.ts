@@ -35,10 +35,11 @@ import {
 import { acquireLock, releaseLock } from "./process.js";
 
 const JOURNAL_V1 = "roll.workspace-create-journal/v1" as const;
+const LEGACY_JOURNAL_V1 = "roll.workspace-init-journal/v1" as const;
 
 export class WorkspaceCreationError extends Error {
   constructor(
-    readonly code: "rejected" | "concurrent_create" | "apply_failed" | "apply_authorization_required" | "apply_authorization_stale",
+    readonly code: "rejected" | "concurrent_create" | "apply_failed" | "apply_authorization_required" | "apply_authorization_stale" | "legacy_create_recovery_required",
     message: string,
     readonly nextAction?: string,
     options?: ErrorOptions,
@@ -74,8 +75,29 @@ interface CreateJournal {
   readonly preservedCaches: readonly string[];
 }
 
+interface LegacyCreateJournal {
+  readonly schema: typeof LEGACY_JOURNAL_V1;
+  readonly transactionId: string;
+  readonly workspaceId: string;
+  readonly root: string;
+  readonly configDigest: string;
+  readonly status: "applying" | "repair_required";
+  readonly created: readonly CreatedNode[];
+  readonly preserved: readonly string[];
+  readonly preservedCaches: readonly string[];
+}
+
+type ParsedJournal<T> =
+  | { readonly state: "absent" }
+  | { readonly state: "valid"; readonly value: T; readonly path: string }
+  | { readonly state: "conflict"; readonly path: string };
+
 export function workspaceCreateJournalPath(rollHome: string, workspaceId: string): string {
   return join(resolve(rollHome), "workspace-create", `${workspaceId}.pending.json`);
+}
+
+export function workspaceLegacyCreateJournalPath(rollHome: string, workspaceId: string): string {
+  return join(resolve(rollHome), "workspace-init", `${workspaceId}.pending.json`);
 }
 
 export function workspaceCreateLockPath(rollHome: string, workspaceId: string): string {
@@ -116,16 +138,84 @@ function configDigest(config: WorkspaceCreateConfig): string {
   return digest(JSON.stringify({ workspaceId: config.workspaceId, root: config.root, manifest: config.manifest }));
 }
 
-function readJournal(config: WorkspaceCreateConfig): "absent" | "repairable" | "conflict" {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const accepted = new Set(allowed);
+  return Object.keys(value).every((key) => accepted.has(key));
+}
+
+function parseCreatedNodes(value: unknown): readonly CreatedNode[] | null {
+  if (!Array.isArray(value)) return null;
+  const nodes: CreatedNode[] = [];
+  const paths = new Set<string>();
+  for (const candidate of value) {
+    if (!isRecord(candidate) || !exactKeys(candidate, ["path", "kind", "digest"]) ||
+      typeof candidate["path"] !== "string" || !isAbsolute(candidate["path"]) || resolve(candidate["path"]) !== candidate["path"] ||
+      (candidate["kind"] !== "file" && candidate["kind"] !== "directory") ||
+      (candidate["digest"] !== undefined && (typeof candidate["digest"] !== "string" || !/^[0-9a-f]{64}$/u.test(candidate["digest"]))) ||
+      (candidate["kind"] === "file" && candidate["digest"] === undefined) || paths.has(candidate["path"])) {
+      return null;
+    }
+    paths.add(candidate["path"]);
+    nodes.push({
+      path: candidate["path"],
+      kind: candidate["kind"],
+      ...(candidate["digest"] === undefined ? {} : { digest: candidate["digest"] }),
+    });
+  }
+  return nodes;
+}
+
+function parseStringArray(value: unknown): readonly string[] | null {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : null;
+}
+
+function readCreateJournal(config: WorkspaceCreateConfig): ParsedJournal<CreateJournal> {
   const path = workspaceCreateJournalPath(config.rollHome, config.workspaceId);
-  if (!existsSync(path)) return "absent";
+  if (!existsSync(path)) return { state: "absent" };
   try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    return value["schema"] === JOURNAL_V1 && value["workspaceId"] === config.workspaceId &&
-      value["root"] === config.root && value["configDigest"] === configDigest(config)
-      ? "repairable" : "conflict";
+    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!isRecord(value) || value["schema"] !== JOURNAL_V1 || value["workspaceId"] !== config.workspaceId ||
+      value["root"] !== config.root || value["configDigest"] !== configDigest(config)) return { state: "conflict", path };
+    return { state: "valid", value: value as unknown as CreateJournal, path };
   } catch {
-    return "conflict";
+    return { state: "conflict", path };
+  }
+}
+
+function readLegacyJournal(config: WorkspaceCreateConfig): ParsedJournal<LegacyCreateJournal> {
+  const path = workspaceLegacyCreateJournalPath(config.rollHome, config.workspaceId);
+  if (!existsSync(path)) return { state: "absent" };
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!isRecord(value) || !exactKeys(value, ["schema", "transactionId", "workspaceId", "root", "configDigest", "status", "created", "preserved", "preservedCaches"]) ||
+      value["schema"] !== LEGACY_JOURNAL_V1 || typeof value["transactionId"] !== "string" || value["transactionId"] === "" ||
+      value["workspaceId"] !== config.workspaceId || value["root"] !== config.root || value["configDigest"] !== configDigest(config) ||
+      (value["status"] !== "applying" && value["status"] !== "repair_required")) return { state: "conflict", path };
+    const created = parseCreatedNodes(value["created"]);
+    const preserved = parseStringArray(value["preserved"]);
+    const preservedCaches = parseStringArray(value["preservedCaches"]);
+    if (created === null || preserved === null || preservedCaches === null) return { state: "conflict", path };
+    return {
+      state: "valid",
+      path,
+      value: {
+        schema: LEGACY_JOURNAL_V1,
+        transactionId: value["transactionId"],
+        workspaceId: config.workspaceId,
+        root: config.root,
+        configDigest: value["configDigest"],
+        status: value["status"],
+        created,
+        preserved,
+        preservedCaches,
+      },
+    };
+  } catch {
+    return { state: "conflict", path };
   }
 }
 
@@ -182,30 +272,142 @@ function hasCanonicalPathConflict(config: WorkspaceCreateConfig): boolean {
   return contains(root, reposRoot) || contains(reposRoot, root);
 }
 
+function createdDirectoryAllowed(config: WorkspaceCreateConfig, path: string): boolean {
+  if (contains(config.root, path)) return true;
+  return contains(config.rollHome, path) && contains(path, config.root);
+}
+
+function legacyCreatedNodesMatch(
+  config: WorkspaceCreateConfig,
+  journal: LegacyCreateJournal,
+  requirePresent: boolean,
+): boolean {
+  const files = expectedFiles(config);
+  for (const node of journal.created) {
+    if (node.kind === "file" && files[node.path] === undefined) return false;
+    if (node.kind === "directory" && !createdDirectoryAllowed(config, node.path)) return false;
+    if (!existsSync(node.path)) {
+      if (requirePresent) return false;
+      continue;
+    }
+    const stat = lstatSync(node.path);
+    if (stat.isSymbolicLink()) return false;
+    if (node.kind === "directory") {
+      if (!stat.isDirectory()) return false;
+      continue;
+    }
+    if (!stat.isFile() || node.digest === undefined || digest(readFileSync(node.path, "utf8")) !== node.digest) return false;
+  }
+  return true;
+}
+
+function legacyRollbackSafe(config: WorkspaceCreateConfig, journal: LegacyCreateJournal): boolean {
+  if (!legacyCreatedNodesMatch(config, journal, false)) return false;
+  const rollbackNodes = journal.created.filter((node) => contains(config.root, node.path));
+  const createdPaths = new Set(rollbackNodes.map((node) => node.path));
+  for (const node of rollbackNodes) {
+    if (node.kind !== "directory" || !existsSync(node.path)) continue;
+    for (const entry of readdirSync(node.path)) {
+      if (!createdPaths.has(join(node.path, entry))) return false;
+    }
+  }
+  return true;
+}
+
+function legacyRollbackNodes(config: WorkspaceCreateConfig, journal: LegacyCreateJournal): readonly CreatedNode[] {
+  return journal.created
+    .filter((node) => contains(config.root, node.path))
+    .slice()
+    .sort((left, right) => {
+      const depth = left.path.split(sep).length - right.path.split(sep).length;
+      if (depth !== 0) return depth;
+      return left.path.localeCompare(right.path, "en");
+    });
+}
+
+function classifyJournal(
+  config: WorkspaceCreateConfig,
+  createJournal: ParsedJournal<CreateJournal>,
+  legacyJournal: ParsedJournal<LegacyCreateJournal>,
+  pathProbe: Readonly<Record<string, WorkspaceCreateState>>,
+  caches: Readonly<Record<string, WorkspaceCreateState>>,
+  registry: WorkspaceCreateState,
+): WorkspaceCreateProbe["journal"] {
+  const recoveryNextAction = `roll workspace doctor ${config.workspaceId} --json`;
+  if (createJournal.state !== "absent" && legacyJournal.state !== "absent") {
+    const journalPath = legacyJournal.path;
+    return {
+      state: "conflict",
+      target: journalPath,
+      recovery: { kind: "journal_conflict", journalPath, nextAction: recoveryNextAction },
+    };
+  }
+  if (createJournal.state === "conflict") return { state: "conflict", target: createJournal.path };
+  if (createJournal.state === "valid") return { state: "repairable", target: createJournal.path };
+  if (legacyJournal.state === "conflict") {
+    return {
+      state: "conflict",
+      target: legacyJournal.path,
+      recovery: { kind: "legacy_recovery_required", journalPath: legacyJournal.path, nextAction: recoveryNextAction },
+    };
+  }
+  if (legacyJournal.state === "absent") return { state: "absent" };
+
+  const layoutCompatible = Object.values(pathProbe).every((state) => state === "compatible");
+  const cachesCompatible = Object.values(caches).every((state) => state === "compatible");
+  if (registry === "compatible" && layoutCompatible && cachesCompatible &&
+    legacyCreatedNodesMatch(config, legacyJournal.value, true)) {
+    return {
+      state: "repairable",
+      target: legacyJournal.path,
+      recovery: { kind: "legacy_completed", journalPath: legacyJournal.path },
+    };
+  }
+
+  const cachesRecoverable = Object.values(caches).every((state) => state !== "conflict");
+  if (registry === "absent" && cachesRecoverable && legacyRollbackSafe(config, legacyJournal.value)) {
+    return {
+      state: "repairable",
+      target: legacyJournal.path,
+      recovery: { kind: "legacy_rollback", journalPath: legacyJournal.path },
+    };
+  }
+  return {
+    state: "conflict",
+    target: legacyJournal.path,
+    recovery: { kind: "legacy_recovery_required", journalPath: legacyJournal.path, nextAction: recoveryNextAction },
+  };
+}
+
 export async function inspectWorkspaceCreation(
   config: WorkspaceCreateConfig,
   deps: Pick<WorkspaceCreateDeps, "inspectCache"> = {},
 ): Promise<WorkspaceCreatePlan> {
-  const journal = readJournal(config);
+  const createJournal = readCreateJournal(config);
+  const legacyJournal = readLegacyJournal(config);
+  const journalPresent = createJournal.state !== "absent" || legacyJournal.state !== "absent";
   if (hasCanonicalPathConflict(config)) {
+    const journal = classifyJournal(config, createJournal, legacyJournal, { [config.root]: "conflict" }, {}, registryState(config));
     return buildWorkspaceCreatePlan(config, {
       paths: { [config.root]: "conflict" },
       caches: {},
       registry: { state: registryState(config) },
-      journal: { state: journal },
+      journal,
     });
   }
   const rootExists = existsSync(config.root);
-  const repairable = journal === "repairable";
+  const repairable = journalPresent;
   if (rootExists) {
     const stat = lstatSync(config.root);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      return buildWorkspaceCreatePlan(config, { paths: { [config.root]: "conflict" }, caches: {}, registry: { state: registryState(config) }, journal: { state: journal } });
+      const registry = registryState(config);
+      const journal = classifyJournal(config, createJournal, legacyJournal, { [config.root]: "conflict" }, {}, registry);
+      return buildWorkspaceCreatePlan(config, { paths: { [config.root]: "conflict" }, caches: {}, registry: { state: registry }, journal });
     }
   }
   const files = expectedFiles(config);
   const pathProbe: Record<string, WorkspaceCreateState> = {};
-  const planned = buildWorkspaceCreatePlan(config, { paths: {}, caches: {}, registry: { state: "absent" }, journal: { state: journal } });
+  const planned = buildWorkspaceCreatePlan(config, { paths: {}, caches: {}, registry: { state: "absent" }, journal: { state: "absent" } });
   for (const step of planned.steps) {
     if (step.kind !== "file" && step.kind !== "directory") continue;
     pathProbe[step.target] = nodeState(step.target, step.kind, files[step.target], rootExists && repairable);
@@ -216,7 +418,14 @@ export async function inspectWorkspaceCreation(
   const inspectCache = deps.inspectCache ?? ((binding: RepositoryBinding, rollHome: string) => inspectRepositoryCache({ binding, rollHome }));
   const caches: Record<string, WorkspaceCreateState> = {};
   for (const binding of config.manifest.repositories) caches[binding.repoId] = await inspectCache(binding, config.rollHome);
-  const probe: WorkspaceCreateProbe = { paths: pathProbe, caches, registry: { state: registryState(config) }, journal: { state: journal } };
+  const registry = registryState(config);
+  const journal = classifyJournal(config, createJournal, legacyJournal, pathProbe, caches, registry);
+  if (journal.recovery?.kind === "legacy_rollback" && legacyJournal.state === "valid") {
+    for (const node of legacyJournal.value.created) {
+      if (pathProbe[node.path] !== undefined) pathProbe[node.path] = "repairable";
+    }
+  }
+  const probe: WorkspaceCreateProbe = { paths: pathProbe, caches, registry: { state: registry }, journal };
   return buildWorkspaceCreatePlan(config, probe);
 }
 
@@ -270,7 +479,12 @@ export async function applyWorkspaceCreation(
   readonly authorization: WorkspaceCreateApplyAuthorizationV1;
 }> {
   const initialPlan = await inspectWorkspaceCreation(config, deps);
-  if (initialPlan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+  if (initialPlan.outcome === "rejected") {
+    if (initialPlan.recovery !== undefined) {
+      throw new WorkspaceCreationError("legacy_create_recovery_required", "Legacy Workspace create recovery requires doctor", initialPlan.recovery.nextAction);
+    }
+    throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+  }
   const authorization = deps.authorization ?? buildWorkspaceCreateApplyAuthorization(initialPlan, "direct_cli_apply");
   const initialAuthorization = validateWorkspaceCreateApplyAuthorization(initialPlan, authorization);
   if (!initialAuthorization.ok) {
@@ -286,10 +500,34 @@ export async function applyWorkspaceCreation(
   }
   try {
     const plan = await inspectWorkspaceCreation(config, deps);
-    if (plan.outcome === "rejected") throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+    if (plan.outcome === "rejected") {
+      if (plan.recovery !== undefined) {
+        throw new WorkspaceCreationError("legacy_create_recovery_required", "Legacy Workspace create recovery requires doctor", plan.recovery.nextAction);
+      }
+      throw new WorkspaceCreationError("rejected", "Workspace creation plan was rejected");
+    }
     const lockedAuthorization = validateWorkspaceCreateApplyAuthorization(plan, authorization);
     if (!lockedAuthorization.ok) {
       throw new WorkspaceCreationError(lockedAuthorization.code, "Workspace create apply authorization became stale", lockedAuthorization.nextAction);
+    }
+    if (plan.recovery?.kind === "legacy_completed") {
+      const legacy = readLegacyJournal(config);
+      if (legacy.state !== "valid" || legacy.path !== plan.recovery.journalPath) {
+        throw new WorkspaceCreationError("legacy_create_recovery_required", "Legacy Workspace create recovery facts changed", `roll workspace doctor ${config.workspaceId} --json`);
+      }
+      rmSync(legacy.path, { force: true });
+      return { outcome: plan.outcome, plan, authorization };
+    }
+    if (plan.recovery?.kind === "legacy_rollback") {
+      const legacy = readLegacyJournal(config);
+      if (legacy.state !== "valid" || legacy.path !== plan.recovery.journalPath || !legacyRollbackSafe(config, legacy.value)) {
+        throw new WorkspaceCreationError("legacy_create_recovery_required", "Legacy Workspace create residue is no longer safe to roll back", `roll workspace doctor ${config.workspaceId} --json`);
+      }
+      const preserved = rollback(legacyRollbackNodes(config, legacy.value));
+      if (preserved.length > 0) {
+        throw new WorkspaceCreationError("legacy_create_recovery_required", "Legacy Workspace create residue changed during rollback", `roll workspace doctor ${config.workspaceId} --json`);
+      }
+      rmSync(legacy.path, { force: true });
     }
     const journalPath = workspaceCreateJournalPath(config.rollHome, config.workspaceId);
     const created: CreatedNode[] = [];

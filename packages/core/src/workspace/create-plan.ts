@@ -30,7 +30,17 @@ export interface WorkspaceCreateProbe {
   readonly paths: Readonly<Record<string, WorkspaceCreateState>>;
   readonly caches: Readonly<Record<string, WorkspaceCreateState>>;
   readonly registry: { readonly state: WorkspaceCreateState };
-  readonly journal: { readonly state: "absent" | "repairable" | "conflict" };
+  readonly journal: {
+    readonly state: "absent" | "repairable" | "conflict";
+    readonly target?: string;
+    readonly recovery?: WorkspaceCreateRecovery;
+  };
+}
+
+export interface WorkspaceCreateRecovery {
+  readonly kind: "legacy_completed" | "legacy_rollback" | "legacy_recovery_required" | "journal_conflict";
+  readonly journalPath: string;
+  readonly nextAction?: string;
 }
 
 export interface WorkspaceCreatePlanStep {
@@ -46,6 +56,7 @@ export interface WorkspaceCreatePlan {
   readonly outcome: WorkspaceCreateAction;
   readonly configSha256: string;
   readonly planSha256: string;
+  readonly recovery?: WorkspaceCreateRecovery;
   readonly steps: readonly WorkspaceCreatePlanStep[];
 }
 
@@ -395,7 +406,7 @@ export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: W
     probe.journal.state === "repairable" ? "repaired" : "rejected";
   const steps: WorkspaceCreatePlanStep[] = [{
     kind: "journal",
-    target: join(config.rollHome, "workspace-create", `${config.workspaceId}.pending.json`),
+    target: probe.journal.target ?? join(config.rollHome, "workspace-create", `${config.workspaceId}.pending.json`),
     action: journalAction,
   }];
   for (const entry of layout(config.root)) {
@@ -420,6 +431,7 @@ export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: W
     root: config.root,
     outcome,
     configSha256,
+    ...(probe.journal.recovery === undefined ? {} : { recovery: probe.journal.recovery }),
     steps,
   });
   return {
@@ -429,6 +441,7 @@ export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: W
     outcome,
     configSha256,
     planSha256,
+    ...(probe.journal.recovery === undefined ? {} : { recovery: probe.journal.recovery }),
     steps,
   };
 }

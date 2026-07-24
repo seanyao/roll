@@ -3,10 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { hostname, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeAgentScopeConfig, parseWorkspaceCreateConfig } from "@roll/core";
+import { buildWorkspaceCreateApplyAuthorization, normalizeAgentScopeConfig, parseWorkspaceCreateConfig } from "@roll/core";
 import {
   applyWorkspaceCreation,
   inspectWorkspaceCreation,
+  workspaceLegacyCreateJournalPath,
   workspaceCreateJournalPath,
   workspaceCreateLockPath,
   workspaceRegistryTransactionPath,
@@ -61,6 +62,38 @@ function tree(root: string): readonly string[] {
   };
   visit(root);
   return rows;
+}
+
+function sha256(text: string): string {
+  return createHash("sha256").update(text).digest("hex");
+}
+
+function legacyConfigDigest(f: ReturnType<typeof fixture>): string {
+  return sha256(JSON.stringify({
+    workspaceId: f.config.workspaceId,
+    root: f.config.root,
+    manifest: f.config.manifest,
+  }));
+}
+
+function writeLegacyJournal(
+  f: ReturnType<typeof fixture>,
+  created: readonly { readonly path: string; readonly kind: "file" | "directory"; readonly digest?: string }[],
+): string {
+  const path = workspaceLegacyCreateJournalPath(f.rollHome, "ws-demo");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({
+    schema: "roll.workspace-init-journal/v1",
+    transactionId: "legacy-transaction",
+    workspaceId: "ws-demo",
+    root: f.root,
+    configDigest: legacyConfigDigest(f),
+    status: "repair_required",
+    created,
+    preserved: [],
+    preservedCaches: [],
+  }, null, 2)}\n`, "utf8");
+  return path;
 }
 
 describe("Workspace filesystem transaction", () => {
@@ -288,5 +321,132 @@ describe("Workspace filesystem transaction", () => {
     expect(existsSync(workspaceRegistryPath(f.rollHome))).toBe(true);
     expect(JSON.parse(readFileSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"), "utf8")))
       .toMatchObject({ status: "repair_required" });
+  });
+
+  it("reconciles a completed legacy init journal as idempotent success without rewriting Workspace authority", async () => {
+    const f = fixture();
+    await applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    });
+    const workspaceBefore = tree(f.root);
+    const legacyPath = writeLegacyJournal(f, [
+      { path: f.root, kind: "directory" },
+      {
+        path: join(f.root, "workspace.yaml"),
+        kind: "file",
+        digest: sha256(readFileSync(join(f.root, "workspace.yaml"), "utf8")),
+      },
+    ]);
+    const beforePreview = tree(f.rollHome);
+
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "compatible" });
+    expect(preview).toMatchObject({
+      outcome: "repaired",
+      recovery: { kind: "legacy_completed", journalPath: legacyPath },
+    });
+    expect(tree(f.rollHome)).toEqual(beforePreview);
+
+    const result = await applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "compatible",
+      ensureCache: async () => ({ action: "reused" as const }),
+    });
+    expect(result).toMatchObject({ outcome: "repaired", plan: { recovery: { kind: "legacy_completed" } } });
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(tree(f.root)).toEqual(workspaceBefore);
+  });
+
+  it("rolls back only proven-safe legacy residue and continues through the new create journal", async () => {
+    const f = fixture();
+    mkdirSync(f.root, { recursive: true });
+    const manifestPath = join(f.root, "workspace.yaml");
+    const manifest = `${JSON.stringify(f.config.manifest, null, 2)}\n`;
+    writeFileSync(manifestPath, manifest, "utf8");
+    const legacyPath = writeLegacyJournal(f, [
+      { path: f.root, kind: "directory" },
+      { path: manifestPath, kind: "file", digest: sha256(manifest) },
+    ]);
+
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+    expect(preview).toMatchObject({
+      outcome: "repaired",
+      recovery: { kind: "legacy_rollback", journalPath: legacyPath },
+    });
+    expect(preview.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "file", target: manifestPath, action: "repaired" }),
+    ]));
+
+    const result = await applyWorkspaceCreation(f.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    });
+    expect(result.outcome).toBe("repaired");
+    expect(existsSync(legacyPath)).toBe(false);
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(JSON.parse(readFileSync(manifestPath, "utf8"))).toMatchObject({ workspaceId: "ws-demo" });
+    expect(JSON.parse(readFileSync(workspaceRegistryPath(f.rollHome), "utf8"))).toMatchObject({
+      entries: [{ workspaceId: "ws-demo", root: f.root }],
+    });
+  });
+
+  it("fails closed for modified legacy residue or simultaneous legacy and create journals", async () => {
+    const modified = fixture();
+    mkdirSync(modified.root, { recursive: true });
+    const manifestPath = join(modified.root, "workspace.yaml");
+    writeFileSync(manifestPath, "operator-owned\n", "utf8");
+    const legacyPath = writeLegacyJournal(modified, [
+      { path: modified.root, kind: "directory" },
+      { path: manifestPath, kind: "file", digest: sha256("expected\n") },
+    ]);
+    const beforeModified = tree(modified.rollHome);
+
+    const modifiedPlan = await inspectWorkspaceCreation(modified.config, { inspectCache: async () => "absent" });
+    expect(modifiedPlan).toMatchObject({
+      outcome: "rejected",
+      recovery: {
+        kind: "legacy_recovery_required",
+        journalPath: legacyPath,
+        nextAction: "roll workspace doctor ws-demo --json",
+      },
+    });
+    await expect(applyWorkspaceCreation(modified.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
+    expect(tree(modified.rollHome)).toEqual(beforeModified);
+
+    const conflict = fixture();
+    writeLegacyJournal(conflict, []);
+    const createPath = workspaceCreateJournalPath(conflict.rollHome, "ws-demo");
+    mkdirSync(dirname(createPath), { recursive: true });
+    writeFileSync(createPath, "{}\n", "utf8");
+    const beforeConflict = tree(conflict.rollHome);
+    const conflictPlan = await inspectWorkspaceCreation(conflict.config, { inspectCache: async () => "absent" });
+    expect(conflictPlan).toMatchObject({ outcome: "rejected", recovery: { kind: "journal_conflict" } });
+    await expect(applyWorkspaceCreation(conflict.config, {
+      inspectCache: async () => "absent",
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({ code: "legacy_create_recovery_required" });
+    expect(tree(conflict.rollHome)).toEqual(beforeConflict);
+  });
+
+  it("invalidates an exact authorization when the lock-in plan digest changes", async () => {
+    const f = fixture();
+    const preview = await inspectWorkspaceCreation(f.config, { inspectCache: async () => "absent" });
+    const inspectCache = vi.fn()
+      .mockResolvedValueOnce("absent")
+      .mockResolvedValueOnce("compatible");
+
+    await expect(applyWorkspaceCreation(f.config, {
+      authorization: buildWorkspaceCreateApplyAuthorization(preview, "owner_after_preview"),
+      inspectCache,
+      ensureCache: async () => ({ action: "created" as const }),
+    })).rejects.toMatchObject({
+      code: "apply_authorization_stale",
+      nextAction: "roll workspace create ws-demo --config <path> --check --json",
+    });
+    expect(existsSync(workspaceCreateJournalPath(f.rollHome, "ws-demo"))).toBe(false);
+    expect(existsSync(f.root)).toBe(false);
   });
 });

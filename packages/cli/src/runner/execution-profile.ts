@@ -1,26 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import {
   applyExecutionPolicy,
-  assembleEvalReport,
   classifyStoryRisk,
-  designContractVsDelivered,
   explainExecutionProfile,
   normalizeAgentConfig,
-  parseDesignContract,
-  renderEvalReport,
   selectExecutionProfile,
-  summarizeDesignContractVsDelivered,
+  validateAuthoredEvalReport,
   validateDesignArtifact,
-  validateEvaluatorArtifact,
+  validateRoleAccess,
   type CycleContext,
 } from "@roll/core";
 import type { AdversarialPlan } from "@roll/core";
-import type { ArtifactManifest, ExecutionProfile, ResolutionSource, Rig } from "@roll/spec";
+import type { ArtifactManifest, DeltaArtifactManifest, ExecutionProfile, ResolutionSource, Rig } from "@roll/spec";
 import { resolveScopedCastRole } from "./scoped-route.js";
-import { cardArchiveDir } from "../lib/archive.js";
-import { readLatestStoryReviewScore } from "../lib/review-score.js";
 import { storySpecPath } from "./attest-gate.js";
 import { resolveExecutionCwd } from "./submodule-worktree.js";
 import { spawnWatched } from "./spawn-watchdog.js";
@@ -147,92 +141,6 @@ export function planAdversarial(
   if (testAuthor === undefined) return undefined;
   return { testAuthor, implementer, ...DEFAULT_ADVERSARIAL_CFG };
 }
-
-export function writeEvaluatorArtifact(
-  ports: Ports,
-  ctx: CycleContext,
-  signals: { attestStatus: "produced" | "skipped" | "unknown"; blockingFindings: readonly string[]; designContractVsDelivered?: string },
-): { written: boolean; valid: boolean; reasons: readonly string[] } {
-  const profile = ctx.selectedProfile;
-  if (profile !== "verified" && profile !== "designed") return { written: false, valid: true, reasons: [] };
-  const storyId = ctx.storyId ?? "";
-  const runDir = ctx.evidenceRunDir ?? "";
-  if (storyId === "" || runDir === "") return { written: false, valid: false, reasons: ["no story id / run dir for evaluator artifact"] };
-  const scoreEntry = readLatestStoryReviewScore(ports.repoCwd, storyId);
-  const verdict: "good" | "ok" | "regression" =
-    scoreEntry?.verdict === "good" || scoreEntry?.verdict === "regression" ? scoreEntry.verdict : "ok";
-  let designSummary = signals.designContractVsDelivered;
-  if (designSummary === undefined || designSummary === "") {
-    const contractPath = join(runDir, "role-artifacts", "designer", "design-contract.md");
-    if (existsSync(contractPath)) {
-      try {
-        const contract = parseDesignContract(readFileSync(contractPath, "utf8"), storyId);
-        if (contract !== null) {
-          designSummary = summarizeDesignContractVsDelivered(designContractVsDelivered(contract, deliveredAcItems(ports.repoCwd, storyId)));
-        }
-      } catch {
-        /* design-contract-vs-delivered is best-effort context for the report */
-      }
-    }
-  }
-  const report = assembleEvalReport({
-    storyId,
-    blockingFindings: signals.blockingFindings,
-    ...(scoreEntry !== undefined ? { score: { value: scoreEntry.score, verdict } } : {}),
-    attestStatus: signals.attestStatus,
-    ...(designSummary !== undefined && designSummary !== "" ? { designContractVsDelivered: designSummary } : {}),
-  });
-  const reportMd = renderEvalReport(report);
-  const manifest: ArtifactManifest = {
-    schemaVersion: 1,
-    storyId,
-    cycleId: ctx.cycleId ?? "",
-    role: "evaluator",
-    // FIX-1262: the evaluator's rig.agent is the agent that ACTUALLY produced
-    // the score (scoredBy) — never a fabricated 'reasonix'. When the score
-    // entry carries no scorer, leave agent undefined so validateEvaluatorArtifact
-    // fails loud ("manifest.rig.agent missing") instead of the artifact silently
-    // claiming an independent evaluation by an agent that never ran.
-    rig: { agent: scoreEntry?.scoredBy } as Rig,
-    sessionId: scoreEntry?.sessionId ?? "",
-    // E4: record the execution worktree (submodule cycle worktree for a submodule
-    // story) as the delivery's worktree — the same place the builder/scorer ran.
-    worktreeCwd: resolveExecutionCwd(ports, ctx),
-    scoreRepoCwd: ports.repoCwd,
-    inputs: [
-      { path: `${storyId}-report.html`, kind: "report" },
-      { path: "ac-map.json", kind: "evidence" },
-    ],
-    outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
-    createdAt: new Date(eventTs(ports)).toISOString(),
-  };
-  const dir = join(runDir, "role-artifacts", "evaluator");
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "eval-report.md"), reportMd);
-    writeFileSync(join(dir, "artifact-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-  } catch {
-    return { written: false, valid: false, reasons: ["failed to write evaluator artifact files"] };
-  }
-  const v = validateEvaluatorArtifact({ manifest, reportMd, storyId, builderSessionId: ctx.builderSessionId ?? "" });
-  return { written: true, valid: v.ok, reasons: v.reasons };
-}
-
-function deliveredAcItems(repoCwd: string, storyId: string): string[] {
-  try {
-    const p = join(cardArchiveDir(repoCwd, storyId), "ac-map.json");
-    if (!existsSync(p)) return [];
-    const arr = JSON.parse(readFileSync(p, "utf8")) as Array<{ ac?: string; status?: string }>;
-    if (!Array.isArray(arr)) return [];
-    return arr
-      .filter((e) => e.status === "pass" || e.status === "partial" || e.status === "readonly")
-      .map((e) => e.ac ?? "")
-      .filter((a) => a !== "");
-  } catch {
-    return [];
-  }
-}
-
 
 function buildDesignerPrompt(storyId: string, contractAbsPath: string): string {
   return [
@@ -466,6 +374,317 @@ export async function runDesignerStage(
   const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
   const v = validateDesignArtifact({ manifest, contractMd, storyId });
   return { ran: true, ok: v.ok, reasons: v.reasons, designerAgent, designerSessionId };
+}
+
+function buildEvaluatorPrompt(storyId: string, reportAbsPath: string): string {
+  return [
+    `You are the EVALUATOR for story ${storyId} in a Full Delta execution profile.`,
+    `Independently evaluate the Builder's delivery. READ (do not modify) the committed diff, the acceptance report ${storyId}-report.html, ac-map.json, and — IF PRESENT — the optional peer-review notes. Those are all INPUTS to your own judgement.`,
+    `Write YOUR evaluation to: ${reportAbsPath}`,
+    "It MUST be markdown containing at least these two sections (use '- ' bullets):",
+    "## Inputs checked",
+    "## Rationale",
+    "Under '## Inputs checked' list every input you actually inspected. Under '## Rationale' give YOUR independent merge/repair/hold reasoning.",
+    "A peer-review artifact is only an INPUT — your report must be your OWN authored evaluation, never a copy or restatement of the peer output.",
+    "Do NOT write product code — you only evaluate, read-only. The Builder consumed the design contract; you judge the result.",
+  ].join("\n");
+}
+
+/**
+ * US-DELTA-007 — the Evaluator role resolved for a Full Delta cycle. `ok:false`
+ * means no valid `evaluate` binding could be cast — the caller MUST fail closed
+ * (delivery is blocked `artifact_invalid`, never marked Done). `null` (from
+ * {@link EvaluatorStageDeps.resolveEvaluator}) means the project has no scoped
+ * agents.yaml at all; that is ALSO fail-closed (no quiet fallback to the Builder).
+ */
+export interface EvaluatorResolution {
+  readonly ok: boolean;
+  readonly agent?: string;
+  readonly model?: string;
+  readonly source: ResolutionSource;
+  readonly reasons: readonly string[];
+  readonly error?: string;
+}
+
+/** Test/injection seam for the evaluator stage. */
+export interface EvaluatorStageDeps {
+  /** Resolve the Evaluator INDEPENDENTLY (scope role `evaluate`), never the
+   *  Builder agent. Default: the scoped `evaluator` cast-role resolution. `null`
+   *  ⇒ no scoped agents.yaml (fail closed for a Full Delta cycle). */
+  readonly resolveEvaluator?: (repoCwd: string) => EvaluatorResolution | null;
+  /** Host id stamped into the delta role facts (default `os.hostname()`). */
+  readonly hostId?: string;
+}
+
+/**
+ * US-DELTA-007 — the default independent Evaluator resolver: the scoped
+ * `evaluator` cast role maps to the `evaluate` scope role. A missing scoped
+ * config (`null`), a non-`evaluate` scope role, or an unresolved `evaluate`
+ * binding all surface as fail-closed (no fallback to the Builder's agent).
+ */
+function defaultResolveEvaluator(repoCwd: string): EvaluatorResolution | null {
+  const route = resolveScopedCastRole(repoCwd, "evaluator");
+  if (route === null) return null;
+  if (route.scopeRole !== "evaluate") {
+    return {
+      ok: false,
+      source: "availability-fallback",
+      reasons: [],
+      error: `resolved scope role '${route.scopeRole}', expected 'evaluate'`,
+    };
+  }
+  if (!route.resolution.ok) {
+    const errors = route.resolution.failure.errors;
+    return {
+      ok: false,
+      source: "availability-fallback",
+      reasons: errors as string[],
+      error: errors[0] ?? "evaluate role unresolved",
+    };
+  }
+  const r = route.resolution.resolved;
+  return {
+    ok: true,
+    agent: r.agent,
+    ...(r.model !== undefined && r.model !== "" ? { model: r.model } : {}),
+    source: r.selectedStrategy === "fixed" ? "user-pin" : "availability-fallback",
+    reasons: [`scoped evaluate role via ${r.source}`, `strategy:${r.selectedStrategy}`],
+  };
+}
+
+/**
+ * US-DELTA-007 — the Full Delta (`verified`/`designed`) EVALUATION STAGE. This
+ * REPLACES the retired `writeEvaluatorArtifact` assembler. The Evaluator is cast
+ * INDEPENDENTLY of the Builder (own agent identity + session), records separate
+ * `delta:role_resolved`/`delta:role_started` facts, runs READ-ONLY (no product
+ * write roots), and must AUTHOR its own `eval-report.md` (`## Inputs checked` +
+ * `## Rationale`) plus a v2 evaluator manifest. Score/attest fields alone can
+ * NEVER produce the report — the runner only VALIDATES what an Evaluator wrote.
+ *
+ * Fail-closed (block reason `identity_collision` / `artifact_invalid`):
+ *  - no independently cast Evaluator (`resolveEvaluator` null/unresolved);
+ *  - the Evaluator's `sessionId` OR `roleInstanceId` equals the Builder's
+ *    (a same-session evaluation is a self-grade);
+ *  - the required role facts cannot be recorded;
+ *  - no structurally-valid authored report is produced (a legacy ASSEMBLED
+ *    report, a peer-only artifact, or a missing report all fail closed).
+ */
+export async function runEvaluatorStage(
+  ports: Ports,
+  ctx: CycleContext,
+  deps: EvaluatorStageDeps = {},
+): Promise<{
+  ran: boolean;
+  ok: boolean;
+  reasons: readonly string[];
+  blockReason?: "identity_collision" | "artifact_invalid";
+  evaluatorAgent?: string;
+  evaluatorSessionId?: string;
+}> {
+  if (ctx.selectedProfile !== "verified" && ctx.selectedProfile !== "designed") {
+    return { ran: false, ok: true, reasons: [] };
+  }
+  const storyId = ctx.storyId ?? "";
+  const runDir = ctx.evidenceRunDir ?? "";
+  if (storyId === "" || runDir === "") {
+    return { ran: false, ok: false, reasons: ["no story id / run dir for evaluator stage"], blockReason: "artifact_invalid" };
+  }
+
+  // AC3: resolve the Evaluator INDEPENDENTLY (scope role `evaluate`). A missing
+  // scoped config, a non-`evaluate` scope role, or an unresolved binding all fail
+  // closed here — the Builder is NEVER reused as the Evaluator.
+  const resolveEvaluator = deps.resolveEvaluator ?? defaultResolveEvaluator;
+  const resolved = resolveEvaluator(ports.repoCwd);
+  if (resolved === null) {
+    return {
+      ran: false,
+      ok: false,
+      reasons: ["evaluator stage: no scoped agents.yaml evaluate binding — Full Delta requires an independently cast Evaluator (no fallback to the Builder agent)"],
+      blockReason: "artifact_invalid",
+    };
+  }
+  if (!resolved.ok || resolved.agent === undefined || resolved.agent === "") {
+    return { ran: false, ok: false, reasons: [`evaluator stage: ${resolved.error ?? "evaluate role unresolved"}`], blockReason: "artifact_invalid" };
+  }
+  const evaluatorAgent = resolved.agent;
+
+  const dir = join(runDir, "role-artifacts", "evaluator");
+  const reportPath = join(dir, "eval-report.md");
+  const manifestPath = join(dir, "artifact-manifest.json");
+  const evaluatorSessionId = `${ctx.cycleId ?? "cycle"}:evaluate:${evaluatorAgent}:${ports.clock()}`;
+  const roleInstanceId = `${ctx.cycleId ?? "cycle"}:evaluator:${evaluatorAgent}`;
+  const delegationId = ctx.cycleId ?? "cycle";
+  const hostId = deps.hostId ?? hostname();
+  const modelId = resolved.model !== undefined && resolved.model !== "" ? resolved.model : evaluatorAgent;
+  const execCwd = resolveExecutionCwd(ports, ctx);
+
+  // AC4 (identity_collision): the Evaluator's opaque sessionId must differ from
+  // the Builder's — a same-session evaluation is a self-grade, rejected BEFORE any
+  // spawn. `ctx.builderSessionId` is the loop's ACTUAL builder identity token
+  // (`<cycle>:build:<agent>:<clock>`, minted in spawn-agent-handler). The loop
+  // exposes no separate builder roleInstanceId, so the sessionId inequality IS the
+  // real independence signal (a builder/evaluator roleInstanceId literal compare
+  // could never fire — dropped rather than kept as dead code).
+  const builderSessionId = ctx.builderSessionId ?? "";
+  if (builderSessionId !== "" && evaluatorSessionId === builderSessionId) {
+    return {
+      ran: false,
+      ok: false,
+      reasons: [`evaluator stage: evaluator sessionId equals builder sessionId ('${evaluatorSessionId}') — a same-session evaluation is a self-grade`],
+      blockReason: "identity_collision",
+      evaluatorAgent,
+    };
+  }
+
+  // AC3: record SEPARATE role-resolution and role-start facts for the Evaluator
+  // BEFORE the stage runs. REQUIRED audit facts (not best-effort): a failure to
+  // record them FAILS CLOSED so no unauditable evaluation can gate delivery.
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "delta:role_resolved",
+      delegationId,
+      storyId,
+      role: "evaluator",
+      roleInstanceId,
+      hostId,
+      modelId,
+      source: resolved.source,
+      reasons: [...resolved.reasons],
+      inventorySha256: "",
+      inventoryObservedAt: new Date(eventTs(ports)).toISOString(),
+      ts: eventTs(ports),
+    });
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "delta:role_started",
+      delegationId,
+      storyId,
+      role: "evaluator",
+      sessionId: evaluatorSessionId,
+      roleInstanceId,
+      hostId,
+      modelId,
+      identityProvenance: "adapter-observed",
+      // AC3: the Evaluator runs READ-ONLY — only the Builder gets write roots.
+      worktreeAccess: "read-only",
+      ts: eventTs(ports),
+    });
+  } catch (e) {
+    return {
+      ran: false,
+      ok: false,
+      reasons: [`evaluator stage: could not record required role facts (delta:role_resolved/role_started) — fail closed: ${e instanceof Error ? e.message : String(e)}`],
+      blockReason: "artifact_invalid",
+      evaluatorAgent,
+    };
+  }
+
+  // The Evaluator must AUTHOR the report in THIS run. We ALWAYS spawn (no
+  // existsSync skip) and DELETE any pre-existing report + manifest first, so a
+  // planted/assembled artifact can never satisfy the gate by pre-existing — only
+  // a file the real Evaluator wrote this cycle survives to validation.
+  try {
+    mkdirSync(dir, { recursive: true });
+    rmSync(reportPath, { force: true });
+    rmSync(manifestPath, { force: true });
+    // The evaluator sub-spawn goes through the shared watchdog (evaluator
+    // role cap). READ-ONLY on the product worktree; its ONLY writable root is
+    // its own artifact dir — it authors the report but cannot touch product
+    // code (advisory for non-sandbox adapters, same note as the Designer).
+    await spawnWatched({
+      ports,
+      ctx,
+      purpose: "evaluator",
+      agent: evaluatorAgent,
+      observeCwd: execCwd,
+      run: () =>
+        ports.agentSpawn(evaluatorAgent, {
+          cwd: execCwd,
+          skillBody: buildEvaluatorPrompt(storyId, reportPath),
+          storyId,
+          runDir: dir,
+          readOnly: true,
+          writableRoots: [dir],
+        }),
+    });
+  } catch {
+    /* an evaluator spawn blip -> no report -> validation below fails closed */
+  }
+
+  // AC3: the Evaluator's OWN v2 manifest (role="evaluator", read-only access).
+  const manifest: DeltaArtifactManifest = {
+    schemaVersion: 2,
+    delegationId,
+    storyId,
+    cycleId: ctx.cycleId ?? "",
+    role: "evaluator",
+    trigger: "loop-autonomous",
+    topology: "full-delta-team",
+    qualityProfile: ctx.selectedProfile,
+    executionIdentity: {
+      kind: "roll-adapter",
+      hostId,
+      roleInstanceId,
+      modelId,
+      adapter: evaluatorAgent,
+    },
+    sessionId: evaluatorSessionId,
+    worktreeAccess: "read-only",
+    // AC5: the optional peer review is an INPUT only — it never stands in for the
+    // Evaluator's own authored output.
+    inputs: [
+      { path: `${storyId}-report.html`, kind: "report" },
+      { path: "ac-map.json", kind: "evidence" },
+    ],
+    outputs: [{ path: "role-artifacts/evaluator/eval-report.md", kind: "report" }],
+    createdAt: new Date(eventTs(ports)).toISOString(),
+  };
+  // VALIDATE (never assemble) the ON-DISK artifacts, not the in-memory objects.
+  // A write failure, an absent/unparseable manifest, a non-evaluator manifest,
+  // or a report that is not a REAL authored evaluation (## Inputs checked +
+  // ## Rationale — a legacy assembled or peer-only artifact is rejected) all
+  // FAIL CLOSED. The manifest is re-read from disk so a swallowed write error or
+  // corrupted file cannot masquerade as a valid evaluation.
+  const reasons: string[] = [];
+  let wrote = true;
+  try {
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  } catch (e) {
+    wrote = false;
+    reasons.push(`evaluator manifest could not be written: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (wrote) {
+    let onDisk: unknown;
+    try {
+      onDisk = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch {
+      onDisk = undefined;
+    }
+    if (typeof onDisk !== "object" || onDisk === null) {
+      reasons.push("evaluator manifest missing or unparseable on disk");
+    } else {
+      const m = onDisk as Partial<DeltaArtifactManifest>;
+      if (m.role !== "evaluator") {
+        reasons.push(`evaluator manifest role '${String(m.role)}' ≠ 'evaluator'`);
+      } else if (!Array.isArray(m.inputs)) {
+        reasons.push("evaluator manifest missing inputs array on disk");
+      } else {
+        const access = validateRoleAccess(m as DeltaArtifactManifest);
+        if (!access.ok) reasons.push(access.detail ?? "evaluator manifest role-access violation");
+      }
+    }
+  }
+  const reportMd = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
+  const rep = validateAuthoredEvalReport(reportMd);
+  reasons.push(...rep.reasons);
+  const ok = reasons.length === 0;
+  return {
+    ran: true,
+    ok,
+    reasons,
+    ...(ok ? {} : { blockReason: "artifact_invalid" as const }),
+    evaluatorAgent,
+    evaluatorSessionId,
+  };
 }
 
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {

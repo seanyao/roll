@@ -28,7 +28,7 @@ import {
   type DraftEvidence,
 } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
-import { writeEvaluatorArtifact } from "./execution-profile.js";
+import { runEvaluatorStage } from "./execution-profile.js";
 import { checkMainDirty, readMainDirtyBaseline, readMainHeadBaseline } from "./main-checkout-guard.js";
 import {
   buildPairScorePrompt,
@@ -603,9 +603,8 @@ export async function executeCaptureFactsCommand(
       // Done without acceptance evidence.
       // Scoped to actual deliveries: an idle cycle has nothing to attest.
       let attestBlocked = false;
-      // US-V4-005: capture the attest verdict + reasons so the Evaluator artifact
-      // (verified/designed) can record evidence status + blocking findings.
-      let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
+      // Capture the attest reasons so the Full Delta repair decision can frame
+      // the Evaluator→Builder signal with the cycle's blocking findings.
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
         const mode = readAttestGateMode(ports.repoCwd);
@@ -656,16 +655,17 @@ export async function executeCaptureFactsCommand(
           });
         }
         attestBlocked = res.blocked;
-        attestVerdict = res.verdict;
         attestReasons = res.reasons;
       }
-      // US-V4-005: for verified/designed profiles, write the Evaluator artifact
-      // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
-      // the cycle's separate review/score/attest signals (never one pass/fail).
-      // FAIL-CLOSED (US-V4-005): a malformed/missing evaluator artifact, or one
-      // whose session is the builder's (self-grade), BLOCKS the cycle — it never
-      // marks Done. US-V4-007: the bounded repair DECISION (decideRepair) frames
-      // the Evaluator→Builder repair signal with a structured reason; the live
+      // US-DELTA-007: for verified/designed (Full Delta) profiles, an
+      // independently-cast Evaluator must AUTHOR its own eval-report.md
+      // (## Inputs checked + ## Rationale) and v2 manifest. capture-facts only
+      // VALIDATES that output — it NEVER assembles the report from score/attest
+      // fields. A missing/malformed/legacy-assembled report, an unresolved
+      // Evaluator, or a same-session evaluation BLOCKS delivery (fail-closed,
+      // `artifact_invalid`/`identity_collision`) before any publish/merge — the
+      // story is never marked Done. US-V4-007: the bounded repair DECISION
+      // (decideRepair) frames the Evaluator→Builder repair signal; the live
       // re-spawn loop that consumes a `repair` action is v4.1.
       let evaluatorBlocked = false;
       if (
@@ -673,15 +673,16 @@ export async function executeCaptureFactsCommand(
         commitsAhead > 0 &&
         storyId !== ""
       ) {
-        const blocking = attestBlocked || peerBlocked ? attestReasons : [];
-        const ev = writeEvaluatorArtifact(ports, ctx, { attestStatus: attestVerdict, blockingFindings: blocking });
-        if (ev.written && !ev.valid) {
+        const ev = await runEvaluatorStage(ports, ctx);
+        const evReasons = attestBlocked || peerBlocked ? attestReasons : [];
+        if (!ev.ok) {
           evaluatorBlocked = true;
           ports.events.appendAlert(
             ports.paths.alertsPath,
-            `evaluator artifact (${ctx.selectedProfile}) failed closed for ${storyId}: ${ev.reasons.join("; ")} — cycle ${ctx.cycleId ?? "?"}`,
+            `evaluator artifact (${ctx.selectedProfile}) BLOCKED [${ev.blockReason ?? "artifact_invalid"}] for ${storyId}: ${ev.reasons.join("; ")} — Full Delta delivery held (no publish/merge); an independently authored eval-report.md (## Inputs checked + ## Rationale) with its own v2 manifest is REQUIRED — cycle ${ctx.cycleId ?? "?"}`,
           );
         }
+        const blocking = [...evReasons, ...(evaluatorBlocked ? ev.reasons : [])];
         const repair = decideRepair(blocking, initialRepairState(), { maxRounds: DEFAULT_MAX_REPAIR_ROUNDS });
         if (repair.action !== "done") {
           ports.events.appendAlert(

@@ -1,12 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import type { GitResult } from "../../src/git.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildGitLlmWikiCommand,
   ContextTransportError,
   resolveContextCacheIdentity,
 } from "../../src/context/context-cache.js";
+import {
+  withFreshGitLlmWikiRead,
+  type GitLlmWikiCommandRunner,
+} from "../../src/context/git-llm-wiki-transport.js";
 
 const sandboxes: string[] = [];
 
@@ -29,6 +34,37 @@ function provider(remote = "https://github.com/bipo/context-wiki") {
     branch: "main",
     fetch_timeout_seconds: 30,
   };
+}
+
+const REVISION = "0123456789abcdef0123456789abcdef01234567";
+
+function successfulGit(remote = provider().remote): {
+  readonly runGit: GitLlmWikiCommandRunner;
+  readonly calls: Array<{ readonly args: readonly string[]; readonly cwd?: string; readonly timeoutMs?: number }>;
+} {
+  const calls: Array<{ readonly args: readonly string[]; readonly cwd?: string; readonly timeoutMs?: number }> = [];
+  const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
+    calls.push({ args: [...args], ...(cwd === undefined ? {} : { cwd }), timeoutMs: options.timeoutMs });
+    const operation = args.slice(12);
+    if (operation[0] === "init") {
+      const target = operation.at(-1);
+      if (target !== undefined) mkdirSync(target, { recursive: true });
+    }
+    if (operation[0] === "rev-parse" && operation[1] === "--is-bare-repository") {
+      return { code: 0, stdout: "true\n", stderr: "" };
+    }
+    if (operation[0] === "remote" && operation[1] === "get-url") {
+      return { code: 0, stdout: `${remote}\n`, stderr: "" };
+    }
+    if (operation[0] === "rev-parse" && operation[1] === "--verify") {
+      return { code: 0, stdout: `${REVISION}\n`, stderr: "" };
+    }
+    if (operation[0] === "cat-file" && operation[1] === "-t") {
+      return { code: 0, stdout: "commit\n", stderr: "" };
+    }
+    return { code: 0, stdout: "", stderr: "" };
+  });
+  return { runGit, calls };
 }
 
 describe("Git LLM Wiki cache identity and command policy", () => {
@@ -88,5 +124,59 @@ describe("Git LLM Wiki cache identity and command policy", () => {
       rollHome: sandbox(),
       provider: provider("https://secret-token@example.test/team/wiki.git"),
     })).toThrowError(expect.objectContaining({ code: "unsupported_git_transport" }));
+  });
+});
+
+describe("withFreshGitLlmWikiRead", () => {
+  it("initializes one bare cache, fetches the exact branch and resolves a commit", async () => {
+    const rollHome = sandbox();
+    const fake = successfulGit();
+
+    const result = await withFreshGitLlmWikiRead({ rollHome, provider: provider(), runGit: fake.runGit }, async (revision) => {
+      return `read:${revision.revision}`;
+    });
+
+    expect(result.value).toBe(`read:${REVISION}`);
+    expect(result.revision).toMatchObject({
+      providerId: "bipo-enterprise",
+      remoteIdentity: "https://github.com/bipo/context-wiki",
+      branch: "main",
+      revision: REVISION,
+      cachePath: join(rollHome, "context-cache", "bipo-enterprise.git"),
+    });
+    expect(fake.calls.map((call) => call.args.slice(12))).toEqual([
+      ["init", "--bare", join(rollHome, "context-cache", "bipo-enterprise.creating")],
+      ["remote", "add", "origin", "https://github.com/bipo/context-wiki"],
+      ["rev-parse", "--is-bare-repository"],
+      ["remote", "get-url", "--all", "origin"],
+      ["fetch", "--prune", "--no-tags", "--recurse-submodules=no", "origin", "+refs/heads/main:refs/remotes/origin/main"],
+      ["rev-parse", "--verify", "refs/remotes/origin/main"],
+      ["cat-file", "-t", REVISION],
+    ]);
+    expect(fake.calls.every((call) => call.timeoutMs === 30_000)).toBe(true);
+  });
+
+  it("performs a real fetch command for every read even when the revision is unchanged", async () => {
+    const rollHome = sandbox();
+    const fake = successfulGit();
+    const timestamps = [1_000, 2_000];
+
+    const first = await withFreshGitLlmWikiRead({
+      rollHome,
+      provider: provider(),
+      runGit: fake.runGit,
+      now: () => timestamps.shift() ?? 3_000,
+    }, async () => "first");
+    const second = await withFreshGitLlmWikiRead({
+      rollHome,
+      provider: provider(),
+      runGit: fake.runGit,
+      now: () => timestamps.shift() ?? 3_000,
+    }, async () => "second");
+
+    const fetches = fake.calls.filter((call) => call.args.slice(12)[0] === "fetch");
+    expect(fetches).toHaveLength(2);
+    expect(first.revision.revision).toBe(second.revision.revision);
+    expect(first.revision.fetchedAt).not.toBe(second.revision.fetchedAt);
   });
 });

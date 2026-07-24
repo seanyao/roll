@@ -155,6 +155,7 @@ export type ToolResult<O = unknown> =
 
 export type ToolCost = {
   toolId: ToolId;
+  correlation?: ToolContextCorrelation;
   invocations: number;
   durationMs?: number;
   failures?: number;

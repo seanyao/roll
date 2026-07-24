@@ -77,18 +77,19 @@ function request(input: unknown = "ok") {
   };
 }
 
-function workspaceContext(): WorkspaceExecutionContextV1 {
+function workspaceContext(workspaceId = "roll"): WorkspaceExecutionContextV1 {
+  const root = `/ws/${workspaceId}`;
   return {
     schema: WORKSPACE_EXECUTION_CONTEXT_V1,
-    workspace: { workspaceId: "roll", root: "/ws/roll", canonicalRoot: "/ws/roll", lifecycle: "active" },
+    workspace: { workspaceId, root, canonicalRoot: root, lifecycle: "active" },
     resolution: { source: "explicit", evidence: [] },
     bindings: [],
     issue: {
       storyId: "US-WS-035",
-      manifestPath: "/ws/roll/issues/US-WS-035/manifest.json",
+      manifestPath: `${root}/issues/US-WS-035/manifest.json`,
       execution: {
-        workspaceId: "roll",
-        issueRoot: "/ws/roll/issues/US-WS-035",
+        workspaceId,
+        issueRoot: `${root}/issues/US-WS-035`,
         repositories: {
           "repo-product": {
             repoId: "repo-product",
@@ -96,7 +97,7 @@ function workspaceContext(): WorkspaceExecutionContextV1 {
             access: "write",
             requiredDelivery: true,
             noChangePolicy: "changes_required",
-            worktreePath: "/ws/roll/issues/US-WS-035/product",
+            worktreePath: `${root}/issues/US-WS-035/product`,
             baseSha: "a".repeat(40),
             headSha: "b".repeat(40),
             commands: { test: [], integration: [] },
@@ -105,16 +106,16 @@ function workspaceContext(): WorkspaceExecutionContextV1 {
       },
     },
     authorities: {
-      backlog: "/ws/roll/backlog",
-      features: "/ws/roll/features",
-      design: "/ws/roll/design",
-      requirements: "/ws/roll/requirements",
-      policy: "/ws/roll/policy",
-      evidence: "/ws/roll/evidence",
-      toolDumps: "/ws/roll/tool-dumps",
-      events: "/ws/roll/events",
-      runtime: "/ws/roll/runtime",
-      locks: "/ws/roll/locks",
+      backlog: `${root}/backlog`,
+      features: `${root}/features`,
+      design: `${root}/design`,
+      requirements: `${root}/requirements`,
+      policy: `${root}/policy`,
+      evidence: `${root}/evidence`,
+      toolDumps: `${root}/tool-dumps`,
+      events: `${root}/events`,
+      runtime: `${root}/runtime`,
+      locks: `${root}/locks`,
     },
   };
 }
@@ -290,6 +291,21 @@ describe("US-TOOL-002 ToolRegistry", () => {
 
     expect(registry.snapshotCosts()).toEqual([
       expect.objectContaining({ toolId: TOOL_ID, invocations: 1, currency: "CNY" }),
+    ]);
+  });
+
+  it("keeps concurrent tool costs separated by Workspace correlation", async () => {
+    const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });
+    registry.register(tool());
+
+    await Promise.all([
+      registry.invoke(TOOL_ID, { ...request("alpha"), invocationId: "inv-alpha", context: workspaceContext("alpha"), repoId: "repo-product" }),
+      registry.invoke(TOOL_ID, { ...request("beta"), invocationId: "inv-beta", context: workspaceContext("beta"), repoId: "repo-product" }),
+    ]);
+
+    expect(registry.snapshotCosts()).toEqual([
+      expect.objectContaining({ invocations: 1, correlation: { workspaceId: "alpha", storyId: "US-WS-035", repoId: "repo-product" } }),
+      expect.objectContaining({ invocations: 1, correlation: { workspaceId: "beta", storyId: "US-WS-035", repoId: "repo-product" } }),
     ]);
   });
 

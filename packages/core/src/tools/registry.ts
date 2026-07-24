@@ -105,7 +105,7 @@ function delay(ms: number): Promise<void> {
 export class ToolRegistry {
   private readonly tools = new Map<ToolId, ToolState>();
   private readonly budgetCounts = new Map<ToolId, number>();
-  private readonly costs = new Map<ToolId, ToolCost>();
+  private readonly costs = new Map<string, ToolCost>();
   private shutdownStarted = false;
 
   constructor(private readonly options: ToolRegistryOptions) {}
@@ -309,8 +309,11 @@ export class ToolRegistry {
 
   private accumulateCost(toolId: ToolId, input: unknown, result: ToolResult<unknown>): void {
     if (result.meta.caller.cycleId === undefined || result.meta.caller.cycleId === "") return;
-    const current = this.costs.get(toolId) ?? {
+    const costCorrelation = result.meta.correlation;
+    const costKey = toolCostKey(toolId, costCorrelation);
+    const current = this.costs.get(costKey) ?? {
       toolId,
+      ...(costCorrelation === undefined ? {} : { correlation: costCorrelation }),
       invocations: 0,
       durationMs: 0,
       failures: 0,
@@ -320,7 +323,7 @@ export class ToolRegistry {
       outputBytes: 0,
     };
     const output = result.ok ? result.output : result.error;
-    this.costs.set(toolId, {
+    this.costs.set(costKey, {
       ...current,
       invocations: current.invocations + 1,
       durationMs: (current.durationMs ?? 0) + result.meta.durationMs,
@@ -329,6 +332,11 @@ export class ToolRegistry {
       outputBytes: (current.outputBytes ?? 0) + jsonBytes(output),
     });
   }
+}
+
+function toolCostKey(toolId: ToolId, value: ToolContextCorrelation | undefined): string {
+  if (value === undefined) return String(toolId);
+  return [toolId, value.workspaceId, value.storyId ?? "", value.repoId ?? ""].join("\u0000");
 }
 
 function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {

@@ -195,11 +195,11 @@ describe("US-WS-025 roll workspace edit --check", () => {
     expect(result).toMatchObject({ status: 2, stderr: "" });
     expect(JSON.parse(result.stdout)).toMatchObject({
       outcome: "blocked",
-      blockers: [expect.objectContaining({
+      blockers: expect.arrayContaining([expect.objectContaining({
         code: "metadata_referenced",
-        path: `repositories[${f.repoId}].workflow`,
+        path: `repositories[${f.repoId}].branchPattern`,
         references: [expect.objectContaining({ storyId: "US-EXISTING-1" })],
-      })],
+      })]),
     });
     expect(snapshot(f.workspace)).toEqual(before);
   });

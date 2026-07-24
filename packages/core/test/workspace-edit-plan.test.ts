@@ -4,6 +4,7 @@ import {
   WORKSPACE_EDIT_CONFIG_V1,
   buildWorkspaceEditPlan,
   parseWorkspaceEditConfig,
+  serializeWorkspaceMetadataReferenceIndex,
   serializeWorkspaceManifest,
   type WorkspaceMetadataReferenceIndex,
 } from "../src/workspace/edit-plan.js";
@@ -226,7 +227,9 @@ repositories:
     expect(plan.blockers).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "metadata_referenced", path: "requirements[jira:SOT-15499]" }),
       expect.objectContaining({ code: "metadata_referenced", path: "repositories[repo-ff7a87ddbb2b].alias" }),
-      expect.objectContaining({ code: "metadata_referenced", path: "repositories[repo-ff7a87ddbb2b].workflow" }),
+      expect.objectContaining({ code: "metadata_referenced", path: "repositories[repo-ff7a87ddbb2b].integrationBranch" }),
+      expect.objectContaining({ code: "metadata_referenced", path: "repositories[repo-ff7a87ddbb2b].branchPattern" }),
+      expect.objectContaining({ code: "metadata_referenced", path: "repositories[repo-ff7a87ddbb2b].requiredChecks" }),
     ]));
     expect(plan.blockers.every((blocker) => blocker.references.some((entry) => entry.storyId === "US-EXISTING-1"))).toBe(true);
     expect(issue).toEqual({
@@ -234,6 +237,210 @@ repositories:
       manifestSha256: "a".repeat(64),
       requirementKeys: [{ provider: "jira", ref: "SOT-15499" }],
       repoIds: ["repo-ff7a87ddbb2b"],
+    });
+  });
+
+  it("pins referenceIndexSha256 to the deterministic serialized reference inventory", () => {
+    const parsed = parseWorkspaceEditConfig(configText(), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error("fixture must parse");
+    const index = references({
+      additionalFacts: [{
+        kind: "event",
+        authorityPath: "runtime/events.ndjson",
+        sha256: "e".repeat(64),
+        requirementKeys: [{ provider: "jira", ref: "SOT-15499" }],
+        repoIds: ["repo-ff7a87ddbb2b"],
+      }],
+    });
+    const plan = buildWorkspaceEditPlan({ config: parsed.value, current, references: index, manifestPath: "/workspace/workspace.yaml" });
+    expect(plan.referenceIndexSha256).toBe(digest(serializeWorkspaceMetadataReferenceIndex(index)));
+  });
+
+  it("blocks Requirement deletion when immutable archive history references its normalized identity", () => {
+    const parsed = parseWorkspaceEditConfig(configText({ requirements: [] }), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error("fixture must parse");
+    const plan = buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references({
+        requirementArchives: [{
+          requirementId: "req-c78ccf14ea21",
+          source: { provider: "jira", ref: "sot-15499" },
+          manifestSha256: "a".repeat(64),
+        }],
+      }),
+      manifestPath: "/workspace/workspace.yaml",
+      configPath: "/tmp/edit.json",
+    });
+    expect(plan).toMatchObject({
+      outcome: "blocked",
+      beforeManifest: { requirements: [{ provider: "jira", ref: "SOT-15499" }] },
+      afterManifest: { requirements: [] },
+      blockers: [expect.objectContaining({
+        code: "metadata_referenced",
+        references: [expect.objectContaining({ kind: "requirement_archive", requirementId: "req-c78ccf14ea21" })],
+      })],
+      nextAction: {
+        kind: "blocked",
+        command: "roll workspace edit ws-demo --config /tmp/edit.json --check --json",
+      },
+    });
+  });
+
+  it.each(["delivery", "runtime", "event", "migration"] as const)(
+    "blocks Requirement deletion referenced by an additional %s authority",
+    (kind) => {
+      const parsed = parseWorkspaceEditConfig(configText({ requirements: [] }), { workspaceId: "ws-demo" });
+      if (!parsed.ok) throw new Error("fixture must parse");
+      const plan = buildWorkspaceEditPlan({
+        config: parsed.value,
+        current,
+        references: references({
+          additionalFacts: [{
+            kind,
+            authorityPath: `${kind}/authority.json`,
+            sha256: kind.charCodeAt(0).toString(16).padStart(2, "0").repeat(32),
+            requirementKeys: [{ provider: "jira", ref: "sot-15499" }],
+            repoIds: [],
+          }],
+        }),
+        manifestPath: "/workspace/workspace.yaml",
+      });
+      expect(plan.blockers).toContainEqual(expect.objectContaining({
+        code: "metadata_referenced",
+        path: "requirements[jira:SOT-15499]",
+        references: [expect.objectContaining({ kind: "additional_fact", authorityPath: `${kind}/authority.json` })],
+      }));
+    },
+  );
+
+  it("treats a remote change as a repoId identity replacement and blocks the referenced old identity", () => {
+    const parsed = parseWorkspaceEditConfig(configText({
+      repositories: [{
+        alias: "product",
+        remote: "https://example.test/owner/replacement",
+        provider: "github",
+        integration_branch: "main",
+        branch_pattern: "roll/{workspace_id}/{story_id}",
+        required_checks: ["test"],
+      }],
+    }), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    const plan = buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references({ issues: [{
+        storyId: "US-IDENTITY",
+        manifestSha256: "a".repeat(64),
+        requirementKeys: [],
+        repoIds: ["repo-ff7a87ddbb2b"],
+      }] }),
+      manifestPath: "/workspace/workspace.yaml",
+    });
+    expect(plan.afterManifest.repositories[0]?.repoId).not.toBe("repo-ff7a87ddbb2b");
+    expect(plan.blockers).toContainEqual(expect.objectContaining({
+      code: "metadata_referenced",
+      path: "repositories[repo-ff7a87ddbb2b].remote",
+    }));
+  });
+
+  it.each([
+    ["integrationBranch", { integration_branch: "release" }],
+    ["branchPattern", { branch_pattern: "feature/{workspace_id}/{story_id}" }],
+    ["requiredChecks", { required_checks: ["lint"] }],
+  ] as const)("blocks the referenced repository %s field independently", (field, override) => {
+    const parsed = parseWorkspaceEditConfig(configText({
+      repositories: [{
+        alias: "product",
+        remote: "https://example.test/owner/product",
+        provider: "github",
+        integration_branch: "main",
+        branch_pattern: "roll/{workspace_id}/{story_id}",
+        required_checks: ["test"],
+        ...override,
+      }],
+    }), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error(JSON.stringify(parsed.errors));
+    const plan = buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references({ issues: [{
+        storyId: "US-WORKFLOW",
+        manifestSha256: "b".repeat(64),
+        requirementKeys: [],
+        repoIds: ["repo-ff7a87ddbb2b"],
+      }] }),
+      manifestPath: "/workspace/workspace.yaml",
+    });
+    expect(plan.changes).toContainEqual(expect.objectContaining({
+      kind: "repository_workflow",
+      path: `repositories[repo-ff7a87ddbb2b].${field}`,
+      safety: "blocked",
+    }));
+    expect(plan.blockers).toContainEqual(expect.objectContaining({ path: `repositories[repo-ff7a87ddbb2b].${field}` }));
+  });
+
+  it.each(["delivery", "runtime"] as const)("blocks repository identity changes referenced by %s facts", (kind) => {
+    const parsed = parseWorkspaceEditConfig(configText({ repositories: [{
+      alias: "product",
+      remote: "https://example.test/owner/replacement",
+      provider: "github",
+      integration_branch: "main",
+      branch_pattern: "roll/{workspace_id}/{story_id}",
+      required_checks: ["test"],
+    }] }), { workspaceId: "ws-demo" });
+    if (!parsed.ok) throw new Error("fixture must parse");
+    const plan = buildWorkspaceEditPlan({
+      config: parsed.value,
+      current,
+      references: references({ additionalFacts: [{
+        kind,
+        authorityPath: `${kind}/authority.json`,
+        sha256: "c".repeat(64),
+        requirementKeys: [],
+        repoIds: ["repo-ff7a87ddbb2b"],
+      }] }),
+      manifestPath: "/workspace/workspace.yaml",
+    });
+    expect(plan.blockers).toContainEqual(expect.objectContaining({
+      path: "repositories[repo-ff7a87ddbb2b].remote",
+      references: [expect.objectContaining({ authorityPath: `${kind}/authority.json` })],
+    }));
+  });
+
+  it("rejects nested unknown fields and duplicate canonical repository identities", () => {
+    expect(parseWorkspaceEditConfig(configText({ repositories: [{
+      alias: "product",
+      remote: "https://example.test/owner/product",
+      provider: "github",
+      integration_branch: "main",
+      branch_pattern: "roll/{workspace_id}/{story_id}",
+      required_checks: ["test"],
+      root: "/escape",
+    }] }), { workspaceId: "ws-demo" })).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "unknown_field", path: "repositories[0].root" })]),
+    });
+    expect(parseWorkspaceEditConfig(configText({ repositories: [
+      {
+        alias: "product",
+        remote: "https://example.test/owner/product.git",
+        provider: "github",
+        integration_branch: "main",
+        branch_pattern: "roll/{workspace_id}/{story_id}",
+        required_checks: [],
+      },
+      {
+        alias: "mirror",
+        remote: "https://example.test/owner/product",
+        provider: "github",
+        integration_branch: "main",
+        branch_pattern: "roll/{workspace_id}/{story_id}",
+        required_checks: [],
+      },
+    ] }), { workspaceId: "ws-demo" })).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "duplicate_identity", path: "repositories" })]),
     });
   });
 

@@ -619,21 +619,20 @@ export function buildWorkspaceEditPlan(input: {
       changes.push(change("repository_identity", path, "updated", references.length > 0 ? "blocked" : "safe", repository.alias, exact.alias));
       if (references.length > 0) blockers.push(blocker("metadata_referenced", path, references));
     }
-    const workflowBefore = {
-      provider: repository.provider,
-      integrationBranch: repository.integrationBranch,
-      branchPattern: repository.workflow.branchPattern,
-      requiredChecks: repository.workflow.requiredChecks,
-    };
-    const workflowAfter = {
-      provider: exact.provider,
-      integrationBranch: exact.integrationBranch,
-      branchPattern: exact.workflow.branchPattern,
-      requiredChecks: exact.workflow.requiredChecks,
-    };
-    if (JSON.stringify(workflowBefore) !== JSON.stringify(workflowAfter)) {
-      const path = `repositories[${repository.repoId}].workflow`;
-      changes.push(change("repository_workflow", path, "updated", references.length > 0 ? "blocked" : "safe", workflowBefore, workflowAfter));
+    const workflowFields: readonly {
+      readonly name: "provider" | "integrationBranch" | "branchPattern" | "requiredChecks";
+      readonly before: unknown;
+      readonly after: unknown;
+    }[] = [
+      { name: "provider", before: repository.provider, after: exact.provider },
+      { name: "integrationBranch", before: repository.integrationBranch, after: exact.integrationBranch },
+      { name: "branchPattern", before: repository.workflow.branchPattern, after: exact.workflow.branchPattern },
+      { name: "requiredChecks", before: repository.workflow.requiredChecks, after: exact.workflow.requiredChecks },
+    ];
+    for (const field of workflowFields) {
+      if (JSON.stringify(field.before) === JSON.stringify(field.after)) continue;
+      const path = `repositories[${repository.repoId}].${field.name}`;
+      changes.push(change("repository_workflow", path, "updated", references.length > 0 ? "blocked" : "safe", field.before, field.after));
       if (references.length > 0) blockers.push(blocker("metadata_referenced", path, references));
     }
   }
@@ -661,6 +660,6 @@ export function buildWorkspaceEditPlan(input: {
     warnings: [],
     nextAction: outcome === "ready"
       ? { kind: "apply", command: `roll workspace edit ${input.current.workspaceId} --config ${configPath} --json` }
-      : { kind: "blocked" },
+      : { kind: "blocked", command: `roll workspace edit ${input.current.workspaceId} --config ${configPath} --check --json` },
   };
 }

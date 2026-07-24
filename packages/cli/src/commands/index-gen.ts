@@ -13,7 +13,7 @@ import { parseEventLine } from "@roll/spec";
 import { buildTruthSnapshot } from "@roll/core";
 import { collectDossierState, type CollectorDeps } from "@roll/core";
 import { serializeTruthSnapshot, type TruthSnapshotPanelSlot } from "@roll/spec";
-import { collectDossier, generateIndex, projectDataPath, projectRuntimePath } from "../lib/archive.js";
+import { collectDossier, generateIndex, projectDataPath, projectRuntimePath, type ProjectDataAuthorityMode } from "../lib/archive.js";
 import { SPINE_STAGES, countLegacyStories, deriveDeliveryLadder, storySpectrumState, type TruthBoardInput, type TruthBoardVerdict } from "../lib/dossier-index.js";
 import type { TruthSnapshotStoryEntry } from "@roll/spec";
 import { renderTruthConsole, renderMachineStubPage, type BacklogEpicVM, type BacklogVM, type LoopLiveFeedVM } from "../lib/truth-console.js";
@@ -45,6 +45,7 @@ import { buildDossierRunCache, collectStoryDossierInput, renderStoryDossier, sta
 import { renderMarkdown } from "../lib/markdown.js";
 import { renderState, stripAnsi } from "../render.js";
 import type { CharterVM } from "../lib/page-charter.js";
+import { requireWorkspaceAuthorities } from "../lib/workspace-project-authority.js";
 
 function iso(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -416,7 +417,10 @@ function renderSpecHtml(storyDir: string, id: string): string | null {
 
 /** `roll index` — regenerate the backlog-derived ID→epic index + static archive
  *  layers (front page → epic pages → story pages, US-DOSSIER-001d). */
-export function indexCommand(args: string[], deps: { readonly projectPath?: string } = {}): number {
+export function indexCommand(
+  args: string[],
+  deps: { readonly projectPath?: string; readonly authorityMode?: ProjectDataAuthorityMode } = {},
+): number {
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(
       "Usage: roll index [--rebuild]\n" +
@@ -433,6 +437,13 @@ export function indexCommand(args: string[], deps: { readonly projectPath?: stri
   // incremental mounts would be lost when source can't reconstruct them).
   const rebuild = args.includes("--rebuild");
   const cwd = deps.projectPath ?? process.cwd();
+  if (deps.authorityMode === "workspace") {
+    const required = [
+      { path: join(cwd, "backlog", "index.md"), kind: "file" as const },
+      { path: join(cwd, "features"), kind: "directory" as const },
+    ];
+    if (!requireWorkspaceAuthorities("roll index", required)) return 1;
+  }
   const stories = generateIndex(cwd);
   const n = Object.keys(stories).length;
   const indexPath = relative(cwd, projectDataPath(cwd, "index.json")) || "index.json";

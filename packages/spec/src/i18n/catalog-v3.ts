@@ -1144,8 +1144,8 @@ export const v3Catalog: Catalog = {
   // FIX-1453 — `roll capture` i18n (was hardcoded English, dual-line mixed).
 
   "capture.usage": {
-    en: "Usage: roll capture <status|migrate|repair|local-window>\n  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n",
-    zh: "用法：roll capture <status|migrate|repair|local-window>\n  status  [--project <path>] [--json]                 网关/渲染器就绪度 + 有效截图策略\n  migrate [--project <path>] [--revert] [--dry-run] [--json]  能力就绪时启用 best_effort（可回退）\n  repair  <story-id> [--project <path>] [--health <path>] [--json]  仅证据修复；绝不重新打开构建\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  仅捕获隔离的本地合成页面\n",
+    en: "Usage: roll capture <status|migrate|repair|local-window> [--workspace <id|path>]\n  status  [--json]                 gateway/renderer readiness + effective capture policy\n  migrate [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n  repair  <story-id> [--health <path>] [--json]  evidence-only repair; never reopens the build\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--json]  isolated local synthetic page only\n",
+    zh: "用法：roll capture <status|migrate|repair|local-window> [--workspace <ID|路径>]\n  status  [--json]                 网关/渲染器就绪度 + 有效截图策略\n  migrate [--revert] [--dry-run] [--json]  能力就绪时启用 best_effort（可回退）\n  repair  <story-id> [--health <path>] [--json]  仅证据修复；绝不重新打开构建\n  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--json]  仅捕获隔离的本地合成页面\n",
   },
   "capture.unknown_subcommand": {
     en: "[roll] unknown 'roll capture' subcommand: %s",
@@ -1158,8 +1158,8 @@ export const v3Catalog: Catalog = {
     zh: "capture refresh：已将主机能力写入 %s",
   },
   "capture.local_window.usage": {
-    en: "Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",
-    zh: "用法：roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--project <path>] [--json]",
+    en: "Usage: roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--workspace <id|path>] [--json]",
+    zh: "用法：roll capture local-window --story <ID> --url <loopback-url> [--run <id>] [--workspace <ID|路径>] [--json]",
   },
   "capture.local_window.unsafe_id": {
     en: "local-window requires safe story and run identifiers (letters, digits, dot, underscore, hyphen only).",
@@ -1258,8 +1258,8 @@ export const v3Catalog: Catalog = {
 
   // repair
   "capture.repair.usage": {
-    en: "Usage: roll capture repair <story-id> [--project <path>] [--health <path>] [--json]",
-    zh: "用法：roll capture repair <story-id> [--project <path>] [--health <path>] [--json]",
+    en: "Usage: roll capture repair <story-id> [--workspace <id|path>] [--health <path>] [--json]",
+    zh: "用法：roll capture repair <story-id> [--workspace <ID|路径>] [--health <path>] [--json]",
   },
   "capture.repair.no_record": {
     en: "no evidence-health record at %s; nothing to repair",

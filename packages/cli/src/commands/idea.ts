@@ -26,14 +26,15 @@
  * Output follows the resolved locale (single-language).
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { BacklogItem } from "@roll/core";
 import { BacklogStore, ConflictError, IDEA_SECTIONS, appendIdea, inferEpic, parseBacklog, planIdea } from "@roll/core";
 import { type Lang, resolveLang, t, v2Catalog, v3Catalog } from "@roll/spec";
 import { generateIndex, projectDataPath } from "../lib/archive.js";
 import { UNCATEGORIZED } from "../lib/archive.js";
-import { renderSpecMd, renderStoryPage } from "../lib/story-page.js";
+import { writeStoryCardFiles } from "../lib/story-mint.js";
+import { requireWorkspaceAuthorities } from "../lib/workspace-project-authority.js";
 import { c, renderState } from "../render.js";
 
 const STORY_ID_DIR_RE = /^(?:US-[A-Z]+-\d+[a-z]?|FIX-\d+[a-z]?|REFACTOR-\d+[a-z]?|IDEA-\d+[a-z]?|BUG-\d+[a-z]?)$/;
@@ -168,6 +169,10 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   const projectPath = deps.projectPath ?? process.cwd();
   const backlogPath = deps.backlogPath ?? join(projectPath, ".roll", "backlog.md");
   const featuresDir = deps.featuresDir ?? projectDataPath(projectPath, "features");
+  if (deps.canonical === true && !requireWorkspaceAuthorities("roll idea", [
+    { path: backlogPath, kind: "file" },
+    { path: featuresDir, kind: "directory" },
+  ])) return 1;
   if (!existsSync(backlogPath)) {
     process.stderr.write(
       `${RED}[roll]${NC} ${t(v2Catalog, lang, "backlog.roll_backlog_md_not_found_run")}\n`,
@@ -226,9 +231,28 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
     return 1;
   }
 
+  const card = {
+    id: plan.id,
+    title: text,
+    type: plan.kind,
+    epic: epic !== UNCATEGORIZED ? epic : undefined,
+    created: new Date().toISOString().slice(0, 10),
+  };
+  try {
+    writeStoryCardFiles(cardDir, card);
+  } catch (error) {
+    process.stderr.write(
+      `${RED}[roll]${NC} ${lang === "zh" ? "Story card 写入失败" : "failed to write Story card"}: ${error instanceof Error ? error.message : "unknown error"}\n`,
+    );
+    return 1;
+  }
+
   try {
     store.writeBacklog(backlogPath, snap.hash, (content) =>
-      appendIdea(content, plan.id, plan.kind, text).content,
+      appendIdea(content, plan.id, plan.kind, text, {
+        epic,
+        ...(deps.canonical === true ? { linkPrefix: "../features" } : {}),
+      }).content,
     );
   } catch (e) {
     // The optimistic-write guard fired: the backlog changed between read and
@@ -247,23 +271,9 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.section") + ":")} ${section}\n`);
   process.stdout.write(`  ${c("dim", label(lang, "ideav3.text") + ":")}    ${text}\n\n`);
 
-  try {
-    mkdirSync(cardDir, { recursive: true });
-    const card = {
-      id: plan.id,
-      title: text,
-      type: plan.kind,
-      epic: epic !== UNCATEGORIZED ? epic : undefined,
-      created: new Date().toISOString().slice(0, 10),
-    };
-    writeFileSync(join(cardDir, "spec.md"), renderSpecMd(card), "utf8");
-    writeFileSync(join(cardDir, "index.html"), renderStoryPage(card), "utf8");
-    process.stdout.write(
-      `  ${c("dim", label(lang, "ideav3.card_created", epic))}\n`,
-    );
-  } catch {
-    /* best-effort: folder creation is non-blocking */
-  }
+  process.stdout.write(
+    `  ${c("dim", label(lang, "ideav3.card_created", epic))}\n`,
+  );
 
   // US-V4-001: maintain the lightweight `.roll/index.json` ID→epic CACHE at card
   // creation (best-effort; the live-first locator works without it). The global

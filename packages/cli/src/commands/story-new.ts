@@ -12,11 +12,13 @@
  * the story page skeleton, then refreshes `.roll/index.json`. Refuses to
  * overwrite an existing spec — cards are born once, evolved by hand after.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UNCATEGORIZED, generateIndex } from "../lib/archive.js";
 import { BacklogStore, appendBacklogRow } from "@roll/core";
-import { STORY_ID_RE, renderSpecMd, renderStoryPage } from "../lib/story-page.js";
+import { STORY_ID_RE } from "../lib/story-page.js";
+import { writeStoryCardFiles } from "../lib/story-mint.js";
+import { requireWorkspaceAuthorities } from "../lib/workspace-project-authority.js";
 import {
   emitBacklogTargetError,
   type BacklogTargetDecision,
@@ -115,6 +117,10 @@ export function storyNewCommand(args: string[], deps?: StoryNewCommandDeps): num
       }
     : canonicalAuthority(args, deps);
   if (typeof authority === "number") return authority;
+  if (authority.canonical && !requireWorkspaceAuthorities("roll story new", [
+    { path: authority.backlogPath, kind: "file" },
+    { path: authority.featuresDir, kind: "directory" },
+  ])) return 1;
   const dir = join(authority.featuresDir, epic, id);
   if (existsSync(join(dir, "spec.md"))) {
     process.stderr.write(`story new: ${epic}/${id}/spec.md already exists — cards are born once\nstory new: 卡已存在，不可覆盖\n`);
@@ -127,9 +133,7 @@ export function storyNewCommand(args: string[], deps?: StoryNewCommandDeps): num
     ...(epic !== UNCATEGORIZED ? { epic } : {}),
     ...(note !== undefined && note !== "" ? { note } : {}),
   };
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "spec.md"), renderSpecMd(meta), "utf8");
-  writeFileSync(join(dir, "index.html"), renderStoryPage(meta), "utf8");
+  writeStoryCardFiles(dir, meta);
   // FIX-250: a card is BORN with its backlog row — "单一建卡入口" was only half
   // the chain while agents still hand-appended rows. Optimistically-locked
   // write (I9); an existing row is a no-op so re-runs stay idempotent.

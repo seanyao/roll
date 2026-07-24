@@ -26,7 +26,16 @@ export const UNCATEGORIZED = "uncategorized";
  * Workspaces with imported legacy projects. A canonical Workspace owns
  * `backlog/index.md` + `features/` directly; legacy projects keep `.roll/`.
  */
-export function projectDataRoot(projectPath: string): string {
+export type ProjectDataAuthorityMode = "auto" | "workspace" | "legacy";
+
+export function projectDataRoot(projectPath: string, authorityMode: ProjectDataAuthorityMode = "auto"): string {
+  if (authorityMode === "workspace") return projectPath;
+  if (authorityMode === "legacy") return join(projectPath, ".roll");
+  try {
+    if (statSync(join(projectPath, "workspace.yaml")).isFile()) return projectPath;
+  } catch {
+    // No canonical Workspace marker; retain legacy auto-detection below.
+  }
   return existsSync(join(projectPath, "backlog", "index.md")) && existsSync(join(projectPath, "features"))
     ? projectPath
     : join(projectPath, ".roll");

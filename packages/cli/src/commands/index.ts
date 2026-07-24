@@ -1,5 +1,6 @@
 /** Ported-command registry — one line per migrated subcommand. */
 import { join } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
@@ -330,13 +331,29 @@ export function registerAll(): void {
   // US-EVID-032: `capture` — capture-policy migration (best_effort, capability
   // gated + reversible), evidence-only repair (never reopens the build), and
   // readiness status (v2 gateway + renderer + effective policy).
-  registerPorted("capture", (args) => captureCommand(args), {
+  registerPorted("capture", (args) => {
+    const sub = args[0];
+    if (sub === undefined || isHelp(sub) || sub === "refresh") return captureCommand(args);
+    const root = workspaceProjectRoot(args, sub === "status" ? "read" : "mutation");
+    if (typeof root === "number") return root;
+    return captureCommand(removeWorkspaceSelector(args), {
+      projectPath: root,
+      authorities: deriveWorkspaceExecutionAuthorities(root),
+    });
+  }, {
     help:
-      "Usage: roll capture <status|migrate|repair|local-window>\n" +
-      "  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n" +
-      "  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
-      "  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
-      "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n",
+      "Usage: roll capture <status|migrate|repair|local-window> [--workspace <id|path>]\n" +
+      "  status  [--json]                 gateway/renderer readiness + effective capture policy\n" +
+      "  migrate [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
+      "  repair  <story-id> [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
+      "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--json]  isolated local synthetic page only\n",
+    operations: [
+      cliSelectorOperation("capture", "status", ["status"], ["status", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "repair", ["repair"], ["repair", "US-DEMO-1", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "local-window", ["local-window"], ["local-window", "--story", "US-DEMO-1", "--url", "http://127.0.0.1:3000", "--workspace", "roll"]),
+      cliOperation("capture", "refresh", ["refresh"]),
+    ],
   });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
@@ -371,7 +388,7 @@ export function registerAll(): void {
     if (args[0] !== "--rebuild") return unknownTopLevel("index");
     const root = workspaceProjectRoot(args, "mutation");
     if (typeof root === "number") return root;
-    return indexCommand(removeWorkspaceSelector(args), { projectPath: root });
+    return indexCommand(removeWorkspaceSelector(args), { projectPath: root, authorityMode: "workspace" });
   }, {
     hidden: true,
     operations: [cliSelectorOperation("index", "rebuild", ["--rebuild"], ["--rebuild", "--workspace", "roll"])],
@@ -632,7 +649,24 @@ export function registerAll(): void {
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
   // Zero markdown parse. `--json` emits the StoryDeliveryTruth verbatim.
-  registerPorted("truth", truthCommand, { help: TRUTH_USAGE, hidden: true });
+  registerPorted("truth", (args) => {
+    if (args[0] === undefined || isHelp(args[0])) return truthCommand(args);
+    const root = workspaceProjectRoot(args, "read");
+    if (typeof root === "number") return root;
+    const authorities = deriveWorkspaceExecutionAuthorities(root);
+    return truthCommand(removeWorkspaceSelector(args), {
+      projectPath: root,
+      backlogPath: authorities.backlog,
+      runtimeRoot: authorities.runtime,
+    });
+  }, {
+    help: TRUTH_USAGE,
+    hidden: true,
+    operations: [
+      cliSelectorOperation("truth", "query", ["query"], ["query", "US-DEMO-1", "--workspace", "roll"]),
+      cliSelectorOperation("truth", "audit", ["audit"], ["audit", "--workspace", "roll"]),
+    ],
+  });
   // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
   // four trend signals (review-score notes / runs.jsonl pass rate / events.ndjson
   // misjudgments / runs result_eval.dims rubric relevance) into the pure

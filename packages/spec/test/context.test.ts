@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as publicSpec from "../src/index.js";
 import {
   CONTEXT_PROVIDER_REGISTRY_V1,
+  CONTEXT_DIAGNOSTIC_CODES,
   CONTEXT_READ_REQUEST_V1,
   CONTEXT_READ_RESULT_V1,
   contextProviderRegistryV1Schema,
@@ -54,6 +55,17 @@ describe("Context v1 contracts", () => {
       contextReadRequestV1Schema: expect.any(Object),
       contextReadResultV1Schema: expect.any(Object),
     });
+  });
+
+  it("keeps diagnostic codes in one closed persisted vocabulary", () => {
+    expect(CONTEXT_DIAGNOSTIC_CODES).toEqual([
+      "context_disabled", "provider_not_found", "provider_not_bound", "invalid_context_binding",
+      "provider_disabled", "invalid_provider_config", "unsupported_git_transport", "remote_identity_mismatch",
+      "fetch_failed", "fetch_timeout", "branch_not_found", "revision_missing", "invalid_wiki_layout",
+      "invalid_context_ref", "context_file_missing", "context_symlink_rejected", "context_file_too_large",
+      "context_budget_exceeded", "invalid_page_frontmatter", "scope_mismatch", "restricted_context_denied",
+      "context_revision_changed", "invalid_context_snapshot", "context_lock_timeout",
+    ]);
   });
 
   it("publishes closed schemas and keeps provider type limited to git_llm_wiki", () => {

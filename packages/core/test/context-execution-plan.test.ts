@@ -168,6 +168,14 @@ describe("compileContextProviderExecutionPlans", () => {
       plans: [],
       diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
     });
+    const unsafeEntrypoint = contexts({
+      bindings: [{ ...contexts().bindings[0]!, entrypoints: ["../wiki/index.md"] }],
+    });
+    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: unsafeEntrypoint, refs: [] })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
+    });
   });
 
   it("builds one plan per Provider in binding order with reserved and requested paths stably deduplicated", () => {

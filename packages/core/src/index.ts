@@ -20,6 +20,7 @@ export * from "./workspace/issue-init-plan.js";
 export * from "./workspace/doctor.js";
 export * from "./workspace/migration.js";
 export * from "./context/execution-plan.js";
+export * from "./context/scope-policy.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

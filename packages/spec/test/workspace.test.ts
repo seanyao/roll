@@ -129,6 +129,14 @@ describe("Workspace repository identity", () => {
     expect(normalizeRepositoryRemote(input)).toEqual({ ok: true, value: expected });
   });
 
+  it("keeps SSH and HTTPS repository identities schemeful and unequal for Context scope", () => {
+    const ssh = normalizeRepositoryRemote("git@gitee.com:bipo/dukang-axis.git");
+    const https = normalizeRepositoryRemote("https://gitee.com/bipo/dukang-axis.git");
+    expect(ssh).toEqual({ ok: true, value: "ssh://gitee.com/bipo/dukang-axis" });
+    expect(https).toEqual({ ok: true, value: "https://gitee.com/bipo/dukang-axis" });
+    expect(ssh).not.toEqual(https);
+  });
+
   it.each([
     "http://example.com/Owner/Repo.git",
     "ftp://example.com/Owner/Repo.git",

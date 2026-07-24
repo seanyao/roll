@@ -824,6 +824,29 @@ describe("US-DELTA-003 — validate plumbing", () => {
     expect(last.reason).toBe("role_write_violation");
   });
 
+  it("US-DELTA-004: a manifest whose role ≠ the validated stage is blocked (no bypass)", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL4C", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL4C", "local-preset");
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-VAL4C",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+    const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-VAL4C",
+      `delta-${delegationId}`, "role-artifacts", "designer");
+    mkdirSync(stageDir, { recursive: true });
+    // Validating the designer stage but the file declares role "builder" — the
+    // stage-role match closes the bypass that would otherwise skip role-specific
+    // checks yet publish a designer event.
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest("builder")), "utf8");
+    const r2 = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
+    expect(r2.code).toBe(1);
+    expect(JSON.parse(r2.stderr).error).toBe("artifact_invalid");
+  });
+
   it("validate invokes injected validator seam (BLOCK-3)", () => {
     const dir = setupMinimalProject("US-DELTA-VAL5", "delta-team");
     const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL5", "local-preset");

@@ -489,6 +489,12 @@ function defaultValidator(input: DeltaValidationInput): ValidatorResult {
   } catch (e) {
     return { ok: false, reason: "artifact_invalid", detail: `manifest unreadable/invalid JSON at ${input.manifestPath}: ${String(e)}`, role: input.stage };
   }
+  // The manifest's declared role MUST match the stage being validated — else an
+  // evaluator-stage file declaring `designer` would bypass the evaluator-only
+  // identity + report-format checks yet still publish an evaluator event.
+  if (manifest.role !== input.stage) {
+    return { ok: false, reason: "artifact_invalid", detail: `manifest role '${manifest.role}' ≠ validated stage '${input.stage}'`, role: input.stage };
+  }
   const frameDir = input.frameDir;
   const contains = (p: string): boolean => {
     const abs = resolve(frameDir, p);
@@ -501,20 +507,36 @@ function defaultValidator(input: DeltaValidationInput): ValidatorResult {
       return null;
     }
   };
-  const evidenceRef = manifest.outputs.find((o) =>
-    input.stage === "builder" ? o.kind === "evidence" : input.stage === "evaluator" ? o.kind === "report" : false,
-  );
-  const evidenceContent = evidenceRef !== undefined ? (readBytes(evidenceRef.path) ?? undefined) : undefined;
+  // Builder and Evaluator MUST publish their evidence document (fail-closed): a
+  // missing evidence/report output — or an unreadable one — is a violation, not
+  // a skipped format check.
+  let evidenceContent: string | undefined;
+  if (input.stage === "builder" || input.stage === "evaluator") {
+    const wantKind = input.stage === "builder" ? "evidence" : "report";
+    const ref = manifest.outputs.find((o) => o.kind === wantKind);
+    if (ref === undefined) {
+      return { ok: false, reason: "artifact_invalid", detail: `${input.stage} manifest declares no '${wantKind}' output`, role: input.stage };
+    }
+    const content = readBytes(ref.path);
+    if (content === null) {
+      return { ok: false, reason: "artifact_invalid", detail: `${input.stage} ${wantKind} artifact missing on disk: ${ref.path}`, role: input.stage };
+    }
+    evidenceContent = content;
+  }
+  // The Evaluator MUST validate identity distinctness against a published Builder
+  // manifest (fail-closed): no valid Builder manifest → the evaluator stage
+  // cannot be admitted (it runs AFTER the Builder).
   let builderManifest: DeltaArtifactManifest | undefined;
   if (input.stage === "evaluator") {
+    const bp = join(frameDir, "role-artifacts", "builder", "evaluation-manifest.json");
     try {
-      const bp = join(frameDir, "role-artifacts", "builder", "evaluation-manifest.json");
-      if (existsSync(bp)) {
-        const bm = JSON.parse(readFileSync(bp, "utf8")) as { schemaVersion?: unknown };
-        if (bm?.schemaVersion === 2) builderManifest = bm as unknown as DeltaArtifactManifest;
-      }
+      const bm = existsSync(bp) ? (JSON.parse(readFileSync(bp, "utf8")) as { schemaVersion?: unknown }) : undefined;
+      if (bm?.schemaVersion === 2) builderManifest = bm as unknown as DeltaArtifactManifest;
     } catch {
-      /* absent/invalid builder manifest → identity check skipped (fail-open on that one check) */
+      /* fall through to the fail-closed block below */
+    }
+    if (builderManifest === undefined) {
+      return { ok: false, reason: "artifact_invalid", detail: `evaluator requires a published v2 Builder manifest for identity distinctness (none at ${bp})`, role: input.stage };
     }
   }
   const r = validateDeltaManifest(manifest, {

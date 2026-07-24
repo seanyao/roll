@@ -71,9 +71,21 @@ describe("US-CYCLE-009 confirmMergeFromGitPlane (AC2 — git plane only)", () =>
     ).toBe("ancestor");
   });
 
+  it("confirms via merge_commit on main (squash + --delete-branch, branch gone)", () => {
+    // The common post-merge state: branch deleted, so ancestor/patch-id cannot
+    // fire — only the (#N) merge commit on main (git log) proves the delivery.
+    expect(
+      confirmMergeFromGitPlane({ ...base, branchPresentOnOrigin: false, mergeCommitOnMain: true }),
+    ).toEqual({ merged: true, signal: "merge_commit" });
+  });
+
   it("branch absence alone is NOT a merge (a branch can be deleted unmerged)", () => {
     expect(
       confirmMergeFromGitPlane({ ...base, branchPresentOnOrigin: false }),
+    ).toEqual({ merged: false, signal: "none" });
+    // deleted branch, no merge commit on main either → still not merged.
+    expect(
+      confirmMergeFromGitPlane({ ...base, branchPresentOnOrigin: false, mergeCommitOnMain: false }),
     ).toEqual({ merged: false, signal: "none" });
   });
 

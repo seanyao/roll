@@ -126,6 +126,28 @@ describe("US-CYCLE-009 full chain: attach → git-plane verify → reconcile", (
     expect(confirmation.signal).toBe("none");
   });
 
+  it("confirms a squash-merged-and-DELETED branch via the merge_commit signal (git log)", () => {
+    // The common post-merge state: --delete-branch removed origin/<branch>, so
+    // ancestor/patch-id cannot fire — only the (#42) commit on main proves it.
+    const repo = repoWithOrigin((r) => {
+      git(r, `checkout -q -b ${BRANCH}`);
+      execSync("echo feat > feat.txt", { cwd: r, shell: "/bin/bash" });
+      git(r, "add feat.txt");
+      git(r, "commit -q -m 'tcr: work'");
+      git(r, "checkout -q main");
+      execSync("echo feat > feat.txt", { cwd: r, shell: "/bin/bash" });
+      git(r, "add feat.txt");
+      git(r, "commit -q -m 'squash: US-CYCLE-009 (#42)'");
+      // push ONLY main — the branch is never on origin (deleted after merge).
+      git(r, "push -q origin main");
+    });
+    const confirmation = withoutGitEnv(() =>
+      verifyMergeGitPlane(repo, BRANCH, { integrationBranch: "origin/main", prNumber: 42, storyId: "US-CYCLE-009" }),
+    );
+    expect(confirmation.merged).toBe(true);
+    expect(confirmation.signal).toBe("merge_commit");
+  });
+
   it("confirms a fast-forward merge via the ancestor signal", () => {
     const repo = repoWithOrigin((r) => {
       git(r, `checkout -q -b ${BRANCH}`);
@@ -214,6 +236,88 @@ describe("US-CYCLE-009 full chain: attach → git-plane verify → reconcile", (
     expect(deletions).toEqual([]);
     // no git-plane confirmation → no merge_confirmed fabricated.
     expect(events.filter((e) => e.type === "delivery:merge_confirmed")).toHaveLength(0);
+  });
+
+  // ── AC2 gate: gh-state alone NEVER flips; git-plane confirmation DOES ──────
+  it("gh pr_state delivered but git plane CANNOT confirm → NO flip, NO delete, alerts (codex #1)", async () => {
+    const events: RollEvent[] = [];
+    const flips: string[] = [];
+    const deletions: string[] = [];
+    const alerts: string[] = [];
+    const deps: WriteBackDeps = {
+      cwd: "/proj",
+      eventsPath: "/proj/e.ndjson",
+      now: 1,
+      events,
+      appendEvent: (_p, ev) => events.push(ev),
+      markStatus: (_c, id) => flips.push(id),
+      alert: (m) => alerts.push(m),
+      deleteSourceBranch: (b) => deletions.push(b),
+      // git plane authority says NOT merged, even though the reconcile verdict is
+      // a gh pr_state delivered.
+      verify: () => ({ merged: false, signal: "none" }),
+    };
+    const out = await reconcileMergeConfirmed(deps, {
+      cycleId: CYCLE,
+      storyId: "US-CYCLE-009",
+      branch: BRANCH,
+      prNumber: 42,
+      result: { kind: "delivered", via: "external", signal: "pr_state" },
+    });
+    expect(out.flipped).toBe(false);
+    expect(out.deleted).toBe(false);
+    expect(flips).toEqual([]);                // NO backlog flip on gh-state alone
+    expect(deletions).toEqual([]);            // NO branch delete on gh-state alone
+    expect(events.filter((e) => e.type === "delivery:merge_confirmed")).toHaveLength(0);
+    // deferred, not dropped: alerts so the next reconcile / a human confirms.
+    expect(alerts.some((a) => a.includes("git plane cannot confirm") && a.includes("DEFERRED"))).toBe(true);
+  });
+
+  it("git-plane verify CONFIRMS → flips + emits merge_confirmed even for a pr_state verdict (codex #1)", async () => {
+    const events: RollEvent[] = [];
+    const flips: string[] = [];
+    const deps: WriteBackDeps = {
+      cwd: "/proj",
+      eventsPath: "/proj/e.ndjson",
+      now: 1,
+      events,
+      appendEvent: (_p, ev) => events.push(ev),
+      markStatus: (_c, id) => flips.push(id),
+      alert: () => {},
+      // git plane confirms via ancestor even though the verdict signal was pr_state.
+      verify: () => ({ merged: true, signal: "ancestor" }),
+    };
+    const out = await reconcileMergeConfirmed(deps, {
+      cycleId: CYCLE,
+      storyId: "US-CYCLE-009",
+      branch: BRANCH,
+      prNumber: 42,
+      result: { kind: "delivered", via: "external", signal: "pr_state" },
+    });
+    expect(out.flipped).toBe(true);
+    expect(flips).toEqual(["US-CYCLE-009"]);
+    const confirmed = events.filter((e) => e.type === "delivery:merge_confirmed");
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0]).toMatchObject({ signal: "ancestor", cycleId: CYCLE });
+  });
+
+  it("verify() takes precedence over the result signal (patch_id verdict re-verified on git plane)", async () => {
+    // A patch_id verdict whose git-plane re-check DISAGREES must not flip.
+    const events: RollEvent[] = [];
+    const flips: string[] = [];
+    const deps: WriteBackDeps = {
+      cwd: "/proj", eventsPath: "/proj/e.ndjson", now: 1, events,
+      appendEvent: (_p, ev) => events.push(ev),
+      markStatus: (_c, id) => flips.push(id),
+      alert: () => {},
+      verify: () => ({ merged: false, signal: "none" }),
+    };
+    const out = await reconcileMergeConfirmed(deps, {
+      cycleId: CYCLE, storyId: "US-CYCLE-009", branch: BRANCH,
+      result: { kind: "delivered", via: "external", signal: "patch_id" },
+    });
+    expect(out.flipped).toBe(false);
+    expect(flips).toEqual([]);
   });
 
   it("alerts when the bounded write-back retry is exhausted (AC3)", async () => {

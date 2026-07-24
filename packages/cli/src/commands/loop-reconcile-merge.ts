@@ -29,7 +29,8 @@ import {
   type ReconcileResult,
 } from "@roll/core";
 import { resolveIntegrationBranch } from "@roll/infra";
-import { branchExists, branchPatchId, mainPatchIdsSinceBranch } from "../lib/delivery-facts.js";
+import { branchExists, branchPatchId, mainPatchIdsSinceBranch, offlineMergeEvidence } from "../lib/delivery-facts.js";
+import { collectGitDossierFacts, type GitDossierFacts } from "../lib/story-dossier.js";
 import { nodeExecPort } from "@roll/core";
 import { markDoneGuarded } from "../runner/done-guard.js";
 
@@ -70,14 +71,29 @@ export const defaultGitPlaneProbes: GitPlaneProbes = {
 };
 
 /**
- * Confirm a merge from the GIT PLANE ONLY (AC2). Gathers ancestor + patch-id
- * facts and delegates the decision to the pure {@link confirmMergeFromGitPlane}.
- * The gh plane is never consulted here — merge truth is git, by contract.
+ * Confirm a merge from the GIT PLANE ONLY (AC2). Gathers ancestor + patch-id +
+ * `(#N)`-on-main facts and delegates the decision to the pure
+ * {@link confirmMergeFromGitPlane}. The gh plane is never consulted here — merge
+ * truth is git, by contract.
+ *
+ * The `(#N)`-on-main signal (offline-L1: `offlineMergeEvidence` over main's git
+ * log) is REQUIRED for correctness: a squash merge with `--delete-branch` — the
+ * common post-merge state — leaves no `origin/<branch>`, so ancestor/patch-id
+ * cannot fire and ONLY the merge commit on main proves the delivery. When a
+ * `prNumber`/`storyId` is given, this reads main's log (git, not gh) to check it.
+ * A prebuilt `dossierFacts` snapshot is reused when supplied (the reconcile
+ * command already builds one) to avoid a redundant log scan.
  */
 export function verifyMergeGitPlane(
   cwd: string,
   branch: string,
-  opts: { probes?: GitPlaneProbes; integrationBranch?: string } = {},
+  opts: {
+    probes?: GitPlaneProbes;
+    integrationBranch?: string;
+    prNumber?: number;
+    storyId?: string;
+    dossierFacts?: GitDossierFacts | null;
+  } = {},
 ): MergeConfirmation {
   const probes = opts.probes ?? defaultGitPlaneProbes;
   const integrationBranch = opts.integrationBranch ?? resolveIntegrationBranch(cwd);
@@ -92,11 +108,20 @@ export function verifyMergeGitPlane(
       mainPatchIds = probes.mainPatchIdsSinceBranch(cwd, branch, integrationBranch);
     }
   }
+  // `(#N)`-on-main (offline L1) — only needed when ancestor/patch-id did not fire
+  // (e.g. the branch was deleted after a squash merge).
+  let mergeCommitOnMain = false;
+  const patchIdHit = branchNetPatchId !== undefined && mainPatchIds.has(branchNetPatchId);
+  if (ancestor !== true && !patchIdHit && (opts.prNumber !== undefined || (opts.storyId ?? "") !== "")) {
+    const facts = opts.dossierFacts !== undefined ? opts.dossierFacts : collectGitDossierFacts(cwd);
+    mergeCommitOnMain = offlineMergeEvidence(facts, opts.storyId ?? "", opts.prNumber) === "MERGED";
+  }
   const facts: GitPlaneMergeFacts = {
     branchTipIsAncestorOfMain: ancestor,
     branchNetPatchId,
     mainPatchIds,
     branchPresentOnOrigin: probes.branchPresentOnOrigin(cwd, branch),
+    mergeCommitOnMain,
   };
   return confirmMergeFromGitPlane(facts);
 }
@@ -141,6 +166,15 @@ export interface WriteBackDeps {
   deleteSourceBranch?: (branch: string) => void | Promise<void>;
   /** Bound on write-back attempts (default {@link DEFAULT_WRITEBACK_MAX_ATTEMPTS}). */
   maxAttempts?: number;
+  /**
+   * The GIT-PLANE merge confirmation authority (AC2). When provided it is the
+   * gate for the entire write-back — the backlog flip, branch delete, and
+   * merge_confirmed record ALL require `confirmation.merged` to be true. The
+   * production binding injects {@link verifyMergeGitPlane}; tests inject a fake.
+   * Takes precedence over `cyc.result` (a gh `pr_state` verdict is NEVER trusted
+   * to flip on its own).
+   */
+  verify?: () => MergeConfirmation;
 }
 
 /** The cycle being written back. `result`/`confirmation` supply the git-plane signal. */
@@ -207,14 +241,35 @@ export async function reconcileMergeConfirmed(
   deps: WriteBackDeps,
   cyc: MergeConfirmedCycle,
 ): Promise<{ confirmation: MergeConfirmation; flipped: boolean; deleted: boolean }> {
+  // Precedence: explicit confirmation (tests) > git-plane verify (production) >
+  // the reconcile result's own signal. verify() is the authority — a gh
+  // `pr_state` delivered NEVER flips unless the git plane also confirms.
   const confirmation =
     cyc.confirmation ??
-    (cyc.result !== undefined
-      ? confirmationFromReconcileResult(cyc.result)
-      : { merged: false, signal: "none" as const });
+    (deps.verify !== undefined
+      ? deps.verify()
+      : cyc.result !== undefined
+        ? confirmationFromReconcileResult(cyc.result)
+        : { merged: false, signal: "none" as const });
 
+  // ── git plane could NOT confirm → never flip / delete / record on gh-state ──
+  if (!confirmation.merged || confirmation.signal === "none") {
+    // A delivered verdict the git plane cannot corroborate is DEFERRED, not
+    // dropped: alert so a later git-plane confirmation (next reconcile) or a
+    // human flips the backlog.
+    if (cyc.result?.kind === "delivered") {
+      deps.alert(
+        `US-CYCLE-009: ${cyc.storyId || cyc.cycleId} reported merged by gh but the git plane cannot confirm ` +
+          `(no ancestor / no patch-id match on main) — backlog flip DEFERRED, branch NOT deleted; ` +
+          `next reconcile confirms on the git plane (cycle ${cyc.cycleId})`,
+      );
+    }
+    return { confirmation, flipped: false, deleted: false };
+  }
+
+  // ── git plane CONFIRMED the merge → write back ─────────────────────────────
   // AC2 + AC4: record the git-plane confirmation exactly once.
-  if (confirmation.merged && confirmation.signal !== "none" && !hasMergeConfirmedEvent(deps.events, cyc.cycleId)) {
+  if (!hasMergeConfirmedEvent(deps.events, cyc.cycleId)) {
     deps.appendEvent(deps.eventsPath, {
       type: "delivery:merge_confirmed",
       cycleId: cyc.cycleId,
@@ -247,10 +302,14 @@ export async function reconcileMergeConfirmed(
 
 /**
  * The production write-back binding used by `roll loop reconcile` in place of the
- * former single-try backlog flip: bounded-retry flip + a git-plane
- * `delivery:merge_confirmed` record (no branch delete — the merge's own
- * `--delete-branch` handles that after GitHub's verified merge). `events` MUST be
- * a fresh read of the stream so the merge_confirmed guard sees prior records.
+ * former single-try backlog flip. GATED on git-plane merge truth (AC2): the
+ * backlog flip + `delivery:merge_confirmed` record fire ONLY when
+ * {@link verifyMergeGitPlane} (ancestor / patch-id) confirms the merge — a gh
+ * `pr_state` delivered that the git plane cannot corroborate DEFERS the flip and
+ * ALERTS instead. No branch delete here — the merge's own `--delete-branch`
+ * handles that after GitHub's verified merge. `events` MUST be a fresh read of
+ * the stream so the merge_confirmed guard sees prior records. `verify` is
+ * injectable for tests; production defaults to the real git-plane check.
  */
 export async function finalizeDeliveredWriteBack(args: {
   cwd: string;
@@ -265,7 +324,19 @@ export async function finalizeDeliveredWriteBack(args: {
   prNumber?: number;
   result: ReconcileResult;
   mergeCommit?: string;
+  /** Prebuilt dossier snapshot (main's log) reused by the git-plane verify. */
+  dossierFacts?: GitDossierFacts | null;
+  /** Test seam — defaults to the real {@link verifyMergeGitPlane}. */
+  verify?: () => MergeConfirmation;
 }): Promise<void> {
+  const verify =
+    args.verify ??
+    (() =>
+      verifyMergeGitPlane(args.cwd, args.branch, {
+        prNumber: args.prNumber,
+        storyId: args.storyId,
+        dossierFacts: args.dossierFacts,
+      }));
   await reconcileMergeConfirmed(
     {
       cwd: args.cwd,
@@ -274,6 +345,7 @@ export async function finalizeDeliveredWriteBack(args: {
       events: args.events,
       appendEvent: args.appendEvent,
       alert: args.alert,
+      verify,
       markStatus: (projectCwd, id, status) => {
         const backlogPath = join(projectCwd, ".roll", "backlog.md");
         const store = new BacklogStore();

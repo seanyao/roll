@@ -292,7 +292,7 @@ export type RollEvent =
   // drives the async reconcile write-back off the critical path; `signal` records
   // WHICH git-plane fact confirmed it (branch tip is an ancestor of main, or the
   // branch's net patch-id is present on main).
-  | { type: "delivery:merge_confirmed"; cycleId: string; storyId: string; branch: string; prNumber?: number; signal: "ancestor" | "patch_id"; mergeCommit?: string; ts: number }
+  | { type: "delivery:merge_confirmed"; cycleId: string; storyId: string; branch: string; prNumber?: number; signal: "ancestor" | "patch_id" | "merge_commit"; mergeCommit?: string; ts: number }
   // A published PR was closed without merging. This is terminal for the
   // cycle and releases its delivery lease without claiming delivery.
   | { type: "delivery:abandoned"; cycleId: string; storyId: string; reason: "pr_closed_unmerged"; ts: number }

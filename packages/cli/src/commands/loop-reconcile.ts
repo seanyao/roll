@@ -699,6 +699,7 @@ export async function runReconcileTick(
         branch: cyc.branch,
         prNumber: cyc.prNumber,
         result,
+        dossierFacts: gitFacts,
         ...(result.kind === "delivered" && result.mergeCommit !== undefined ? { mergeCommit: result.mergeCommit } : {}),
       });
     }
@@ -956,25 +957,25 @@ export async function loopReconcileCommand(
         }
       }
       // US-CYCLE-009: bounded-retry backlog flip + git-plane merge_confirmed
-      // record. The backlog flip preserves the pre-existing behavior of running
-      // even in --dry-run (repairs an interrupted flip); event writes are
-      // suppressed under --dry-run to honor "报告判定,不写事件".
-      await finalizeDeliveredWriteBack({
-        cwd,
-        eventsPath,
-        now,
-        events: readAllEvents(eventsPath),
-        appendEvent: dryRun ? () => {} : (p, ev) => deps.bus.appendEvent(p, ev),
-        alert: dryRun
-          ? () => {}
-          : (message) => deps.bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
-        cycleId: cyc.cycleId,
-        storyId: cyc.storyId,
-        branch: cyc.branch,
-        prNumber: cyc.prNumber,
-        result,
-        ...(result.kind === "delivered" && result.mergeCommit !== undefined ? { mergeCommit: result.mergeCommit } : {}),
-      });
+      // record — GATED on git-plane merge truth. --dry-run mutates NOTHING
+      // (no backlog flip, no branch delete, no event writes): report only.
+      if (!dryRun) {
+        await finalizeDeliveredWriteBack({
+          cwd,
+          eventsPath,
+          now,
+          events: readAllEvents(eventsPath),
+          appendEvent: (p, ev) => deps.bus.appendEvent(p, ev),
+          alert: (message) => deps.bus.appendEvent(eventsPath, { type: "loop:error", loop: "main", error: message, ts: now }),
+          cycleId: cyc.cycleId,
+          storyId: cyc.storyId,
+          branch: cyc.branch,
+          prNumber: cyc.prNumber,
+          result,
+          dossierFacts: gitFacts,
+          ...(result.kind === "delivered" && result.mergeCommit !== undefined ? { mergeCommit: result.mergeCommit } : {}),
+        });
+      }
     }
     if (result.kind === "terminal" && !dryRun) {
       deps.bus.appendEvent(eventsPath, {

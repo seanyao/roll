@@ -78,10 +78,19 @@ export interface GitPlaneMergeFacts {
    * can be deleted unmerged), so this is corroborating context, not a signal.
    */
   branchPresentOnOrigin: boolean;
+  /**
+   * Is the PR's merge commit reachable on main? Derived from MAIN'S GIT LOG (a
+   * `(#N)` squash commit for the recorded PR, or a story-named commit for a
+   * PR-less legacy cycle — the offline-L1 evidence, `offlineMergeEvidence`).
+   * This is STILL the git plane (main's commit log, never `gh` stdout) and is the
+   * ONLY signal that survives a squash merge with `--delete-branch` — the common
+   * post-merge state where the branch is gone so ancestor/patch-id cannot fire.
+   */
+  mergeCommitOnMain?: boolean;
 }
 
 /** Which git-plane fact confirmed the merge. */
-export type MergeConfirmSignal = "ancestor" | "patch_id" | "none";
+export type MergeConfirmSignal = "ancestor" | "patch_id" | "merge_commit" | "none";
 
 /** The result of a git-plane merge check. `merged:false` ⇒ signal `"none"`. */
 export interface MergeConfirmation {
@@ -92,14 +101,16 @@ export interface MergeConfirmation {
 /**
  * Confirm a merge from GIT-PLANE facts ONLY (AC2). A merge is confirmed iff:
  *   - the branch tip is an ancestor of main (`ancestor`), OR
- *   - the branch's net patch-id is present on main (`patch_id`, squash-safe).
- * The ancestor signal is checked first (it is the most direct evidence). Branch
- * absence on the remote is NEVER sufficient on its own — a branch can be deleted
- * without merging.
+ *   - the branch's net patch-id is present on main (`patch_id`, squash-safe), OR
+ *   - the PR's merge commit is reachable on main (`merge_commit` — main's git
+ *     log; the only signal that survives a squash merge with `--delete-branch`).
+ * The ancestor signal is checked first (most direct); patch-id next (branch still
+ * present); merge_commit last (branch deleted). Branch absence on the remote is
+ * NEVER sufficient on its own — a branch can be deleted without merging.
  *
  * Pure and deterministic. It NEVER inspects a `gh` result: the false-positive
  * history of grepping `gh` stdout is precisely why merge truth lives on the git
- * plane.
+ * plane. (`merge_commit` reads MAIN'S commit log — git, not gh.)
  */
 export function confirmMergeFromGitPlane(facts: GitPlaneMergeFacts): MergeConfirmation {
   if (facts.branchTipIsAncestorOfMain === true) {
@@ -110,6 +121,9 @@ export function confirmMergeFromGitPlane(facts: GitPlaneMergeFacts): MergeConfir
     facts.mainPatchIds.has(facts.branchNetPatchId)
   ) {
     return { merged: true, signal: "patch_id" };
+  }
+  if (facts.mergeCommitOnMain === true) {
+    return { merged: true, signal: "merge_commit" };
   }
   return { merged: false, signal: "none" };
 }

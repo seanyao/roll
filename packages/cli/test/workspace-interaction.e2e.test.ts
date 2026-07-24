@@ -16,6 +16,7 @@ import {
   answerDirectWorkspaceClarification,
   parseWorkspaceInteractionArgs,
   renderDirectWorkspaceClarificationPrompt,
+  resolveWorkspaceTargetInteraction,
   type WorkspaceInteractionCapabilities,
 } from "../src/lib/workspace-interaction.js";
 import { backlogCommand } from "../src/commands/backlog.js";
@@ -262,6 +263,45 @@ describe("US-WS-030 direct Workspace clarification", () => {
       })).toEqual({ kind: "invalid", code: "invalid_workspace_clarification", reload: true });
       expect(rerunResolver).not.toHaveBeenCalled();
     }
+  });
+
+  it("replaces the pre-sentinel selector and preserves post-sentinel payload bytes", () => {
+    const resolveTarget = vi.fn((args: readonly string[]) => {
+      const sentinel = args.indexOf("--");
+      const prefix = sentinel < 0 ? args : args.slice(0, sentinel);
+      const selectorIndex = prefix.indexOf("--workspace");
+      return prefix[selectorIndex + 1] === "fields"
+        ? { ok: true as const }
+        : { ok: false as const, code: "target_missing" };
+    });
+    const result = resolveWorkspaceTargetInteraction({
+      args: ["show", "US-1", "--workspace", "does-not-exist", "--", "--workspace", "literal"],
+      operation: "read",
+      resolveTarget,
+      host: {
+        cwd: "/tmp",
+        capabilities: { stdinTTY: true, stderrTTY: true, agentQuestionCapable: false },
+        ask: () => "1",
+        loadDiscovery: () => ({
+          schema: "roll.workspace-discovery-load/v1",
+          registryRevision: 7,
+          discoveryFactsSha256: "a".repeat(64),
+          workspaces: [facts("fields")],
+          diagnostics: [],
+        }),
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "resolved",
+      args: ["show", "US-1", "--workspace", "fields", "--", "--workspace", "literal"],
+      result: { ok: true },
+    });
+    expect(resolveTarget).toHaveBeenNthCalledWith(
+      2,
+      ["show", "US-1", "--workspace", "fields", "--", "--workspace", "literal"],
+      "read",
+    );
   });
 });
 

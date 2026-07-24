@@ -284,6 +284,34 @@ interface WorkspaceTargetDecisionShape {
   readonly code?: string;
 }
 
+function replaceCanonicalWorkspaceSelector(
+  args: readonly string[],
+  workspaceId: string,
+): readonly string[] {
+  const replaced: string[] = [];
+  let inserted = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      if (!inserted) replaced.push("--workspace", workspaceId);
+      replaced.push(...args.slice(index));
+      return replaced;
+    }
+    if (arg === "--workspace") {
+      if (!inserted) {
+        replaced.push("--workspace", workspaceId);
+        inserted = true;
+      }
+      const oldValue = args[index + 1];
+      if (oldValue !== undefined && oldValue !== "--" && !oldValue.startsWith("-")) index += 1;
+      continue;
+    }
+    if (arg !== undefined) replaced.push(arg);
+  }
+  if (!inserted) replaced.push("--workspace", workspaceId);
+  return replaced;
+}
+
 export type WorkspaceTargetInteractionOutcome<T extends WorkspaceTargetDecisionShape> =
   | { readonly kind: "resolved"; readonly args: readonly string[]; readonly result: T }
   | {
@@ -351,7 +379,7 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
     answer,
     currentDiscovery,
     rerunResolver: (workspaceId) => input.resolveTarget(
-      [...interaction.args, "--workspace", workspaceId],
+      replaceCanonicalWorkspaceSelector(interaction.args, workspaceId),
       input.operation,
     ),
   });
@@ -385,7 +413,7 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
           }) ?? handoff,
         };
       }
-      const selectedArgs = [...interaction.args, "--workspace", resolved.workspaceId];
+      const selectedArgs = replaceCanonicalWorkspaceSelector(interaction.args, resolved.workspaceId);
       return resolved.result.ok
         ? { kind: "resolved", args: selectedArgs, result: resolved.result }
         : { kind: "target_failure", args: selectedArgs, result: resolved.result };

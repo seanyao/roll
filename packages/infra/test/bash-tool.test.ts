@@ -192,7 +192,10 @@ describe("US-TOOL-004 BashTool", () => {
     symlinkSync(outside, escape);
     for (const input of [
       { command: "sh", args: ["-c", "cat /etc/passwd"] },
+      { command: "bash", args: ["-lc", "cat /etc/passwd"] },
       { command: "node", args: ["-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--eval=require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "/usr/bin/env", args: ["node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "cat", args: ["escape/file.txt"] },
     ]) {
       const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });

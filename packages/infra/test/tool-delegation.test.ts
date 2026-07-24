@@ -147,7 +147,12 @@ describe("US-TOOL-014 infra tool delegation", () => {
 
     const result = await invokeInfraTool({
       declaration,
-      input: { nested: { secrets } },
+      input: {
+        nested: { secrets, secret: "nested-secret" },
+        password: "structured-password",
+        token: "structured-token",
+        api_key: "structured-key",
+      },
       scope: "issue_required",
       context: executionContext,
       run: async (invocation) => ({
@@ -166,7 +171,10 @@ describe("US-TOOL-014 infra tool delegation", () => {
 
     expect(result.ok).toBe(true);
     const persisted = readFileSync(join(executionContext.authorities.events, "tools.ndjson"), "utf8");
-    for (const secret of ["sk-example123456", "bearer-secret", "hunter2", "key-secret"]) {
+    for (const secret of [
+      "sk-example123456", "bearer-secret", "hunter2", "key-secret",
+      "nested-secret", "structured-password", "structured-token", "structured-key",
+    ]) {
       expect(persisted).not.toContain(secret);
     }
     expect(persisted).toContain("[REDACTED]");

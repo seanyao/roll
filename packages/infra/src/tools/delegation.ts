@@ -272,12 +272,15 @@ function sanitizeInvocation<I>(invocation: ToolInvocation<I>): ToolInvocation<I>
   };
 }
 
-function sanitizeInvocationValue(value: unknown): unknown {
+function sanitizeInvocationValue(value: unknown, key?: string): unknown {
+  if (key !== undefined && /^(?:api[_-]?key|authorization|cookie|credential|password|passwd|private[_-]?key|secret|token)$/iu.test(key)) {
+    return "[REDACTED]";
+  }
   if (typeof value === "string") return redactInfraToolValue(value);
-  if (Array.isArray(value)) return value.map(sanitizeInvocationValue);
+  if (Array.isArray(value)) return value.map((item) => sanitizeInvocationValue(item));
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, sanitizeInvocationValue(item)]),
+      Object.entries(value as Record<string, unknown>).map(([childKey, item]) => [childKey, sanitizeInvocationValue(item, childKey)]),
     );
   }
   return value;

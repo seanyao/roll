@@ -165,14 +165,8 @@ function advisoryWarnings(command: string, blockedCommands: readonly string[] | 
   return blockedCommands.includes(command) ? [`blocked command advisory: ${command}`] : [];
 }
 
-const DYNAMIC_INTERPRETER_FLAGS: Readonly<Record<string, readonly string[]>> = {
-  bash: ["-c"], dash: ["-c"], fish: ["-c"], sh: ["-c"], zsh: ["-c"],
-  node: ["-e", "--eval"], perl: ["-e"], php: ["-r"], python: ["-c"], python3: ["-c"], ruby: ["-e"],
-};
-
 function argumentsContained(command: string, args: readonly string[], cwd: string, repositoryRoot: string): boolean {
-  const interpreterFlags = DYNAMIC_INTERPRETER_FLAGS[basename(command)];
-  if (interpreterFlags?.some((flag) => args.includes(flag)) === true) return false;
+  if (dynamicInterpreterDenied(command, args)) return false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? "";
     const equalsValue = argument.startsWith("-") && argument.includes("=")
@@ -189,6 +183,25 @@ function argumentsContained(command: string, args: readonly string[], cwd: strin
     if (resolved === undefined) return false;
   }
   return true;
+}
+
+function dynamicInterpreterDenied(command: string, args: readonly string[]): boolean {
+  const executable = basename(command).toLowerCase();
+  if (executable === "env") {
+    if (args.includes("-S") || args.includes("--split-string")) return true;
+    const nested = args.findIndex((argument) => !argument.startsWith("-") && !argument.includes("="));
+    return nested >= 0 && dynamicInterpreterDenied(args[nested] ?? "", args.slice(nested + 1));
+  }
+  if (["bash", "dash", "fish", "sh", "zsh"].includes(executable)) {
+    return args.some((argument) => /^-[^-]*c/u.test(argument));
+  }
+  if (executable === "node") {
+    return args.some((argument) => argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval="));
+  }
+  if (["perl", "ruby"].includes(executable)) return args.some((argument) => argument.startsWith("-e"));
+  if (["python", "python2", "python3"].includes(executable)) return args.some((argument) => argument.startsWith("-c"));
+  if (executable === "php") return args.some((argument) => argument.startsWith("-r"));
+  return false;
 }
 
 function redactEnv(env: Record<string, string> | undefined, deps: ToolDeps): Record<string, string> | undefined {

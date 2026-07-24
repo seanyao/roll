@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { JsonSchema } from "./json-schema.js";
-import { parseWorkspaceContexts, workspaceContextsV1Schema, type WorkspaceContextsV1 } from "./context.js";
+import {
+  parseWorkspaceContexts,
+  workspaceContextsV1Schema,
+  type WorkspaceContextsV1,
+} from "./context-binding.js";
 
 export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
 export const WORKSPACE_EXECUTION_CONTEXT_V1 = "roll.workspace-execution-context/v1" as const;
@@ -534,6 +538,99 @@ export const repositoryBindingV1Schema: JsonSchema = objectSchema(
     ),
   },
   ["schema", "repoId", "alias", "remote", "integrationBranch", "provider", "workflow"],
+);
+
+const workspaceStringArraySchema: JsonSchema = { type: "array", items: stringSchema };
+const workspaceRepositoryExecutionCommandsSchema = objectSchema(
+  { test: workspaceStringArraySchema, integration: workspaceStringArraySchema },
+  ["test", "integration"],
+);
+const workspaceRepositoryExecutionContextSchema = objectSchema(
+  {
+    repoId: stringSchema,
+    alias: stringSchema,
+    access: { type: "string", enum: ["read", "write"] },
+    requiredDelivery: { type: "boolean" },
+    noChangePolicy: { type: "string", enum: ["changes_required", "no_change_allowed"] },
+    dependsOnRepo: stringSchema,
+    worktreePath: stringSchema,
+    baseSha: stringSchema,
+    headSha: stringSchema,
+    commands: workspaceRepositoryExecutionCommandsSchema,
+  },
+  ["repoId", "alias", "access", "requiredDelivery", "worktreePath", "baseSha", "headSha", "commands"],
+);
+const workspaceCycleExecutionContextSchema = objectSchema(
+  {
+    workspaceId: stringSchema,
+    issueRoot: stringSchema,
+    repositories: { type: "object", additionalProperties: workspaceRepositoryExecutionContextSchema },
+  },
+  ["workspaceId", "issueRoot", "repositories"],
+);
+const workspaceMatchEvidenceSchema = objectSchema(
+  {
+    kind: {
+      type: "string",
+      enum: ["issue_exact", "requirement_source_exact", "repository_exact", "path_contained", "semantic_supported"],
+    },
+    value: stringSchema,
+    hard: { type: "boolean" },
+    score: { type: "number" },
+  },
+  ["kind", "value", "hard", "score"],
+);
+const workspaceAuthoritiesV1Schema = objectSchema(
+  {
+    backlog: stringSchema,
+    features: stringSchema,
+    design: stringSchema,
+    requirements: stringSchema,
+    policy: stringSchema,
+    evidence: stringSchema,
+    toolDumps: stringSchema,
+    events: stringSchema,
+    runtime: stringSchema,
+    locks: stringSchema,
+  },
+  ["backlog", "features", "design", "requirements", "policy", "evidence", "toolDumps", "events", "runtime", "locks"],
+);
+
+export const workspaceExecutionContextV1Schema: JsonSchema = objectSchema(
+  {
+    schema: { const: WORKSPACE_EXECUTION_CONTEXT_V1 },
+    workspace: objectSchema(
+      {
+        workspaceId: stringSchema,
+        root: stringSchema,
+        canonicalRoot: stringSchema,
+        lifecycle: { type: "string", enum: ["registered", "active", "paused", "archived"] },
+      },
+      ["workspaceId", "root", "canonicalRoot", "lifecycle"],
+    ),
+    resolution: objectSchema(
+      {
+        source: {
+          type: "string",
+          enum: ["explicit", "environment", "cwd_manifest", "issue_manifest", "requirement_discovery"],
+        },
+        evidence: { type: "array", items: workspaceMatchEvidenceSchema },
+      },
+      ["source", "evidence"],
+    ),
+    bindings: { type: "array", items: repositoryBindingV1Schema },
+    contexts: workspaceContextsV1Schema,
+    issue: objectSchema(
+      {
+        storyId: stringSchema,
+        manifestPath: stringSchema,
+        execution: workspaceCycleExecutionContextSchema,
+      },
+      ["storyId", "manifestPath", "execution"],
+    ),
+    authorities: workspaceAuthoritiesV1Schema,
+  },
+  ["schema", "workspace", "resolution", "bindings", "authorities"],
 );
 
 export const workspaceManifestV1Schema: JsonSchema = objectSchema(

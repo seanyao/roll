@@ -10,12 +10,12 @@ import {
   type ContextProviderRegistryV1,
   type GitLlmWikiProviderConfigV1,
   type WorkspaceContextBindingV1,
-  type WorkspaceContextsV1,
+  type WorkspaceExecutionContextV1,
 } from "@roll/spec";
 
 export interface CompileContextProviderExecutionPlansInput {
   readonly registry?: ContextProviderRegistryV1;
-  readonly contexts?: WorkspaceContextsV1;
+  readonly workspace?: WorkspaceExecutionContextV1;
   readonly refs?: readonly string[];
 }
 
@@ -84,7 +84,14 @@ function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProv
     provider.fetch_timeout_seconds > 300 ||
     !remote.ok
   ) return undefined;
-  return { ...provider, remote: remote.value };
+  return {
+    id: provider.id,
+    type: "git_llm_wiki",
+    enabled: provider.enabled,
+    remote: remote.value,
+    branch: provider.branch,
+    fetch_timeout_seconds: provider.fetch_timeout_seconds,
+  };
 }
 
 /**
@@ -95,7 +102,7 @@ function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProv
 export function compileContextProviderExecutionPlans(
   input: CompileContextProviderExecutionPlansInput,
 ): ContextProviderExecutionPlanCompilationV1 {
-  const contexts = input.contexts;
+  const contexts = input.workspace?.contexts;
   if (input.registry === undefined || !input.registry.enabled || contexts === undefined || !contexts.enabled) {
     return {
       outcome: "disabled",
@@ -227,7 +234,9 @@ export function compileContextProviderExecutionPlans(
       parsed.ok && parsed.value.providerId === binding.providerId ? [parsed.value.path] : []
     );
     const normalizedBinding: WorkspaceContextBindingV1 = {
-      ...binding,
+      providerId: binding.providerId,
+      enabled: binding.enabled,
+      required: binding.required,
       entrypoints: stableUnique(binding.entrypoints),
     };
     plans.push({

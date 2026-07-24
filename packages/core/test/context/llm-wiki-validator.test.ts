@@ -246,13 +246,20 @@ describe("fixed-revision LLM Wiki validation", () => {
       refs: ["wiki/data-surfaces/db-access.md"],
       files: minimumFiles([blob(
         "wiki/data-surfaces/db-access.md",
-        page(["sensitivity: restricted_reference"], "- vault://team/db/axis-sit\n- secret-ref:axis-test-account\n"),
+        page(
+          ["sensitivity: restricted_reference"],
+          "- vault://team/db/axis-sit\n- secret://team/api/signing-key\n- secret-ref:axis-test-account\n- credential-ref:axis-sit-db\n",
+        ),
       )]),
     });
     expect(allowed.valid).toBe(true);
 
     for (const body of [
       "password=hunter2\n",
+      "password:hunter2\n",
+      "token:plain-text-token\n",
+      "secret:plain-text-secret\n",
+      "custom-ref:not-an-approved-reference\n",
       "postgres://axis:plain-text-secret@db.internal/reporting\n",
       "-----BEGIN PRIVATE KEY-----\nvalue\n",
       "Use account alice with token ghp_abcdefghijklmnopqrstuvwxyz123456\n",

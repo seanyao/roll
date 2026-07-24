@@ -219,7 +219,7 @@ function envCommandIndex(args: readonly string[]): number {
 
 const NODE_OPTIONS_WITH_VALUE = new Set([
   "-r", "--require", "--import", "--loader", "--experimental-loader", "--conditions",
-  "--input-type",
+  "--input-type", "--env-file", "--env-file-if-exists",
   "--inspect-port", "--title", "--icu-data-dir", "--openssl-config", "--redirect-warnings",
   "--diagnostic-dir", "--cpu-prof-dir", "--heap-prof-dir", "--report-dir", "--test-reporter",
 ]);

@@ -196,6 +196,8 @@ describe("US-TOOL-004 BashTool", () => {
       { command: "node", args: ["-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "node", args: ["--eval=require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "node", args: ["--input-type", "module", "-e", "import fs from 'node:fs'; fs.readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--env-file", "package.json", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "node", args: ["--env-file-if-exists", ".env", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "node", args: ["--print", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "/usr/bin/env", args: ["node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "/usr/bin/env", args: ["-u", "NODE_OPTIONS", "node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },

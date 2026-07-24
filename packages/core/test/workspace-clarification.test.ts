@@ -115,17 +115,29 @@ function handoff(input: {
   });
 }
 
+const ACTION_MATRIX = [
+  { reason: "requirement_match_required", operation: "read", candidates: [candidate("roll", "active")], expected: ["select_existing", "create_new"] },
+  { reason: "requirement_match_required", operation: "read", candidates: [], expected: ["create_new"] },
+  { reason: "requirement_match_required", operation: "mutation", candidates: [candidate("roll", "active")], expected: ["select_existing", "create_new"] },
+  { reason: "requirement_match_required", operation: "mutation", candidates: [], expected: ["create_new"] },
+  { reason: "ambiguous_requirement_match", operation: "read", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
+  { reason: "ambiguous_requirement_match", operation: "mutation", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
+  { reason: "requirement_workspace_conflict", operation: "read", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
+  { reason: "requirement_workspace_conflict", operation: "mutation", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
+  { reason: "workspace_activation_required", operation: "read", candidates: [candidate("fields", "registered")], expected: ["select_existing"] },
+  { reason: "workspace_activation_required", operation: "mutation", candidates: [candidate("fields", "paused")], expected: ["select_existing"] },
+  { reason: "create_required", operation: "read", candidates: [], expected: ["create_new"] },
+  { reason: "create_required", operation: "mutation", candidates: [], expected: ["create_new"] },
+  { reason: "workspace_discovery_incomplete", operation: "read", candidates: [candidate("fields", "registered")], expected: ["select_existing", "repair_discovery"] },
+  { reason: "workspace_discovery_incomplete", operation: "mutation", candidates: [candidate("fields", "registered")], expected: ["repair_discovery"] },
+] as const;
+
 describe("US-WS-029 Workspace clarification handoff", () => {
-  it.each([
-    { reason: "requirement_match_required", operation: "read", candidates: [candidate("roll", "active")], expected: ["select_existing", "create_new"] },
-    { reason: "requirement_match_required", operation: "mutation", candidates: [], expected: ["create_new"] },
-    { reason: "ambiguous_requirement_match", operation: "read", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
-    { reason: "requirement_workspace_conflict", operation: "mutation", candidates: [candidate("fields", "active")], expected: ["select_existing"] },
-    { reason: "workspace_activation_required", operation: "mutation", candidates: [candidate("fields", "paused")], expected: ["select_existing"] },
-    { reason: "create_required", operation: "read", candidates: [], expected: ["create_new"] },
-    { reason: "workspace_discovery_incomplete", operation: "read", candidates: [candidate("fields", "registered")], expected: ["select_existing", "repair_discovery"] },
-    { reason: "workspace_discovery_incomplete", operation: "mutation", candidates: [candidate("fields", "registered")], expected: ["repair_discovery"] },
-  ] as const)("narrows $reason for $operation", ({ reason, operation, candidates, expected }) => {
+  it("covers all fourteen reason, operation, and candidate-presence matrix cells", () => {
+    expect(ACTION_MATRIX).toHaveLength(14);
+  });
+
+  it.each(ACTION_MATRIX)("narrows $reason for $operation", ({ reason, operation, candidates, expected }) => {
     const diagnostic = reason === "workspace_discovery_incomplete"
       ? [{
           workspaceId: "fields",

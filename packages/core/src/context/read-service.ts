@@ -95,10 +95,19 @@ function providerDiagnostic(
   plan: ContextProviderExecutionPlanV1,
   diagnostic: ContextDiagnosticV1,
 ): ContextDiagnosticV1 {
+  const parsedRef = diagnostic.ref === undefined ? undefined : parseContextRef(diagnostic.ref);
+  const safeRef = parsedRef?.ok === true && parsedRef.value.providerId === plan.provider.id
+    ? parsedRef.value.ref
+    : undefined;
+  const allowedDimensions = new Set(["workspace_ids", "repository_ids", "environment_ids", "story_ids", "stages"]);
+  const mismatchedDimensions = diagnostic.mismatchedDimensions?.filter((dimension) => allowedDimensions.has(dimension));
   return {
-    ...diagnostic,
+    code: diagnostic.code,
     severity: severityFor(plan),
     providerId: plan.provider.id,
+    ...(safeRef === undefined ? {} : { ref: safeRef }),
+    message: `Context Provider read failed (${diagnostic.code})`,
+    ...(mismatchedDimensions === undefined || mismatchedDimensions.length === 0 ? {} : { mismatchedDimensions }),
   };
 }
 

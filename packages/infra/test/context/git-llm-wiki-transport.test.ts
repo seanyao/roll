@@ -73,12 +73,33 @@ describe("Git LLM Wiki cache identity and command policy", () => {
     expect(resolveContextCacheIdentity({ rollHome, provider: provider() })).toEqual({
       providerId: "bipo-enterprise",
       remoteIdentity: "https://github.com/bipo/context-wiki",
+      fetchEndpoint: "https://github.com/bipo/context-wiki",
       branch: "main",
       cacheRoot: join(rollHome, "context-cache"),
       cachePath: join(rollHome, "context-cache", "bipo-enterprise.git"),
       temporaryPath: join(rollHome, "context-cache", "bipo-enterprise.creating"),
       lockPath: join(rollHome, "context-cache", "locks", "bipo-enterprise.lock"),
       remoteName: "origin",
+    });
+  });
+
+  it("keeps the explicit SSH user in the validated endpoint but not the canonical identity", () => {
+    const scp = resolveContextCacheIdentity({
+      rollHome: sandbox(),
+      provider: provider("git@GitHub.com:bipo/context-wiki.git"),
+    });
+    const ssh = resolveContextCacheIdentity({
+      rollHome: sandbox(),
+      provider: provider("ssh://deploy@github.com:22/bipo/context-wiki"),
+    });
+
+    expect(scp).toMatchObject({
+      remoteIdentity: "ssh://github.com/bipo/context-wiki",
+      fetchEndpoint: "ssh://git@github.com/bipo/context-wiki",
+    });
+    expect(ssh).toMatchObject({
+      remoteIdentity: "ssh://github.com/bipo/context-wiki",
+      fetchEndpoint: "ssh://deploy@github.com/bipo/context-wiki",
     });
   });
 
@@ -89,11 +110,12 @@ describe("Git LLM Wiki cache identity and command policy", () => {
       "-c", "protocol.https.allow=always",
       "-c", "protocol.ssh.allow=always",
       "-c", "core.hooksPath=/dev/null",
-      "-c", "credential.helper=",
+      "-c", "core.askPass=false",
       "-c", "credential.interactive=never",
-      "fetch", "--prune", "--no-tags", "--recurse-submodules=no", "origin",
+      "fetch", "--prune", "--no-tags", "--recurse-submodules=no", "https://github.com/bipo/context-wiki",
       "+refs/heads/main:refs/remotes/origin/main",
     ]);
+    expect(command).not.toContain("credential.helper=");
     expect(command).not.toContain("sh");
     expect(command.join(" ")).not.toContain("checkout");
   });
@@ -149,7 +171,7 @@ describe("withFreshGitLlmWikiRead", () => {
       ["remote", "add", "origin", "https://github.com/bipo/context-wiki"],
       ["rev-parse", "--is-bare-repository"],
       ["remote", "get-url", "--all", "origin"],
-      ["fetch", "--prune", "--no-tags", "--recurse-submodules=no", "origin", "+refs/heads/main:refs/remotes/origin/main"],
+      ["fetch", "--prune", "--no-tags", "--recurse-submodules=no", "https://github.com/bipo/context-wiki", "+refs/heads/main:refs/remotes/origin/main"],
       ["rev-parse", "--verify", "refs/remotes/origin/main"],
       ["cat-file", "-t", REVISION],
     ]);

@@ -5,6 +5,7 @@ import {
   isValidContextProviderId,
   normalizeContextGitRemote,
   parseContextRef,
+  resolveContextGitRemote,
   workspaceExecutionContextV1Schema,
   type ContextDiagnosticV1,
   type ContextProviderExecutionPlanV1,
@@ -92,7 +93,7 @@ function invalidBinding(binding: WorkspaceContextBindingV1): boolean {
 }
 
 function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProviderConfigV1 | undefined {
-  const remote = normalizeContextGitRemote(provider.remote);
+  const remote = resolveContextGitRemote(provider.remote);
   if (provider.type !== "git_llm_wiki" ||
     !isValidContextProviderId(provider.id) ||
     !isValidContextBranch(provider.branch) ||
@@ -105,10 +106,15 @@ function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProv
     id: provider.id,
     type: "git_llm_wiki",
     enabled: provider.enabled,
-    remote: remote.value,
+    remote: remote.value.fetchEndpoint,
     branch: provider.branch,
     fetch_timeout_seconds: provider.fetch_timeout_seconds,
   };
+}
+
+function providerDigestInput(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProviderConfigV1 {
+  const remote = normalizeContextGitRemote(provider.remote);
+  return { ...provider, remote: remote.ok ? remote.value : provider.remote };
 }
 
 /**
@@ -281,7 +287,7 @@ export function compileContextProviderExecutionPlans(
       provider: normalizedProvider,
       binding: normalizedBinding,
       paths: stableUnique(["purpose.md", "schema.md", ...normalizedBinding.entrypoints, ...requestedPaths]),
-      providerConfigDigest: digest(normalizedProvider),
+      providerConfigDigest: digest(providerDigestInput(normalizedProvider)),
       bindingDigest: digest(normalizedBinding),
     });
   }

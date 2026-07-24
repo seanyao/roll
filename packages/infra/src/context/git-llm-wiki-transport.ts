@@ -232,7 +232,7 @@ async function initializeCache(
       identity,
       lease,
       runGit,
-      policyCommand(["remote", "add", identity.remoteName, identity.remoteIdentity]),
+      policyCommand(["remote", "add", identity.remoteName, identity.fetchEndpoint]),
       identity.temporaryPath,
       { operation: "remote setup", timeoutMs },
     );

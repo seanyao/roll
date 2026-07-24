@@ -315,7 +315,8 @@ describe("compileContextProviderExecutionPlans", () => {
       workspace: workspace(),
       refs: [],
     });
-    expect(scp.plans[0]?.provider.remote).toBe("ssh://github.com/Bipo/bipo-enterprise");
+    expect(scp.plans[0]?.provider.remote).toBe("ssh://git@github.com/Bipo/bipo-enterprise");
+    expect(ssh.plans[0]?.provider.remote).toBe("ssh://deploy@github.com/Bipo/bipo-enterprise");
     expect(ssh.plans[0]?.providerConfigDigest).toBe(scp.plans[0]?.providerConfigDigest);
     expect(https.plans[0]?.providerConfigDigest).not.toBe(scp.plans[0]?.providerConfigDigest);
   });

@@ -164,7 +164,9 @@ function showStory(target: ResolvedBacklogTarget, storyId: string): number {
   const item = parseBacklog(target.backlogPath).find((candidate) => candidate.id === storyId);
   const linkPath = item?.link?.split("#", 1)[0]?.split("?", 1)[0];
   if (linkPath === undefined || linkPath === "" || isAbsolute(linkPath)) return emitError("story_not_found");
-  const path = resolve(linkPath.startsWith("backlog/") ? target.workspaceRoot : dirname(target.backlogPath), linkPath);
+  const path = linkPath.startsWith(".roll/features/")
+    ? resolve(target.workspaceRoot, linkPath.slice(".roll/".length))
+    : resolve(linkPath.startsWith("backlog/") ? target.workspaceRoot : dirname(target.backlogPath), linkPath);
   if (!existsSync(path)) return emitError("story_not_found");
   const canonicalPath = realpathSync(path);
   if (!contained(target.canonicalRoot, canonicalPath)) return emitError("story_not_found");

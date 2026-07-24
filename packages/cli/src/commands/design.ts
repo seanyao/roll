@@ -24,6 +24,7 @@ import {
   readSkillBody,
 } from "../lib/interactive-agent.js";
 import { renderDesignReviewPageFromMarkdown } from "../lib/review-page.js";
+import { projectBacklogPath, projectDataPath, projectDataRoot, projectRuntimePath } from "../lib/archive.js";
 import { readRigLifecycleState } from "../runner/agent-liveness.js";
 
 function lang(): Lang {
@@ -101,7 +102,10 @@ function parseDesignFlags(args: string[]): ParsedDesignFlags {
 }
 
 function isRollProject(cwd: string): boolean {
-  return existsSync(join(cwd, ".roll"));
+  const root = projectDataRoot(cwd);
+  return root === cwd
+    ? existsSync(projectBacklogPath(cwd)) && existsSync(projectDataPath(cwd, "features"))
+    : existsSync(root);
 }
 
 function isRegularFile(path: string): boolean {
@@ -114,7 +118,7 @@ function isRegularFile(path: string): boolean {
 
 /** True when `.roll/backlog.md` has at least one Todo card row. */
 function hasTodoBacklog(cwd: string): boolean {
-  const bp = join(cwd, ".roll", "backlog.md");
+  const bp = projectBacklogPath(cwd);
   try {
     const content = readFileSync(bp, "utf8");
     return parseBacklog(content).some((row) => classifyStatus(row.status) === "todo");
@@ -162,12 +166,14 @@ function formatRunFolder(ts: number, target: string | null): string {
 }
 
 function transcriptPath(cwd: string, ts: number, target: string | null): string {
-  return join(cwd, ".roll", "runs", "design", formatRunFolder(ts, target), "transcript.log");
+  return projectDataRoot(cwd) === cwd
+    ? projectRuntimePath(cwd, "design", formatRunFolder(ts, target), "transcript.log")
+    : projectDataPath(cwd, "runs", "design", formatRunFolder(ts, target), "transcript.log");
 }
 
 function lookupEpic(target: string, cwd: string): string | null {
   try {
-    const raw = readFileSync(join(cwd, ".roll", "index.json"), "utf8");
+    const raw = readFileSync(projectDataPath(cwd, "index.json"), "utf8");
     const parsed = JSON.parse(raw) as { stories?: Record<string, string> };
     return parsed.stories?.[target] ?? null;
   } catch {
@@ -177,7 +183,7 @@ function lookupEpic(target: string, cwd: string): string | null {
 
 function readBacklogItems(cwd: string): { id: string; desc: string; status: string }[] {
   try {
-    const content = readFileSync(join(cwd, ".roll", "backlog.md"), "utf8");
+    const content = readFileSync(projectBacklogPath(cwd), "utf8");
     return parseBacklog(content).map((row) => ({ id: row.id, desc: row.desc, status: row.status }));
   } catch {
     return [];
@@ -200,7 +206,7 @@ function renderDesignReviewPageForTarget(ctx: RunContext, cardsCreated: number):
   if (ctx.target === null || ctx.fromFile !== undefined) return;
   const epic = lookupEpic(ctx.target, ctx.cwd);
   if (epic === null) return;
-  const base = join(".roll", "features", epic, ctx.target);
+  const base = relative(ctx.cwd, projectDataPath(ctx.cwd, "features", epic, ctx.target));
   const md = join(base, "spec.md");
   const absMd = resolve(ctx.cwd, md);
   if (!existsSync(absMd) || !hasDetailedDesign(absMd)) return;
@@ -611,7 +617,7 @@ function printHandoff(ctx: RunContext, statusCode: number, rawTranscript: string
   let designPath: string | undefined;
   let reviewPagePath: string | undefined;
   if (epic !== null && ctx.target !== null) {
-    const base = join(".roll", "features", epic, ctx.target);
+    const base = relative(ctx.cwd, projectDataPath(ctx.cwd, "features", epic, ctx.target));
     const md = join(base, "spec.md");
     const reviewHtml = join(base, "design-review.html");
     const html = join(base, "spec.html");
@@ -659,7 +665,7 @@ function newTodoCards(ctx: RunContext): { id: string; desc: string; status: stri
 }
 
 function runtimeDir(cwd: string): string {
-  return join(cwd, ".roll", "loop");
+  return projectRuntimePath(cwd);
 }
 
 function printAgentPoolSummary(ctx: RunContext): void {

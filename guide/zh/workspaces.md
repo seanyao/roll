@@ -71,6 +71,28 @@ roll delivery list --workspace ws-payments
 显式参数、环境变量与 cwd 指向不同目标时也会 fail loud。`pause`、`archive`、scheduler
 控制和 delivery reconcile 等变更拒绝 `--all`。
 
+planning 与 delivery 命令只把选定 Workspace 当作 project-data authority。即使从任意
+目录运行，也不会创建 `<cwd>/.roll`：
+
+```bash
+roll story new US-PAY-102 --title "重试退款" --epic payments --workspace ws-payments
+roll idea "改进退款诊断" --workspace ws-payments
+roll design "拆分退款恢复方案" --workspace ws-payments
+roll attest US-PAY-102 --workspace ws-payments
+roll capture status --workspace ws-payments --json
+roll truth query US-PAY-102 --workspace ws-payments --json
+```
+
+这些命令及其内部 view refresh 只读写 canonical Workspace 下的 `backlog/index.md`、
+`features/`、`policy.yaml`、`evidence/`、`runtime/` 与派生 `index.json`。变更所需的
+authority 缺失或类型损坏时会 fail closed，绝不会回退创建新的 `.roll` 树。authority
+或内部变更路径是 symlink 时，也会在读取或写入前拒绝。legacy `.roll` 只作为 migration
+input；Roll 不会同时写两套布局。
+
+`roll idea` 会同时写 Story card 与 canonical linked backlog row，因此可以立即用
+`roll backlog show <ID> --workspace ...` 打开。导入 backlog 中仍以 `.roll/features/`
+开头的链接只在读取时兼容解析到 canonical `features/`，不会静默改写 backlog。
+
 ## Requirement 与 Issue 布局
 
 执行前先采集 requirement revision，并保留 provider ref 与 digest。`backlog/` 中的 Story

@@ -78,6 +78,32 @@ Roll reports the candidates and exits non-zero. Conflicting explicit,
 environment and cwd selectors also fail loud. Mutations such as `pause`,
 `archive`, scheduler control and delivery reconciliation reject `--all`.
 
+Planning and delivery commands use the selected Workspace as their only
+project-data authority. They can run from an arbitrary directory without
+creating `<cwd>/.roll`:
+
+```bash
+roll story new US-PAY-102 --title "Retry refund" --epic payments --workspace ws-payments
+roll idea "improve refund diagnostics" --workspace ws-payments
+roll design "split refund recovery" --workspace ws-payments
+roll attest US-PAY-102 --workspace ws-payments
+roll capture status --workspace ws-payments --json
+roll truth query US-PAY-102 --workspace ws-payments --json
+```
+
+These commands and their internal view refresh read or write `backlog/index.md`,
+`features/`, `policy.yaml`, `evidence/`, `runtime/` and the derived `index.json`
+under the canonical Workspace. A mutation fails closed when its required
+authority is missing or has the wrong type; it never falls back to creating a
+new `.roll` tree. Symlinked authorities or internal mutation paths are rejected
+before Roll reads or writes through them. A legacy `.roll` project is migration input only; Roll never
+writes both layouts.
+
+`roll idea` writes the Story card and a canonical linked backlog row, so the
+result is immediately readable with `roll backlog show <ID> --workspace ...`.
+Imported backlog links that still start with `.roll/features/` are resolved
+read-only against canonical `features/`; the backlog is not silently rewritten.
+
 ## Requirement and Issue layout
 
 A requirement revision is captured before execution and remains attributable to

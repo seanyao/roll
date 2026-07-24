@@ -1,4 +1,6 @@
 /** Ported-command registry — one line per migrated subcommand. */
+import { join } from "node:path";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
@@ -15,6 +17,7 @@ import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
 import { attestCommand } from "./attest.js";
 import { backlogCommand } from "./backlog.js";
+import { emitBacklogTargetError, resolveBacklogCommandTarget } from "./backlog-target.js";
 import {
   backlogClaimCommand,
   backlogLintCommand,
@@ -161,6 +164,29 @@ function removedTopLevel(command: string) {
   return (): number => unknownTopLevel(command);
 }
 
+function workspaceProjectRoot(args: readonly string[], operation: "read" | "mutation"): string | number {
+  const target = resolveBacklogCommandTarget(args, operation);
+  if (!target.ok) return emitBacklogTargetError(target);
+  if ("aggregate" in target) {
+    process.stderr.write("roll: --all is not valid for this Workspace-scoped operation\n");
+    return 1;
+  }
+  return target.workspaceRoot;
+}
+
+function removeWorkspaceSelector(args: readonly string[]): string[] {
+  const remaining: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--workspace") {
+      index += 1;
+      continue;
+    }
+    const arg = args[index];
+    if (arg !== undefined) remaining.push(arg);
+  }
+  return remaining;
+}
+
 function isHelp(arg: string | undefined): boolean {
   return arg === "help" || arg === "--help" || arg === "-h";
 }
@@ -305,17 +331,46 @@ export function registerAll(): void {
   // US-EVID-032: `capture` — capture-policy migration (best_effort, capability
   // gated + reversible), evidence-only repair (never reopens the build), and
   // readiness status (v2 gateway + renderer + effective policy).
-  registerPorted("capture", (args) => captureCommand(args), {
+  registerPorted("capture", (args) => {
+    const sub = args[0];
+    if (sub === undefined || isHelp(sub) || sub === "refresh") return captureCommand(args);
+    const root = workspaceProjectRoot(args, sub === "status" ? "read" : "mutation");
+    if (typeof root === "number") return root;
+    return captureCommand(removeWorkspaceSelector(args), {
+      projectPath: root,
+      authorities: deriveWorkspaceExecutionAuthorities(root),
+    });
+  }, {
     help:
-      "Usage: roll capture <status|migrate|repair|local-window>\n" +
-      "  status  [--project <path>] [--json]                 gateway/renderer readiness + effective capture policy\n" +
-      "  migrate [--project <path>] [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
-      "  repair  <story-id> [--project <path>] [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
-      "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--project <path>] [--json]  isolated local synthetic page only\n",
+      "Usage: roll capture <status|migrate|repair|local-window> [--workspace <id|path>]\n" +
+      "  status  [--json]                 gateway/renderer readiness + effective capture policy\n" +
+      "  migrate [--revert] [--dry-run] [--json]  enable best_effort when capabilities are ready; reversible\n" +
+      "  repair  <story-id> [--health <path>] [--json]  evidence-only repair; never reopens the build\n" +
+      "  local-window --story <ID> --url <loopback-url> [--prepare <json>] [--run <id>] [--json]  isolated local synthetic page only\n",
+    operations: [
+      cliSelectorOperation("capture", "status", ["status"], ["status", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "repair", ["repair"], ["repair", "US-DEMO-1", "--workspace", "roll"]),
+      cliSelectorOperation("capture", "local-window", ["local-window"], ["local-window", "--story", "US-DEMO-1", "--url", "http://127.0.0.1:3000", "--workspace", "roll"]),
+      cliOperation("capture", "refresh", ["refresh"]),
+    ],
   });
   // `attest`: the acceptance-evidence report (US-ATTEST-006) — v3-native, no
   // bash counterpart (additive; the evidence chain is new product surface).
-  registerPorted("attest", attestCommand, { hidden: true });
+  registerPorted("attest", async (args) => {
+    if (args.includes("--help") || args.includes("-h") || args.includes("help")) {
+      return attestCommand(args);
+    }
+    const root = workspaceProjectRoot(args, args[0] === "audit" ? "read" : "mutation");
+    if (typeof root === "number") return root;
+    return attestCommand(args, { projectPath: root });
+  }, {
+    hidden: true,
+    operations: [
+      cliSelectorOperation("attest", "audit", ["audit"], ["audit", "--workspace", "roll"]),
+      cliOperation("attest", "render", [], true, ["US-DEMO-1", "--workspace", "roll"], true),
+    ],
+  });
   // `cycles`: the cycle ledger as a first-class command (US-CLI-012) — same
   // aggregation + verdict vocabulary as the web ledger; failures never swallowed.
   registerPorted("cycles", removedTopLevel("cycles"));
@@ -329,7 +384,15 @@ export function registerAll(): void {
   // solely by a fresh-session peer Reviewer (runScorePairing). The only writer of
   // a score note is that Reviewer path, which always sets `scoring: 'pair'`.
   // `index`: regenerate the backlog-derived ID→epic map (US-META-001). v3-native.
-  registerPorted("index", (args) => (args[0] === "--rebuild" ? indexCommand(args) : unknownTopLevel("index")), { hidden: true });
+  registerPorted("index", (args) => {
+    if (args[0] !== "--rebuild") return unknownTopLevel("index");
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return indexCommand(removeWorkspaceSelector(args), { projectPath: root, authorityMode: "workspace" });
+  }, {
+    hidden: true,
+    operations: [cliSelectorOperation("index", "rebuild", ["--rebuild"], ["--rebuild", "--workspace", "roll"])],
+  });
   // `ls`: the cross-project registry listing (US-DOSSIER-028) — name·tag·verdict·path
   // from ~/.roll/projects.json; --json echoes the file verbatim. ONE registry, two
   // faces (this + the web switcher); missing/stale rows flagged, never dropped.
@@ -338,15 +401,24 @@ export function registerAll(): void {
   // REFACTOR-050: `roll idea` is now the one user-facing card-capture entry;
   // `story new` is retained for agents/skills that need explicit ID+epic control.
   registerPorted("story", (args) => {
-    if (args[0] === "new") return storyNewCommand(args.slice(1));
+    if (args[0] === "new") return storyNewCommand(args.slice(1), { resolveTarget: resolveBacklogCommandTarget });
     // FIX-339 (AC7): `story validate <ID>` — must-declare + visual-evidence-AC
     // self-check, the command-side of the AC6 hard闸 (roll-design prefills it).
-    if (args[0] === "validate") return storyValidateCommand(args.slice(1));
+    if (args[0] === "validate") {
+      const root = workspaceProjectRoot(args.slice(1), "read");
+      if (typeof root === "number") return root;
+      return storyValidateCommand(args.slice(1), { projectPath: root });
+    }
     process.stdout.write(
       "Usage: roll story new <ID> --title <text> [--epic <epic>] [--note <text>]\n" +
         "       roll story validate <ID>\n",
     );
     return args[0] === undefined || args[0] === "--help" || args[0] === "-h" ? 0 : 1;
+  }, {
+    operations: [
+      cliSelectorOperation("story", "new", ["new"], ["new", "US-DEMO-1", "--title", "Demo", "--workspace", "roll"]),
+      cliSelectorOperation("story", "validate", ["validate"], ["validate", "US-DEMO-1", "--workspace", "roll"]),
+    ],
   });
   // `gc`: age out old surplus attest runs across the archive layout (US-META-001).
   registerPorted("gc", removedTopLevel("gc"), { hidden: true });
@@ -427,7 +499,19 @@ export function registerAll(): void {
   // appends through BacklogStore's optimistic atomic write (与 backlog 存取同源).
   // A lint violation reports and refuses — no bad card is ever written.
   // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
-  registerPorted("idea", ideaCommand, { operations: [cliPositionalOperation("idea", "capture")] });
+  registerPorted("idea", (args) => {
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return ideaCommand(args, {
+      projectPath: root,
+      backlogPath: join(root, "backlog", "index.md"),
+      featuresDir: join(root, "features"),
+      canonical: true,
+      remoteBacklogIds: () => [],
+    });
+  }, {
+    operations: [cliOperation("idea", "capture", [], true, ["Improve backlog", "--workspace", "roll"], true)],
+  });
   // `release`: v3-native read-only release guidance (US-PORT-004). Computes the
   // next calver version from package.json + today, surfaces changelog readiness,
   // and prints the PR/tag flow + the CI consistency-gate note. It NEVER bumps,
@@ -513,7 +597,14 @@ export function registerAll(): void {
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.
-  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: [cliPositionalOperation("design", "design")] });
+  registerPorted("design", (args) => {
+    const root = workspaceProjectRoot(args, "mutation");
+    if (typeof root === "number") return root;
+    return designCommand(removeWorkspaceSelector(args), { cwd: root });
+  }, {
+    help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。",
+    operations: [cliOperation("design", "design", [], true, ["Improve backlog", "--workspace", "roll"], true)],
+  });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.
@@ -558,7 +649,24 @@ export function registerAll(): void {
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
   // Zero markdown parse. `--json` emits the StoryDeliveryTruth verbatim.
-  registerPorted("truth", truthCommand, { help: TRUTH_USAGE, hidden: true });
+  registerPorted("truth", (args) => {
+    if (args[0] === undefined || isHelp(args[0])) return truthCommand(args);
+    const root = workspaceProjectRoot(args, "read");
+    if (typeof root === "number") return root;
+    const authorities = deriveWorkspaceExecutionAuthorities(root);
+    return truthCommand(removeWorkspaceSelector(args), {
+      projectPath: root,
+      backlogPath: authorities.backlog,
+      runtimeRoot: authorities.runtime,
+    });
+  }, {
+    help: TRUTH_USAGE,
+    hidden: true,
+    operations: [
+      cliSelectorOperation("truth", "query", ["query"], ["query", "US-DEMO-1", "--workspace", "roll"]),
+      cliSelectorOperation("truth", "audit", ["audit"], ["audit", "--workspace", "roll"]),
+    ],
+  });
   // `tune`: v3-native US-EVID-015 second-order control loop, READ-ONLY. Aggregates
   // four trend signals (review-score notes / runs.jsonl pass rate / events.ndjson
   // misjudgments / runs result_eval.dims rubric relevance) into the pure

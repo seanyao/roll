@@ -1,8 +1,8 @@
 {
   "schema": "roll.workspace-context-compatibility-matrix/v1",
   "summary": {
-    "cliFamilies": 19,
-    "cliOperations": 111,
+    "cliFamilies": 24,
+    "cliOperations": 123,
     "skillFamilies": 22,
     "skillOperations": 24,
     "toolAdapters": 8,
@@ -95,6 +95,26 @@
       "id": "agent",
       "operation": "workspace",
       "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "attest",
+      "operation": "audit",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "attest",
+      "operation": "render",
+      "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace",
@@ -195,6 +215,54 @@
       "id": "backlog",
       "operation": "unstick",
       "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "capture",
+      "operation": "local-window",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "capture",
+      "operation": "migrate",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "capture",
+      "operation": "refresh",
+      "scope": "machine_only",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false
+    },
+    {
+      "surface": "cli",
+      "id": "capture",
+      "operation": "repair",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "capture",
+      "operation": "status",
+      "scope": "workspace_required_read",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "workspace",
@@ -306,7 +374,8 @@
       "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
-      "contextConsumer": "workspace"
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
     },
     {
       "surface": "cli",
@@ -372,7 +441,18 @@
       "scope": "workspace_required_mutation",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
-      "contextConsumer": "workspace"
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "index",
+      "operation": "rebuild",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
     },
     {
       "surface": "cli",
@@ -868,12 +948,52 @@
     },
     {
       "surface": "cli",
+      "id": "story",
+      "operation": "new",
+      "scope": "workspace_required_mutation",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "story",
+      "operation": "validate",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
       "id": "test",
       "operation": "run",
       "scope": "repository_required",
       "allowsAmbientCwd": false,
       "allowsLegacyRollPath": false,
       "contextConsumer": "repository"
+    },
+    {
+      "surface": "cli",
+      "id": "truth",
+      "operation": "audit",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
+    },
+    {
+      "surface": "cli",
+      "id": "truth",
+      "operation": "query",
+      "scope": "workspace_required_read",
+      "allowsAmbientCwd": false,
+      "allowsLegacyRollPath": false,
+      "contextConsumer": "workspace",
+      "acceptsWorkspaceSelector": true
     },
     {
       "surface": "cli",

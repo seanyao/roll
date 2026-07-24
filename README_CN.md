@@ -196,10 +196,10 @@ roll loop on
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <ID\|路径>]` | 查看和管理一个明确 Workspace 的待办；`--all` 仅限只读 |
 | `roll config [lang\|prices\|tune\|…]` | 配置语言、价格和建议式调参 |
 | `roll delivery <list\|show\|reconcile> [--workspace <ID\|路径>]` | 查看 Issue 各仓 PR/CI/merge 事实与 exact-SHA 集成验收；`list --all` 仅限只读 |
-| `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design`；详细设计会生成自包含 Design Review Page |
+| `roll design [--from-file <path>] [--agent <name>] [--workspace <ID\|路径>]` | 在一个明确 Workspace authority 上交互式启动 `$roll-design` |
 | `roll doctor [skills\|tools\|language]` | 诊断安装、skills、工具、权限与语言漂移 |
 | `roll help [--lang en\|zh] [name]` | 查看内置 Charter / guide；`roll --help` 显示 CLI usage |
-| `roll idea "<一句话描述>"` | 捕获并分类一张 backlog 卡 |
+| `roll idea "<一句话描述>" --workspace <ID\|路径>` | 在一个明确 Workspace backlog 中捕获并分类卡片 |
 | `roll init` | 诊断当前目录并路由 setup/onboard |
 | `roll loop <on\|go\|pause\|resume> --workspace <ID\|路径>` / `roll loop status --all` | 运行或变更一个 Workspace scheduler；聚合状态仅限只读 |
 | `roll next` | 接续 init/onboard，只给一个最合适的下一步 |

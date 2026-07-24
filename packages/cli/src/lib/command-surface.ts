@@ -104,6 +104,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   // ── Internal/machine: callable only while an external process boundary needs them; never advertised ──
   { current: "story", owner: "backlog", audience: "internal", disposition: "internal", rationale: "story new/validate are machine entry points under backlog." },
   { current: "attest", owner: "release", audience: "internal", disposition: "internal", rationale: "Acceptance attestation is a release-gate machine surface." },
+  { current: "capture", owner: "release", audience: "internal", disposition: "internal", rationale: "Capture policy and evidence repair are release-evidence machine surfaces." },
   { current: "context", owner: "workspace", audience: "internal", disposition: "internal", rationale: "Execution-context reads remain directly callable for agents and operators without expanding the primary help surface." },
   { current: "truth", owner: "status", audience: "internal", disposition: "internal", rationale: "truth query/audit are internal snapshot surfaces." },
   { current: "supervisor", owner: "loop", audience: "internal", disposition: "internal", rationale: "Observations surface through status/next/loop; internals stay hidden." },
@@ -359,14 +360,7 @@ export function workspaceSelectorOperation(
   args: readonly string[],
   operations: readonly CliCommandOperationRegistration[],
 ): WorkspaceSelectorOperationDecision | undefined {
-  return workspaceSelectorOperations(operations)
-    .filter((operation) => {
-      if (operation.command !== command) return false;
-      if (operation.route.length === 0) {
-        const first = args[0];
-        return first === undefined || first.startsWith("-");
-      }
-      return operation.route.every((token, index) => args[index] === token);
-    })
-    .sort((left, right) => right.route.length - left.route.length)[0];
+  const registration = cliOperationForArgs(command, args, operations);
+  if (registration?.supportsWorkspaceSelector !== true) return undefined;
+  return workspaceSelectorOperations([registration])[0];
 }

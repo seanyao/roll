@@ -17,7 +17,7 @@ const POLL_MS = 10;
 
 /** A controllable rig: an injected epoch-seconds clock the test advances in
  *  lockstep with fake timers, plus recorded onTimeout/kill effects. */
-function rig(over: Partial<WatchRunOptions> & { commitCount: () => Promise<number> }) {
+function rig(over: Partial<WatchRunOptions> & { commitCount: (cwd: string) => Promise<number> }) {
   let nowSec = 0;
   const timeouts: RunTimeoutInfo[] = [];
   const order: string[] = [];
@@ -53,20 +53,75 @@ describe("watchRun — shared run-watchdog (US-CYCLE-001)", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("worktree-blind: steady git progress in the run cwd is NEVER killed, even past every window", async () => {
-    // The run's worktree keeps committing; the injected signal observes THAT.
+  it("hands the run's cwd to EVERY probe — the observation point is the worktree, never the main checkout", async () => {
+    // The scorer focus: liveness MUST be observed on the run's cwd. Prove the
+    // watchdog itself supplies that cwd to the probes (so a caller cannot
+    // silently bind them to the static main checkout).
+    const seenCommit: string[] = [];
+    const seenState: string[] = [];
+    const r = rig({
+      cwd: "/wt/run-42",
+      commitCount: (cwd) => {
+        seenCommit.push(cwd);
+        return Promise.resolve(0);
+      },
+      progressSignals: {
+        commitCount: (cwd) => {
+          seenCommit.push(cwd);
+          return Promise.resolve(0);
+        },
+        stateSignature: (cwd) => {
+          seenState.push(cwd);
+          return Promise.resolve("x");
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0); // seed
+    await r.tickAt(5);
+    r.handle.stop();
+    expect(seenCommit.length).toBeGreaterThan(0);
+    expect(seenState.length).toBeGreaterThan(0);
+    expect(new Set(seenCommit)).toEqual(new Set(["/wt/run-42"]));
+    expect(new Set(seenState)).toEqual(new Set(["/wt/run-42"]));
+  });
+
+  it("worktree-blind: progress observed in the run cwd (static main) is NEVER killed, past every window", async () => {
+    // The probe returns RISING commits only when handed the worktree cwd; if it
+    // were pointed at the (static) main checkout it would return 0 forever. The
+    // watchdog hands it the worktree cwd → productive run must never trip.
     let commits = 0;
-    const r = rig({ commitCount: () => Promise.resolve(commits) });
-    await vi.advanceTimersByTimeAsync(0); // flush baseline seed
-    // Advance well past wall/no-progress/no-state windows, but bump the worktree
-    // commit each step — a productive run must never trip.
-    for (let sec = 10; sec <= 90; sec += 10) {
+    const worktreeAwareCommitCount = (cwd: string): Promise<number> => {
       commits += 1;
-      await r.tickAt(sec);
-    }
+      return Promise.resolve(cwd === "/wt/run" ? commits : 0); // main = frozen
+    };
+    const r = rig({ cwd: "/wt/run", commitCount: worktreeAwareCommitCount });
+    await vi.advanceTimersByTimeAsync(0); // flush baseline seed
+    for (let sec = 10; sec <= 90; sec += 10) await r.tickAt(sec);
     expect(r.timeouts).toHaveLength(0);
     expect(r.kills).toBe(0);
     expect(r.handle.stop().firedReason).toBeNull();
+  });
+
+  it("worktree-blind reverse: the SAME probe pointed at a static main checkout IS killed on schedule", async () => {
+    // Identical probe, but cwd is the main checkout → it returns 0 forever →
+    // the run correctly looks frozen and is killed. This is the failure the card
+    // exists to prevent when the wiring is wrong: same code, wrong cwd = mis-kill.
+    let commits = 0;
+    const worktreeAwareCommitCount = (cwd: string): Promise<number> => {
+      commits += 1;
+      return Promise.resolve(cwd === "/wt/run" ? commits : 0);
+    };
+    const r = rig({
+      cwd: "/main/checkout", // WRONG observation point
+      commitCount: worktreeAwareCommitCount,
+      thresholds: { wallSec: 1000, noProgressSec: 1000, noStateChangeSec: 30 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await r.tickAt(20);
+    expect(r.timeouts).toHaveLength(0);
+    await r.tickAt(31);
+    expect(r.timeouts[0]?.reason).toBe("no-state-change");
+    expect(r.kills).toBe(1);
   });
 
   it("reverse: a static run cwd (no commit, no dirty change) trips no-state-change and kills", async () => {
@@ -187,5 +242,34 @@ describe("watchRun — shared run-watchdog (US-CYCLE-001)", () => {
     expect(r.timeouts).toHaveLength(0);
     expect(r.kills).toBe(0);
     expect(r.handle.stop().firedReason).toBeNull();
+  });
+
+  it("stop({external:true}) records the structured 'external' reason when no window tripped", async () => {
+    // The run was killed by something OTHER than the watchdog (orchestrator
+    // abort / the process exiting) — the taxonomy captures it, not null.
+    const r = rig({ commitCount: () => Promise.resolve(0) });
+    await vi.advanceTimersByTimeAsync(0);
+    await r.tickAt(5); // still alive
+    expect(r.handle.stop({ external: true }).firedReason).toBe("external");
+    // The watchdog itself never issued a kill for an external termination.
+    expect(r.kills).toBe(0);
+  });
+
+  it("external never overwrites a real window trip — the truer reason wins", async () => {
+    const r = rig({
+      commitCount: () => Promise.resolve(0),
+      thresholds: { wallSec: 40, noProgressSec: 1000, noStateChangeSec: 1000 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await r.tickAt(41); // wall trip
+    expect(r.handle.stop({ external: true }).firedReason).toBe("wall");
+  });
+
+  it("inert handle still records an external termination", async () => {
+    const r = rig({
+      commitCount: () => Promise.resolve(0),
+      thresholds: { wallSec: 0, noProgressSec: 0, noStateChangeSec: 0 },
+    });
+    expect(r.handle.stop({ external: true }).firedReason).toBe("external");
   });
 });

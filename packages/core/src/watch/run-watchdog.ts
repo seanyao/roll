@@ -14,7 +14,12 @@
  */
 import { cycleTimeoutVerdict } from "../loop/orchestrator.js";
 
-export type RunKillReason = "wall" | "no-progress" | "no-state-change";
+/** A window the watchdog itself trips on. These flow through `onTimeout`. */
+export type RunWindowReason = "wall" | "no-progress" | "no-state-change";
+/** Every structured kill reason. `external` is recorded via `stop({external})`
+ *  when the run was terminated by something OTHER than this watchdog — it never
+ *  flows through `onTimeout`. */
+export type RunKillReason = RunWindowReason | "external";
 
 export interface RunWatchThresholds {
   /** Absolute wall-clock ceiling (seconds). <= 0 disables. */
@@ -26,20 +31,23 @@ export interface RunWatchThresholds {
 }
 
 /**
- * Progress signals — MUST observe the run's own `cwd` (the worktree), so a
- * productive run is never mis-killed for the main checkout being static.
+ * Progress signals. `watchRun` calls each with `opts.cwd` — the run's OWN
+ * working directory — so the observed directory is chosen by the watchdog, NOT
+ * baked into the closure. A caller therefore CANNOT silently observe the main
+ * checkout: whatever `cwd` the watchdog is given is the directory the probe is
+ * handed. This is the structural guarantee behind US-CYCLE-001's scorer focus.
  */
 export interface RunProgressSignals {
-  /** commits-ahead count on the run's worktree branch. A rise is progress. */
-  commitCount: () => Promise<number>;
-  /** dirty-state fingerprint of the run cwd (e.g. `git status --porcelain`).
-   *  A CHANGE is progress. Omit to track commits only. A thrown probe is a blip
-   *  — skipped, never progress, never a kill. */
-  stateSignature?: () => Promise<string>;
+  /** commits-ahead count on the branch checked out at `cwd`. A rise is progress. */
+  commitCount: (cwd: string) => Promise<number>;
+  /** dirty-state fingerprint of `cwd` (e.g. `git status --porcelain`). A CHANGE
+   *  is progress. Omit to track commits only. A thrown probe is a blip — skipped,
+   *  never progress, never a kill. */
+  stateSignature?: (cwd: string) => Promise<string>;
 }
 
 export interface RunTimeoutInfo {
-  reason: RunKillReason;
+  reason: RunWindowReason;
   elapsedSec: number;
   idleSec: number;
   /** The run cwd the signals observed — for the record. */
@@ -65,8 +73,12 @@ export interface WatchRunOptions {
 export interface RunWatchHandle {
   /** Reset ONLY the true-silence fuse (proof of liveness, not of work). */
   markProgress(): void;
-  /** Stop the watchdog; returns why it fired (null = never tripped). */
-  stop(): { firedReason: RunKillReason | null };
+  /** Stop the watchdog; returns why it fired (null = never tripped). Pass
+   *  `{ external: true }` when the run was terminated by something OTHER than
+   *  this watchdog (orchestrator abort, the process exiting on its own) so the
+   *  structured reason is recorded as `"external"` rather than null. A window
+   *  the watchdog already tripped on wins — external never overwrites it. */
+  stop(opts?: { external?: boolean }): { firedReason: RunKillReason | null };
 }
 
 /**
@@ -77,9 +89,13 @@ export interface RunWatchHandle {
 export function watchRun(opts: WatchRunOptions): RunWatchHandle {
   const { cwd, clock, thresholds, progressSignals, onTimeout, kill, pollMs } = opts;
   const { commitCount, stateSignature } = progressSignals;
-  // All criteria disabled → an inert handle (no timer, never fires).
+  // All criteria disabled → an inert handle (no timer). It never trips a window,
+  // but STILL records an external termination so accounting stays complete.
   if (thresholds.wallSec <= 0 && thresholds.noProgressSec <= 0 && thresholds.noStateChangeSec <= 0) {
-    return { markProgress: () => {}, stop: () => ({ firedReason: null }) };
+    return {
+      markProgress: () => {},
+      stop: (o) => ({ firedReason: o?.external === true ? "external" : null }),
+    };
   }
   const startSec = clock();
   let lastProgressSec = startSec;
@@ -100,8 +116,9 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
     running = true;
     try {
       // A NEW commit on the worktree branch is GIT-STATE progress — bumps BOTH clocks.
+      // The probe is handed `cwd` (the run's worktree) — it cannot observe elsewhere.
       try {
-        const n = await commitCount();
+        const n = await commitCount(cwd);
         if (n > lastCommitCount) {
           lastCommitCount = n;
           const now = clock();
@@ -115,7 +132,7 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
       // The first observation only establishes the baseline (never a bump).
       if (stateSignature !== undefined) {
         try {
-          const sig = await stateSignature();
+          const sig = await stateSignature(cwd);
           if (lastSignature !== undefined && sig !== lastSignature) {
             const now = clock();
             lastProgressSec = now;
@@ -156,13 +173,13 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
   // Seed the baselines once up front so the first real change counts.
   void (async () => {
     try {
-      lastCommitCount = await commitCount();
+      lastCommitCount = await commitCount(cwd);
     } catch {
       /* baseline best-effort */
     }
     if (stateSignature !== undefined) {
       try {
-        lastSignature = await stateSignature();
+        lastSignature = await stateSignature(cwd);
       } catch {
         /* baseline best-effort */
       }
@@ -172,8 +189,11 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
   timer.unref?.();
   return {
     markProgress,
-    stop: () => {
+    stop: (o) => {
       clearInterval(timer);
+      // An external termination is recorded ONLY if no window already tripped —
+      // a real wall/stale kill is the truer reason and must not be overwritten.
+      if (o?.external === true && firedReason === null) firedReason = "external";
       return { firedReason };
     },
   };

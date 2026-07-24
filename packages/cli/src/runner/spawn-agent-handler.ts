@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext } from "@roll/core";
+import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext, type RunKillReason } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
@@ -158,10 +158,11 @@ export async function executeSpawnAgentCommand(
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
         // US-CYCLE-001: observe the run's OWN work dir (worktree/submodule),
-        // not the main checkout — commitCount/stateSignature both bind execCwd.
+        // not the main checkout. observeCwd=execCwd is LOAD-BEARING — the
+        // watchdog hands it to the probes, which observe exactly that cwd.
         observeCwd: execCwd,
-        commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
-        ...(statusSignature !== undefined ? { stateSignature: () => statusSignature(execCwd) } : {}),
+        commitCount: (cwd) => ports.git.commitsAhead(cwd, observeBase),
+        ...(statusSignature !== undefined ? { stateSignature: (cwd) => statusSignature(cwd) } : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -194,7 +195,7 @@ export async function executeSpawnAgentCommand(
       // codex; the cold spawn below is the only path. A future resumable engine
       // re-introduces this as registry-driven, agent-agnostic logic.
       let res: Awaited<ReturnType<typeof ports.agentSpawn>>;
-      let timeoutFired: "wall" | "no-progress" | "no-state-change" | null = null;
+      let timeoutFired: RunKillReason | null = null;
       let activeMainLeak: { detected: boolean; files: string[] } = { detected: false, files: [] };
       let mainLeakWatchdog: ReturnType<typeof startMainCheckoutLeakWatchdog> | undefined;
       // FIX-1474 — the LOST-CHILD probe. The watchdogs above cover a child that

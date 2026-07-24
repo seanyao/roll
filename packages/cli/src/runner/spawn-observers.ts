@@ -18,6 +18,7 @@ import {
   type AgentActivityNormalizer,
   type CycleObserverState,
   type NormalizerState,
+  type RunKillReason,
   watchRun,
 } from "@roll/core";
 import type { RollEvent } from "@roll/spec";
@@ -239,7 +240,7 @@ export function readStallThreshold(repoCwd: string): StallThresholdConfig {
  *  `timedOut`). */
 export interface SpawnTimeoutWatchdog {
   markProgress(): void;
-  stop(): { firedReason: "wall" | "no-progress" | "no-state-change" | null };
+  stop(opts?: { external?: boolean }): { firedReason: RunKillReason | null };
 }
 
 /**
@@ -282,21 +283,25 @@ export function startSpawnTimeoutWatchdog(opts: {
   thresholds: CycleTimeoutThresholds;
   /** Epoch SECONDS (injected — the runner's ProcessClock). */
   clock: () => number;
-  /** Observe commits-ahead on the worktree branch (progress signal). */
-  commitCount: () => Promise<number>;
-  /** FIX-1477 — fingerprint the worktree DIRTY state (e.g. raw
+  /** Observe commits-ahead on the branch at the observed cwd (progress signal).
+   *  US-CYCLE-001: the watchdog HANDS this probe `observeCwd` — the run's
+   *  worktree — so the observation point is chosen by the watchdog, never baked
+   *  into the closure against the main checkout. */
+  commitCount: (cwd: string) => Promise<number>;
+  /** FIX-1477 — fingerprint the DIRTY state of the observed cwd (e.g. raw
    *  `git status --porcelain` output); a CHANGE is progress. Optional: without
    *  it the state fuse tracks commits only. A thrown error is a blip — skipped,
-   *  never progress, never a kill. */
-  stateSignature?: () => Promise<string>;
+   *  never progress, never a kill. Handed `observeCwd` like {@link commitCount}. */
+  stateSignature?: (cwd: string) => Promise<string>;
   /** Append the cycle:timeout event (best-effort). */
   appendEvent: (ev: RollEvent) => void;
   /** Kill the in-flight agent process tree (returns count signalled). */
   kill?: () => number;
   /** Poll cadence ms (default {@link TIMEOUT_POLL_MS}; tests pin a small value). */
   pollMs?: number;
-  /** US-CYCLE-001: the run's worktree cwd the signals observe (record only —
-   *  commitCount/stateSignature are already bound to it by the caller). */
+  /** US-CYCLE-001: the run's worktree cwd. LOAD-BEARING — the watchdog hands it
+   *  to commitCount/stateSignature, so liveness is observed HERE, never on the
+   *  main checkout. Defaults to "" (the process cwd) only for legacy callers. */
   observeCwd?: string;
 }): SpawnTimeoutWatchdog {
   const { cycleId, thresholds, clock, commitCount, appendEvent } = opts;

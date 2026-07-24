@@ -1,4 +1,5 @@
-import { isAbsolute, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
 import { isCanonicalPathContained, resolveContainedExistingPath, resolveContainedPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
@@ -73,7 +74,7 @@ export class BashTool {
         warnings,
       };
     }
-    if (!argumentsContained(input.args ?? [], cwd, repository.canonicalWorktreePath)) {
+    if (!argumentsContained(input.command, input.args ?? [], cwd, repository.canonicalWorktreePath)) {
       return {
         ok: false,
         error: {
@@ -164,14 +165,24 @@ function advisoryWarnings(command: string, blockedCommands: readonly string[] | 
   return blockedCommands.includes(command) ? [`blocked command advisory: ${command}`] : [];
 }
 
-function argumentsContained(args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+const DYNAMIC_INTERPRETER_FLAGS: Readonly<Record<string, readonly string[]>> = {
+  bash: ["-c"], dash: ["-c"], fish: ["-c"], sh: ["-c"], zsh: ["-c"],
+  node: ["-e", "--eval"], perl: ["-e"], php: ["-r"], python: ["-c"], python3: ["-c"], ruby: ["-e"],
+};
+
+function argumentsContained(command: string, args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+  const interpreterFlags = DYNAMIC_INTERPRETER_FLAGS[basename(command)];
+  if (interpreterFlags?.some((flag) => args.includes(flag)) === true) return false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? "";
     const equalsValue = argument.startsWith("-") && argument.includes("=")
       ? argument.slice(argument.indexOf("=") + 1)
       : undefined;
     const candidate = args[index - 1] === "-C" ? argument : equalsValue ?? argument;
-    const pathLike = isAbsolute(candidate) || candidate === ".." || candidate.startsWith("../") || candidate.includes("/../");
+    const localCandidate = resolve(cwd, candidate);
+    const pathLike = isAbsolute(candidate) || candidate === ".." || candidate.startsWith("../") ||
+      candidate.includes("/../") || (candidate.includes("/") && !candidate.includes("://")) ||
+      (!candidate.startsWith("-") && existsSync(localCandidate));
     if (!pathLike) continue;
     const base = isAbsolute(candidate) ? repositoryRoot : cwd;
     const resolved = resolveContainedPath(repositoryRoot, resolve(base, candidate), true);

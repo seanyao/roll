@@ -134,6 +134,44 @@ describe("US-TOOL-014 infra tool delegation", () => {
     expect(existsSync(redirected)).toBe(false);
   });
 
+  it("redacts common provider and credential forms from delegated invoke events", async () => {
+    const root = tmp("workspace-event-redaction");
+    const executionContext = toolWorkspaceContext("US-WS-036", root);
+    const declaration: ToolDeclaration = {
+      id: "network.secret-test" as ToolDeclaration["id"],
+      kind: "network",
+      title: "Workspace event redaction test",
+      defaults: { enabled: true },
+    };
+    const secrets = ["sk-example123456", "Bearer bearer-secret", "password=hunter2", "api_key=key-secret"];
+
+    const result = await invokeInfraTool({
+      declaration,
+      input: { nested: { secrets } },
+      scope: "issue_required",
+      context: executionContext,
+      run: async (invocation) => ({
+        ok: true,
+        output: invocation.input,
+        meta: {
+          invocationId: invocation.invocationId,
+          toolId: invocation.toolId,
+          caller: invocation.caller,
+          startedAt: invocation.ts,
+          endedAt: invocation.ts,
+          durationMs: 0,
+        },
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    const persisted = readFileSync(join(executionContext.authorities.events, "tools.ndjson"), "utf8");
+    for (const secret of ["sk-example123456", "bearer-secret", "hunter2", "key-secret"]) {
+      expect(persisted).not.toContain(secret);
+    }
+    expect(persisted).toContain("[REDACTED]");
+  });
+
   it("keeps the legacy machine process wrapper explicit even when Story environment is present", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);

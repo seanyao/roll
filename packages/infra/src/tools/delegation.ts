@@ -201,7 +201,11 @@ export async function infraToolExecFile(command: string, args: readonly string[]
 }
 
 export function redactInfraToolValue(value: string): string {
-  return value.replace(/(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)/g, "[REDACTED]");
+  return value
+    .replace(/(gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{8,})/g, "[REDACTED]")
+    .replace(/(Bearer\s+)[^\s"']+/gi, "$1[REDACTED]")
+    .replace(/((?:password|passwd|token|secret|api[_-]?key)\s*[=:]\s*)[^\s,;"']+/gi, "$1[REDACTED]")
+    .replace(/("(?:password|passwd|token|secret|api[_-]?key)"\s*:\s*")[^"]+/gi, "$1[REDACTED]");
 }
 
 function resolveCaller(overrides: Partial<ToolCaller> | undefined): ToolCaller {

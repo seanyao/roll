@@ -8,7 +8,15 @@ import {
   type CycleRepositoryExecutionContext,
   type RepositoryExecutionContext,
 } from "@roll/spec";
-import { BUILD_HEARTBEAT_GAP_MS, cycleStep, initialCycleState, nodeExecPort, type RouteDeps } from "@roll/core";
+import {
+  BUILD_HEARTBEAT_GAP_MS,
+  claimStoryLease,
+  cycleStep,
+  initialCycleState,
+  nodeExecPort,
+  readLeases,
+  type RouteDeps,
+} from "@roll/core";
 import {
   REPOSITORY_CONTEXT_MAX_CHARS,
   buildRepositoryContextMap,
@@ -888,10 +896,12 @@ describe("US-WS-010 repository Builder context", () => {
       runsPath: join(runtimeRoot, "runs.jsonl"),
       alertsPath: join(runtimeRoot, "alerts.log"),
     };
-    const leasePath = join(runtimeRoot, "story-leases.json");
-    writeFileSync(leasePath, `${JSON.stringify({
-      "US-WS-010": { pid: 4242, claimedAt: 1, source: "cycle" },
-    })}\n`);
+    const leasePath = join(runtimeRoot, "leases");
+    expect(claimStoryLease(leasePath, "US-WS-010", {
+      pid: process.pid,
+      claimedAt: 1,
+      source: "cycle",
+    })).toMatchObject({ status: "claimed" });
     const ports = nodePorts({
       repoCwd: "/project",
       paths: scopedPaths,
@@ -937,7 +947,7 @@ describe("US-WS-010 repository Builder context", () => {
     expect(readFileSync(scopedPaths.runsPath, "utf8")).toContain(
       '"story_id":"US-WS-010","cycle_id":"cycle-terminal"',
     );
-    expect(existsSync(leasePath)).toBe(false);
+    expect(readLeases(leasePath)["US-WS-010"]).toBeUndefined();
     expect(appendAlert).toHaveBeenCalledWith(
       scopedPaths.alertsPath,
       expect.stringContaining("workspace_repository_scope_required: cleanup_worktree"),

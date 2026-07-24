@@ -145,8 +145,8 @@ function paths(rt: string, cycleId: string): RunnerPaths {
 }
 
 const routeDeps: RouteDeps = {
-  readSlot: () => "claude-stream",
-  firstInstalled: () => "claude-stream",
+  readSlot: () => ({ agent: "claude" }),
+  firstInstalled: () => "claude",
 };
 
 const CLAUDE_STREAM_JSON = [
@@ -209,7 +209,13 @@ describe("FIX-1475 — the supervised path never moves the shared main ref", () 
 
     const rt = tmp("ahead-rt");
     const p = paths(rt, cycleId);
-    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: join(rt, "capacity"),
+    });
     const result = await runCycleOnce({
       ports: { ...base, agentSpawn: shimAgent, github: fakeGithub() },
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
@@ -277,7 +283,13 @@ describe("FIX-1475 — the supervised path never moves the shared main ref", () 
 
     const rt = tmp("dirtyahead-rt");
     const p = paths(rt, cycleId);
-    const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps });
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: join(rt, "capacity"),
+    });
     const result = await runCycleOnce({
       ports: { ...base, agentSpawn: shimAgent, github: fakeGithub() },
       ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },

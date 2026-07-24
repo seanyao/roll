@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { repositoryIdFromRemote } from "@roll/spec";
+import { claimStoryLease, readLeases } from "@roll/core";
 import { nodePorts, type RunnerPaths } from "../src/runner/index.js";
 import { executeSetupCommand } from "../src/runner/setup-handlers.js";
 import { executeTerminalCommand } from "../src/runner/terminal-handlers.js";
+import { resolveStoryLeasePath } from "../src/runner/story-lease-path.js";
 import { repositoryAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
 
 function git(cwd: string, args: readonly string[]): string {
@@ -263,7 +265,7 @@ describe("US-WS-011 Workspace repository preparation", () => {
 
       expect(result.event).toEqual({ type: "repository_setup_failed", storyId: f.storyId });
       expect(readFileSync(join(f.workspace, "backlog", "index.md"), "utf8")).toContain("📋 Todo");
-      expect(existsSync(f.paths.storyLeasePath!)).toBe(false);
+      expect(readLeases(resolveStoryLeasePath(f.paths))[f.storyId]).toBeUndefined();
       expect(existsSync(join(issueRoot, "sot"))).toBe(true);
       const event = readFileSync(f.paths.eventsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)).at(-1);
       expect(event).toMatchObject({
@@ -297,8 +299,7 @@ describe("US-WS-011 Workspace repository preparation", () => {
       ports.repositories = {
         ...repositories,
         async prepare(request) {
-          leaseObservedBeforePrepare = existsSync(f.paths.storyLeasePath!)
-            && JSON.parse(readFileSync(f.paths.storyLeasePath!, "utf8"))[f.storyId]?.source === "cycle";
+          leaseObservedBeforePrepare = readLeases(resolveStoryLeasePath(f.paths))[f.storyId]?.source === "cycle";
           expect(readFileSync(join(f.workspace, "backlog", "index.md"), "utf8")).toContain("📋 Todo");
           return repositories.prepare(request);
         },
@@ -342,7 +343,7 @@ describe("US-WS-011 Workspace repository preparation", () => {
 
       expect(result.event).toEqual({ type: "repository_setup_failed", storyId: f.storyId });
       expect(readFileSync(join(f.workspace, "backlog", "index.md"), "utf8")).toContain("📋 Todo");
-      expect(existsSync(f.paths.storyLeasePath!)).toBe(false);
+      expect(readLeases(resolveStoryLeasePath(f.paths))[f.storyId]).toBeUndefined();
       expect(existsSync(join(f.workspace, "issues", f.storyId))).toBe(false);
       const event = readFileSync(f.paths.eventsPath, "utf8").trim().split("\n").map((line) => JSON.parse(line)).at(-1);
       expect(event).toMatchObject({
@@ -375,10 +376,11 @@ describe("US-WS-011 Workspace repository preparation", () => {
       if (execution === undefined) throw new Error("repository execution must resolve");
       // Stamp a live Cycle lease and leave unpushed work in the writable leg so
       // teardown must NOT touch it (only setup rollback / explicit reclamation may).
-      mkdirSync(dirname(f.paths.storyLeasePath!), { recursive: true });
-      writeFileSync(f.paths.storyLeasePath!, `${JSON.stringify({
-        [f.storyId]: { pid: process.pid, claimedAt: 1, source: "cycle" },
-      })}\n`);
+      expect(claimStoryLease(resolveStoryLeasePath(f.paths), f.storyId, {
+        pid: process.pid,
+        claimedAt: 1,
+        source: "cycle",
+      })).toMatchObject({ status: "claimed" });
       const writable = Object.values(execution.repositories).find((entry) => entry.access === "write");
       if (writable === undefined) throw new Error("fixture must expose a writable leg");
       writeFileSync(join(writable.worktreePath, "unpushed.txt"), "in-flight work\n", "utf8");
@@ -409,8 +411,7 @@ describe("US-WS-011 Workspace repository preparation", () => {
       expect(readFileSync(join(writable.worktreePath, "unpushed.txt"), "utf8")).toBe("in-flight work\n");
       // Only the Cycle-owned lease is released (removeLease drops the file once
       // its last entry is gone, so an absent file also means "released").
-      const leaseReleased = !existsSync(f.paths.storyLeasePath!)
-        || JSON.parse(readFileSync(f.paths.storyLeasePath!, "utf8"))[f.storyId] === undefined;
+      const leaseReleased = readLeases(resolveStoryLeasePath(f.paths))[f.storyId] === undefined;
       expect(leaseReleased).toBe(true);
       const alerts = readFileSync(f.paths.alertsPath, "utf8");
       // The teardown records the exact preserved Issue worktree facts so an

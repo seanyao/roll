@@ -7,7 +7,11 @@ import {
   type ContextReadResultV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
-import { computeContextSnapshotDigest } from "@roll/core";
+import {
+  computeContextSnapshotDigest,
+  contextSnapshotId,
+  contextSnapshotReference,
+} from "@roll/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   readCapturedContextFile,
@@ -42,8 +46,8 @@ function fixture(): { workspace: WorkspaceExecutionContextV1; runtime: string } 
 }
 
 function snapshot(runtime: string, storyId?: string): ContextReadResultV1 {
-  const snapshotId = "ctx_20260724T060000000Z_aaaaaaaaaaaa";
-  const artifactPath = join(runtime, "context", storyId ?? "_workspace", `${snapshotId}.json`);
+  const snapshotId = "pending";
+  const artifactPath = "pending";
   const initial: ContextReadResultV1 = {
     schema: CONTEXT_READ_RESULT_V1,
     snapshotId,
@@ -77,7 +81,25 @@ function snapshot(runtime: string, storyId?: string): ContextReadResultV1 {
     }],
     gaps: [],
   };
-  return { ...initial, snapshotDigest: computeContextSnapshotDigest(initial) };
+  const snapshotDigest = computeContextSnapshotDigest(initial);
+  const resolvedSnapshotId = contextSnapshotId(initial.createdAt, snapshotDigest)!;
+  return {
+    ...initial,
+    snapshotId: resolvedSnapshotId,
+    snapshotDigest,
+    artifactPath: join(runtime, "context", storyId ?? "_workspace", `${resolvedSnapshotId}.json`),
+  };
+}
+
+function resign(runtime: string, value: ContextReadResultV1): ContextReadResultV1 {
+  const snapshotDigest = computeContextSnapshotDigest(value);
+  const snapshotId = contextSnapshotId(value.createdAt, snapshotDigest)!;
+  return {
+    ...value,
+    snapshotId,
+    snapshotDigest,
+    artifactPath: join(runtime, "context", value.requestScope.storyId ?? "_workspace", `${snapshotId}.json`),
+  };
 }
 
 describe("Context Snapshot store", () => {
@@ -86,7 +108,7 @@ describe("Context Snapshot store", () => {
       const { workspace, runtime } = fixture();
       const value = snapshot(runtime, storyId);
       expect(writeContextSnapshot(workspace, value)).toBe(value.artifactPath);
-      expect(readContextSnapshot(workspace, value.artifactPath)).toEqual(value);
+      expect(readContextSnapshot(workspace, contextSnapshotReference(value))).toEqual(value);
       expect(readCapturedContextFile(value, "context://wiki/wiki/index.md").content).toBe("# Index\n");
       expect(() => writeContextSnapshot(workspace, value)).toThrowError();
       expect(readFileSync(value.artifactPath, "utf8")).toContain(value.snapshotDigest);
@@ -97,11 +119,11 @@ describe("Context Snapshot store", () => {
     const { workspace, runtime } = fixture();
     const base = snapshot(runtime, "US-CONTEXT-006");
     const blockedInitial = { ...base, outcome: "blocked" as const, providers: [], gaps: [{ code: "fetch_failed" as const, severity: "blocking" as const, message: "fetch failed" }] };
-    const blocked = { ...blockedInitial, snapshotDigest: computeContextSnapshotDigest(blockedInitial) };
+    const blocked = resign(runtime, blockedInitial);
     expect(writeContextSnapshot(workspace, blocked)).toBe(blocked.artifactPath);
 
     const disabledInitial = { ...snapshot(runtime), outcome: "disabled" as const, providers: [] };
-    const disabled = { ...disabledInitial, snapshotDigest: computeContextSnapshotDigest(disabledInitial) };
+    const disabled = resign(runtime, disabledInitial);
     expect(() => writeContextSnapshot(workspace, disabled)).toThrowError();
   });
 
@@ -110,15 +132,15 @@ describe("Context Snapshot store", () => {
     const value = snapshot(runtime, "US-CONTEXT-006");
     writeContextSnapshot(workspace, value);
     writeFileSync(value.artifactPath, readFileSync(value.artifactPath, "utf8").replace("# Index", "# Tampered"));
-    expect(() => readContextSnapshot(workspace, value.artifactPath)).toThrowError();
+    expect(() => readContextSnapshot(workspace, contextSnapshotReference(value))).toThrowError();
 
     const outside = join(realpathSync(mkdtempSync(join(tmpdir(), "roll-context-outside-"))), "snapshot.json");
     writeFileSync(outside, JSON.stringify(value));
-    expect(() => readContextSnapshot(workspace, outside)).toThrowError();
+    expect(() => readContextSnapshot(workspace, { ...contextSnapshotReference(value), artifactPath: outside })).toThrowError();
 
     const link = join(runtime, "linked.json");
     symlinkSync(outside, link);
-    expect(() => readContextSnapshot(workspace, link)).toThrowError();
+    expect(() => readContextSnapshot(workspace, { ...contextSnapshotReference(value), artifactPath: link })).toThrowError();
     expect(() => writeContextSnapshot(workspace, { ...value, artifactPath: outside })).toThrowError();
   });
 
@@ -137,5 +159,26 @@ describe("Context Snapshot store", () => {
     expect(() => writeContextSnapshot(workspace, value)).toThrowError();
     expect(() => readFileSync(value.artifactPath, "utf8")).toThrowError();
     expect(realpathSync(lock)).toBe(lock);
+  });
+
+  it("atomically refuses a target created after the temp write and preserves the winner bytes", () => {
+    const { workspace, runtime } = fixture();
+    const value = snapshot(runtime, "US-CONTEXT-006");
+    expect(() => writeContextSnapshot(workspace, value, {
+      beforePublish: () => writeFileSync(value.artifactPath, "winner\n", { flag: "wx" }),
+    })).toThrowError();
+    expect(readFileSync(value.artifactPath, "utf8")).toBe("winner\n");
+  });
+
+  it("binds reads to the complete handoff reference and embedded artifact path", () => {
+    const { workspace, runtime } = fixture();
+    const value = snapshot(runtime, "US-CONTEXT-006");
+    writeContextSnapshot(workspace, value);
+    const reference = contextSnapshotReference(value);
+    expect(() => readContextSnapshot(workspace, { ...reference, snapshotDigest: "f".repeat(64) })).toThrowError();
+
+    const embedded = JSON.parse(readFileSync(value.artifactPath, "utf8")) as ContextReadResultV1;
+    writeFileSync(value.artifactPath, `${JSON.stringify({ ...embedded, artifactPath: "/attacker/rewritten.json" })}\n`);
+    expect(() => readContextSnapshot(workspace, reference)).toThrowError();
   });
 });

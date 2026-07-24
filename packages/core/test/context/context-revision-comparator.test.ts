@@ -1,5 +1,6 @@
 import { CONTEXT_READ_RESULT_V1, type ContextReadResultV1 } from "@roll/spec";
 import { describe, expect, it } from "vitest";
+import { contextSnapshotReference } from "../../src/context/snapshot.js";
 import { compareContextRevisions, decideContextRevision } from "../../src/context/revision-comparator.js";
 
 function snapshot(revision: string, files: Readonly<Record<string, string>>): ContextReadResultV1 {
@@ -32,11 +33,17 @@ describe("Context revision reconciliation", () => {
     const comparison = compareContextRevisions(handoff, structuredClone(handoff));
     expect(comparison).toEqual({
       status: "unchanged",
+      handoffSnapshot: contextSnapshotReference(handoff),
+      freshSnapshot: contextSnapshotReference(handoff),
       providers: [{ providerId: "wiki", fromRevision: "1".repeat(40), toRevision: "1".repeat(40), changedRefs: [] }],
     });
     expect(decideContextRevision(comparison)).toEqual({
       accepted: true,
-      decision: "continue_with_handoff_snapshot",
+      record: {
+        decision: "continue_with_handoff_snapshot",
+        handoffSnapshot: contextSnapshotReference(handoff),
+        freshSnapshot: contextSnapshotReference(handoff),
+      },
       useSnapshot: "handoff",
     });
   });
@@ -53,6 +60,8 @@ describe("Context revision reconciliation", () => {
     const comparison = compareContextRevisions(handoff, fresh);
     expect(comparison).toEqual({
       status: "changed",
+      handoffSnapshot: contextSnapshotReference(handoff),
+      freshSnapshot: contextSnapshotReference(fresh),
       providers: [{
         providerId: "wiki",
         fromRevision: "1".repeat(40),
@@ -70,12 +79,20 @@ describe("Context revision reconciliation", () => {
     });
     expect(decideContextRevision(comparison, "adopt_new_snapshot")).toEqual({
       accepted: true,
-      decision: "adopt_new_snapshot",
+      record: {
+        decision: "adopt_new_snapshot",
+        handoffSnapshot: contextSnapshotReference(handoff),
+        freshSnapshot: contextSnapshotReference(fresh),
+      },
       useSnapshot: "new",
     });
     expect(decideContextRevision(comparison, "needs_reconciliation")).toEqual({
       accepted: true,
-      decision: "needs_reconciliation",
+      record: {
+        decision: "needs_reconciliation",
+        handoffSnapshot: contextSnapshotReference(handoff),
+        freshSnapshot: contextSnapshotReference(fresh),
+      },
       useSnapshot: "none",
     });
   });

@@ -95,6 +95,43 @@ describe("US-TOOL-014 infra tool delegation", () => {
     ]);
   });
 
+  it("does not let a machine event-path override redirect Workspace-scoped events", async () => {
+    const root = tmp("workspace-event-precedence");
+    const redirected = join(tmp("redirected-events"), "events.ndjson");
+    process.env["ROLL_TOOL_EVENTS_PATH"] = redirected;
+    const executionContext = toolWorkspaceContext("US-WS-036", root);
+    const declaration: ToolDeclaration = {
+      id: "network.test" as ToolDeclaration["id"],
+      kind: "network",
+      title: "Workspace event authority test",
+      defaults: { enabled: true },
+    };
+
+    const result = await invokeInfraTool({
+      declaration,
+      input: { url: "https://example.test" },
+      caller: { cycleId: "cycle-context", storyId: "US-WS-036", agent: "codex" },
+      context: executionContext,
+      repoId: TOOL_TEST_REPO_ID,
+      run: async (invocation) => ({
+        ok: true,
+        output: { accepted: true },
+        meta: {
+          invocationId: invocation.invocationId,
+          toolId: invocation.toolId,
+          caller: invocation.caller,
+          startedAt: invocation.ts,
+          endedAt: invocation.ts,
+          durationMs: 0,
+        },
+      }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(events(join(executionContext.authorities.events, "tools.ndjson"))).toHaveLength(2);
+    expect(existsSync(redirected)).toBe(false);
+  });
+
   it("delegates public process execFile calls through the bash tool and appends events.ndjson entries", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);

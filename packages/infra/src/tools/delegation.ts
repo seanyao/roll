@@ -227,9 +227,9 @@ async function appendToolEvent(event: unknown, context?: WorkspaceExecutionConte
 }
 
 function eventPath(context?: WorkspaceExecutionContextV1): string | undefined {
+  if (context !== undefined) return join(context.authorities.events, "tools.ndjson");
   const direct = (process.env["ROLL_TOOL_EVENTS_PATH"] ?? "").trim();
   if (direct !== "") return direct;
-  if (context !== undefined) return join(context.authorities.events, "tools.ndjson");
   const runtime = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
   if (runtime !== "") return join(runtime, "events.ndjson");
   return undefined;

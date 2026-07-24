@@ -74,14 +74,17 @@ function invalidBinding(binding: WorkspaceContextBindingV1): boolean {
     binding.entrypoints.some((path) => !isSafeContextPath(path, false));
 }
 
-function invalidProvider(provider: GitLlmWikiProviderConfigV1): boolean {
-  return provider.type !== "git_llm_wiki" ||
+function normalizeProvider(provider: GitLlmWikiProviderConfigV1): GitLlmWikiProviderConfigV1 | undefined {
+  const remote = normalizeContextGitRemote(provider.remote);
+  if (provider.type !== "git_llm_wiki" ||
     !isValidContextProviderId(provider.id) ||
     !isValidContextBranch(provider.branch) ||
     !Number.isSafeInteger(provider.fetch_timeout_seconds) ||
     provider.fetch_timeout_seconds < 5 ||
     provider.fetch_timeout_seconds > 300 ||
-    !normalizeContextGitRemote(provider.remote).ok;
+    !remote.ok
+  ) return undefined;
+  return { ...provider, remote: remote.value };
 }
 
 /**
@@ -92,6 +95,15 @@ function invalidProvider(provider: GitLlmWikiProviderConfigV1): boolean {
 export function compileContextProviderExecutionPlans(
   input: CompileContextProviderExecutionPlansInput,
 ): ContextProviderExecutionPlanCompilationV1 {
+  const contexts = input.contexts;
+  if (input.registry === undefined || !input.registry.enabled || contexts === undefined || !contexts.enabled) {
+    return {
+      outcome: "disabled",
+      plans: [],
+      diagnostics: [diagnostic("context_disabled", "warning", "Context is disabled for this machine or Workspace")],
+    };
+  }
+
   const refs = input.refs ?? [];
   const parsedRefs = refs.map((ref) => parseContextRef(ref));
   const invalidRefIndex = parsedRefs.findIndex((entry) => !entry.ok);
@@ -109,8 +121,7 @@ export function compileContextProviderExecutionPlans(
     };
   }
 
-  const contexts = input.contexts;
-  const bindings = contexts?.bindings ?? [];
+  const bindings = contexts.bindings;
   const seenBindings = new Set<string>();
   for (const binding of bindings) {
     if (seenBindings.has(binding.providerId) || invalidBinding(binding)) {
@@ -144,14 +155,6 @@ export function compileContextProviderExecutionPlans(
         )],
       };
     }
-  }
-
-  if (input.registry === undefined || !input.registry.enabled || contexts === undefined || !contexts.enabled) {
-    return {
-      outcome: "disabled",
-      plans: [],
-      diagnostics: [diagnostic("context_disabled", "warning", "Context is disabled for this machine or Workspace")],
-    };
   }
 
   const activeBindings = bindings.filter((binding) => binding.enabled);
@@ -198,7 +201,8 @@ export function compileContextProviderExecutionPlans(
       blocked ||= binding.required;
       continue;
     }
-    if (invalidProvider(provider)) {
+    const normalizedProvider = normalizeProvider(provider);
+    if (normalizedProvider === undefined) {
       diagnostics.push(diagnostic(
         "invalid_provider_config",
         severity,
@@ -227,10 +231,10 @@ export function compileContextProviderExecutionPlans(
       entrypoints: stableUnique(binding.entrypoints),
     };
     plans.push({
-      provider,
+      provider: normalizedProvider,
       binding: normalizedBinding,
       paths: stableUnique(["purpose.md", "schema.md", ...normalizedBinding.entrypoints, ...requestedPaths]),
-      providerConfigDigest: digest(provider),
+      providerConfigDigest: digest(normalizedProvider),
       bindingDigest: digest(normalizedBinding),
     });
   }

@@ -66,6 +66,20 @@ describe("compileContextProviderExecutionPlans", () => {
     });
   });
 
+  it("lets the explicit global disabled state dominate malformed dormant bindings and refs", () => {
+    expect(compileContextProviderExecutionPlans({
+      registry: registry({ enabled: false }),
+      contexts: contexts({
+        bindings: [{ ...contexts().bindings[0]!, enabled: false, required: true }],
+      }),
+      refs: ["not-a-context-ref"],
+    })).toEqual({
+      outcome: "disabled",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "context_disabled" })],
+    });
+  });
+
   it("blocks a required missing Provider and degrades an optional missing Provider without a plan", () => {
     const required = compileContextProviderExecutionPlans({ registry: registry({ providers: [] }), contexts: contexts(), refs: [] });
     expect(required).toMatchObject({
@@ -222,5 +236,22 @@ describe("compileContextProviderExecutionPlans", () => {
     });
     expect(changedProvider.plans[0]?.providerConfigDigest).not.toBe(first.plans[0]?.providerConfigDigest);
     expect(changedBinding.plans[0]?.bindingDigest).not.toBe(first.plans[0]?.bindingDigest);
+  });
+
+  it("normalizes equivalent Provider remotes before planning and digesting", () => {
+    const https = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    const scp = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [{ ...provider(), remote: "git@GitHub.com:Bipo/bipo-enterprise.git" }] }),
+      contexts: contexts(),
+      refs: [],
+    });
+    const ssh = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [{ ...provider(), remote: "ssh://deploy@github.com:22/Bipo/bipo-enterprise" }] }),
+      contexts: contexts(),
+      refs: [],
+    });
+    expect(scp.plans[0]?.provider.remote).toBe("ssh://github.com/Bipo/bipo-enterprise");
+    expect(ssh.plans[0]?.providerConfigDigest).toBe(scp.plans[0]?.providerConfigDigest);
+    expect(https.plans[0]?.providerConfigDigest).not.toBe(scp.plans[0]?.providerConfigDigest);
   });
 });

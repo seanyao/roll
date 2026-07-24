@@ -109,6 +109,8 @@ describe("Context v1 contracts", () => {
     "../company-context.git",
     "ext::sh -c evil",
     "helper::company-context",
+    "https://example..com/Bipo/company-context.git",
+    "https://-example.com/Bipo/company-context.git",
   ])("rejects unsupported or credential-bearing provider remotes without echoing them: %s", (remote) => {
     const parsed = parseContextProviderRegistry({
       ...registry(),
@@ -187,8 +189,6 @@ describe("Context v1 contracts", () => {
 describe("Canonical Context refs", () => {
   it.each([
     ["context://bipo-enterprise/wiki/systems/axis.md", "bipo-enterprise", "wiki/systems/axis.md"],
-    ["context://bipo-enterprise/purpose.md", "bipo-enterprise", "purpose.md"],
-    ["context://bipo-enterprise/schema.md", "bipo-enterprise", "schema.md"],
   ])("parses %s", (ref, providerId, path) => {
     expect(parseContextRef(ref)).toEqual({ ok: true, value: { ref, providerId, path } });
   });
@@ -204,6 +204,10 @@ describe("Canonical Context refs", () => {
     "context://bipo-enterprise/.obsidian/config",
     "context://bipo-enterprise/raw/sources/source.md",
     "context://bipo-enterprise/-danger",
+    "context://bipo-enterprise/wiki/index.md?ref=main",
+    "context://bipo-enterprise/wiki/%2e%2e/secrets.md",
+    "context://bipo-enterprise/purpose.md",
+    "context://bipo-enterprise/schema.md",
   ])("rejects unsafe or non-canonical ref %s", (ref) => {
     expect(parseContextRef(ref)).toMatchObject({
       ok: false,

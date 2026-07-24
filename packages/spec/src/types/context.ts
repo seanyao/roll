@@ -289,7 +289,11 @@ function safeRemotePath(value: string): string | undefined {
 }
 
 function normalizeHost(value: string): string | undefined {
-  if (!/^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])$/u.test(value)) return undefined;
+  if (value.startsWith("[")) {
+    if (!/^\[[0-9A-Fa-f:.]+\]$/u.test(value)) return undefined;
+  } else if (!value.split(".").every((label) =>
+    label.length >= 1 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label)
+  )) return undefined;
   try {
     return new URL(`https://${value}/`).hostname.toLowerCase();
   } catch {
@@ -340,7 +344,10 @@ const FORBIDDEN_CONTEXT_SEGMENTS = new Set([".git", ".llm-wiki", ".obsidian", "c
 
 export function isSafeContextPath(value: string, allowReserved: boolean): boolean {
   if (allowReserved && RESERVED_CONTEXT_PATHS.has(value)) return true;
-  if (!value.startsWith("wiki/") || value.startsWith("/") || value.includes("\\") || /[\x00-\x1f\x7f]/u.test(value)) return false;
+  if (
+    !value.startsWith("wiki/") || value.startsWith("/") || value.includes("\\") ||
+    /[\x00-\x1f\x7f?#%]/u.test(value)
+  ) return false;
   const segments = value.split("/");
   return segments.every((segment) =>
     segment !== "" && segment !== "." && segment !== ".." && !segment.startsWith(".") &&
@@ -476,6 +483,6 @@ export function parseContextRef(value: unknown): ContractResult<ContextRefV1> {
   if (matched === null) return fail();
   const providerId = matched[1];
   const path = matched[2];
-  if (providerId === undefined || path === undefined || !isValidContextProviderId(providerId) || !isSafeContextPath(path, true)) return fail();
+  if (providerId === undefined || path === undefined || !isValidContextProviderId(providerId) || !isSafeContextPath(path, false)) return fail();
   return { ok: true, value: { ref: value, providerId, path } };
 }

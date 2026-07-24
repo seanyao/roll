@@ -291,6 +291,7 @@ opens the remote publication gate after local acceptance.
 | `roll agent [--workspace <id\|path>\|migrate\|list\|readiness]` | Agent Scope, machine inventory/readiness, and read-only Workspace casting |
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <id\|path>]` | View and manage one Workspace backlog; `--all` is read-only |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
+| `roll context <status\|read> [--workspace <id\|path>]` | Inspect local Context configuration or fetch a fresh Git LLM Wiki revision into an immutable Snapshot |
 | `roll delivery <list\|show\|reconcile> [--workspace <id\|path>]` | Inspect Issue repository PR/CI/merge facts and exact-SHA integration acceptance; `list --all` is read-only |
 | `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, handoff, and an optional `roll loop go --review auto` continuation when new Todo cards are created |
 | `roll doctor [skills\|tools\|language\|repair-protection]` | Diagnose install health, skills, tools, permissions, language drift, and stale main-checkout write protection |
@@ -410,7 +411,7 @@ Published as a single npm package `@seanyao/roll`: `dist/` (the CLI bundled to o
 | | |
 |---|---|
 | **Start here** | [Getting started](guide/en/getting-started.md) · [Workspace-first delivery](guide/en/workspaces.md) · [Overview & architecture](guide/en/overview.md) · [Engineering methodology](guide/en/methodology.md) |
-| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Workspace doctor](guide/en/workspace-doctor.md) · [Tools & policy](guide/en/tools.md) · [Browser operations (managed + interactive lanes; optional diagnostics are opt-in only)](guide/en/browser-operations.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
+| **Daily driving** | [The loop (autonomous executor)](guide/en/loop.md) · [Context Engineering](guide/en/context.md) · [APE Context migration](guide/en/context-ape-migration.md) · [Workspace doctor](guide/en/workspace-doctor.md) · [Tools & policy](guide/en/tools.md) · [Browser operations (managed + interactive lanes; optional diagnostics are opt-in only)](guide/en/browser-operations.md) · [Configuration](guide/en/configuration.md) · [Pricing & cost](guide/en/pricing.md) · [FAQ](guide/en/faq.md) |
 | **Quality machinery** | [Acceptance evidence (`roll attest`)](guide/en/acceptance-evidence.md) · [Evidence lifecycle](guide/en/acceptance-evidence.md#lifecycle-in-three-stages) · [Consistency & release gate](guide/en/consistency.md) · [Cross-agent pairing](guide/en/pairing.md) · [Peer review](guide/en/peer.md) · [Test isolation](guide/en/test-isolation.md) |
 | **Under the hood** | [Architecture: layers · domain · invariants](docs/architecture.md) · [Verification system](docs/verification.md) · [Manifesto](docs/manifesto.md) |
 

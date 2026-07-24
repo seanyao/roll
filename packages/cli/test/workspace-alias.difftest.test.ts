@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { dispatch, registerPorted } from "../src/bridge.js";
 
@@ -62,5 +65,32 @@ describe("US-WS-022 workspace command alias", () => {
     expect(canonical.stdout).toContain("Alias: roll ws ...");
     expect(canonical.stdout).toContain("Workspace selector alias: --ws <id|path>");
     expect(canonical.stdout).not.toContain("Usage: roll ws");
+  });
+
+  it("renders generated alias notes in the configured help language", async () => {
+    const home = mkdtempSync(join(tmpdir(), "roll-workspace-alias-lang-"));
+    const rollHome = join(home, ".roll");
+    mkdirSync(rollHome, { recursive: true });
+    writeFileSync(join(rollHome, "config.yaml"), "lang: zh\n");
+    const saved = {
+      rollHome: process.env["ROLL_HOME"],
+      rollLang: process.env["ROLL_LANG"],
+    };
+    process.env["ROLL_HOME"] = rollHome;
+    delete process.env["ROLL_LANG"];
+    registerPorted("workspace", () => 9, { help: "用法：roll workspace <list>" });
+
+    try {
+      const result = await captureDispatch(["ws", "--help"]);
+      expect(result.stdout).toContain("别名：roll ws ...");
+      expect(result.stdout).toContain("Workspace selector 别名：--ws <ID|路径>");
+      expect(result.stdout).not.toContain("Alias: roll ws");
+    } finally {
+      if (saved.rollHome === undefined) delete process.env["ROLL_HOME"];
+      else process.env["ROLL_HOME"] = saved.rollHome;
+      if (saved.rollLang === undefined) delete process.env["ROLL_LANG"];
+      else process.env["ROLL_LANG"] = saved.rollLang;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

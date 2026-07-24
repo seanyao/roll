@@ -23,6 +23,7 @@ import { renderFrontDoor } from "./lib/front-door.js";
 import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
 import { renderState } from "./render.js";
 import { treeVersion } from "./commands/version.js";
+import { resolveCurrent } from "./commands/lang.js";
 import { type WakeDeps, tryWakeOnRoll, buildProductionWakeDeps, createProductionWakeDeps } from "./lib/wake-hook.js";
 export { buildProductionWakeDeps, createProductionWakeDeps };
 
@@ -149,11 +150,7 @@ function emitWorkspaceSelectorError(
   operation: WorkspaceSelectorOperationDecision,
   args: readonly string[],
 ): RunResult {
-  const lang = resolveLang({
-    rollLang: process.env["ROLL_LANG"],
-    lcAll: process.env["LC_ALL"],
-    lang: process.env["LANG"],
-  });
+  const lang = resolveCurrent();
   const message = t(v3Catalog, lang, `workspace.selector.error.${code}`);
   const nextAction = t(v3Catalog, lang, `workspace.selector.next.${code}`);
   if (jsonFlag(args)) {
@@ -172,11 +169,7 @@ function renderHelp(command: string, help: HelpSpec): string {
   const text = typeof help === "function" ? help() : help;
   const aliases = aliasHelpDecision(command);
   if (aliases === undefined) return text;
-  const lang = resolveLang({
-    rollLang: process.env["ROLL_LANG"],
-    lcAll: process.env["LC_ALL"],
-    lang: process.env["LANG"],
-  });
+  const lang = resolveCurrent();
   const lines: string[] = [];
   for (const alias of aliases.commandAliases) {
     lines.push(t(v3Catalog, lang, "workspace.alias.help.command", alias, aliases.canonicalCommand));

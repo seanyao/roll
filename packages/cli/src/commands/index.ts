@@ -3,7 +3,13 @@ import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
-import { cliOperation, cliSelectorOperation } from "../lib/command-surface.js";
+import {
+  cliMatchedOperation,
+  cliMatchedSelectorOperation,
+  cliOperation,
+  cliPositionalOperation,
+  cliSelectorOperation,
+} from "../lib/command-surface.js";
 import { agentCommand } from "./agent.js";
 import { agentListCommand } from "./agent-list.js";
 import { alertCommand } from "./alert.js";
@@ -28,7 +34,7 @@ import {
 import { castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
-import { configCommand } from "./config.js";
+import { configCommand, configWorkspaceContextOperation } from "./config.js";
 import { contextCommand, contextUsage } from "./context.js";
 import { cycleCommand } from "./cycle.js";
 import { cyclesCommand } from "./cycles.js";
@@ -167,7 +173,7 @@ export function registerAll(): void {
       return 0;
     }
     return docCommand(args);
-  }, { help: HELP_USAGE, operations: [cliOperation("help", "read")] });
+  }, { help: HELP_USAGE, operations: [cliPositionalOperation("help", "read")] });
   registerPorted("status", (args) => {
     if (args[0] === "ci") {
       const rest = args.slice(1);
@@ -192,8 +198,20 @@ export function registerAll(): void {
     help: workspaceUsage,
     operations: [
       cliOperation("workspace", "create", ["create"]),
-      cliSelectorOperation("workspace", "issue.init", ["issue", "init"], ["issue", "init", "US-WS-022", "--workspace", "roll"]),
-      cliSelectorOperation("workspace", "requirement.add", ["requirement", "add"], ["requirement", "add", "--workspace", "roll"]),
+      cliMatchedSelectorOperation(
+        "workspace",
+        "issue.init",
+        ["issue", "init"],
+        ["issue", "init", "US-WS-022", "--workspace", "roll"],
+        (args) => args[0] === "issue" && (args[1] === "init" || isHelp(args[1])),
+      ),
+      cliMatchedSelectorOperation(
+        "workspace",
+        "requirement.add",
+        ["requirement", "add"],
+        ["requirement", "add", "--workspace", "roll"],
+        (args) => args[0] === "requirement" && (args[1] === "add" || isHelp(args[1])),
+      ),
       cliOperation("workspace", "doctor", ["doctor"]),
       cliSelectorOperation("workspace", "migrate", ["migrate"], ["migrate", "--workspace", "roll"]),
       cliOperation("workspace", "edit", ["edit"]),
@@ -203,6 +221,10 @@ export function registerAll(): void {
       ...["activate", "pause", "archive"].map((name) =>
         cliSelectorOperation("workspace", name, [name], [name, "--workspace", "roll"])),
     ],
+    rejectedRoutes: [{
+      route: ["init"],
+      message: "Unknown workspace subcommand \"init\". Use \"roll workspace create\".",
+    }],
   });
   registerPorted("context", contextCommand, {
     help: contextUsage,
@@ -327,9 +349,16 @@ export function registerAll(): void {
   }, {
     help: agentUsage,
     operations: [
-      cliSelectorOperation("agent", "workspace", [], ["--workspace", "roll"]),
-      ...["view", "cast", "list", "readiness", "disable", "enable", "default", "set", "migrate", "use"].map((name) =>
-        cliOperation("agent", name, name === "view" ? [] : [name])),
+      cliMatchedSelectorOperation(
+        "agent",
+        "workspace",
+        [],
+        ["--workspace", "roll"],
+        (args) => args.includes("--workspace"),
+      ),
+      cliMatchedOperation("agent", "view", [], (args) => args.length === 0),
+      ...["cast", "list", "readiness", "disable", "enable", "default", "set", "migrate", "use"].map((name) =>
+        cliOperation("agent", name, [name])),
     ],
   });
   registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
@@ -382,7 +411,7 @@ export function registerAll(): void {
   // appends through BacklogStore's optimistic atomic write (与 backlog 存取同源).
   // A lint violation reports and refuses — no bad card is ever written.
   // No bash fallback: v2 had no `roll idea` command (capture was skill-only).
-  registerPorted("idea", ideaCommand, { operations: [cliOperation("idea", "capture")] });
+  registerPorted("idea", ideaCommand, { operations: [cliPositionalOperation("idea", "capture")] });
   // `release`: v3-native read-only release guidance (US-PORT-004). Computes the
   // next calver version from package.json + today, surfaces changelog readiness,
   // and prints the PR/tag flow + the CI consistency-gate note. It NEVER bumps,
@@ -404,6 +433,10 @@ export function registerAll(): void {
       cliOperation("release", "consistency", ["consistency"]),
       cliOperation("release", "verify", ["verify"]),
     ],
+    rejectedRoutes: ["ship", "waiver", "changelog", "tag", "publish"].map((route) => ({
+      route: [route],
+      message: `[roll] roll release ${route} was removed — the release surface is one command: roll release (see roll release --help)`,
+    })),
   });
   // US-SHOW-001: `roll showcase` — the golden-path standard E2E. Resets the
   // target card in a throwaway sandbox, casts an explicit strict-diversity real-agent trio
@@ -434,8 +467,8 @@ export function registerAll(): void {
     return configCommand(args);
   }, {
     operations: [
-      cliOperation("config", "read"),
-      cliOperation("config", "write"),
+      cliMatchedOperation("config", "read", [], (args) => configWorkspaceContextOperation(args) === "read"),
+      cliMatchedOperation("config", "write", [], (args) => configWorkspaceContextOperation(args) === "write"),
       cliOperation("config", "prices", ["prices"]),
       cliOperation("config", "tune", ["tune"]),
     ],
@@ -464,7 +497,7 @@ export function registerAll(): void {
   // `design`: explicit thin entry point for the $roll-design skill
   // (US-ONBOARD-NUDGE-004). Loads the skill and launches the selected agent;
   // all design logic lives in the skill, not here.
-  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: [cliOperation("design", "design")] });
+  registerPorted("design", designCommand, { help: "Usage: roll design [--from-file <path> | \"<requirement>\"] [--agent <name>] [--verbose|--raw]\n  Launch $roll-design interactively with bounded live progress, card-created events, quiet heartbeats, and final handoff; when new Todo cards are created, offer `roll loop go --review auto` after showing agent-pool health.\n交互式启动 $roll-design；默认实时显示有界进展、建卡事件、静默心跳和最终交付；产出新 Todo 卡时会显示 agent 池健康概况，并提议启动 `roll loop go --review auto`。", operations: [cliPositionalOperation("design", "design")] });
   // REFACTOR-048: `migrate-features` (card-skeleton backfill for pre-card-era
   // stories, US-META-007) retired — that one-time backfill completed; new cards
   // are minted via `roll story new`.
@@ -504,7 +537,7 @@ export function registerAll(): void {
   // suite on the host via a forwarded `npm test`; any other configured type
   // (incl. a stale `tart` — lane removed by REFACTOR-046) errors non-zero WITHOUT a
   // silent host fallback (US-ISO-003). No sub-paths on bash.
-  registerPorted("test", testCommand, { operations: [cliOperation("test", "run")] });
+  registerPorted("test", testCommand, { operations: [cliPositionalOperation("test", "run")] });
   registerPorted("tool", removedTopLevel("tool"));
   // `truth`: deterministic delivery-truth query (US-TRUTH-016). Pure read-only
   // — reads deliveries.jsonl, runs queryStoryDelivery, prints the verdict.
@@ -665,7 +698,14 @@ export function registerAll(): void {
         "off", "fallback", "now", "reset", "mute", "unmute", "gc", "test", "notify", "enforce-tcr", "precheck-ci",
         "hotfix-head-context", "agent-routes", "monitor", "attach", "branches", "test-quality-check",
       ].map((name) => cliOperation("loop", name, [name])),
-      ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((name) =>
+      cliMatchedSelectorOperation(
+        "loop",
+        "status",
+        ["status"],
+        ["status", "--workspace", "roll"],
+        (args) => args[0] === undefined || args[0] === "status",
+      ),
+      ...["go", "run-once", "reconcile", "on", "pause", "resume"].map((name) =>
         cliSelectorOperation("loop", name, [name], [name, "--workspace", "roll"])),
     ],
     // US-DOSSIER-035: a help PROVIDER (not a static string) so `roll loop --help`

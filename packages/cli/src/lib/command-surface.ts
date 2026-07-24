@@ -188,6 +188,10 @@ export interface CliCommandOperationRegistration {
   readonly canonicalCommand: string;
   readonly exampleArgs?: readonly string[];
   readonly supportsWorkspaceSelector: boolean;
+  /** Root operation may consume positional operands instead of a nested route token. */
+  readonly acceptsPositionalArgs?: boolean;
+  /** Optional executable matcher for aliases or argument-shaped operations. */
+  readonly matchesArgs?: (args: readonly string[]) => boolean;
 }
 
 /** One current CLI leaf that already accepts the canonical Workspace selector. */
@@ -213,7 +217,14 @@ export function isWorkspaceSelectorAlias(
   return WORKSPACE_SELECTOR_ALIAS.aliases.some((alias) => alias === token);
 }
 
-export function cliOperation(command: string, name: string, route: readonly string[] = [], selector = false, exampleArgs?: readonly string[]): CliCommandOperationRegistration {
+export function cliOperation(
+  command: string,
+  name: string,
+  route: readonly string[] = [],
+  selector = false,
+  exampleArgs?: readonly string[],
+  acceptsPositionalArgs = false,
+): CliCommandOperationRegistration {
   return {
     command,
     operation: name,
@@ -221,11 +232,61 @@ export function cliOperation(command: string, name: string, route: readonly stri
     canonicalCommand: `roll ${command}${route.length === 0 ? "" : ` ${route.join(" ")}`}`,
     ...(exampleArgs === undefined ? {} : { exampleArgs }),
     supportsWorkspaceSelector: selector,
+    ...(acceptsPositionalArgs ? { acceptsPositionalArgs: true } : {}),
   };
+}
+
+export function cliPositionalOperation(
+  command: string,
+  name: string,
+): CliCommandOperationRegistration {
+  return cliOperation(command, name, [], false, undefined, true);
+}
+
+export function cliMatchedOperation(
+  command: string,
+  name: string,
+  route: readonly string[],
+  matchesArgs: (args: readonly string[]) => boolean,
+): CliCommandOperationRegistration {
+  return { ...cliOperation(command, name, route), matchesArgs };
+}
+
+export function cliMatchedSelectorOperation(
+  command: string,
+  name: string,
+  route: readonly string[],
+  exampleArgs: readonly string[],
+  matchesArgs: (args: readonly string[]) => boolean,
+): CliCommandOperationRegistration {
+  return { ...cliSelectorOperation(command, name, route, exampleArgs), matchesArgs };
 }
 
 export function cliSelectorOperation(command: string, name: string, route: readonly string[], exampleArgs: readonly string[]): CliCommandOperationRegistration {
   return cliOperation(command, name, route, true, exampleArgs);
+}
+
+/**
+ * Resolve the live operation registration before invoking a mixed-family
+ * handler. Longest registered routes win. A root operation accepts only bare
+ * or flag-led calls unless it explicitly declares positional operands.
+ */
+export function cliOperationForArgs(
+  command: string,
+  args: readonly string[],
+  operations: readonly CliCommandOperationRegistration[],
+): CliCommandOperationRegistration | undefined {
+  const commandOperations = operations.filter((entry) => entry.command === command);
+  const first = args[0];
+  const matches = commandOperations.filter((entry) => {
+    if (entry.matchesArgs !== undefined) return entry.matchesArgs(args);
+    if (entry.route.length > 0) return entry.route.every((token, index) => args[index] === token);
+    return first === undefined || first === "--" || first.startsWith("-") || entry.acceptsPositionalArgs === true;
+  });
+  if (matches.length === 0) return undefined;
+  const longest = Math.max(...matches.map((entry) => entry.route.length));
+  const winners = matches.filter((entry) => entry.route.length === longest);
+  return winners.length === 1 ? winners[0] : undefined;
 }
 
 export function workspaceSelectorOperations(

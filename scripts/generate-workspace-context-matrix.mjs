@@ -6,21 +6,18 @@ import { registeredCliOperations } from "../packages/cli/dist/bridge.js";
 import { registerAll } from "../packages/cli/dist/commands/index.js";
 import {
   buildRegisteredWorkspaceContextMatrix,
+  skillContextInventoryFromManifest,
   skillContextPoliciesFromManifest,
 } from "../packages/cli/dist/lib/workspace-context-policy.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const skillsRoot = path.join(root, "skills");
-const skillIds = fs.readdirSync(skillsRoot, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(skillsRoot, entry.name, "SKILL.md")))
-  .map((entry) => entry.name)
-  .sort();
 const manifest = JSON.parse(fs.readFileSync(path.join(skillsRoot, "route-cases", "skills.json"), "utf8"));
 
 registerAll();
 const matrix = buildRegisteredWorkspaceContextMatrix({
   cliRegistrations: registeredCliOperations(),
-  skillIds,
+  skillInventory: skillContextInventoryFromManifest(manifest),
   skillPolicies: skillContextPoliciesFromManifest(manifest),
 });
 

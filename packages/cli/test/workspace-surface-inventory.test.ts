@@ -1,14 +1,19 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { dispatch, registerPorted, registeredCliOperations } from "../src/bridge.js";
 import { registerAll } from "../src/commands/index.js";
-import { commandDecision, publicCommands } from "../src/lib/command-surface.js";
+import {
+  cliMatchedOperation,
+  cliOperationForArgs,
+  commandDecision,
+  publicCommands,
+} from "../src/lib/command-surface.js";
 import {
   buildRegisteredWorkspaceContextMatrix,
   builtinToolContextInventory,
+  skillContextInventoryFromManifest,
   skillContextPoliciesFromManifest,
 } from "../src/lib/workspace-context-policy.js";
 
@@ -24,60 +29,6 @@ function shippedSkillIds(): string[] {
 
 function skillsManifest(): unknown {
   return JSON.parse(readFileSync(join(skillsRoot, "route-cases", "skills.json"), "utf8"));
-}
-
-function routeLiterals(node: ts.Node): string[] {
-  const aliases = new Set(["sub"]);
-  const routes = new Set<string>();
-  const visit = (current: ts.Node): void => {
-    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)
-      && current.initializer !== undefined && current.initializer.getText().includes("args[0]")) {
-      aliases.add(current.name.text);
-    }
-    if (ts.isBinaryExpression(current)
-      && [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken].includes(current.operatorToken.kind)) {
-      const pair: readonly [ts.Expression, ts.Expression] = [current.left, current.right];
-      for (const [candidate, selector] of [pair, [pair[1], pair[0]] as const]) {
-        if (!ts.isStringLiteral(candidate)) continue;
-        const selectorText = selector.getText();
-        if (selectorText === "args[0]" || (ts.isIdentifier(selector) && aliases.has(selector.text))) {
-          if (candidate.text !== "" && !candidate.text.startsWith("-")) routes.add(candidate.text);
-        }
-      }
-    }
-    ts.forEachChild(current, visit);
-  };
-  visit(node);
-  return [...routes].sort();
-}
-
-function registeredCallbackRoutes(source: string): Map<string, string[]> {
-  const file = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const out = new Map<string, string[]>();
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && node.expression.getText(file) === "registerPorted") {
-      const command = node.arguments[0];
-      const handler = node.arguments[1];
-      if (command !== undefined && ts.isStringLiteral(command)
-        && handler !== undefined && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler))) {
-        out.set(command.text, routeLiterals(handler));
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return out;
-}
-
-function exportedCommandRoutes(source: string, functionName: string): string[] {
-  const file = ts.createSourceFile(`${functionName}.ts`, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  let routes: string[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === functionName) routes = routeLiterals(node);
-    ts.forEachChild(node, visit);
-  };
-  visit(file);
-  return routes;
 }
 
 describe("US-WS-032 actual Workspace surface inventory", () => {
@@ -109,39 +60,12 @@ describe("US-WS-032 actual Workspace surface inventory", () => {
     expect(registrationSource).not.toContain("cliOperations(");
   });
 
-  it("accounts for literal callable routes in real public family dispatchers", () => {
-    registerAll();
-    const inventory = registeredCliOperations();
-    const registeredFirstTokens = (command: string): Set<string> => new Set(
-      inventory.filter((entry) => entry.command === command)
-        .map((entry) => entry.route[0])
-        .filter((token): token is string => token !== undefined),
-    );
-    const indexSource = readFileSync(join(root, "packages", "cli", "src", "commands", "index.ts"), "utf8");
-    for (const [command, routes] of registeredCallbackRoutes(indexSource)) {
-      if (!publicCommands().includes(command)) continue;
-      for (const route of routes) expect(registeredFirstTokens(command).has(route), `${command} ${route}`).toBe(true);
-    }
-    for (const [command, fileName, functionName] of [
-      ["workspace", "workspace.ts", "workspaceCommand"],
-      ["delivery", "delivery.ts", "deliveryCommand"],
-      ["agent", "agent.ts", "agentCommand"],
-      ["doctor", "doctor.ts", "doctorCommand"],
-      ["release", "release.ts", "releaseCommand"],
-    ] as const) {
-      const source = readFileSync(join(root, "packages", "cli", "src", "commands", fileName), "utf8");
-      const ignored = new Set(command === "workspace" ? ["help", "init"] : command === "delivery" ? ["help"] : []);
-      for (const route of exportedCommandRoutes(source, functionName)) {
-        if (ignored.has(route)) continue;
-        expect(registeredFirstTokens(command).has(route), `${command} ${route}`).toBe(true);
-      }
-    }
-  });
-
   it("enumerates shipped Skill.md families and built-in adapter declarations", () => {
     const skillIds = shippedSkillIds();
+    const skillInventory = skillContextInventoryFromManifest(skillsManifest());
     const skillPolicies = skillContextPoliciesFromManifest(skillsManifest());
     const toolInventory = builtinToolContextInventory();
+    expect(new Set(skillInventory.map((item) => item.id))).toEqual(new Set(skillIds));
     expect(new Set(skillPolicies.map((policy) => policy.id))).toEqual(new Set(skillIds));
     expect(new Set(toolInventory.map((item) => `${item.id}:${item.operation}`)).size).toBe(toolInventory.length);
   });
@@ -167,7 +91,7 @@ describe("US-WS-032 actual Workspace surface inventory", () => {
     registerAll();
     const matrix = buildRegisteredWorkspaceContextMatrix({
       cliRegistrations: registeredCliOperations(),
-      skillIds: shippedSkillIds(),
+      skillInventory: skillContextInventoryFromManifest(skillsManifest()),
       skillPolicies: skillContextPoliciesFromManifest(skillsManifest()),
     });
     const artifact = JSON.parse(readFileSync(join(root, "docs", "generated", "workspace-context-compatibility-matrix.json"), "utf8"));
@@ -200,8 +124,66 @@ describe("US-WS-032 actual Workspace surface inventory", () => {
     await expect(dispatch(["workspace", "future-leaf"])).resolves.toEqual({ status: 41 });
     expect(() => buildRegisteredWorkspaceContextMatrix({
       cliRegistrations: registeredCliOperations(),
-      skillIds: shippedSkillIds(),
+      skillInventory: skillContextInventoryFromManifest(skillsManifest()),
       skillPolicies: skillContextPoliciesFromManifest(skillsManifest()),
     })).toThrow(/missing policy: cli:workspace:future-leaf/);
+  });
+
+  it("blocks an unregistered nested leaf before a handler can hide it behind destructuring or Set.has", async () => {
+    registerAll();
+    const currentWorkspace = registeredCliOperations()
+      .filter((entry) => entry.command === "workspace" && entry.operation !== "future-leaf");
+    let handlerRuns = 0;
+    const hiddenLeaves = new Set(["future"]);
+    registerPorted("workspace", (args) => {
+      const [family, leaf] = args;
+      if (family === "issue" && leaf !== undefined && hiddenLeaves.has(leaf)) {
+        handlerRuns += 1;
+        return 41;
+      }
+      return 0;
+    }, { operations: currentWorkspace });
+
+    await expect(dispatch(["workspace", "issue", "future"])).resolves.toEqual({ status: 1 });
+    expect(handlerRuns).toBe(0);
+  });
+
+  it("uses executable matchers to distinguish config reads, writes, nested routes, and ambiguity", () => {
+    registerAll();
+    const config = registeredCliOperations().filter((entry) => entry.command === "config");
+    expect(cliOperationForArgs("config", ["lang"], config)?.operation).toBe("read");
+    expect(cliOperationForArgs("config", ["lang", "en"], config)?.operation).toBe("write");
+    expect(cliOperationForArgs("config", ["prices"], config)?.operation).toBe("prices");
+    expect(cliOperationForArgs("config", ["future"], config)).toBeUndefined();
+
+    const ambiguous = [
+      cliMatchedOperation("status", "one", [], () => true),
+      cliMatchedOperation("status", "two", [], () => true),
+    ];
+    expect(cliOperationForArgs("status", [], ambiguous)).toBeUndefined();
+  });
+
+  it("preserves a legitimate positional single-operation command at runtime", async () => {
+    registerAll();
+    const operations = registeredCliOperations().filter((entry) => entry.command === "idea");
+    const observed: string[][] = [];
+    registerPorted("idea", (args) => {
+      observed.push(args);
+      return 43;
+    }, { operations });
+    await expect(dispatch(["idea", "capture", "this", "requirement"])).resolves.toEqual({ status: 43 });
+    expect(observed).toEqual([["capture", "this", "requirement"]]);
+  });
+
+  it("fails when an independently declared shipped skill operation has no policy", () => {
+    const manifest = structuredClone(skillsManifest()) as {
+      skillOperations: Array<{ id: string; operations: string[] }>;
+    };
+    manifest.skillOperations[0]?.operations.push("future-operation");
+    expect(() => buildRegisteredWorkspaceContextMatrix({
+      cliRegistrations: registeredCliOperations(),
+      skillPolicies: skillContextPoliciesFromManifest(manifest),
+      skillInventory: skillContextInventoryFromManifest(manifest),
+    })).toThrow(/missing policy: skill:.*:future-operation/);
   });
 });

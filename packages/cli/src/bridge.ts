@@ -13,6 +13,7 @@ import { networkNeeds, requireNetwork } from "./lib/require-network.js";
 import {
   aliasHelpDecision,
   canonicalTopLevelCommand,
+  cliOperationForArgs,
   isWorkspaceSelectorAlias,
   publicCommands,
   WORKSPACE_SELECTOR_ALIAS,
@@ -46,14 +47,25 @@ const hidden = new Set<string>();
 // render locale-resolved / grouped help (e.g. `roll loop --help`) while still
 // going through the central read-only enforcement.
 type HelpSpec = string | (() => string);
+export interface RejectedCliRoute {
+  readonly route: readonly string[];
+  readonly message: string;
+}
 const helpText = new Map<string, HelpSpec>();
 const commandOperations = new Map<string, readonly CliCommandOperationRegistration[]>();
+const rejectedCommandRoutes = new Map<string, readonly RejectedCliRoute[]>();
 
-export function registerPorted(command: string, handler: Handler, opts?: { hidden?: boolean; help?: HelpSpec; operations?: readonly CliCommandOperationRegistration[] }): void {
+export function registerPorted(command: string, handler: Handler, opts?: {
+  hidden?: boolean;
+  help?: HelpSpec;
+  operations?: readonly CliCommandOperationRegistration[];
+  rejectedRoutes?: readonly RejectedCliRoute[];
+}): void {
   ported.set(command, handler);
   if (opts?.hidden === true) hidden.add(command);
   if (opts?.help !== undefined) helpText.set(command, opts.help);
   if (opts?.operations !== undefined) commandOperations.set(command, [...opts.operations]);
+  if (opts?.rejectedRoutes !== undefined) rejectedCommandRoutes.set(command, [...opts.rejectedRoutes]);
 }
 
 /** Actual operation metadata attached to live bridge registrations. */
@@ -258,12 +270,25 @@ export async function dispatch(
     if (handler !== undefined) {
       // FIX-238/239: the contract half the bridge owns — help is read-only.
       const help = helpText.get(command);
-      if (help !== undefined && (rest[0] === "--help" || rest[0] === "-h")) {
+      if (help !== undefined && (rest[0] === "help" || rest[0] === "--help" || rest[0] === "-h")) {
         const text = renderHelp(command, help);
         process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
         return { status: 0 };
       }
-      const selectorOperation = workspaceSelectorOperation(command, rest, commandOperations.get(command) ?? []);
+      const operations = commandOperations.get(command) ?? [];
+      const rejected = (rejectedCommandRoutes.get(command) ?? [])
+        .filter((entry) => entry.route.every((token, index) => rest[index] === token))
+        .sort((left, right) => right.route.length - left.route.length)[0];
+      if (rejected !== undefined) {
+        process.stderr.write(rejected.message.endsWith("\n") ? rejected.message : `${rejected.message}\n`);
+        return { status: 1 };
+      }
+      if (operations.length > 0 && cliOperationForArgs(command, rest, operations) === undefined) {
+        const route = rest.slice(0, 2).join(" ") || "<root>";
+        process.stderr.write(`roll ${command}: unknown or unregistered route '${route}'\n`);
+        return { status: 1 };
+      }
+      const selectorOperation = workspaceSelectorOperation(command, rest, operations);
       if (selectorOperation !== undefined) {
         const parsed = parseCanonicalWorkspaceSelectorArgs(rest);
         if (!parsed.ok) return emitWorkspaceSelectorError(parsed.code, selectorOperation, rest);

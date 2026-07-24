@@ -193,21 +193,56 @@ export function skillContextPoliciesFromManifest(manifest: unknown): WorkspaceCo
   });
 }
 
-export function skillContextInventory(skillIds: readonly string[], policies: readonly WorkspaceContextPolicy[]): WorkspaceContextSurfaceInventoryItem[] {
-  const shipped = new Set(skillIds);
-  return policies
-    .filter((policy) => shipped.has(policy.id))
-    .map((policy) => ({ surface: "skill", id: policy.id, operation: policy.operation }));
+export function skillContextInventoryFromManifest(manifest: unknown): WorkspaceContextSurfaceInventoryItem[] {
+  if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
+    throw new Error("workspace-context-policy: invalid skills manifest");
+  }
+  const declarations = (manifest as Record<string, unknown>)["skillOperations"];
+  if (!Array.isArray(declarations)) {
+    throw new Error("workspace-context-policy: invalid skill operation declarations");
+  }
+  const seenIds = new Set<string>();
+  const seenOperations = new Set<string>();
+  return declarations.flatMap((declaration, index) => {
+    if (typeof declaration !== "object" || declaration === null || Array.isArray(declaration)) {
+      throw new Error(`workspace-context-policy: invalid skill operation declaration at index ${index}`);
+    }
+    const record = declaration as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.some((key) => key !== "id" && key !== "operations")) {
+      throw new Error(`workspace-context-policy: invalid skill operation declaration at index ${index}: unknown field`);
+    }
+    const id = record["id"];
+    const operations = record["operations"];
+    if (typeof id !== "string" || id.trim() === "" || !Array.isArray(operations) || operations.length === 0) {
+      throw new Error(`workspace-context-policy: invalid skill operation declaration at index ${index}`);
+    }
+    if (seenIds.has(id)) {
+      throw new Error(`workspace-context-policy: duplicate skill operation declaration for ${id}`);
+    }
+    seenIds.add(id);
+    return operations.map((operation, operationIndex) => {
+      if (typeof operation !== "string" || operation.trim() === "") {
+        throw new Error(`workspace-context-policy: invalid skill operation at ${index}:${operationIndex}`);
+      }
+      const identity = `${id}:${operation}`;
+      if (seenOperations.has(identity)) {
+        throw new Error(`workspace-context-policy: duplicate skill operation ${identity}`);
+      }
+      seenOperations.add(identity);
+      return { surface: "skill" as const, id, operation };
+    });
+  });
 }
 
 export function buildRegisteredWorkspaceContextMatrix(input: {
   readonly cliRegistrations: readonly CliCommandOperationRegistration[];
-  readonly skillIds: readonly string[];
+  readonly skillInventory: readonly WorkspaceContextSurfaceInventoryItem[];
   readonly skillPolicies: readonly WorkspaceContextPolicy[];
 }): WorkspaceContextCompatibilityMatrixV1 {
   const inventory = [
     ...cliContextInventory(input.cliRegistrations),
-    ...skillContextInventory(input.skillIds, input.skillPolicies),
+    ...input.skillInventory,
     ...builtinToolContextInventory(),
   ];
   return buildWorkspaceContextCompatibilityMatrix({

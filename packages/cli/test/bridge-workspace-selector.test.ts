@@ -6,12 +6,12 @@ import {
   canonicalizeWorkspaceAliasTokens,
   dispatch,
   parseCanonicalWorkspaceSelectorArgs,
-  portedCommands,
   registerPorted,
   registeredCliOperations,
 } from "../src/bridge.js";
 import {
   aliasHelpDecision,
+  cliMatchedOperation,
   validateWorkspaceSelectorOperations,
   workspaceSelectorOperation,
   workspaceSelectorOperations,
@@ -165,14 +165,14 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(unsupportedCalls).toEqual([["--workspace"]]);
   });
 
-  it("surfaces a canonical unknown --workspace error from a real unsupported public handler", async () => {
+  it("fails closed before an unsupported public handler can consume canonical --workspace", async () => {
     registerAll();
 
     const result = await captureDispatch(["config", "--ws"]);
 
-    expect(result.status).toBe(2);
+    expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("unknown key '--workspace'");
+    expect(result.stderr).toContain("unknown or unregistered route '--workspace'");
     expect(result.stderr).not.toMatch(/--ws(?=['"\s]|$)/u);
   });
 
@@ -350,18 +350,16 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(aliasHelpDecision("status", LIVE_CLI_OPERATIONS)).toBeUndefined();
   });
 
-  it("normalizes before every registered family dispatcher and canonicalizes ws to workspace", async () => {
+  it("normalizes aliases before guarded dispatch and canonicalizes ws to workspace", async () => {
     registerAll();
-    for (const command of portedCommands()) {
-      const observed: string[][] = [];
-      registerPorted(command, (args) => {
-        observed.push(args);
-        return 0;
-      });
-      const result = await captureDispatch([command, "--ws", "roll"]);
-      expect(result.status, command).toBe(0);
-      expect(observed, command).toEqual([["--workspace", "roll"]]);
-    }
+    const observed: string[][] = [];
+    registerPorted("status", (args) => {
+      observed.push(args);
+      return 0;
+    });
+    const normalized = await captureDispatch(["status", "--ws", "roll"]);
+    expect(normalized.status).toBe(0);
+    expect(observed).toEqual([["--workspace", "roll"]]);
 
     const workspaceCalls: string[][] = [];
     registerPorted("workspace", (args) => {
@@ -371,5 +369,34 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     const alias = await captureDispatch(["ws", "create", "demo", "--config", "demo.yaml"]);
     expect(alias.status).toBe(0);
     expect(workspaceCalls).toEqual([["create", "demo", "--config", "demo.yaml"]]);
+  });
+
+  it("keeps bare agent view callable but rejects the nonexistent agent view route", async () => {
+    registerAll();
+    const operations = registeredCliOperations().filter((entry) => entry.command === "agent");
+    const calls: string[][] = [];
+    registerPorted("agent", (args) => {
+      calls.push(args);
+      return 44;
+    }, { operations });
+
+    await expect(dispatch(["agent"])).resolves.toEqual({ status: 44 });
+    await expect(dispatch(["agent", "view"])).resolves.toEqual({ status: 1 });
+    expect(calls).toEqual([[]]);
+  });
+
+  it("fails closed before runtime dispatch when operation matchers are ambiguous", async () => {
+    let handlerRuns = 0;
+    registerPorted("status", () => {
+      handlerRuns += 1;
+      return 45;
+    }, {
+      operations: [
+        cliMatchedOperation("status", "one", [], () => true),
+        cliMatchedOperation("status", "two", [], () => true),
+      ],
+    });
+    await expect(dispatch(["status"])).resolves.toEqual({ status: 1 });
+    expect(handlerRuns).toBe(0);
   });
 });

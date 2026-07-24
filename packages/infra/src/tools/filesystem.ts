@@ -104,7 +104,15 @@ export class FsTool {
       if (this.id === "filesystem.read") {
         return ok(boundInvocation, startedAt, deps.now(), await readOutput(target, invocation.input as FsReadInput, deps));
       }
-      return ok(boundInvocation, startedAt, deps.now(), await writeOutput(target, invocation.input as FsWriteInput, deps));
+      const output = await writeOutput(
+        target,
+        invocation.input as FsWriteInput,
+        repository.canonicalWorktreePath,
+        deps,
+      );
+      return output === undefined
+        ? failure(boundInvocation, startedAt, deps.now(), "invalid_execution_context", "filesystem path changed before write", false)
+        : ok(boundInvocation, startedAt, deps.now(), output);
     } catch {
       return failure(boundInvocation, startedAt, deps.now(), "adapter_error", "filesystem operation failed", true);
     }
@@ -163,9 +171,16 @@ async function readOutput(path: string, input: FsReadInput, deps: ToolDeps): Pro
   };
 }
 
-async function writeOutput(path: string, input: FsWriteInput, deps: ToolDeps): Promise<FsWriteOutput> {
+async function writeOutput(
+  path: string,
+  input: FsWriteInput,
+  repositoryRoot: string,
+  deps: ToolDeps,
+): Promise<FsWriteOutput | undefined> {
   const content = deps.redact(input.content);
   await deps.fs.mkdir(dirname(path), { recursive: true });
+  const revalidated = resolveContainedPath(repositoryRoot, path, true);
+  if (revalidated !== path) return undefined;
   await deps.fs.writeFile(path, content, "utf8");
   return { bytesWritten: Buffer.byteLength(content, "utf8") };
 }

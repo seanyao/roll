@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,8 @@ import type {
   WorkspaceExecutionContextV1,
 } from "@roll/spec";
 import { WORKSPACE_EXECUTION_CONTEXT_V1 } from "@roll/spec";
+import { REPOSITORY_BINDING_V1 } from "@roll/spec";
+import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   BashTool,
@@ -58,24 +60,21 @@ function context(root: string, repositories: readonly RepositoryExecutionContext
     schema: WORKSPACE_EXECUTION_CONTEXT_V1,
     workspace: { workspaceId: "roll", root, canonicalRoot: root, lifecycle: "active" },
     resolution: { source: "explicit", evidence: [] },
-    bindings: [],
+    bindings: repositories.map((repo) => ({
+      schema: REPOSITORY_BINDING_V1,
+      repoId: repo.repoId,
+      alias: repo.alias,
+      remote: `git@github.com:example/${repo.repoId}.git`,
+      integrationBranch: "main",
+      provider: "github" as const,
+      workflow: { branchPattern: "story/{storyId}", requiredChecks: [] },
+    })),
     issue: {
       storyId: "US-WS-035",
       manifestPath: join(issueRoot, "manifest.json"),
       execution: { workspaceId: "roll", issueRoot, repositories: byId },
     },
-    authorities: {
-      backlog: join(root, "backlog"),
-      features: join(root, "features"),
-      design: join(root, "design"),
-      requirements: join(root, "requirements"),
-      policy: join(root, "policy"),
-      evidence: join(root, "evidence"),
-      toolDumps: join(root, "tool-dumps"),
-      events: join(root, "events"),
-      runtime: join(root, "runtime"),
-      locks: join(root, "locks"),
-    },
+    authorities: deriveWorkspaceExecutionAuthorities(root),
   };
 }
 
@@ -155,8 +154,9 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
-function initRepo(tag: string): string {
-  const repo = tmp(tag);
+function initRepo(tag: string, parent?: string): string {
+  const repo = parent === undefined ? tmp(tag) : join(parent, tag);
+  if (parent !== undefined) mkdirSync(repo, { recursive: true });
   git(repo, "init", "-q", "-b", "main");
   git(repo, "config", "user.email", "t@t");
   git(repo, "config", "user.name", "t");
@@ -197,7 +197,7 @@ describe("US-WS-035 Workspace-local tool context", () => {
       meta: { correlation: { workspaceId: "roll", storyId: "US-WS-035", repoId: "product" } },
     });
     expect(deps.calls[0]?.opts?.cwd).toBe(repo);
-    expect(deps.files.get(join(root, "tool-dumps", "inv-none.log"))).toContain("stdout:\nok\n");
+    expect(deps.files.get(join(root, "runtime", "tool-dumps", "inv-none.log"))).toContain("stdout:\nok\n");
   });
 
   it("rejects missing and ambiguous bash context instead of using ambient cwd or first repo", async () => {
@@ -328,10 +328,58 @@ describe("US-WS-035 Workspace-local tool context", () => {
     expect(JSON.stringify(result)).not.toContain("SECRET");
   });
 
+  it("rejects a declared repository worktree that resolves outside the Issue root", async () => {
+    const root = tmp("declared-worktree-symlink");
+    const issueRoot = join(root, "issues", "US-WS-035");
+    const outside = tmp("declared-worktree-outside");
+    mkdirSync(issueRoot, { recursive: true });
+    symlinkSync(outside, join(issueRoot, "product"));
+    const executionContext = context(root, [repository("product", join(issueRoot, "product"))]);
+    const deps = bashDeps();
+
+    const result = await new BashTool().execute(
+      bashInvocation({ command: "pwd" }, executionContext, "product"),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(deps.calls).toHaveLength(0);
+    expect(JSON.stringify(result)).not.toContain(outside);
+  });
+
+  it("revalidates a filesystem write after mkdir before following a replaced parent", async () => {
+    const root = tmp("filesystem-parent-swap");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    const outside = tmp("filesystem-parent-swap-outside");
+    mkdirSync(repo, { recursive: true });
+    const executionContext = context(root, [repository("product", repo)]);
+    const targetParent = join(repo, "created");
+    const deps: ToolDeps = {
+      ...fsDeps(),
+      fs: {
+        readFile: async (path, encoding = "utf8") => readFileSync(path, encoding),
+        mkdir: async (path) => {
+          expect(path).toBe(targetParent);
+          symlinkSync(outside, path);
+        },
+        writeFile: async (path, data, encoding = "utf8") => writeFileSync(path, data, encoding),
+      },
+    };
+
+    const result = await new FsTool("filesystem.write", { root: repo, access: "write" }).execute(
+      fsInvocation<FsWriteInput>("filesystem.write", { path: "created/result.txt", content: "blocked" }, executionContext, "product"),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(existsSync(join(outside, "result.txt"))).toBe(false);
+  });
+
   it("requires git cwd to equal the explicitly selected Issue worktree and preserves dirty status", async () => {
     const root = tmp("git-workspace");
-    const first = initRepo("git-first");
-    const second = initRepo("git-second");
+    const issueRoot = join(root, "issues", "US-WS-035");
+    const first = initRepo("first", issueRoot);
+    const second = initRepo("second", issueRoot);
     const executionContext = context(root, [repository("first", first), repository("second", second)]);
     writeFileSync(join(second, "dirty.txt"), "dirty\n");
     const tool = new GitTool("git.status");
@@ -351,7 +399,7 @@ describe("US-WS-035 Workspace-local tool context", () => {
 
   it("allows git status but rejects git writes for read-only repositories", async () => {
     const root = tmp("git-read-only-workspace");
-    const repo = initRepo("git-read-only");
+    const repo = initRepo("reference", join(root, "issues", "US-WS-035"));
     const executionContext = context(root, [repository("reference", repo, "read")]);
 
     const status = await new GitTool("git.status").execute(
@@ -370,7 +418,7 @@ describe("US-WS-035 Workspace-local tool context", () => {
 
   it("rejects missing git context and symlink cwd escapes without exposing paths", async () => {
     const root = tmp("git-symlink-workspace");
-    const repo = initRepo("git-bound");
+    const repo = initRepo("product", join(root, "issues", "US-WS-035"));
     const outside = initRepo("git-outside");
     const escape = join(root, "escape");
     symlinkSync(outside, escape);

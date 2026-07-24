@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MinimalFs, ToolDeps, ToolInvocation, ToolPolicy } from "@roll/spec";
@@ -23,7 +23,7 @@ afterAll(() => {
 });
 
 function tmpRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "roll-fs-tool-"));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "roll-fs-tool-")));
   dirs.push(dir);
   return dir;
 }

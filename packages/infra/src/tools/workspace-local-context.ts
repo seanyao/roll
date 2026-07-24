@@ -51,8 +51,17 @@ export function resolveWorkspaceLocalRepository(
     return invalid("selected Issue repository does not grant write access");
   }
 
+  const canonicalIssueRoot = canonicalExistingPath(issue.execution.issueRoot);
   const canonicalWorktreePath = canonicalExistingPath(repository.worktreePath);
-  if (canonicalWorktreePath === undefined) return invalid("selected Issue repository worktree is unavailable");
+  if (
+    canonicalIssueRoot === undefined ||
+    canonicalIssueRoot !== issue.execution.issueRoot ||
+    canonicalWorktreePath === undefined ||
+    canonicalWorktreePath !== repository.worktreePath ||
+    !isCanonicalPathContained(canonicalIssueRoot, canonicalWorktreePath)
+  ) {
+    return invalid("selected Issue repository worktree is unavailable");
+  }
   return {
     ok: true,
     repository,

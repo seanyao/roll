@@ -3,6 +3,7 @@ import {
   isValidContextBranch,
   isValidContextProviderId,
   normalizeContextGitRemote,
+  resolveContextGitRemote,
   type ContextDiagnosticCode,
   type ContextDiagnosticV1,
   type GitLlmWikiProviderConfigV1,
@@ -15,13 +16,14 @@ export const GIT_LLM_WIKI_POLICY_ARGS = [
   "-c", "protocol.https.allow=always",
   "-c", "protocol.ssh.allow=always",
   "-c", "core.hooksPath=/dev/null",
-  "-c", "credential.helper=",
+  "-c", "core.askPass=false",
   "-c", "credential.interactive=never",
 ] as const;
 
 export interface ContextCacheIdentity {
   readonly providerId: string;
   readonly remoteIdentity: string;
+  readonly fetchEndpoint: string;
   readonly branch: string;
   readonly cacheRoot: string;
   readonly cachePath: string;
@@ -52,6 +54,7 @@ export class ContextTransportError extends Error {
 function normalizedProvider(provider: GitLlmWikiProviderConfigV1): {
   readonly providerId: string;
   readonly remoteIdentity: string;
+  readonly fetchEndpoint: string;
   readonly branch: string;
 } {
   if (
@@ -69,7 +72,7 @@ function normalizedProvider(provider: GitLlmWikiProviderConfigV1): {
       isValidContextProviderId(provider.id) ? provider.id : undefined,
     );
   }
-  const remote = normalizeContextGitRemote(provider.remote);
+  const remote = resolveContextGitRemote(provider.remote);
   if (!remote.ok) {
     throw new ContextTransportError(
       "unsupported_git_transport",
@@ -77,7 +80,12 @@ function normalizedProvider(provider: GitLlmWikiProviderConfigV1): {
       provider.id,
     );
   }
-  return { providerId: provider.id, remoteIdentity: remote.value, branch: provider.branch };
+  return {
+    providerId: provider.id,
+    remoteIdentity: remote.value.remoteIdentity,
+    fetchEndpoint: remote.value.fetchEndpoint,
+    branch: provider.branch,
+  };
 }
 
 export function resolveContextCacheIdentity(input: {
@@ -92,6 +100,7 @@ export function resolveContextCacheIdentity(input: {
   return {
     providerId: provider.providerId,
     remoteIdentity: provider.remoteIdentity,
+    fetchEndpoint: provider.fetchEndpoint,
     branch: provider.branch,
     cacheRoot,
     cachePath: join(cacheRoot, `${provider.providerId}.git`),
@@ -112,7 +121,7 @@ export function buildGitLlmWikiCommand(
     "--prune",
     "--no-tags",
     "--recurse-submodules=no",
-    GIT_LLM_WIKI_REMOTE_NAME,
+    normalized.fetchEndpoint,
     `+refs/heads/${normalized.branch}:refs/remotes/${GIT_LLM_WIKI_REMOTE_NAME}/${normalized.branch}`,
   ];
 }

@@ -157,6 +157,9 @@ describe("Context read integration", () => {
       if (operation[0] === "remote" && operation[1] === "add") {
         executable[executable.length - 1] = `file://${remote.bare}`;
       }
+      if (operation[0] === "fetch") {
+        executable[executable.length - 2] = `file://${remote.bare}`;
+      }
       executable.splice(12, 0, "-c", "protocol.file.allow=always");
       const result = await rawGit(executable, cwd, options);
       if (operation[0] === "remote" && operation[1] === "get-url" && result.code === 0) {

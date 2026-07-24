@@ -234,12 +234,12 @@ describe("Context v1 contracts", () => {
     expect(request.workspace.authorities.runtime).toBe("/workspaces/roll/runtime");
   });
 
-  it("parses a registry and normalizes its credential-free remote identity", () => {
+  it("parses a registry and preserves a validated SSH fetch endpoint", () => {
     expect(parseContextProviderRegistry(registry())).toEqual({
       ok: true,
       value: {
         ...registry(),
-        providers: [{ ...registry().providers[0], remote: "ssh://github.com/Bipo/company-context" }],
+        providers: [{ ...registry().providers[0], remote: "ssh://git@github.com/Bipo/company-context" }],
       },
     });
   });

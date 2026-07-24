@@ -7298,6 +7298,78 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
     expect(spawns[0]?.cwd).toBe(subWt);
   });
 
+  it("US-WS-033: spawn_role receives the frozen Workspace context and Issue root", async () => {
+    const spawns: AgentSpawnOptions[] = [];
+    const { ports } = fakePorts({
+      clock: () => 100,
+      agentSpawn: vi.fn(async (_agent: string, opts: AgentSpawnOptions) => {
+        spawns.push(opts);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }),
+    });
+    const workspaceRoot = realpathSync(mkdtempSync(join(tmpdir(), "roll-ws-033-role-")));
+    execDirs.push(workspaceRoot);
+    const issueRoot = join(workspaceRoot, "issues", "US-WS-033");
+    const productWorktree = join(issueRoot, "product");
+    mkdirSync(productWorktree, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: productWorktree });
+    const repositoryExecution = {
+      workspaceId: "roll",
+      issueRoot,
+      repositories: {
+        "repo-product": {
+          repoId: "repo-product",
+          alias: "product",
+          access: "write" as const,
+          requiredDelivery: true,
+          noChangePolicy: "changes_required" as const,
+          worktreePath: productWorktree,
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          commands: { test: [], integration: [] },
+        },
+      },
+    };
+    const workspaceExecution = {
+      schema: "roll.workspace-execution-context/v1" as const,
+      workspace: {
+        workspaceId: "roll",
+        root: workspaceRoot,
+        canonicalRoot: workspaceRoot,
+        lifecycle: "active" as const,
+      },
+      resolution: { source: "requirement_discovery" as const, evidence: [] },
+      bindings: [],
+      issue: {
+        storyId: "US-WS-033",
+        manifestPath: `${issueRoot}/manifest.json`,
+        execution: repositoryExecution,
+      },
+      authorities: {
+        backlog: join(workspaceRoot, "backlog", "index.md"),
+        features: join(workspaceRoot, "features"),
+        design: join(workspaceRoot, "design"),
+        requirements: join(workspaceRoot, "requirements"),
+        policy: join(workspaceRoot, "policy.yaml"),
+        evidence: join(workspaceRoot, "evidence"),
+        toolDumps: join(workspaceRoot, "runtime", "tool-dumps"),
+        events: join(workspaceRoot, "runtime", "events"),
+        runtime: join(workspaceRoot, "runtime"),
+        locks: join(workspaceRoot, "runtime", "locks"),
+      },
+    };
+
+    await executeCommand(
+      { kind: "spawn_role", role: "implementer", agent: "codex", round: 0 },
+      ports,
+      { ...CTX, storyId: "US-WS-033", repositoryExecution, workspaceExecution },
+    );
+
+    expect(spawns[0]?.cwd).toBe(issueRoot);
+    expect(spawns[0]?.workspaceExecution).toBe(workspaceExecution);
+    expect(spawns[0]?.writableRoots).toEqual(expect.arrayContaining([productWorktree]));
+  });
+
   it("spawn_role attacker reads its finding marker (newHole + attackTest)", async () => {
     const rt = realpathSync(mkdtempSync(join(tmpdir(), "roll-adv-marker-")));
     execDirs.push(rt);

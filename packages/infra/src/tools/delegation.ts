@@ -2,7 +2,7 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { resolveWorkspaceExecutionContextScope, validateJsonSchemaValue } from "@roll/core";
+import { parseWorkspaceExecutionContext, resolveWorkspaceExecutionContextScope, validateJsonSchemaValue } from "@roll/core";
 import type {
   ExecOpts,
   ExecResult,
@@ -31,13 +31,21 @@ export interface InfraToolOptions<I, O> {
 
 export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Promise<ToolResult<O>> {
   const caller = resolveCaller(options.caller);
-  const contextResolution = options.context === undefined
-    ? undefined
+  const environmentContext = options.context === undefined ? executionContextFromEnvironment() : undefined;
+  const context = options.context ?? (environmentContext?.ok === true ? environmentContext.context : undefined);
+  // Legacy infrastructure helpers also use this seam for machine bootstrap. Once a
+  // Story identity or repository selector is present, the call is agent-facing and
+  // must carry the frozen Workspace context instead of falling back to host cwd.
+  const scope = context !== undefined || caller.storyId !== undefined || options.repoId !== undefined
+    ? delegatedScope(options.declaration, options.repoId)
+    : "machine_only";
+  const contextResolution = environmentContext?.ok === false
+    ? environmentContext
     : resolveWorkspaceExecutionContextScope({
-        scope: delegatedScope(options.declaration, options.repoId),
-        context: options.context,
+        scope,
+        context,
       });
-  const frozenContext = contextResolution?.ok === true ? contextResolution.context : undefined;
+  const frozenContext = contextResolution.ok ? contextResolution.context : undefined;
   const invocation: ToolInvocation<I> = {
     invocationId: nextInvocationId(options.declaration.id),
     toolId: options.declaration.id,
@@ -48,7 +56,17 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     ...(frozenContext === undefined ? {} : { context: frozenContext }),
     ...(options.repoId === undefined ? {} : { repoId: options.repoId }),
   };
-  if (contextResolution !== undefined && !contextResolution.ok) {
+  const emitEvents = options.declaration.emitsEvents !== false;
+  if (!contextResolution.ok) {
+    if (emitEvents) {
+      await appendToolEvent({
+        type: "tool:invoke",
+        cycleId: caller.cycleId,
+        invocation,
+        declaration: options.declaration,
+        ts: Date.now(),
+      });
+    }
     const result: ToolResult<never> = {
       ok: false,
       error: {
@@ -70,7 +88,6 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     });
     return result;
   }
-  const emitEvents = options.declaration.emitsEvents !== false;
   if (emitEvents) {
     await appendToolEvent({
       type: "tool:invoke",
@@ -118,6 +135,21 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     }, invocation.context);
   }
   return result;
+}
+
+function executionContextFromEnvironment():
+  | { readonly ok: true; readonly context: WorkspaceExecutionContextV1 | undefined }
+  | { readonly ok: false; readonly error: { readonly code: "invalid_execution_context"; readonly message: string } } {
+  const raw = (process.env["ROLL_WORKSPACE_EXECUTION_CONTEXT"] ?? "").trim();
+  if (raw === "") return { ok: true, context: undefined };
+  try {
+    const parsed = parseWorkspaceExecutionContext(JSON.parse(raw) as unknown);
+    return parsed.ok
+      ? { ok: true, context: parsed.value }
+      : { ok: false, error: { code: "invalid_execution_context", message: "ROLL_WORKSPACE_EXECUTION_CONTEXT is invalid" } };
+  } catch {
+    return { ok: false, error: { code: "invalid_execution_context", message: "ROLL_WORKSPACE_EXECUTION_CONTEXT is invalid" } };
+  }
 }
 
 function delegatedScope(declaration: ToolDeclaration, repoId: string | undefined): WorkspaceContextScope {

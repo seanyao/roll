@@ -193,6 +193,31 @@ describe("US-WS-036 external tools consume frozen Workspace authority", () => {
     expect(wroteRequest).toBe(false);
   });
 
+  it("rejects a physical capture request attributed to another Story", async () => {
+    const executionContext = context();
+    let wroteRequest = false;
+    const tool = new BrowserTool("physical.screenshot", undefined, {
+      writeRequest: async () => {
+        wroteRequest = true;
+        return "/tmp/request.json";
+      },
+      waitForResponse: async () => ({ status: "timeout", reason: "not expected" }),
+    });
+    const result = await tool.execute(invocation("physical.screenshot", {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: "wrong-story-physical",
+      storyId: "US-OTHER",
+      kind: "physical_terminal",
+      target: { type: "window", appName: "Terminal" },
+      out: join(executionContext.authorities.evidence, "wrong-story.png"),
+      timeoutMs: 1000,
+      createdAt: "2026-07-24T00:00:00.000Z",
+    }, executionContext), deps());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(wroteRequest).toBe(false);
+  });
+
   it.each([
     ["github", new GitHubTool("github.ci"), { action: "status", slug: "example/product", commit: "a".repeat(40) }],
     ["network", new NetworkTool(), { url: "https://example.test" }],

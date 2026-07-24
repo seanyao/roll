@@ -244,6 +244,10 @@ export class BrowserTool {
     deps: ToolDeps,
     startedAt: number,
   ): Promise<ToolResult<PhysicalScreenshotOutput>> {
+    const contextStoryId = invocation.context!.issue!.storyId;
+    if (invocation.input.storyId !== undefined && invocation.input.storyId !== contextStoryId) {
+      return fail(invocation, startedAt, deps.now(), "invalid_execution_context", "physical capture Story does not match the frozen Workspace execution context", false);
+    }
     if (!workspaceArtifactPathAllowed(invocation.input.out, invocation.context!)) {
       return fail(invocation, startedAt, deps.now(), "sandbox_denied", "physical capture path is outside Workspace evidence authorities", false);
     }

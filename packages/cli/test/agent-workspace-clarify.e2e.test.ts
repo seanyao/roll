@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   REPOSITORY_BINDING_V1,
@@ -87,7 +98,156 @@ function candidate(workspaceId: string, lifecycle: WorkspaceLifecycle): Workspac
   };
 }
 
+function snapshotAuthorityTree(root: string): readonly string[] {
+  const entries: string[] = [];
+  const walk = (absolutePath: string, relativePath: string): void => {
+    const stat = lstatSync(absolutePath);
+    if (stat.isDirectory()) {
+      entries.push(`directory:${relativePath}`);
+      for (const name of readdirSync(absolutePath).sort()) {
+        walk(join(absolutePath, name), relativePath === "." ? name : `${relativePath}/${name}`);
+      }
+      return;
+    }
+    if (stat.isSymbolicLink()) {
+      entries.push(`symlink:${relativePath}:${readlinkSync(absolutePath)}`);
+      return;
+    }
+    entries.push(`file:${relativePath}:${readFileSync(absolutePath).toString("base64")}`);
+  };
+  walk(root, ".");
+  return entries;
+}
+
+function isolatedAuthorityFixture(): {
+  readonly home: string;
+  readonly rollHome: string;
+  readonly workspaceRoot: (workspaceId: string) => string;
+  readonly facts: (workspaceId: string, lifecycle: WorkspaceLifecycle) => WorkspaceDiscoveryFactsV1;
+  readonly candidate: (workspaceId: string, lifecycle: WorkspaceLifecycle) => WorkspaceMatchCandidateV1;
+  readonly cleanup: () => void;
+} {
+  const home = mkdtempSync(join(tmpdir(), "roll-ws029-zero-mutation-"));
+  const rollHome = join(home, ".roll");
+  const workspaceRoot = (workspaceId: string): string => join(home, "workspaces", workspaceId);
+  mkdirSync(join(rollHome, "workspace-create"), { recursive: true });
+  for (const workspaceId of ["roll", "fields"] as const) {
+    const root = workspaceRoot(workspaceId);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "workspace.yaml"), `${JSON.stringify(facts(workspaceId, workspaceId === "roll" ? "active" : "registered").manifest, null, 2)}\n`, "utf8");
+  }
+  writeFileSync(join(rollHome, "workspaces.json"), `${JSON.stringify({
+    schema: "roll.workspace-registry/v1",
+    revision: 7,
+    entries: ["fields", "roll"].map((workspaceId) => ({
+      workspaceId,
+      root: workspaceRoot(workspaceId),
+      canonicalRoot: workspaceRoot(workspaceId),
+      pathState: "valid",
+    })),
+  }, null, 2)}\n`, "utf8");
+  writeFileSync(join(rollHome, "workspace-events.ndjson"), [
+    JSON.stringify({ type: "workspace:registered", workspaceId: "roll", root: workspaceRoot("roll"), ts: 1 }),
+    JSON.stringify({ type: "workspace:activated", workspaceId: "roll", ts: 2 }),
+    JSON.stringify({ type: "workspace:registered", workspaceId: "fields", root: workspaceRoot("fields"), ts: 3 }),
+    "",
+  ].join("\n"), "utf8");
+  writeFileSync(join(rollHome, "workspace-create", "ws-existing.pending.json"), "{\"status\":\"repair_required\"}\n", "utf8");
+
+  return {
+    home,
+    rollHome,
+    workspaceRoot,
+    facts: (workspaceId, lifecycle) => {
+      const value = facts(workspaceId, lifecycle);
+      const root = workspaceRoot(workspaceId);
+      return {
+        ...value,
+        candidate: { ...value.candidate, root, canonicalRoot: root },
+      };
+    },
+    candidate: (workspaceId, lifecycle) => ({
+      ...candidate(workspaceId, lifecycle),
+      root: workspaceRoot(workspaceId),
+    }),
+    cleanup: () => rmSync(home, { recursive: true, force: true }),
+  };
+}
+
 describe("US-WS-029 agent Workspace clarification host", () => {
+  it("keeps isolated HOME, ROLL_HOME, registry, events, manifests, and journals byte-identical", () => {
+    const fixture = isolatedAuthorityFixture();
+    vi.stubEnv("HOME", fixture.home);
+    vi.stubEnv("ROLL_HOME", fixture.rollHome);
+    try {
+      const before = snapshotAuthorityTree(fixture.home);
+      const question = beginAgentWorkspaceClarification({
+        intent: intent(),
+        reason: "requirement_match_required",
+        candidates: [fixture.candidate("roll", "active")],
+        diagnostics: [],
+        discovery: {
+          registryRevision: 7,
+          discoveryFactsSha256: SHA,
+          workspaces: [fixture.facts("roll", "active"), fixture.facts("fields", "registered")],
+        },
+      });
+      expect(snapshotAuthorityTree(fixture.home)).toEqual(before);
+
+      const selected = continueAgentWorkspaceClarification({
+        handoff: question.handoff,
+        answer: { action: "select_existing", workspaceId: "roll" },
+        currentDiscovery: { registryRevision: 7, discoveryFactsSha256: SHA },
+        rerunResolver: (selector) => ({ selector, status: "read_only_recheck" }),
+      });
+      expect(selected).toMatchObject({ kind: "resolution_retried", stopped: true });
+      expect(snapshotAuthorityTree(fixture.home)).toEqual(before);
+
+      const created = continueAgentWorkspaceClarification({
+        handoff: question.handoff,
+        answer: { action: "create_new", workspaceId: "ws-new" },
+        currentDiscovery: { registryRevision: 7, discoveryFactsSha256: SHA },
+        rerunResolver: () => ({ unexpected: true }),
+      });
+      expect(created).toMatchObject({ kind: "collect_create_input", stopped: true, applyAuthorized: false });
+      expect(snapshotAuthorityTree(fixture.home)).toEqual(before);
+
+      const repairQuestion = beginAgentWorkspaceClarification({
+        intent: intent("mutation"),
+        reason: "workspace_discovery_incomplete",
+        candidates: [],
+        diagnostics: [{
+          workspaceId: "fields",
+          root: fixture.workspaceRoot("fields"),
+          code: "invalid_workspace_manifest",
+          authorityPath: `${fixture.workspaceRoot("fields")}/workspace.yaml`,
+          message: "invalid manifest",
+        }],
+        discovery: { registryRevision: 7, discoveryFactsSha256: SHA, workspaces: [] },
+      });
+      const repaired = continueAgentWorkspaceClarification({
+        handoff: repairQuestion.handoff,
+        answer: { action: "repair_discovery" },
+        currentDiscovery: { registryRevision: 7, discoveryFactsSha256: SHA },
+        rerunResolver: () => ({ unexpected: true }),
+      });
+      expect(repaired).toMatchObject({ kind: "repair_actions", stopped: true });
+      expect(snapshotAuthorityTree(fixture.home)).toEqual(before);
+
+      const stale = continueAgentWorkspaceClarification({
+        handoff: question.handoff,
+        answer: { action: "select_existing", workspaceId: "roll" },
+        currentDiscovery: { registryRevision: 8, discoveryFactsSha256: "b".repeat(64) },
+        rerunResolver: () => ({ unexpected: true }),
+      });
+      expect(stale).toEqual({ kind: "reload_required", stopped: true, code: "invalid_workspace_clarification" });
+      expect(snapshotAuthorityTree(fixture.home)).toEqual(before);
+    } finally {
+      vi.unstubAllEnvs();
+      fixture.cleanup();
+    }
+  });
+
   it("deposits the single-active requirement-mismatch select/create stopping transcript", () => {
     const question = beginAgentWorkspaceClarification({
       intent: intent(),
@@ -142,9 +302,6 @@ describe("US-WS-029 agent Workspace clarification host", () => {
   });
 
   it.each(["registered", "paused"] as const)("stops on a %s exact match without activating or mutating", (lifecycle) => {
-    const writeRegistry = vi.fn();
-    const activate = vi.fn();
-    const create = vi.fn();
     const question = beginAgentWorkspaceClarification({
       intent: intent(),
       reason: "workspace_activation_required",
@@ -164,9 +321,6 @@ describe("US-WS-029 agent Workspace clarification host", () => {
     expect(question.prompt).toContain("requirement_source_exact");
     expect(question.prompt.match(/\?/gu)).toHaveLength(1);
     expect(question.prompt).not.toContain("planning / building");
-    expect(writeRegistry).not.toHaveBeenCalled();
-    expect(activate).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
   });
 
   it("reruns the resolver with a canonical explicit selector and does nothing else", () => {

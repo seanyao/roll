@@ -16,6 +16,7 @@ import { workspaceIssueCommand } from "./workspace-issue.js";
 import { workspaceRequirementCommand } from "./workspace-requirement.js";
 import { workspaceDoctorCommand } from "./workspace-doctor.js";
 import { workspaceMigrateCommand } from "./workspace-migrate.js";
+import { workspaceEditCommand } from "./workspace-edit.js";
 import { workspaceRegistryCandidates, workspaceRollHome, workspaceTargetSelector } from "./workspace-target.js";
 
 const WORKSPACE_LIST_V1 = "roll.workspace-list/v1" as const;
@@ -298,6 +299,7 @@ export function workspaceCommand(args: string[]): number | Promise<number> {
   if (subcommand === "requirement") return workspaceRequirementCommand(rest);
   if (subcommand === "doctor") return workspaceDoctorCommand(rest);
   if (subcommand === "migrate") return workspaceMigrateCommand(rest);
+  if (subcommand === "edit") return workspaceEditCommand(rest);
   const store = new WorkspaceRegistry({ rollHome: workspaceRollHome() });
   if (subcommand === "list") return listCommand(rest, store);
   if (subcommand === "show") return showCommand(rest, store);

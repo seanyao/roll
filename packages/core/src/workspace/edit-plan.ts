@@ -476,6 +476,7 @@ export function buildWorkspaceEditPlan(input: {
   readonly current: WorkspaceManifest;
   readonly references: WorkspaceMetadataReferenceIndex;
   readonly manifestPath: string;
+  readonly configPath?: string;
 }): WorkspaceEditPlan {
   const beforeManifest = canonicalManifest(input.current);
   const afterManifest = canonicalManifest({
@@ -577,6 +578,7 @@ export function buildWorkspaceEditPlan(input: {
   const sortedChanges = changes.slice().sort((left, right) => compareText(left.path, right.path));
   const sortedBlockers = blockers.slice().sort((left, right) => compareText(`${left.path}\0${left.code}`, `${right.path}\0${right.code}`));
   const outcome = sortedBlockers.length === 0 ? "ready" : "blocked";
+  const configPath = input.configPath ?? "<path>";
   return {
     schema: WORKSPACE_EDIT_PLAN_V1,
     outcome,
@@ -591,7 +593,7 @@ export function buildWorkspaceEditPlan(input: {
     blockers: sortedBlockers,
     warnings: [],
     nextAction: outcome === "ready"
-      ? { kind: "apply", command: `roll workspace edit ${input.current.workspaceId} --config <path> --json` }
+      ? { kind: "apply", command: `roll workspace edit ${input.current.workspaceId} --config ${configPath} --json` }
       : { kind: "blocked" },
   };
 }

@@ -36,8 +36,9 @@ wake      a DORMANT loop wakes on any roll command · the daily dream scan · a 
 
 Workspace selector alias: --ws <id|path> (canonical: --workspace <id|path>)
 ",
-    "workspace": "Usage: roll workspace <init|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [options]
+    "workspace": "Usage: roll workspace <init|edit|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [options]
   \`init <id> --config <file> [--check] [--json]\`
+  \`edit <id|path> --config <file> --check [--json]\`
   \`issue init <story-id> --workspace <id> [--check] [--json]\`
   \`requirement add --provider <provider> --ref <ref> --revision <revision> --body-file <file> --story <id> [options]\`
   \`doctor <id> [--json] [--repair <typed-action>] [--path <absolute-path>]\`
@@ -47,7 +48,7 @@ Workspace selector alias: --ws <id|path> (canonical: --workspace <id|path>)
   \`show <id|path> [--json]\`
   \`register <id> <path> [--json]\`
   \`activate|pause|archive <id|path> [--json]\`
-  Init/issue/migrate --check and doctor diagnosis are read-only; migrate apply/rollback, typed doctor repairs and lifecycle mutations require one explicit target; --all is read-only.
+  Init/edit/issue/migrate --check and doctor diagnosis are read-only; migrate apply/rollback, typed doctor repairs and lifecycle mutations require one explicit target; --all is read-only.
 
 Alias: roll ws ... (canonical: roll workspace ...)
 Workspace selector alias: --ws <id|path> (canonical: --workspace <id|path>)
@@ -87,8 +88,9 @@ Workspace selector 别名：--ws <ID|路径>（canonical：--workspace <ID|路�
 
 Workspace selector 别名：--ws <ID|路径>（canonical：--workspace <ID|路径>）
 ",
-    "workspace": "用法：roll workspace <init|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [选项]
+    "workspace": "用法：roll workspace <init|edit|issue|requirement|doctor|migrate|list|show|register|activate|pause|archive> [选项]
   \`init <ID> --config <文件> [--check] [--json]\`
+  \`edit <ID|路径> --config <文件> --check [--json]\`
   \`issue init <Story ID> --workspace <ID> [--check] [--json]\`
   \`requirement add --provider <来源> --ref <引用> --revision <修订> --body-file <文件> --story <ID> [选项]\`
   \`doctor <ID> [--json] [--repair <类型化动作>] [--path <绝对路径>]\`
@@ -98,7 +100,7 @@ Workspace selector 别名：--ws <ID|路径>（canonical：--workspace <ID|路�
   \`show <ID|路径> [--json]\`
   \`register <ID> <路径> [--json]\`
   \`activate|pause|archive <ID|路径> [--json]\`
-  init/issue/migrate --check 和 doctor 诊断只读；migrate apply/rollback、doctor 类型化修复和生命周期变更必须显式指定一个目标；--all 仅限只读。
+  init/edit/issue/migrate --check 和 doctor 诊断只读；migrate apply/rollback、doctor 类型化修复和生命周期变更必须显式指定一个目标；--all 仅限只读。
 
 别名：roll ws ...（canonical：roll workspace ...）
 Workspace selector 别名：--ws <ID|路径>（canonical：--workspace <ID|路径>）

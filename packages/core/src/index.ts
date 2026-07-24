@@ -23,6 +23,7 @@ export * from "./context/execution-plan.js";
 export * from "./context/context-ref.js";
 export * from "./context/page-metadata.js";
 export * from "./context/llm-wiki-validator.js";
+export * from "./context/scope-policy.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

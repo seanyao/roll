@@ -12,7 +12,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { CycleCommand, CycleContext, CycleEvent, RollEvent, WarmSessionEntry } from "@roll/core";
 import { AGENTS } from "../../core/src/agent/specs.js";
 import { resolveIntegrationBranch, submoduleWorktreePath } from "@roll/infra";
-import { classifyComplexity, cycleStep, initialCycleState, mapV2Status } from "@roll/core";
+import { classifyComplexity, cycleStep, initialCycleState, mapV2Status, readLeases } from "@roll/core";
 import { AWAITING_REVIEW_STATUS_MARKER, STATUS_MARKER } from "@roll/spec";
 import { agentWritableRoots, checkMainDirty, planAdversarial, recordExecutionProfile, writeEvaluatorArtifact, runDesignerStage } from "../src/runner/executor.js";
 import { submoduleAgentWritableRoots } from "../src/runner/worktree-bootstrap.js";
@@ -54,6 +54,7 @@ import {
   startSpawnTimeoutWatchdog,
   startBuilderLivenessProbe,
   readCycleTimeoutThresholds,
+  runCycleOnce,
   storyPinDirective,
   RESUME_DISABLED_ENV,
   resolveResumeBase,
@@ -987,6 +988,103 @@ describe("dryRunPlan", () => {
     expect(joined).toContain("spawn_agent");
     expect(joined).toContain("publish_pr");
     expect(joined).toContain("append_run");
+  });
+});
+
+describe("US-WS-033 — unexpected terminal fallback restores frozen context", () => {
+  it("upgrades Workspace-only context from the durable Issue snapshot and releases the Story lease", async () => {
+    const runtimeRoot = realpathSync(mkdtempSync(join(tmpdir(), "roll-ws-033-fallback-")));
+    execDirs.push(runtimeRoot);
+    const workspaceRoot = join(runtimeRoot, "workspace");
+    const issueRoot = join(workspaceRoot, "issues", "US-WS-033");
+    const binding = {
+      schema: "roll.repository-binding/v1" as const,
+      repoId: "repo-111111111111",
+      alias: "product",
+      remote: "git@github.com:seanyao/roll.git",
+      integrationBranch: "idea-074-workspace",
+      provider: "github" as const,
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    };
+    const repositoryExecution = {
+      workspaceId: "roll",
+      issueRoot,
+      repositories: {
+        [binding.repoId]: {
+          repoId: binding.repoId,
+          alias: binding.alias,
+          access: "write" as const,
+          requiredDelivery: true,
+          noChangePolicy: "changes_required" as const,
+          worktreePath: join(issueRoot, binding.alias),
+          baseSha: "a".repeat(40),
+          headSha: "b".repeat(40),
+          commands: { test: [], integration: [] },
+        },
+      },
+    };
+    const workspaceExecution = {
+      schema: "roll.workspace-execution-context/v1" as const,
+      workspace: {
+        workspaceId: "roll",
+        root: workspaceRoot,
+        canonicalRoot: workspaceRoot,
+        lifecycle: "active" as const,
+      },
+      resolution: { source: "requirement_discovery" as const, evidence: [] },
+      bindings: [binding],
+      authorities: {
+        backlog: join(workspaceRoot, "backlog", "index.md"),
+        features: join(workspaceRoot, "features"),
+        design: join(workspaceRoot, "design"),
+        requirements: join(workspaceRoot, "requirements"),
+        policy: join(workspaceRoot, "policy.yaml"),
+        evidence: join(workspaceRoot, "evidence"),
+        toolDumps: join(workspaceRoot, "runtime", "tool-dumps"),
+        events: join(workspaceRoot, "runtime", "events"),
+        runtime: join(workspaceRoot, "runtime"),
+        locks: join(workspaceRoot, "runtime", "locks"),
+      },
+    };
+    const cycleId = "cycle-ws-033-fallback";
+    const paths = {
+      eventsPath: join(runtimeRoot, "events.ndjson"),
+      runsPath: join(runtimeRoot, "runs.jsonl"),
+      alertsPath: join(runtimeRoot, "alerts.log"),
+      lockPath: join(runtimeRoot, "inner.lock"),
+      heartbeatPath: join(runtimeRoot, "heartbeat"),
+      worktreePath: join(runtimeRoot, "worktree"),
+    };
+    const markStatus = vi.fn(() => {
+      throw new Error("fixture crash after context persistence");
+    });
+    const { ports, calls } = fakePorts({
+      paths,
+      backlog: {
+        read: vi.fn(() => [{ id: "US-WS-033", desc: "est_min:15", status: "📋 Todo" }]),
+        markStatus,
+      },
+      repositories: {
+        prepare: vi.fn(async () => ({ kind: "prepared" as const, outcome: "reused" as const })),
+        resolve: vi.fn(async () => repositoryExecution),
+        bind: () => { throw new Error("repository ports must not bind before the injected setup failure"); },
+      },
+    });
+
+    await expect(runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never, workspaceExecution },
+    })).rejects.toThrow("fixture crash after context persistence");
+
+    const restored = restorePersistedWorkspaceCycleContext(runtimeRoot, cycleId);
+    expect(restored).toMatchObject({
+      ok: true,
+      context: { workspace: { workspaceId: "roll" }, issue: { storyId: "US-WS-033" } },
+    });
+    const runCall = calls["run"]?.[0];
+    expect(runCall?.[1]).toEqual({ storyId: "US-WS-033", cycleId });
+    expect(runCall?.[2]).toMatchObject({ workspace_id: "roll", status: "aborted" });
+    expect(readLeases(join(runtimeRoot, "leases"))["US-WS-033"]).toBeUndefined();
   });
 });
 

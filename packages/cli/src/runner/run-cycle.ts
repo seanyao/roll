@@ -34,6 +34,7 @@ import {
   foldCycleAdversarial,
   initialCycleState,
   mapV2Status,
+  releaseStoryLease,
   watchdogVerdict,
 } from "@roll/core";
 import { CYCLE_TIMEOUT_SEC } from "@roll/core";
@@ -44,6 +45,7 @@ import { readCycleAttributionFromEvents } from "../lib/cycle-attribution.js";
 import { classifyCycleFailure, readCycleEvents } from "./failure-attribution.js";
 import { killLiveAgents } from "./agent-spawn.js";
 import { restorePersistedWorkspaceCycleContext } from "./scoped-route.js";
+import { resolveStoryLeasePath } from "./story-lease-path.js";
 
 /** Inputs for one cycle run. */
 export interface RunCycleOptions {
@@ -268,10 +270,10 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
       // orchestrator propagated story/agent), recover the best-known attribution
       // from events the cycle already wrote.
       const attr = readCycleAttributionFromEvents(ports.paths.eventsPath, liveCtx.cycleId);
-      const restored = liveCtx.workspaceExecution === undefined
+      const restored = liveCtx.workspaceExecution?.issue === undefined
         ? restorePersistedWorkspaceCycleContext(dirname(ports.paths.eventsPath), liveCtx.cycleId)
         : undefined;
-      const workspaceExecution = liveCtx.workspaceExecution ?? (restored?.ok ? restored.context : undefined);
+      const workspaceExecution = restored?.ok ? restored.context : liveCtx.workspaceExecution;
       const storyId = liveCtx.storyId ?? workspaceExecution?.issue?.storyId ?? attr.storyId ?? "";
       const agent = liveCtx.agent ?? attr.agent ?? "";
       const tctx = {
@@ -320,6 +322,13 @@ export async function runCycleOnce(opts: RunCycleOptions): Promise<RunCycleResul
         }
       } catch {
         /* best-effort terminal write; never mask the original failure */
+      }
+      if (storyId !== "") {
+        try {
+          releaseStoryLease(resolveStoryLeasePath(ports.paths), storyId, { source: "cycle", pid: process.pid });
+        } catch {
+          /* lease cleanup must never mask the original cycle failure */
+        }
       }
       if (state.done) state = { ...state, terminal: status };
     }

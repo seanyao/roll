@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext } from "@roll/core";
+import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type ContextCycleStageStateV1, type CycleCommand, type CycleContext } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment, type AgentSpawnOptions } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
@@ -20,6 +20,7 @@ import { resolveIntegrationBranch } from "@roll/infra";
 import { recordSpawnRound } from "./round-journal-emit.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { invalidContextHandoff, type ContextStageHandoffV1 } from "./context-handoff.js";
+import type { ContextStageHostReadInputV1 } from "./context-stage-host.js";
 import {
   RepositoryObservationError,
   observeWritableRepositoryCommitCount,
@@ -43,6 +44,7 @@ export async function prepareContextBuilderSkillBody(
   ports: Pick<Ports, "contextStage">,
   storyId: string | undefined,
   skillBody: string,
+  contextInput: Omit<ContextStageHostReadInputV1, "storyId" | "stage"> = { refs: [] },
 ): Promise<ContextBuilderSkillBodyResult> {
   if (ports.contextStage === undefined || storyId === undefined || storyId === "") {
     return { status: "ready", skillBody };
@@ -52,6 +54,7 @@ export async function prepareContextBuilderSkillBody(
     result = await ports.contextStage.readForStage({
       storyId,
       stage: storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "fix" : "build",
+      ...contextInput,
     });
   } catch {
     return { status: "blocked", diagnostic: invalidContextHandoff() };
@@ -152,14 +155,22 @@ export async function executeSpawnAgentCommand(
       // US-V4-006: for a `designed` cycle, run the Designer BEFORE the Builder in a
       // fresh session and FAIL CLOSED on a missing/malformed design contract —
       // the Builder never starts without a valid design. No-op for standard/verified.
+      let contextStage: ContextCycleStageStateV1 | undefined = ctx.contextStage;
       if (ctx.selectedProfile === "designed") {
         const design = await runDesignerStage(ports, ctx, cmd.agent);
+        contextStage = design.contextStage ?? contextStage;
         if (design.ran && !design.ok) {
           ports.events.appendAlert(
             ports.paths.alertsPath,
             `designer stage failed closed for ${ctx.storyId ?? "?"}: ${design.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,
           );
-          return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
+          return {
+            event: { type: "agent_exited", exit: 1, timedOut: false },
+            ctxPatch: {
+              builderSessionId,
+              ...(contextStage === undefined ? {} : { contextStage }),
+            },
+          };
         }
       }
       // Context must be resolved before any observer/watchdog starts. A missing
@@ -178,7 +189,12 @@ export async function executeSpawnAgentCommand(
         lowScoreFeedback !== ""
           ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
           : skillBodyForSpawn;
-      const contextSkillBody = await prepareContextBuilderSkillBody(ports, ctx.storyId, preContextSkillBody);
+      const contextSkillBody = await prepareContextBuilderSkillBody(
+        ports,
+        ctx.storyId,
+        preContextSkillBody,
+        contextStage ?? { refs: [] },
+      );
       if (contextSkillBody.status === "blocked") {
         ports.events.appendAlert(
           ports.paths.alertsPath,
@@ -186,10 +202,21 @@ export async function executeSpawnAgentCommand(
         );
         return {
           event: { type: "agent_exited", exit: 1, timedOut: false },
-          ctxPatch: { builderSessionId },
+          ctxPatch: {
+            builderSessionId,
+            ...(contextStage === undefined ? {} : { contextStage }),
+          },
         };
       }
       const finalSkillBody = contextSkillBody.skillBody;
+      const nextContextStage: ContextCycleStageStateV1 | undefined = contextSkillBody.handoff === undefined
+        ? contextStage
+        : {
+            ...(contextStage ?? { refs: [] }),
+            readMode: "handoff_snapshot",
+            handoff: contextSkillBody.handoff,
+            sourceStage: ctx.storyId?.startsWith("FIX-") || ctx.storyId?.startsWith("BUG-") ? "fix" : "build",
+          };
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
@@ -672,6 +699,7 @@ export async function executeSpawnAgentCommand(
         // traceable to a recorded build-session id, not asserted).
         ctxPatch: {
           builderSessionId,
+          ...(nextContextStage === undefined ? {} : { contextStage: nextContextStage }),
           ...(costPatch !== undefined ? { cost: costPatch } : {}),
           ...(usageUnknownReason !== undefined ? { usageUnknownReason } : {}),
           ...(agentInternalFailure !== undefined ? { agentInternalFailure } : {}),

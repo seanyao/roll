@@ -13,6 +13,7 @@ import {
   summarizeDesignContractVsDelivered,
   validateDesignArtifact,
   validateEvaluatorArtifact,
+  type ContextCycleStageStateV1,
   type CycleContext,
 } from "@roll/core";
 import type { AdversarialPlan } from "@roll/core";
@@ -252,7 +253,12 @@ export async function runDesignerStage(
   ports: Ports,
   ctx: CycleContext,
   designerAgent: string,
-): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
+): Promise<{
+  ran: boolean;
+  ok: boolean;
+  reasons: readonly string[];
+  contextStage?: ContextCycleStageStateV1;
+}> {
   if (ctx.selectedProfile !== "designed") return { ran: false, ok: true, reasons: [] };
   const storyId = ctx.storyId ?? "";
   const runDir = ctx.evidenceRunDir ?? "";
@@ -265,12 +271,52 @@ export async function runDesignerStage(
   // will run (submodule cycle worktree for a submodule story). No targetSubmodule
   // ⇒ ports.paths.worktreePath, unchanged.
   const execCwd = resolveExecutionCwd(ports, ctx);
+  let contextStage = ctx.contextStage;
+  let contextEnvelope = "";
+  if (ports.contextStage !== undefined) {
+    const requested = contextStage ?? { refs: [] };
+    let contextResult: Awaited<ReturnType<NonNullable<Ports["contextStage"]>["readForStage"]>>;
+    try {
+      contextResult = await ports.contextStage.readForStage({
+        storyId,
+        stage: "design",
+        ...requested,
+        readMode: "fresh",
+      });
+    } catch {
+      return { ran: true, ok: false, reasons: ["invalid_context_snapshot: Context host failed closed"] };
+    }
+    if (contextResult.status !== "ready") {
+      const reason = contextResult.status === "blocked"
+        ? `${contextResult.diagnostic.code}: ${contextResult.diagnostic.message}`
+        : "context revision needs reconciliation";
+      return { ran: true, ok: false, reasons: [reason] };
+    }
+    contextStage = {
+      ...requested,
+      readMode: "handoff_snapshot",
+      handoff: contextResult.handoff,
+      sourceStage: "design",
+    };
+    contextEnvelope = contextResult.encodedEnvelope;
+  }
+  try {
+    mkdirSync(dir, { recursive: true });
+    if (contextStage !== undefined) {
+      writeFileSync(join(dir, "context-stage-handoff.json"), `${JSON.stringify(contextStage, null, 2)}\n`);
+    }
+  } catch {
+    if (contextStage !== undefined) {
+      return { ran: true, ok: false, reasons: ["Context handoff artifact could not be persisted"] };
+    }
+  }
   if (!existsSync(contractPath)) {
     try {
-      mkdirSync(dir, { recursive: true });
       await ports.agentSpawn(designerAgent, {
         cwd: execCwd,
-        skillBody: buildDesignerPrompt(storyId, contractPath),
+        skillBody: contextEnvelope === ""
+          ? buildDesignerPrompt(storyId, contractPath)
+          : `${buildDesignerPrompt(storyId, contractPath)}\n\n${contextEnvelope}`,
         storyId,
         timeoutMs: DESIGNER_TIMEOUT_MS,
         runDir: dir,
@@ -299,7 +345,12 @@ export async function runDesignerStage(
   }
   const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
   const v = validateDesignArtifact({ manifest, contractMd, storyId });
-  return { ran: true, ok: v.ok, reasons: v.reasons };
+  return {
+    ran: true,
+    ok: v.ok,
+    reasons: v.reasons,
+    ...(contextStage === undefined ? {} : { contextStage }),
+  };
 }
 
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {

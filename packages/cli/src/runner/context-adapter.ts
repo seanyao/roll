@@ -280,15 +280,22 @@ function unavailable(snapshot: ContextReadResultV1): ContextDiagnosticV1 {
   };
 }
 
+function snapshotBlockingDiagnostic(snapshot: ContextReadResultV1): ContextDiagnosticV1 | undefined {
+  if (snapshot.outcome === "disabled" || snapshot.outcome === "blocked") return unavailable(snapshot);
+  return snapshot.gaps.find((gap) => gap.severity === "blocking");
+}
+
 export function createContextHostAdapter(options: CreateContextHostAdapterOptions): ContextHostAdapter {
   return {
     async readForStage(input: ContextStageReadInputV1): Promise<ContextStageReadResultV1> {
       if ((input.readMode ?? "handoff_snapshot") === "handoff_snapshot") {
         if (input.handoff === undefined) return { status: "blocked", diagnostic: invalidContextHandoff() };
         const snapshot = readHandoffSnapshot(options, input, input.handoff);
-        return snapshot === undefined
-          ? { status: "blocked", diagnostic: invalidContextHandoff() }
-          : ready(options, input, "handoff_snapshot", snapshot);
+        if (snapshot === undefined) return { status: "blocked", diagnostic: invalidContextHandoff() };
+        const blocking = snapshotBlockingDiagnostic(snapshot);
+        return blocking === undefined
+          ? ready(options, input, "handoff_snapshot", snapshot)
+          : { status: "blocked", diagnostic: blocking };
       }
 
       if (input.handoff === undefined && !CONTEXT_BOOTSTRAP_STAGES.has(input.stage)) {
@@ -309,8 +316,9 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
       if (fresh.outcome === "disabled") return { status: "blocked", diagnostic: unavailable(fresh) };
       options.writeSnapshot(fresh);
       const freshHandoff = createContextStageHandoff(fresh);
-      if (fresh.outcome === "blocked") {
-        return { status: "blocked", diagnostic: unavailable(fresh), freshHandoff };
+      const freshBlocking = snapshotBlockingDiagnostic(fresh);
+      if (freshBlocking !== undefined) {
+        return { status: "blocked", diagnostic: freshBlocking, freshHandoff };
       }
       if (input.handoff === undefined) return ready(options, input, "fresh", fresh, undefined, operationAllowed);
 

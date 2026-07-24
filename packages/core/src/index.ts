@@ -31,6 +31,7 @@ export * from "./context/scope-policy.js";
 export * from "./context/read-service.js";
 export * from "./context/snapshot.js";
 export * from "./context/revision-comparator.js";
+export * from "./context/stage-handoff.js";
 export * from "./workspace/edit-plan.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";

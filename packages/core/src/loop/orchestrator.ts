@@ -121,6 +121,7 @@ import type { RollEvent } from "@roll/spec";
 import { builderFinalizationReady, finalizeBuilder, handoffKindFor } from "./builder-finalization.js";
 import { adversarialNextStep, adversarialDegradeDecision, type AdversarialFailure, type AdversarialRunSummary } from "./adversarial.js";
 import { nextWaitAction, type WaitAction } from "../delivery/pr.js";
+import type { ContextCycleStageStateV1 } from "../context/stage-handoff.js";
 
 // ── v2 terminal vocabulary (six-state model) ─────────────────────────────────
 
@@ -941,6 +942,9 @@ export interface CycleContext {
    *  v4.0 only `standard` (builder-only) actually executes — verified/planned add
    *  evaluator/planner stages in later stories. Absent ⇒ not yet selected. */
   selectedProfile?: ExecutionProfile;
+  /** Exact Context stage state. Consuming stages must use this handoff rather
+   * than discovering a newer Snapshot from the durable store. */
+  contextStage?: ContextCycleStageStateV1;
   /** FIX-208: the real per-cycle cost folded from the agent's parsed usage
    *  (cost/tracker.ts), set by the executor after spawn_agent. Threaded into
    *  BOTH the cycle:end event and the runs row so they agree. Absent ⇒ no

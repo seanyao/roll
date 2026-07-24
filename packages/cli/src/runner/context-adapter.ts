@@ -294,7 +294,7 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
       }
       const record: ContextStageDecisionRecordV1 = {
         comparison,
-        decision: decision.decision,
+        ...decision.record,
         useSnapshot: decision.useSnapshot,
       };
       if (decision.useSnapshot === "none") {

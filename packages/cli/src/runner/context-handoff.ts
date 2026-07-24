@@ -6,7 +6,7 @@ import type {
 } from "@roll/spec";
 import {
   contextSnapshotReference,
-  type ContextRevisionDecisionV1,
+  type ContextRevisionDecisionRecordV1,
   type ContextRevisionComparisonV1,
   type ContextSnapshotReferenceV1,
 } from "@roll/core";
@@ -48,9 +48,8 @@ export interface ContextAgentEnvelopeV1 {
   readonly pages: readonly ContextAgentPageEnvelopeV1[];
 }
 
-export interface ContextStageDecisionRecordV1 {
+export interface ContextStageDecisionRecordV1 extends ContextRevisionDecisionRecordV1 {
   readonly comparison: ContextRevisionComparisonV1;
-  readonly decision: ContextRevisionDecisionV1;
   readonly useSnapshot: "handoff" | "new" | "none";
 }
 

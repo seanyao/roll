@@ -10,7 +10,7 @@ import {
   type ContextReadResultV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
-import { computeContextSnapshotDigest } from "@roll/core";
+import { computeContextSnapshotDigest, contextSnapshotId } from "@roll/core";
 import { readContextSnapshot, writeContextSnapshot } from "@roll/infra";
 import { describe, expect, it, vi } from "vitest";
 import { createContextHostAdapter } from "../src/runner/context-adapter.js";
@@ -80,13 +80,13 @@ function snapshot(
   files: readonly ContextReadFileV1[],
   stage: ContextReadRequestV1["stage"] = "design",
 ): ContextReadResultV1 {
-  const snapshotId = `ctx_20260724T06000000${id}Z_${id.repeat(12)}`;
+  const createdAt = `2026-07-24T06:00:00.00${id}Z`;
   const initial: ContextReadResultV1 = {
     schema: CONTEXT_READ_RESULT_V1,
-    snapshotId,
+    snapshotId: "pending",
     snapshotDigest: "0".repeat(64),
-    createdAt: `2026-07-24T06:00:00.00${id}Z`,
-    artifactPath: join(workspaceValue.authorities.runtime, "context", STORY_ID, `${snapshotId}.json`),
+    createdAt,
+    artifactPath: "pending",
     outcome: "completed",
     requestScope: {
       workspaceId: workspaceValue.workspace.workspaceId,
@@ -108,7 +108,15 @@ function snapshot(
     }],
     gaps: [],
   };
-  return { ...initial, snapshotDigest: computeContextSnapshotDigest(initial) };
+  const snapshotDigest = computeContextSnapshotDigest(initial);
+  const snapshotId = contextSnapshotId(createdAt, snapshotDigest);
+  if (snapshotId === undefined) throw new Error("invalid Context Snapshot test timestamp");
+  return {
+    ...initial,
+    snapshotId,
+    snapshotDigest,
+    artifactPath: join(workspaceValue.authorities.runtime, "context", STORY_ID, `${snapshotId}.json`),
+  };
 }
 
 function adapter(workspaceValue: WorkspaceExecutionContextV1, fresh: readonly ContextReadResultV1[], operationAllowed = false) {
@@ -121,7 +129,7 @@ function adapter(workspaceValue: WorkspaceExecutionContextV1, fresh: readonly Co
     host: createContextHostAdapter({
       freshRead,
       writeSnapshot: (value) => writeContextSnapshot(workspaceValue, value),
-      readSnapshot: (_workspace, reference) => readContextSnapshot(workspaceValue, reference.artifactPath),
+      readSnapshot: (_workspace, reference) => readContextSnapshot(workspaceValue, reference),
       authorizeRestrictedOperation: () => operationAllowed,
       observe,
     }),
@@ -230,7 +238,16 @@ describe("Context Agent handoff", () => {
     expect(adopted).toMatchObject({
       status: "ready",
       source: "fresh",
-      decision: { decision: "adopt_new_snapshot", useSnapshot: "new" },
+      decision: {
+        decision: "adopt_new_snapshot",
+        useSnapshot: "new",
+        handoffSnapshot: blocked.previousHandoff?.snapshot,
+        freshSnapshot: {
+          snapshotId: adoptedSnapshot.snapshotId,
+          snapshotDigest: adoptedSnapshot.snapshotDigest,
+          artifactPath: adoptedSnapshot.artifactPath,
+        },
+      },
       handoff: { snapshot: { snapshotId: adoptedSnapshot.snapshotId } },
     });
 
@@ -366,7 +383,7 @@ describe("Context Agent handoff", () => {
     const host = createContextHostAdapter({
       freshRead: vi.fn(async () => restricted),
       writeSnapshot: (value) => writeContextSnapshot(workspaceValue, value),
-      readSnapshot: (_workspace, reference) => readContextSnapshot(workspaceValue, reference.artifactPath),
+      readSnapshot: (_workspace, reference) => readContextSnapshot(workspaceValue, reference),
       authorizeRestrictedOperation,
     });
     await expect(host.readForStage({

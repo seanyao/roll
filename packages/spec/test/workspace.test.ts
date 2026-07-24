@@ -51,6 +51,18 @@ function workspace() {
   };
 }
 
+function workspaceContexts() {
+  return {
+    enabled: true,
+    bindings: [{
+      providerId: "bipo-enterprise",
+      enabled: true,
+      required: true,
+      entrypoints: ["wiki/index.md"],
+    }],
+  };
+}
+
 function issue() {
   const product = repository();
   const docs = repository("https://github.com/Owner/Docs.git", "docs");
@@ -86,6 +98,7 @@ describe("Workspace repository identity", () => {
     expect(imports).toEqual([
       { kind: "value", source: "node:crypto" },
       { kind: "type", source: "./json-schema.js" },
+      { kind: "value", source: "./context-binding.js" },
     ]);
     expect(source).not.toMatch(/\b(?:process|globalThis|fetch|console|Date|setTimeout|setInterval)\b/u);
   });
@@ -302,6 +315,48 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
         repositories: [{ ...repository(), remote: "https://github.com/Owner/Repo" }],
       },
     });
+  });
+
+  it("keeps contexts optional and round-trips an explicitly authorized binding", () => {
+    expect(parseWorkspaceManifest(workspace(), {})).toMatchObject({
+      ok: true,
+      value: expect.not.objectContaining({ contexts: expect.anything() }),
+    });
+    expect(parseWorkspaceManifest({ ...workspace(), contexts: workspaceContexts() }, {})).toMatchObject({
+      ok: true,
+      value: { contexts: workspaceContexts() },
+    });
+  });
+
+  it("rejects invalid Workspace contexts at the Workspace contract boundary", () => {
+    expect(parseWorkspaceManifest({
+      ...workspace(),
+      contexts: {
+        enabled: true,
+        bindings: [{ ...workspaceContexts().bindings[0], enabled: false }],
+      },
+    }, {})).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        expect.objectContaining({ code: "invalid_value", path: "contexts.bindings[0]" }),
+      ]),
+    });
+  });
+
+  it.each([
+    ["root secret", { ...workspaceContexts(), credential: "workspace-secret-sentinel" }, "contexts.credential"],
+    [
+      "binding cache path",
+      { ...workspaceContexts(), bindings: [{ ...workspaceContexts().bindings[0], cachePath: "workspace-secret-sentinel" }] },
+      "contexts.bindings[0].cachePath",
+    ],
+  ])("rejects %s through parseWorkspaceManifest without echoing secret values", (_label, contextsValue, path) => {
+    const parsed = parseWorkspaceManifest({ ...workspace(), contexts: contextsValue }, {});
+    expect(parsed).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "unknown_field", path })]),
+    });
+    expect(JSON.stringify(parsed)).not.toContain("workspace-secret-sentinel");
   });
 
   it.each([

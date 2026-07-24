@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -268,6 +269,32 @@ describe("US-WS-025 Workspace metadata reference index", () => {
     expect(() => collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace })).toThrowError(
       expect.objectContaining({ code }),
     );
+  });
+
+  it.each([
+    ["provider directory", (f: ReturnType<typeof fixture>) => {
+      const target = join(f.workspace, "requirements", "jira");
+      const outside = join(f.root, "outside-provider");
+      renameSync(target, outside);
+      symlinkSync(outside, target, "dir");
+    }],
+    ["Requirement directory", (f: ReturnType<typeof fixture>) => {
+      const target = join(f.workspace, "requirements", "jira", f.source.requirementId);
+      const outside = join(f.root, "outside-requirement");
+      renameSync(target, outside);
+      symlinkSync(outside, target, "dir");
+    }],
+    ["source.yaml", (f: ReturnType<typeof fixture>) => {
+      const target = join(f.workspace, "requirements", "jira", f.source.requirementId, "source.yaml");
+      const outside = join(f.root, "outside-source.yaml");
+      renameSync(target, outside);
+      symlinkSync(outside, target, "file");
+    }],
+  ] as const)("rejects a symlinked Requirement archive %s without following it", (_name, mutate) => {
+    const f = fixture();
+    mutate(f);
+    expect(() => collectWorkspaceMetadataReferenceIndex({ workspaceRoot: f.workspace }))
+      .toThrowError(expect.objectContaining({ code: "unsafe_authority_path" }));
   });
 
   it("rejects a symlinked authority path without following it", () => {

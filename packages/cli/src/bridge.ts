@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveLang } from "@roll/spec";
 import { networkNeeds, requireNetwork } from "./lib/require-network.js";
-import { publicCommands } from "./lib/command-surface.js";
+import { canonicalTopLevelCommand, publicCommands } from "./lib/command-surface.js";
 import { renderFrontDoor } from "./lib/front-door.js";
 import { isSnapshotStale, loadTruthSnapshot, renderNowMs } from "./lib/truth-read.js";
 import { renderState } from "./render.js";
@@ -138,7 +138,8 @@ export async function dispatch(
   // Production passes real deps from bin/roll.js; tests omit to skip wake.
   wakeDeps?: WakeDeps,
 ): Promise<RunResult> {
-  const [command, ...rest] = argv;
+  const [rawCommand, ...rest] = argv;
+  const command = rawCommand === undefined ? undefined : canonicalTopLevelCommand(rawCommand);
   if (command !== undefined) {
     const handler = ported.get(command);
     if (handler !== undefined) {

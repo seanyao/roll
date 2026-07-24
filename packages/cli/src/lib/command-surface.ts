@@ -50,6 +50,8 @@ export type CommandOwner =
 export interface CommandSurfaceDecision {
   /** The current command surface as a user types it today (e.g. `prices` or `loop monitor`). */
   readonly current: string;
+  /** Fixed parser aliases. They canonicalize to `current` and never appear as separate public commands. */
+  readonly aliases?: readonly string[];
   /** Where it should live (only meaningful for nested/internal moves); omitted for public commands that own themselves. */
   readonly target?: string;
   /** The public top-level command this surface belongs under. */
@@ -83,7 +85,7 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
   { current: "setup", owner: "setup", audience: "human", disposition: "public", rationale: "Project/tooling setup lifecycle root." },
   { current: "status", owner: "status", audience: "human", disposition: "public", rationale: "Project health snapshot." },
   { current: "test", owner: "test", audience: "human", disposition: "public", rationale: "Run the project's tests; a core workflow verb." },
-  { current: "workspace", owner: "workspace", audience: "human", disposition: "public", rationale: "Inspect and control explicitly targeted Workspace lifecycle state." },
+  { current: "workspace", aliases: ["ws"], owner: "workspace", audience: "human", disposition: "public", rationale: "Inspect and control explicitly targeted Workspace lifecycle state." },
   { current: "update", owner: "update", audience: "human", disposition: "public", rationale: "Upgrade the global roll." },
 
   // ── Nested: useful capabilities that move under their owning command ──
@@ -124,11 +126,19 @@ export const COMMAND_SURFACE: readonly CommandSurfaceDecision[] = [
  */
 export function validateCommandSurface(decisions: readonly CommandSurfaceDecision[]): void {
   const seen = new Set<string>();
+  const aliases = new Set<string>();
+  const canonicalNames = new Set(decisions.map((decision) => decision.current));
   for (const d of decisions) {
     if (seen.has(d.current)) {
       throw new Error(`command-surface: duplicate decision for '${d.current}'`);
     }
     seen.add(d.current);
+    for (const alias of d.aliases ?? []) {
+      if (canonicalNames.has(alias) || aliases.has(alias)) {
+        throw new Error(`command-surface: duplicate alias '${alias}'`);
+      }
+      aliases.add(alias);
+    }
     if (d.disposition === "public") {
       if (d.owner !== d.current) {
         throw new Error(`command-surface: public '${d.current}' must own itself (owner='${d.owner}')`);
@@ -162,4 +172,9 @@ export function publicCommands(): string[] {
 /** Look up a single decision by its current surface name. */
 export function commandDecision(current: string): CommandSurfaceDecision | undefined {
   return COMMAND_SURFACE.find((d) => d.current === current);
+}
+
+/** Canonicalize one exact top-level token without creating a second command surface. */
+export function canonicalTopLevelCommand(command: string): string {
+  return COMMAND_SURFACE.find((decision) => decision.aliases?.includes(command) === true)?.current ?? command;
 }

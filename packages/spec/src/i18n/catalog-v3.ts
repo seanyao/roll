@@ -9,6 +9,26 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  "workspace.selector.error.line": {
+    en: "%s: %s — %s",
+    zh: "%s：%s — %s",
+  },
+  "workspace.selector.error.duplicate_workspace_selector": {
+    en: "Provide exactly one --workspace <id|path>.",
+    zh: "请只提供一个 --workspace <ID|路径>。",
+  },
+  "workspace.selector.error.workspace_selector_missing_value": {
+    en: "--workspace requires <id|path>; another flag is not a selector value.",
+    zh: "--workspace 需要 <ID|路径>；后续 flag 不能作为 selector 值。",
+  },
+  "workspace.selector.next.duplicate_workspace_selector": {
+    en: "Remove the duplicate and use --workspace <id|path> once.",
+    zh: "请移除重复参数，只使用一次 --workspace <ID|路径>。",
+  },
+  "workspace.selector.next.workspace_selector_missing_value": {
+    en: "Provide a value with --workspace <id|path>.",
+    zh: "请使用 --workspace <ID|路径> 提供目标。",
+  },
   "backlog.usage": {
     en: "Usage: roll backlog [--workspace <id|path>]\n       roll backlog show <story-id> [--workspace <id|path>]\n       roll backlog --all",
     zh: "用法：roll backlog [--workspace <ID|路径>]\n      roll backlog show <Story ID> [--workspace <ID|路径>]\n      roll backlog --all",

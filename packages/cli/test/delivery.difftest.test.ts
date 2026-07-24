@@ -402,8 +402,8 @@ describe("US-WS-015 roll delivery surface", () => {
 
     expect(malformed.map((result) => result.status)).toEqual([1, 1, 1]);
     expect(malformed.map((result) => JSON.parse(result.stderr).error.code)).toEqual([
-      "invalid_arguments",
-      "invalid_arguments",
+      "workspace_selector_missing_value",
+      "duplicate_workspace_selector",
       "invalid_arguments",
     ]);
   });

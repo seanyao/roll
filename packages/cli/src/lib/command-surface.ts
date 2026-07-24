@@ -178,3 +178,77 @@ export function commandDecision(current: string): CommandSurfaceDecision | undef
 export function canonicalTopLevelCommand(command: string): string {
   return COMMAND_SURFACE.find((decision) => decision.aliases?.includes(command) === true)?.current ?? command;
 }
+
+/** One current CLI leaf that already accepts the canonical Workspace selector. */
+export interface WorkspaceSelectorOperationDecision {
+  readonly id: string;
+  readonly command: string;
+  readonly route: readonly string[];
+  readonly canonicalCommand: string;
+  readonly exampleArgs: readonly string[];
+}
+
+/**
+ * Narrow selector capability source for US-WS-022. The closed cross-surface
+ * context-policy registry is delivered by US-WS-032; it consumes this list
+ * instead of inventing a second alias inventory.
+ */
+export const WORKSPACE_SELECTOR_OPERATIONS: readonly WorkspaceSelectorOperationDecision[] = [
+  { id: "agent.workspace", command: "agent", route: [], canonicalCommand: "roll agent", exampleArgs: ["--workspace", "roll"] },
+  { id: "backlog.read", command: "backlog", route: [], canonicalCommand: "roll backlog", exampleArgs: ["--workspace", "roll"] },
+  ...["show", "block", "defer", "unblock", "promote", "claim", "lint", "unstick", "sync"].map((operation) => ({
+    id: `backlog.${operation}`,
+    command: "backlog",
+    route: [operation],
+    canonicalCommand: `roll backlog ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+  })),
+  ...["list", "show", "reconcile"].map((operation) => ({
+    id: `delivery.${operation}`,
+    command: "delivery",
+    route: [operation],
+    canonicalCommand: `roll delivery ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+  })),
+  ...["status", "go", "run-once", "reconcile", "on", "pause", "resume"].map((operation) => ({
+    id: `loop.${operation}`,
+    command: "loop",
+    route: [operation],
+    canonicalCommand: `roll loop ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+  })),
+  { id: "workspace.issue.init", command: "workspace", route: ["issue", "init"], canonicalCommand: "roll workspace issue init", exampleArgs: ["issue", "init", "US-WS-022", "--workspace", "roll"] },
+  { id: "workspace.requirement.add", command: "workspace", route: ["requirement", "add"], canonicalCommand: "roll workspace requirement add", exampleArgs: ["requirement", "add", "--workspace", "roll"] },
+  { id: "workspace.migrate", command: "workspace", route: ["migrate"], canonicalCommand: "roll workspace migrate", exampleArgs: ["migrate", "--workspace", "roll"] },
+  ...["show", "activate", "pause", "archive"].map((operation) => ({
+    id: `workspace.${operation}`,
+    command: "workspace",
+    route: [operation],
+    canonicalCommand: `roll workspace ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+  })),
+  ...["audit", "cleanup"].map((operation) => ({
+    id: `worktree.${operation}`,
+    command: "worktree",
+    route: [operation],
+    canonicalCommand: `roll worktree ${operation}`,
+    exampleArgs: [operation, "--workspace", "roll"],
+  })),
+];
+
+/** Resolve the leaf capability before its registered family handler dispatches. */
+export function workspaceSelectorOperation(
+  command: string,
+  args: readonly string[],
+): WorkspaceSelectorOperationDecision | undefined {
+  return WORKSPACE_SELECTOR_OPERATIONS
+    .filter((operation) => {
+      if (operation.command !== command) return false;
+      if (operation.route.length === 0) {
+        const first = args[0];
+        return first === undefined || first.startsWith("-");
+      }
+      return operation.route.every((token, index) => args[index] === token);
+    })
+    .sort((left, right) => right.route.length - left.route.length)[0];
+}

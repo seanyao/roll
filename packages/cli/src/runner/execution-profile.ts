@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import {
   applyExecutionPolicy,
@@ -16,7 +17,8 @@ import {
   type CycleContext,
 } from "@roll/core";
 import type { AdversarialPlan } from "@roll/core";
-import type { ArtifactManifest, ExecutionProfile, Rig } from "@roll/spec";
+import type { ArtifactManifest, ExecutionProfile, ResolutionSource, Rig } from "@roll/spec";
+import { resolveScopedCastRole } from "./scoped-route.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { readLatestStoryReviewScore } from "../lib/review-score.js";
 import { storySpecPath } from "./attest-gate.js";
@@ -248,23 +250,157 @@ function buildDesignerPrompt(storyId: string, contractAbsPath: string): string {
   ].join("\n");
 }
 
+/**
+ * US-DELTA-006 — the Designer role resolved for a Full Delta cycle. `ok:false`
+ * means no valid `design` binding could be cast — the caller MUST fail closed
+ * (the Builder never starts). `null` (from {@link DesignerStageDeps.resolveDesigner})
+ * means the project has no scoped agents.yaml at all; that is ALSO fail-closed
+ * for the designed profile (no quiet fallback to reusing the Builder agent).
+ */
+export interface DesignerResolution {
+  readonly ok: boolean;
+  readonly agent?: string;
+  readonly model?: string;
+  readonly source: ResolutionSource;
+  readonly reasons: readonly string[];
+  readonly error?: string;
+}
+
+/** Test/injection seam for the designer stage. */
+export interface DesignerStageDeps {
+  /** Resolve the Designer INDEPENDENTLY (scope role `design`), never the Builder
+   *  agent. Default: the scoped `designer` cast-role resolution. `null` ⇒ no
+   *  scoped agents.yaml (fail closed for a designed cycle). */
+  readonly resolveDesigner?: (repoCwd: string) => DesignerResolution | null;
+  /** Host id stamped into the delta role facts (default `os.hostname()`). */
+  readonly hostId?: string;
+}
+
+/**
+ * US-DELTA-006 — the default independent Designer resolver: the scoped
+ * `designer` cast role maps to the `design` scope role. A missing scoped config
+ * (`null`), a non-`design` scope role, or an unresolved `design` binding all
+ * surface as fail-closed (no fallback to the Builder's `execute` agent).
+ */
+function defaultResolveDesigner(repoCwd: string): DesignerResolution | null {
+  const route = resolveScopedCastRole(repoCwd, "designer");
+  if (route === null) return null;
+  if (route.scopeRole !== "design") {
+    return {
+      ok: false,
+      source: "availability-fallback",
+      reasons: [],
+      error: `resolved scope role '${route.scopeRole}', expected 'design'`,
+    };
+  }
+  if (!route.resolution.ok) {
+    const errors = route.resolution.failure.errors;
+    return {
+      ok: false,
+      source: "availability-fallback",
+      reasons: errors as string[],
+      error: errors[0] ?? "design role unresolved",
+    };
+  }
+  const r = route.resolution.resolved;
+  return {
+    ok: true,
+    agent: r.agent,
+    ...(r.model !== undefined && r.model !== "" ? { model: r.model } : {}),
+    // A `fixed` owner binding is an explicit user pin; a `select` pool is an
+    // availability-driven cast.
+    source: r.selectedStrategy === "fixed" ? "user-pin" : "availability-fallback",
+    reasons: [`scoped design role via ${r.source}`, `strategy:${r.selectedStrategy}`],
+  };
+}
+
+/**
+ * US-DELTA-006 — the Full Delta / `designed` DESIGN STAGE. The Designer is cast
+ * INDEPENDENTLY of the Builder (its own agent identity + session), records
+ * separate `delta:role_resolved` and `delta:role_started` facts, runs READ-ONLY
+ * (no product worktree write roots), and FAILS CLOSED — returning `ok:false` so
+ * the Builder never starts — when no valid `design` binding resolves or the
+ * Designer publishes no valid contract.
+ */
 export async function runDesignerStage(
   ports: Ports,
   ctx: CycleContext,
-  designerAgent: string,
-): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[] }> {
+  deps: DesignerStageDeps = {},
+): Promise<{ ran: boolean; ok: boolean; reasons: readonly string[]; designerAgent?: string; designerSessionId?: string }> {
   if (ctx.selectedProfile !== "designed") return { ran: false, ok: true, reasons: [] };
   const storyId = ctx.storyId ?? "";
   const runDir = ctx.evidenceRunDir ?? "";
   if (storyId === "" || runDir === "") return { ran: false, ok: false, reasons: ["no story id / run dir for designer stage"] };
+
+  // AC1/AC2: resolve the Designer INDEPENDENTLY (scope role `design`). A missing
+  // scoped config, a non-`design` scope role, or an unresolved `design` binding
+  // all fail closed here — the Builder is NEVER reused as the Designer and there
+  // is NO quiet fallback to `execute`.
+  const resolveDesigner = deps.resolveDesigner ?? defaultResolveDesigner;
+  const resolved = resolveDesigner(ports.repoCwd);
+  if (resolved === null) {
+    return {
+      ran: false,
+      ok: false,
+      reasons: ["designer stage: no scoped agents.yaml design binding — Full Delta requires an independently cast Designer (no fallback to the Builder agent)"],
+    };
+  }
+  if (!resolved.ok || resolved.agent === undefined || resolved.agent === "") {
+    return { ran: false, ok: false, reasons: [`designer stage: ${resolved.error ?? "design role unresolved"}`] };
+  }
+  const designerAgent = resolved.agent;
+
   const dir = join(runDir, "role-artifacts", "designer");
   const contractPath = join(dir, "design-contract.md");
   const manifestPath = join(dir, "artifact-manifest.json");
   const designerSessionId = `${ctx.cycleId ?? "cycle"}:design:${designerAgent}:${ports.clock()}`;
+  const roleInstanceId = `${ctx.cycleId ?? "cycle"}:designer:${designerAgent}`;
+  const delegationId = ctx.cycleId ?? "cycle";
+  const hostId = deps.hostId ?? hostname();
+  // The scoped router casts an agent IDENTITY; a per-role MODEL resolution is
+  // US-DELTA-002 territory, so absent an explicit model the agent name is the
+  // best-available identity token (mirrors the manifest's `rig.agent`).
+  const modelId = resolved.model !== undefined && resolved.model !== "" ? resolved.model : designerAgent;
   // E4: the designer reads the code it designs against; run it where the builder
   // will run (submodule cycle worktree for a submodule story). No targetSubmodule
   // ⇒ ports.paths.worktreePath, unchanged.
   const execCwd = resolveExecutionCwd(ports, ctx);
+
+  // AC3: record SEPARATE role-resolution and role-start facts for the Designer
+  // BEFORE the design stage runs, so the independent cast is auditable.
+  try {
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "delta:role_resolved",
+      delegationId,
+      storyId,
+      role: "designer",
+      roleInstanceId,
+      hostId,
+      modelId,
+      source: resolved.source,
+      reasons: [...resolved.reasons],
+      inventorySha256: "",
+      inventoryObservedAt: new Date(eventTs(ports)).toISOString(),
+      ts: eventTs(ports),
+    });
+    ports.events.appendEvent(ports.paths.eventsPath, {
+      type: "delta:role_started",
+      delegationId,
+      storyId,
+      role: "designer",
+      sessionId: designerSessionId,
+      roleInstanceId,
+      hostId,
+      modelId,
+      identityProvenance: "adapter-observed",
+      // AC5: the Designer runs READ-ONLY — only the Builder gets write roots.
+      worktreeAccess: "read-only",
+      ts: eventTs(ports),
+    });
+  } catch {
+    /* recording is best-effort; never topple the stage on an event-append blip */
+  }
+
   if (!existsSync(contractPath)) {
     try {
       mkdirSync(dir, { recursive: true });
@@ -278,6 +414,9 @@ export async function runDesignerStage(
         agent: designerAgent,
         observeCwd: execCwd,
         run: () =>
+          // AC5: NO `writableRoots` — the Designer runs READ-ONLY. Only the
+          // Builder spawn (spawn-agent-handler) receives product worktree write
+          // roots.
           ports.agentSpawn(designerAgent, {
             cwd: execCwd,
             skillBody: buildDesignerPrompt(storyId, contractPath),
@@ -309,7 +448,7 @@ export async function runDesignerStage(
   }
   const contractMd = existsSync(contractPath) ? readFileSync(contractPath, "utf8") : null;
   const v = validateDesignArtifact({ manifest, contractMd, storyId });
-  return { ran: true, ok: v.ok, reasons: v.reasons };
+  return { ran: true, ok: v.ok, reasons: v.reasons, designerAgent, designerSessionId };
 }
 
 export function routerEstMin(worktreeCwd: string, storyId: string, backlogDesc: string): number | undefined {

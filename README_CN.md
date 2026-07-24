@@ -195,7 +195,6 @@ roll loop on
 | `roll agent [--workspace <ID\|路径>\|migrate\|list\|readiness\|cast]` | 查看机器 Agent Scope/就绪度，或只读解析一个 Workspace 的角色分工 |
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <ID\|路径>]` | 查看和管理一个明确 Workspace 的待办；`--all` 仅限只读 |
 | `roll config [lang\|prices\|tune\|…]` | 配置语言、价格和建议式调参 |
-| `roll context <status\|read> [--workspace <ID\|路径>]` | 查看本地 Context 配置，或 fresh fetch Git LLM Wiki revision 并生成不可变 Snapshot |
 | `roll delivery <list\|show\|reconcile> [--workspace <ID\|路径>]` | 查看 Issue 各仓 PR/CI/merge 事实与 exact-SHA 集成验收；`list --all` 仅限只读 |
 | `roll design [--from-file <path>] [--agent <name>]` | 交互式启动 `$roll-design`；详细设计会生成自包含 Design Review Page |
 | `roll doctor [skills\|tools\|language]` | 诊断安装、skills、工具、权限与语言漂移 |

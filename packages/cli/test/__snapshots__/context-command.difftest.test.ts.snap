@@ -124,7 +124,7 @@ exports[`US-CONTEXT-007 context command snapshots > puts versioned usage and tar
 }
 `;
 
-exports[`US-CONTEXT-007 context command snapshots > renders localized help without resolving Workspace or reading Context > help-en 1`] = `
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > help-en 1`] = `
 {
   "status": 0,
   "stderr": "",
@@ -136,7 +136,7 @@ exports[`US-CONTEXT-007 context command snapshots > renders localized help witho
 }
 `;
 
-exports[`US-CONTEXT-007 context command snapshots > renders localized help without resolving Workspace or reading Context > help-zh 1`] = `
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > help-zh 1`] = `
 {
   "status": 0,
   "stderr": "",
@@ -144,6 +144,90 @@ exports[`US-CONTEXT-007 context command snapshots > renders localized help witho
       roll context read [--workspace <ID|路径>] [--story <ID>] --stage <阶段> [--environment <ID>]... [--ref <Context 引用>]... [--include-non-active] [--allow-restricted] [--json]
   status 只读取本地 registry、binding 和 snapshot 元数据；不会 fetch，也不能证明远端最新。
   read 每次调用都会重新读取 Provider。--allow-restricted 只表达意图，仍须 operation policy 授权。
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > read-help-en 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "Usage: roll context read [--workspace <id|path>] [--story <id>] --stage <clarify|design|tasking|build|qa|review|fix|operation> [--environment <id>]... [--ref <context-ref>]... [--include-non-active] [--allow-restricted] [--json]
+
+Perform a fresh Context read. Every invocation fetches once per unique enabled Provider, then reads purpose, schema, entrypoints, and requested pages from the same commit. Fetch failure has no stale fallback. Snapshot reuse is a separate no-fetch path; requesting a new page requires a new read.
+
+Options:
+  --workspace <id|path>  Resolve this Workspace explicitly; otherwise use the unified target resolver from the current directory.
+  --story <id>           Bind the request to a Story; it must agree with an Issue-scoped current directory.
+  --stage <stage>        Required execution stage for scope matching.
+  --environment <id>     Add an explicit environment scope value; repeatable.
+  --ref <context-ref>    Add an explicit context:// Provider page; repeatable.
+  --include-non-active   Permit explicitly requested proposed or deprecated pages.
+  --allow-restricted     Express restricted-reference intent; operation policy must still authorize it.
+  --json                 Write the complete versioned result, including page bodies, to stdout.
+
+Plain stdout contains outcome, scope, Provider, revision, refs, digests, and diagnostics, never page bodies. Fetch progress and sanitized diagnostics go to stderr and the event stream.
+Exit codes: 0=completed/disabled, 3=partial, 2=blocked/error.
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > read-help-zh 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "用法：roll context read [--workspace <ID|路径>] [--story <ID>] --stage <clarify|design|tasking|build|qa|review|fix|operation> [--environment <ID>]... [--ref <Context 引用>]... [--include-non-active] [--allow-restricted] [--json]
+
+执行 fresh Context read。每次调用对每个唯一且启用的 Provider fetch 一次，然后从同一 commit 读取 purpose、schema、entrypoints 与请求页面。fetch 失败时没有 stale fallback。复用 Snapshot 是独立的 no-fetch 路径；请求新页面必须发起新 read。
+
+选项：
+  --workspace <ID|路径>  显式解析 Workspace；省略时从当前目录使用统一 target resolver。
+  --story <ID>           把 request 绑定到 Story；必须与当前 Issue 目录一致。
+  --stage <阶段>          scope 匹配所需的 execution stage。
+  --environment <ID>     添加显式 environment scope value；可重复。
+  --ref <Context 引用>   添加显式 context:// Provider 页面；可重复。
+  --include-non-active   允许显式请求 proposed 或 deprecated 页面。
+  --allow-restricted     表达 restricted-reference intent；仍须 operation policy 授权。
+  --json                 把包含页面正文的完整 versioned result 写到 stdout。
+
+plain stdout 只包含 outcome、scope、Provider、revision、refs、digest 与 diagnostics，绝不打印页面正文。fetch progress 与清洗后的 diagnostics 写 stderr 和 event stream。
+退出码：0=completed/disabled，3=partial，2=blocked/error。
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > status-help-en 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "Usage: roll context status [--workspace <id|path>] [--json]
+
+Inspect the machine registry, resolved Workspace binding, and latest local Snapshot metadata. This command never fetches and is not proof of remote freshness.
+
+Options:
+  --workspace <id|path>  Resolve this Workspace explicitly; otherwise use the unified target resolver from the current directory.
+  --json                 Write the versioned status object to stdout.
+
+Plain stdout is a metadata summary. Errors go to stderr.
+Exit codes: 0=success, 2=target/configuration/snapshot error.
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized command and subcommand help without resolving Workspace or reading Context > status-help-zh 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "用法：roll context status [--workspace <ID|路径>] [--json]
+
+查看机器 registry、解析后的 Workspace binding 与最近本地 Snapshot metadata。该命令绝不 fetch，也不能证明远端最新。
+
+选项：
+  --workspace <ID|路径>  显式解析 Workspace；省略时从当前目录使用统一 target resolver。
+  --json                 把 versioned status object 写到 stdout。
+
+plain stdout 输出 metadata 摘要；错误写 stderr。
+退出码：0=成功，2=target/configuration/snapshot 错误。
 ",
 }
 `;

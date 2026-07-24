@@ -120,7 +120,10 @@ interface ParsedReadArgs {
   readonly json: boolean;
 }
 
-type ParsedContextArgs = ParsedStatusArgs | ParsedReadArgs | { readonly kind: "help" };
+type ParsedContextArgs = ParsedStatusArgs | ParsedReadArgs | {
+  readonly kind: "help";
+  readonly command?: "status" | "read";
+};
 
 interface ContextStatusV1 {
   readonly schema: typeof CONTEXT_STATUS_V1;
@@ -180,7 +183,9 @@ function message(key: string, ...args: ReadonlyArray<string | number>): string {
   return t(v3Catalog, language(), key, ...args);
 }
 
-export function contextUsage(): string {
+export function contextUsage(command?: "status" | "read"): string {
+  if (command === "status") return message("context.status.usage");
+  if (command === "read") return message("context.read.usage");
   return message("context.usage");
 }
 
@@ -273,7 +278,11 @@ function flagValue(args: readonly string[], index: number): string | undefined {
 }
 
 function parseArgs(args: readonly string[]): ParsedContextArgs | undefined {
-  if (args.length === 0 || args.includes("--help") || args.includes("-h") || args[0] === "help") return { kind: "help" };
+  if (args.length === 0 || args[0] === "help") return { kind: "help" };
+  if (args.includes("--help") || args.includes("-h")) {
+    const command = args[0] === "status" || args[0] === "read" ? args[0] : undefined;
+    return command === undefined ? { kind: "help" } : { kind: "help", command };
+  }
   const kind = args[0];
   if (kind !== "status" && kind !== "read") return undefined;
   let workspace: string | undefined;
@@ -701,7 +710,7 @@ export async function contextCommand(args: string[], deps: ContextCommandDeps = 
   const parsed = parseArgs(args);
   if (parsed === undefined) return emitError("invalid_arguments", args.includes("--json"));
   if (parsed.kind === "help") {
-    process.stdout.write(contextUsage());
+    process.stdout.write(contextUsage(parsed.command));
     return 0;
   }
   return parsed.kind === "status" ? runStatus(parsed, deps) : runRead(parsed, deps);

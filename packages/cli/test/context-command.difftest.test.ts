@@ -153,14 +153,25 @@ beforeEach(() => {
 });
 
 describe("US-CONTEXT-007 context command snapshots", () => {
-  it("renders localized help without resolving Workspace or reading Context", async () => {
+  it("renders localized command and subcommand help without resolving Workspace or reading Context", async () => {
     const commandDeps = deps();
     const en = await capture(["--help"], commandDeps);
+    const statusEn = await capture(["status", "--help"], commandDeps);
+    const readEn = await capture(["read", "--help"], commandDeps);
     process.env["ROLL_LANG"] = "zh";
     const zh = await capture(["--help"], commandDeps);
+    const statusZh = await capture(["status", "--help"], commandDeps);
+    const readZh = await capture(["read", "--help"], commandDeps);
 
     expect(en).toMatchSnapshot("help-en");
+    expect(statusEn).toMatchSnapshot("status-help-en");
+    expect(readEn).toMatchSnapshot("read-help-en");
     expect(zh).toMatchSnapshot("help-zh");
+    expect(statusZh).toMatchSnapshot("status-help-zh");
+    expect(readZh).toMatchSnapshot("read-help-zh");
+    expect(statusEn.stdout).not.toContain("--allow-restricted");
+    expect(readEn.stdout).toContain("--allow-restricted");
+    expect(readEn.stdout).toContain("Exit codes: 0=completed/disabled, 3=partial, 2=blocked/error");
     expect(commandDeps.resolveTarget).not.toHaveBeenCalled();
     expect(commandDeps.createReadService).not.toHaveBeenCalled();
   });

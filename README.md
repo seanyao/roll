@@ -291,7 +291,6 @@ opens the remote publication gate after local acceptance.
 | `roll agent [--workspace <id\|path>\|migrate\|list\|readiness]` | Agent Scope, machine inventory/readiness, and read-only Workspace casting |
 | `roll backlog [show\|sync\|block\|defer\|lint\|…] [--workspace <id\|path>]` | View and manage one Workspace backlog; `--all` is read-only |
 | `roll config [lang\|prices\|tune\|…]` | Read/write configuration, model prices, and suggest-only tuning |
-| `roll context <status\|read> [--workspace <id\|path>]` | Inspect local Context configuration or fetch a fresh Git LLM Wiki revision into an immutable Snapshot |
 | `roll delivery <list\|show\|reconcile> [--workspace <id\|path>]` | Inspect Issue repository PR/CI/merge facts and exact-SHA integration acceptance; `list --all` is read-only |
 | `roll design [--from-file <path>] [--agent <name>] [--verbose\|--raw]` | Launch `$roll-design` with bounded live progress, handoff, and an optional `roll loop go --review auto` continuation when new Todo cards are created |
 | `roll doctor [skills\|tools\|language\|repair-protection]` | Diagnose install health, skills, tools, permissions, language drift, and stale main-checkout write protection |

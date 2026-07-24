@@ -1,0 +1,226 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+  CONTEXT_PROVIDER_REGISTRY_V1,
+  type ContextProviderRegistryV1,
+  type WorkspaceContextsV1,
+} from "@roll/spec";
+import { compileContextProviderExecutionPlans } from "../src/context/execution-plan.js";
+
+function provider(id = "bipo-enterprise") {
+  return {
+    id,
+    type: "git_llm_wiki" as const,
+    enabled: true,
+    remote: `https://github.com/Bipo/${id}`,
+    branch: "main",
+    fetch_timeout_seconds: 30,
+  };
+}
+
+function registry(overrides: Partial<ContextProviderRegistryV1> = {}): ContextProviderRegistryV1 {
+  return {
+    schema: CONTEXT_PROVIDER_REGISTRY_V1,
+    enabled: true,
+    providers: [provider()],
+    ...overrides,
+  };
+}
+
+function contexts(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceContextsV1 {
+  return {
+    enabled: true,
+    bindings: [{
+      providerId: "bipo-enterprise",
+      enabled: true,
+      required: true,
+      entrypoints: ["wiki/index.md"],
+    }],
+    ...overrides,
+  };
+}
+
+describe("compileContextProviderExecutionPlans", () => {
+  it("is synchronous and stays inside the pure core boundary", () => {
+    const source = readFileSync(new URL("../src/context/execution-plan.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/(?:node:fs|node:child_process|process\.cwd|\bfetch\s*\()/u);
+    const result = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    expect(result).not.toBeInstanceOf(Promise);
+  });
+
+  it.each([
+    ["missing registry", undefined, contexts()],
+    ["registry disabled", registry({ enabled: false }), contexts()],
+    ["missing Workspace contexts", registry(), undefined],
+    ["Workspace contexts disabled", registry(), contexts({ enabled: false })],
+    ["all bindings disabled", registry(), contexts({ bindings: [{ ...contexts().bindings[0]!, enabled: false, required: false }] })],
+  ])("returns an explicit disabled plan for %s", (_label, providerRegistry, workspaceContexts) => {
+    expect(compileContextProviderExecutionPlans({
+      registry: providerRegistry,
+      contexts: workspaceContexts,
+      refs: [],
+    })).toEqual({
+      outcome: "disabled",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "context_disabled", severity: "warning" })],
+    });
+  });
+
+  it("blocks a required missing Provider and degrades an optional missing Provider without a plan", () => {
+    const required = compileContextProviderExecutionPlans({ registry: registry({ providers: [] }), contexts: contexts(), refs: [] });
+    expect(required).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_not_found", severity: "blocking", providerId: "bipo-enterprise" })],
+    });
+
+    const optional = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [] }),
+      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      refs: [],
+    });
+    expect(optional).toMatchObject({
+      outcome: "ready",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_not_found", severity: "gap" })],
+    });
+  });
+
+  it("blocks a required disabled Provider and skips an optional disabled Provider", () => {
+    const disabledRegistry = registry({ providers: [{ ...provider(), enabled: false }] });
+    expect(compileContextProviderExecutionPlans({ registry: disabledRegistry, contexts: contexts(), refs: [] })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_disabled", severity: "blocking" })],
+    });
+    expect(compileContextProviderExecutionPlans({
+      registry: disabledRegistry,
+      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      refs: [],
+    })).toMatchObject({
+      outcome: "ready",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_disabled", severity: "gap" })],
+    });
+  });
+
+  it("blocks invalid and unbound explicit refs before producing any executable plan", () => {
+    expect(compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts(),
+      refs: ["context://other/wiki/index.md"],
+    })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_not_bound", severity: "blocking" })],
+    });
+    expect(compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts(),
+      refs: ["context://bipo-enterprise/../wiki/index.md"],
+    })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "invalid_context_ref", severity: "blocking" })],
+    });
+  });
+
+  it("treats an explicit ref to a disabled binding as not bound", () => {
+    expect(compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, enabled: false, required: false }] }),
+      refs: ["context://bipo-enterprise/wiki/systems/axis.md"],
+    })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "provider_not_bound", severity: "blocking" })],
+    });
+  });
+
+  it("defensively blocks duplicate or contradictory bindings instead of merging them", () => {
+    const duplicate = contexts({
+      bindings: [contexts().bindings[0]!, { ...contexts().bindings[0]!, required: false }],
+    });
+    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: duplicate, refs: [] })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
+    });
+    const contradictory = contexts({
+      bindings: [{ ...contexts().bindings[0]!, enabled: false, required: true }],
+    });
+    expect(compileContextProviderExecutionPlans({ registry: registry(), contexts: contradictory, refs: [] })).toMatchObject({
+      outcome: "blocked",
+      plans: [],
+      diagnostics: [expect.objectContaining({ code: "invalid_context_binding", severity: "blocking" })],
+    });
+  });
+
+  it("builds one plan per Provider in binding order with reserved and requested paths stably deduplicated", () => {
+    const second = provider("platform-handbook");
+    const result = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [second, provider()] }),
+      contexts: contexts({
+        bindings: [
+          {
+            ...contexts().bindings[0]!,
+            entrypoints: ["wiki/index.md", "wiki/systems/axis.md", "wiki/index.md"],
+          },
+          {
+            providerId: "platform-handbook",
+            enabled: true,
+            required: false,
+            entrypoints: ["wiki/index.md"],
+          },
+        ],
+      }),
+      refs: [
+        "context://bipo-enterprise/wiki/systems/axis.md",
+        "context://platform-handbook/wiki/workflows/release.md",
+        "context://bipo-enterprise/wiki/data-surfaces/reporting.md",
+        "context://bipo-enterprise/wiki/systems/axis.md",
+      ],
+    });
+    expect(result).toMatchObject({ outcome: "ready", diagnostics: [] });
+    expect(result.plans.map((plan) => plan.provider.id)).toEqual(["bipo-enterprise", "platform-handbook"]);
+    expect(result.plans[0]?.paths).toEqual([
+      "purpose.md",
+      "schema.md",
+      "wiki/index.md",
+      "wiki/systems/axis.md",
+      "wiki/data-surfaces/reporting.md",
+    ]);
+    expect(result.plans[1]?.paths).toEqual([
+      "purpose.md",
+      "schema.md",
+      "wiki/index.md",
+      "wiki/workflows/release.md",
+    ]);
+  });
+
+  it("pins lowercase SHA-256 digests to canonical provider and binding content", () => {
+    const first = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
+    const same = compileContextProviderExecutionPlans({
+      registry: structuredClone(registry()),
+      contexts: structuredClone(contexts()),
+      refs: [],
+    });
+    expect(first).toEqual(same);
+    expect(first.plans).toHaveLength(1);
+    expect(first.plans[0]?.providerConfigDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(first.plans[0]?.bindingDigest).toMatch(/^[0-9a-f]{64}$/u);
+
+    const changedProvider = compileContextProviderExecutionPlans({
+      registry: registry({ providers: [{ ...provider(), branch: "release" }] }),
+      contexts: contexts(),
+      refs: [],
+    });
+    const changedBinding = compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts({ bindings: [{ ...contexts().bindings[0]!, required: false }] }),
+      refs: [],
+    });
+    expect(changedProvider.plans[0]?.providerConfigDigest).not.toBe(first.plans[0]?.providerConfigDigest);
+    expect(changedBinding.plans[0]?.bindingDigest).not.toBe(first.plans[0]?.bindingDigest);
+  });
+});

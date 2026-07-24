@@ -78,6 +78,26 @@ describe("recordSpawnRound (US-CYCLE-004 auto-write)", () => {
     // appends, so any further call is a genuinely new journal state.)
   });
 
+  it("US-CYCLE-012 auto-trigger: 2 consecutive rig failures auto-write a model-swap candidate + event", async () => {
+    const project = proj();
+    const ports = { repoCwd: project } as unknown as Ports;
+    const rec = (cyc: string, outcome: string): void =>
+      recordSpawnRound(ports, { storyId: "US-FAIL", model: "glm-5.2", cycleId: cyc } as unknown as CycleContext, { role: "builder", start: 1, durMs: 1, outcome });
+    const candPath = join(cardDirOf(project, "US-FAIL"), "model-swap-candidate.md");
+    rec("c1", "failed");
+    await flush();
+    expect(existsSync(candPath)).toBe(false); // one failure — under threshold
+    rec("c2", "kill:no-state-change");
+    await flush();
+    expect(existsSync(candPath)).toBe(true);
+    expect(readFileSync(candPath, "utf8")).toContain("builder × glm-5.2");
+    const eventsPath = join(project, ".roll", "loop", "events.ndjson");
+    const evs = readFileSync(eventsPath, "utf8").split("\n").filter((l) => l.includes('"model:swap_candidate"'));
+    expect(evs.length).toBe(1);
+    expect(evs[0]).toContain('"role":"builder"');
+    expect(evs[0]).toContain('"streak":2');
+  });
+
   it("returns synchronously (non-blocking) — the write is deferred off the hot path", () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;

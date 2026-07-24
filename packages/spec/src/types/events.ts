@@ -96,6 +96,15 @@ export type RollEvent =
   // to feed the sizing error back to the design side. Signal only: no backlog /
   // spec mutation. `rounds` is the distinct-round count observed in the journal.
   | { type: "split:advice"; card: string; rounds: number; path: string; ts: number }
+  // US-CYCLE-012 — a (role × model) rig failed the same card >= threshold times
+  // in a row, so a MODEL-SWAP CANDIDATE was surfaced (candidate file written).
+  // Signal only — never an automatic swap; a heterogeneous consensus adjudicates.
+  | { type: "model:swap_candidate"; card: string; role: string; model: string; streak: number; path: string; ts: number }
+  // US-CYCLE-012 — a heterogeneous consensus adjudicated a swap candidate.
+  // `decision` is `agree` (unanimous — recorded as approved, still owner-applied)
+  // or `escalate` (any disagreement / no valid verdicts → owner decides). The
+  // model binding is NEVER rewritten automatically.
+  | { type: "model:swap_decision"; card: string; role: string; model: string; decision: "agree" | "escalate"; path: string; ts: number }
   // US-CYCLE-002 — a SUB-agent spawn (designer / evaluator / adversarial builder
   // role / pick-ranking) was killed by the shared run-watchdog after breaching
   // its per-role timeout cap. Unlike `cycle:timeout` (the main builder cycle),

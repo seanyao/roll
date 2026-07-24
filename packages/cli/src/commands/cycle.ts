@@ -28,6 +28,7 @@ import type { Readable } from "node:stream";
 import { join } from "node:path";
 import { cardArchiveDir } from "../lib/archive.js";
 import { analyzeRepairRounds, listPendingSplitAdvice, writeSplitAdvice } from "../lib/split-advice.js";
+import { cycleModelSwapCommand } from "./cycle-model-swap.js";
 import { collectCycleLedger, formatBuilderIdentity, type CycleLedgerRow, type CycleTapeSegment } from "../lib/cycle-ledger.js";
 import { collectGitDossierFacts } from "../lib/story-dossier.js";
 import { cycleNo } from "./cycles.js";
@@ -45,6 +46,7 @@ export const CYCLE_USAGE =
   "       roll cycle watch [<id>] [--once] [--since <lines>] [--json]\n" +
   "       roll cycle journal <card-id> [--json]\n" +
   "       roll cycle split-advice [<card-id>] [--generate] [--json]\n" +
+  "       roll cycle model-swap [<card-id>] [--adjudicate] [--json]\n" +
   "  One cycle's full trace tape, a read-only ActivitySignal watch window, a\n" +
   "  supervisor-facing activity explanation, or a collaboration relay view.\n" +
   "  journal <card>  Round-journal readout for a card: median/mean/p90 duration +\n" +
@@ -754,6 +756,9 @@ export function cycleCommand(args: string[]): number | Promise<number> {
   }
   if (args[0] === "split-advice") {
     return cycleSplitAdviceCommand(args.slice(1), lang);
+  }
+  if (args[0] === "model-swap") {
+    return cycleModelSwapCommand(args.slice(1), lang);
   }
   if (args.includes("--help") || args.includes("-h") || args.length === 0) {
     process.stdout.write(`${CYCLE_USAGE}\n`);

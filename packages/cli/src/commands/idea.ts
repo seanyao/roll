@@ -74,8 +74,9 @@ function cardIdsAsBacklogItems(ids: readonly string[]): BacklogItem[] {
 export interface IdeaCommandDeps {
   /** Ids present on the remote (`origin/main`) backlog. Best-effort: returns []
    *  when the remote is unreachable so allocation degrades to local, never blocks.
-   *  Called with `fetch:true` for the allocation pool and `fetch:false` for the
-   *  pre-write collision re-check. */
+   *  Called with `fetch:true` for BOTH the allocation pool and the pre-write
+   *  collision re-check — the re-check must fetch fresh to see a concurrent
+   *  site's just-pushed id. */
   remoteBacklogIds?: (projectPath: string, opts?: { fetch?: boolean }) => string[];
 }
 

@@ -12,6 +12,7 @@ import {
 } from "@roll/spec";
 import {
   buildWorkspaceClarificationHandoff,
+  resolveWorkspaceClarificationAnswer,
   type WorkspaceDiscoveryFactsV1,
 } from "../src/index.js";
 
@@ -80,6 +81,31 @@ function candidate(workspaceId: string, lifecycle: WorkspaceLifecycle): Workspac
 }
 
 const SHA = "a".repeat(64);
+
+function handoff(input: {
+  readonly reason?: WorkspaceClarificationReason;
+  readonly operation?: "read" | "mutation";
+  readonly lifecycle?: WorkspaceLifecycle;
+  readonly candidates?: readonly WorkspaceMatchCandidateV1[];
+  readonly diagnostics?: readonly {
+    readonly workspaceId: string;
+    readonly root: string;
+    readonly code: "invalid_workspace_manifest";
+    readonly authorityPath: string;
+    readonly message: string;
+  }[];
+} = {}) {
+  const candidates = input.candidates ?? [candidate("fields", input.lifecycle ?? "active")];
+  return buildWorkspaceClarificationHandoff({
+    intent: intent(input.operation ?? "mutation"),
+    reason: input.reason ?? "workspace_activation_required",
+    candidates,
+    diagnostics: input.diagnostics ?? [],
+    facts: [facts("fields", input.lifecycle ?? "active"), facts("roll", "active")],
+    registryRevision: 7,
+    discoveryFactsSha256: SHA,
+  });
+}
 
 describe("US-WS-029 Workspace clarification handoff", () => {
   it.each([
@@ -151,5 +177,142 @@ describe("US-WS-029 Workspace clarification handoff", () => {
       registryRevision: 0,
       discoveryFactsSha256: SHA,
     })).toThrowError("invalid_workspace_clarification: repair action has no canonical command");
+  });
+});
+
+describe("US-WS-029 Workspace clarification answer", () => {
+  it.each(["registered", "paused"] as const)("turns a %s selection into explicit re-resolution only", (lifecycle) => {
+    const input = handoff({ lifecycle });
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: { action: "select_existing", workspaceId: "fields" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual({
+      ok: true,
+      action: "retry_resolution",
+      explicitSelector: { kind: "id", workspaceId: "fields" },
+      canonicalSelector: "--workspace fields",
+    });
+  });
+
+  it("starts create preview preparation without granting apply authorization", () => {
+    const input = handoff({ reason: "create_required", candidates: [] });
+    const first = resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: { action: "create_new", workspaceId: "ws-ape-234" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    });
+    expect(first).toEqual({
+      ok: true,
+      action: "start_create_preview",
+      requestedWorkspaceId: "ws-ape-234",
+      canonicalCommand: "roll workspace create",
+      applyAuthorized: false,
+    });
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: { action: "create_new", workspaceId: "ws-ape-234" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual(first);
+  });
+
+  it("returns only canonical repair commands", () => {
+    const diagnostic = {
+      workspaceId: "fields",
+      root: "/workspaces/fields",
+      code: "invalid_workspace_manifest" as const,
+      authorityPath: "/workspaces/fields/workspace.yaml",
+      message: "invalid manifest",
+    };
+    const input = handoff({
+      reason: "workspace_discovery_incomplete",
+      operation: "mutation",
+      diagnostics: [diagnostic],
+    });
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: { action: "repair_discovery" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual({
+      ok: true,
+      action: "show_repair_actions",
+      commands: ["roll workspace doctor fields --json"],
+    });
+  });
+
+  it.each([
+    {
+      name: "stale registry revision",
+      answer: { action: "select_existing", workspaceId: "fields" },
+      revision: 8,
+      digest: SHA,
+    },
+    {
+      name: "stale discovery digest",
+      answer: { action: "select_existing", workspaceId: "fields" },
+      revision: 7,
+      digest: "b".repeat(64),
+    },
+    {
+      name: "Workspace outside candidates",
+      answer: { action: "select_existing", workspaceId: "roll" },
+      revision: 7,
+      digest: SHA,
+    },
+    {
+      name: "action outside allowedActions",
+      answer: { action: "create_new" },
+      revision: 7,
+      digest: SHA,
+    },
+    {
+      name: "open answer shape",
+      answer: { action: "select_existing", workspaceId: "fields", apply: true },
+      revision: 7,
+      digest: SHA,
+    },
+    {
+      name: "unsafe requested Workspace ID",
+      answer: { action: "create_new", workspaceId: "../escape" },
+      revision: 7,
+      digest: SHA,
+      create: true,
+    },
+  ])("rejects $name and requires candidate reload", ({ answer, revision, digest, create }) => {
+    const input = create === true
+      ? handoff({ reason: "create_required", candidates: [] })
+      : handoff();
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: answer as never,
+      currentRegistryRevision: revision,
+      currentDiscoveryFactsSha256: digest,
+    })).toEqual({
+      ok: false,
+      code: "invalid_workspace_clarification",
+      reload: true,
+    });
+  });
+
+  it("rejects an open handoff shape instead of trusting extra host fields", () => {
+    const input = { ...handoff(), applyAuthorized: true };
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: input,
+      answer: { action: "select_existing", workspaceId: "fields" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual({ ok: false, code: "invalid_workspace_clarification", reload: true });
+
+    const malformed = { ...handoff(), candidates: { fields: true } };
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: malformed as never,
+      answer: { action: "select_existing", workspaceId: "fields" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual({ ok: false, code: "invalid_workspace_clarification", reload: true });
   });
 });

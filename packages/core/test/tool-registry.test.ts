@@ -417,6 +417,28 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(t.executes).toBe(1);
   });
 
+  it("keeps invocation budgets isolated across concurrent Workspace cycles", async () => {
+    const t = tool();
+    const registry = new ToolRegistry({
+      deps: deps(),
+      policyEngine: policyEngine({ maxInvocationsPerCycle: 1 }),
+    });
+    registry.register(t);
+    const alpha = { ...request("alpha"), invocationId: "inv-alpha", caller: { ...request().caller, cycleId: "cycle-alpha" }, context: workspaceContext("alpha"), repoId: "repo-product" };
+    const beta = { ...request("beta"), invocationId: "inv-beta", caller: { ...request().caller, cycleId: "cycle-beta" }, context: workspaceContext("beta"), repoId: "repo-product" };
+
+    const [alphaResult, betaResult] = await Promise.all([
+      registry.invoke(TOOL_ID, alpha),
+      registry.invoke(TOOL_ID, beta),
+    ]);
+    const alphaSecond = await registry.invoke(TOOL_ID, { ...alpha, invocationId: "inv-alpha-2" });
+
+    expect(alphaResult.ok).toBe(true);
+    expect(betaResult.ok).toBe(true);
+    expect(alphaSecond).toMatchObject({ ok: false, error: { code: "budget_exhausted" } });
+    expect(t.executes).toBe(2);
+  });
+
   it("catches adapter crashes and returns adapter_error", async () => {
     const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine() });
     registry.register(

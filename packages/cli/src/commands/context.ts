@@ -5,11 +5,12 @@ import {
   realpathSync,
   readdirSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import {
   EventBus,
   createContextReadService,
   resolveWorkspaceTarget,
+  validateStoryId,
   verifyContextSnapshot,
   type ContextReadService,
   type WorkspaceTargetFailureCode,
@@ -88,6 +89,7 @@ export interface ContextCommandDeps {
   readonly readRegistry: () => ContextProviderRegistryV1;
   readonly readLatestSnapshot: (workspace: WorkspaceExecutionContextV1) => ContextReadResultV1 | undefined;
   readonly createReadService: (input: ContextReadServiceFactoryInput) => ContextReadService;
+  readonly authorizeRestrictedReference: (request: ContextReadRequestV1, file: ContextReadFileV1) => boolean;
   readonly writeSnapshot: (workspace: WorkspaceExecutionContextV1, result: ContextReadResultV1) => void;
   readonly recordAudit: (event: ContextCommandAuditEventV1, workspace: WorkspaceExecutionContextV1) => void;
   readonly now: () => number;
@@ -98,6 +100,7 @@ export interface ContextCommandRuntimeOptions {
   readonly cwd?: () => string;
   readonly now?: () => number;
   readonly createReadService?: ContextCommandDeps["createReadService"];
+  readonly authorizeRestrictedReference?: ContextCommandDeps["authorizeRestrictedReference"];
   readonly writeSnapshot?: ContextCommandDeps["writeSnapshot"];
   readonly recordAudit?: ContextCommandDeps["recordAudit"];
 }
@@ -443,6 +446,12 @@ function workspaceForStory(
   };
 }
 
+function canonicalStoryId(value: string): string | undefined {
+  const normalized = value.trim().toUpperCase();
+  const validated = validateStoryId(normalized);
+  return validated.ok ? validated.value : undefined;
+}
+
 export function createContextCommandDeps(options: ContextCommandRuntimeOptions = {}): ContextCommandDeps {
   const rollHome = options.rollHome ?? workspaceRollHome();
   const cwd = options.cwd ?? process.cwd;
@@ -457,6 +466,7 @@ export function createContextCommandDeps(options: ContextCommandRuntimeOptions =
       now,
       authorizeRestrictedReference: (_request, file) => input.authorizeRestrictedReference(file),
     })),
+    authorizeRestrictedReference: options.authorizeRestrictedReference ?? (() => false),
     writeSnapshot: options.writeSnapshot ?? ((workspace, result) => { writeContextSnapshot(workspace, result); }),
     recordAudit: options.recordAudit ?? ((event, workspace) => { new EventBus().appendEvent(workspace.authorities.events, event); }),
     now,
@@ -610,6 +620,8 @@ function auditEvents(
       ...(transportEvent?.diagnosticCode === undefined ? [] : [transportEvent.diagnosticCode]),
     ]);
     const fetchOutcome = transportEvent?.outcome ?? (provider === undefined ? "not_started" : "completed");
+    const revision = provider?.revision ?? transportEvent?.revision;
+    const bytes = provider?.files.reduce((sum, file) => sum + file.bytes, 0) ?? transportEvent?.bytes ?? 0;
     return {
       type: "context:read",
       workspaceId: result.requestScope.workspaceId,
@@ -619,8 +631,8 @@ function auditEvents(
       startedAt: transportEvent?.startedAt ?? new Date(startedAtMs).toISOString(),
       durationMs: transportEvent?.durationMs ?? Math.max(0, finishedAtMs - startedAtMs),
       fetchOutcome,
-      ...(provider?.revision === undefined ? {} : { revision: provider.revision }),
-      bytes: provider?.files.reduce((sum, file) => sum + file.bytes, 0) ?? 0,
+      ...(revision === undefined ? {} : { revision }),
+      bytes,
       diagnosticCodes: codes,
       snapshotId: result.snapshotId,
       ts: finishedAtMs,
@@ -644,7 +656,10 @@ async function runStatus(args: ParsedStatusArgs, deps: ContextCommandDeps): Prom
 async function runRead(args: ParsedReadArgs, deps: ContextCommandDeps): Promise<number> {
   const target = await deps.resolveTarget(args.workspace);
   if ("error" in target) return emitError(target.error.code, args.json);
-  if (args.story !== undefined && target.issueStoryId !== undefined && args.story !== target.issueStoryId) {
+  const requestedStoryId = args.story === undefined ? undefined : canonicalStoryId(args.story);
+  if (args.story !== undefined && requestedStoryId === undefined) return emitError("invalid_arguments", args.json);
+  const issueStoryId = target.issueStoryId === undefined ? undefined : canonicalStoryId(target.issueStoryId);
+  if (requestedStoryId !== undefined && issueStoryId !== undefined && requestedStoryId !== issueStoryId) {
     return emitError("story_conflict", args.json);
   }
   let registry: ContextProviderRegistryV1;
@@ -653,7 +668,7 @@ async function runRead(args: ParsedReadArgs, deps: ContextCommandDeps): Promise<
   } catch {
     return emitError("invalid_registry", args.json);
   }
-  const storyId = args.story ?? target.issueStoryId;
+  const storyId = requestedStoryId ?? issueStoryId;
   const scopedWorkspace = workspaceForStory(target.workspace, storyId);
   const request: ContextReadRequestV1 = {
     schema: CONTEXT_READ_REQUEST_V1,
@@ -670,10 +685,10 @@ async function runRead(args: ParsedReadArgs, deps: ContextCommandDeps): Promise<
   const service = deps.createReadService({
     workspace: scopedWorkspace,
     registry,
-    authorizeRestrictedReference: () => false,
+    authorizeRestrictedReference: (file) => deps.authorizeRestrictedReference(request, file),
     audit: (event) => { transportAudit.push(event); },
   });
-  process.stderr.write(`${message("context.read.progress")}\n`);
+  if (!args.json) process.stderr.write(`${message("context.read.progress")}\n`);
   let result: ContextReadResultV1;
   try {
     result = await service.read(request);

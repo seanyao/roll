@@ -56,6 +56,7 @@ export interface GitLlmWikiReadAuditEventV1 {
   readonly durationMs: number;
   readonly outcome: "completed" | "failed";
   readonly revision?: string;
+  readonly bytes?: number;
   readonly diagnosticCode?: ContextDiagnosticCode;
 }
 

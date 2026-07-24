@@ -7,6 +7,9 @@ import {
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
 import {
+  LLM_WIKI_MAX_FILE_BYTES,
+  LLM_WIKI_MAX_PAGES,
+  LLM_WIKI_MAX_PROVIDER_BYTES,
   compareContextRevisions,
   contextSnapshotReference,
   decideContextRevision,
@@ -114,11 +117,45 @@ function buildEnvelope(
   options: CreateContextHostAdapterOptions,
   input: ContextStageReadInputV1,
   snapshot: ContextReadResultV1,
+  authorizedRestrictedOperation?: boolean,
 ): { readonly envelope?: ContextAgentEnvelopeV1; readonly diagnostic?: ContextDiagnosticV1 } {
   const explicitRefs = new Set(input.refs);
-  const operationAllowed = restrictedOperationAllowed(options, input);
+  const operationAllowed = authorizedRestrictedOperation ?? restrictedOperationAllowed(options, input);
   const pages = [];
   for (const provider of snapshot.providers) {
+    if (provider.files.length > LLM_WIKI_MAX_PAGES) {
+      return {
+        diagnostic: {
+          code: "context_budget_exceeded",
+          severity: "blocking",
+          providerId: provider.providerId,
+          message: "Context Agent envelope exceeds the page budget",
+        },
+      };
+    }
+    const oversized = provider.files.find((file) => !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > LLM_WIKI_MAX_FILE_BYTES);
+    if (oversized !== undefined) {
+      return {
+        diagnostic: {
+          code: "context_file_too_large",
+          severity: "blocking",
+          providerId: provider.providerId,
+          ref: oversized.ref,
+          message: "Context Agent envelope file exceeds the byte budget",
+        },
+      };
+    }
+    const providerBytes = provider.files.reduce((sum, file) => sum + file.bytes, 0);
+    if (!Number.isSafeInteger(providerBytes) || providerBytes > LLM_WIKI_MAX_PROVIDER_BYTES) {
+      return {
+        diagnostic: {
+          code: "context_budget_exceeded",
+          severity: "blocking",
+          providerId: provider.providerId,
+          message: "Context Agent envelope exceeds the Provider byte budget",
+        },
+      };
+    }
     for (const file of provider.files) {
       if (file.page?.sensitivity === "restricted_reference") {
         const explicit = explicitRefs.has(file.ref);
@@ -184,8 +221,9 @@ function ready(
   source: "fresh" | "handoff_snapshot",
   snapshot: ContextReadResultV1,
   decision?: ContextStageDecisionRecordV1,
+  authorizedRestrictedOperation?: boolean,
 ): ContextStageReadResultV1 {
-  const built = buildEnvelope(options, input, snapshot);
+  const built = buildEnvelope(options, input, snapshot, authorizedRestrictedOperation);
   if (built.diagnostic !== undefined || built.envelope === undefined) {
     return { status: "blocked", diagnostic: built.diagnostic ?? invalidContextHandoff() };
   }
@@ -237,12 +275,12 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
       if (fresh.outcome === "blocked") {
         return { status: "blocked", diagnostic: unavailable(fresh), freshHandoff };
       }
-      if (input.handoff === undefined) return ready(options, input, "fresh", fresh);
+      if (input.handoff === undefined) return ready(options, input, "fresh", fresh, undefined, operationAllowed);
 
       const previous = readHandoffSnapshot(options, input, input.handoff);
       if (previous === undefined) return { status: "blocked", diagnostic: invalidContextHandoff(), freshHandoff };
       const comparison = compareContextRevisions(previous, fresh);
-      if (comparison.status === "unchanged") return ready(options, input, "fresh", fresh);
+      if (comparison.status === "unchanged") return ready(options, input, "fresh", fresh, undefined, operationAllowed);
 
       const decision = decideContextRevision(comparison, input.revisionDecision);
       if (!decision.accepted) {
@@ -268,8 +306,8 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
         };
       }
       return decision.useSnapshot === "new"
-        ? ready(options, input, "fresh", fresh, record)
-        : ready(options, input, "handoff_snapshot", previous, record);
+        ? ready(options, input, "fresh", fresh, record, operationAllowed)
+        : ready(options, input, "handoff_snapshot", previous, record, operationAllowed);
     },
   };
 }

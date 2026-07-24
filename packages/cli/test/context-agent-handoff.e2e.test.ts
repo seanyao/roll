@@ -233,6 +233,39 @@ describe("Context Agent handoff", () => {
       decision: { decision: "adopt_new_snapshot", useSnapshot: "new" },
       handoff: { snapshot: { snapshotId: adoptedSnapshot.snapshotId } },
     });
+
+    const continuedSnapshot = snapshot(workspaceValue, "4", "d".repeat(40), [file(ref, "index-v4")], "build");
+    const continuedHost = adapter(workspaceValue, [continuedSnapshot]);
+    await expect(continuedHost.host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      readMode: "fresh",
+      refs: [ref],
+      handoff: blocked.previousHandoff,
+      revisionDecision: "continue_with_handoff_snapshot",
+    })).resolves.toMatchObject({
+      status: "ready",
+      source: "handoff_snapshot",
+      handoff: blocked.previousHandoff,
+      decision: { decision: "continue_with_handoff_snapshot", useSnapshot: "handoff" },
+    });
+
+    const reconciliationSnapshot = snapshot(workspaceValue, "5", "e".repeat(40), [file(ref, "index-v5")], "build");
+    const reconciliationHost = adapter(workspaceValue, [reconciliationSnapshot]);
+    await expect(reconciliationHost.host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      readMode: "fresh",
+      refs: [ref],
+      handoff: blocked.previousHandoff,
+      revisionDecision: "needs_reconciliation",
+    })).resolves.toMatchObject({
+      status: "needs_reconciliation",
+      previousHandoff: blocked.previousHandoff,
+      decision: { decision: "needs_reconciliation", useSnapshot: "none" },
+    });
   });
 
   it("encodes hostile page text as one length-delimited JSON data value and never promotes Wiki commands", async () => {
@@ -283,6 +316,28 @@ describe("Context Agent handoff", () => {
       allowRestrictedReferences: true,
     })).resolves.toMatchObject({ status: "blocked", diagnostic: { code: "restricted_context_denied" } });
 
+    const missingIntent = adapter(workspaceValue, [restricted], true);
+    await expect(missingIntent.host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      refs: [ref],
+      handoff,
+    })).resolves.toMatchObject({ status: "blocked", diagnostic: { code: "restricted_context_denied" } });
+
+    const implicit = adapter(workspaceValue, [restricted], true);
+    const omitted = await implicit.host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      refs: [],
+      handoff,
+      allowRestrictedReferences: true,
+    });
+    expect(omitted.status).toBe("ready");
+    if (omitted.status !== "ready") throw new Error("expected implicit restricted omission");
+    expect(decodeContextAgentEnvelope(omitted.encodedEnvelope).pages).toEqual([]);
+
     const allowed = adapter(workspaceValue, [restricted], true);
     const result = await allowed.host.readForStage({
       workspace: workspaceValue,
@@ -299,6 +354,48 @@ describe("Context Agent handoff", () => {
       sensitivity: "restricted_reference",
       content: "vault://testing/accounts/axis-reader",
     });
+  });
+
+  it("checks restricted operation policy once and rejects a reused Snapshot outside Context Read budgets", async () => {
+    const workspaceValue = workspace();
+    const restrictedRef = "context://enterprise-wiki/wiki/environments/test-account.md";
+    const restricted = snapshot(workspaceValue, "1", "a".repeat(40), [
+      file(restrictedRef, "vault://testing/accounts/axis-reader", { sensitivity: "restricted_reference" }),
+    ]);
+    const authorizeRestrictedOperation = vi.fn(() => true);
+    const host = createContextHostAdapter({
+      freshRead: vi.fn(async () => restricted),
+      writeSnapshot: (value) => writeContextSnapshot(workspaceValue, value),
+      readSnapshot: (_workspace, reference) => readContextSnapshot(workspaceValue, reference.artifactPath),
+      authorizeRestrictedOperation,
+    });
+    await expect(host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "design",
+      readMode: "fresh",
+      refs: [restrictedRef],
+      allowRestrictedReferences: true,
+    })).resolves.toMatchObject({ status: "ready" });
+    expect(authorizeRestrictedOperation).toHaveBeenCalledTimes(1);
+
+    const largeRef = "context://enterprise-wiki/wiki/systems/large.md";
+    const large = snapshot(workspaceValue, "2", "b".repeat(40), [
+      { ...file(largeRef, "small"), bytes: 256 * 1024 + 1 },
+    ], "build");
+    writeContextSnapshot(workspaceValue, large);
+    await expect(host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      refs: [largeRef],
+      handoff: {
+        schema: "roll.context-stage-handoff/v1",
+        workspaceId: "roll",
+        storyId: STORY_ID,
+        snapshot: { snapshotId: large.snapshotId, snapshotDigest: large.snapshotDigest, artifactPath: large.artifactPath },
+      },
+    })).resolves.toMatchObject({ status: "blocked", diagnostic: { code: "context_file_too_large" } });
   });
 
   it("performs a second fresh read for index-selected refs and uses only the new Snapshot", async () => {

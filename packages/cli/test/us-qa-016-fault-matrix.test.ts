@@ -136,8 +136,8 @@ function paths(rt: string, cycleId: string): RunnerPaths {
 }
 
 const routeDeps: RouteDeps = {
-  readSlot: () => "claude-stream",
-  firstInstalled: () => "claude-stream",
+  readSlot: () => "pi",
+  firstInstalled: () => "pi",
 };
 
 const CLAUDE_STREAM_JSON = [

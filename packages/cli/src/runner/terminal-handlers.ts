@@ -1,4 +1,5 @@
-import { lstatSync, realpathSync, unlinkSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   appendDelivery,
@@ -42,11 +43,97 @@ type TerminalCommand = Extract<CycleCommand, { kind:
   | "release_lock"
 }>;
 
+const LEGACY_REPOSITORY_TERMINAL_COMMANDS = new Set<TerminalCommand["kind"]>([
+  "publish_pr",
+  "merge_back",
+  "push_orphan",
+  "rescue_leaked",
+  "wait_merge",
+]);
+
+function storyLeasePath(ports: Ports): string {
+  return ports.paths.storyLeasePath ?? join(dirname(ports.paths.eventsPath), "leases");
+}
+
+function preservedIssueWorktreeFacts(ctx: CycleContext): object | undefined {
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) return undefined;
+  const repositories = Object.values(execution.repositories)
+    .sort((left, right) => left.repoId.localeCompare(right.repoId))
+    .map((repository) => {
+      const worktreePath = existsSync(repository.worktreePath)
+        ? realpathSync(repository.worktreePath)
+        : repository.worktreePath;
+      let headSha = repository.headSha;
+      let dirty = true;
+      let commitsAheadBase = -1;
+      try {
+        headSha = execFileSync("git", ["-C", worktreePath, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+        dirty = execFileSync("git", ["-C", worktreePath, "status", "--porcelain"], { encoding: "utf8" }).trim() !== "";
+        const ahead = execFileSync("git", ["-C", worktreePath, "rev-list", "--count", `${repository.baseSha}..HEAD`], {
+          encoding: "utf8",
+        }).trim();
+        commitsAheadBase = Number.parseInt(ahead, 10);
+        if (!Number.isFinite(commitsAheadBase)) commitsAheadBase = -1;
+      } catch {
+        // Preserve a conservative recovery record even when Git probing fails:
+        // unknown work is never mislabeled clean or silently omitted.
+      }
+      return {
+        repoId: repository.repoId,
+        alias: repository.alias,
+        worktreePath,
+        headSha,
+        baseSha: repository.baseSha,
+        dirty,
+        commitsAheadBase,
+      };
+    });
+  return {
+    workspaceId: execution.workspaceId,
+    storyId: ctx.storyId ?? "",
+    cycleId: ctx.cycleId,
+    issueRoot: existsSync(execution.issueRoot) ? realpathSync(execution.issueRoot) : execution.issueRoot,
+    repositories,
+  };
+}
+
 export async function executeTerminalCommand(
   cmd: TerminalCommand,
   ports: Ports,
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
+  if (ctx.repositoryExecution !== undefined) {
+    if (cmd.kind === "append_run") {
+      const key: RunKey = { storyId: ctx.storyId ?? "", cycleId: cmd.cycleId };
+      ports.events.upsertRun(ports.paths.runsPath, key, buildRunRow(cmd, ctx, ports.clock()));
+      if ((ctx.storyId ?? "") !== "") {
+        try {
+          releaseStoryLease(storyLeasePath(ports), ctx.storyId ?? "", { source: "cycle", pid: process.pid });
+        } catch {
+          /* lease cleanup must never block terminal bookkeeping */
+        }
+      }
+      return {};
+    }
+    if (cmd.kind === "cleanup_environment" || cmd.kind === "cleanup_worktree") {
+      const preserved = preservedIssueWorktreeFacts(ctx);
+      if (preserved !== undefined) {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `workspace_issue_worktrees_preserved: ${JSON.stringify(preserved)}`,
+        );
+      }
+      ports.events.appendAlert(
+        ports.paths.alertsPath,
+        `workspace_repository_scope_required: ${cmd.kind} skipped legacy repo-global cleanup for cycle ${ctx.cycleId}`,
+      );
+      return {};
+    }
+    if (LEGACY_REPOSITORY_TERMINAL_COMMANDS.has(cmd.kind)) {
+      throw new Error(`workspace_repository_scope_required: ${cmd.kind}`);
+    }
+  }
   switch (cmd.kind) {
     // delivery/pr planPublishPr → github.runPublishPlan → published result.
     case "publish_pr": {
@@ -447,7 +534,7 @@ export async function executeTerminalCommand(
       // keep its soft-lease protection past this cycle's terminal (kimi review).
       if (terminalStoryId !== "") {
         try {
-          releaseStoryLease(join(dirname(ports.paths.eventsPath), "leases"), terminalStoryId, { source: "cycle", pid: process.pid });
+          releaseStoryLease(storyLeasePath(ports), terminalStoryId, { source: "cycle", pid: process.pid });
         } catch {
           /* lease cleanup must never block terminal */
         }
@@ -527,6 +614,12 @@ export async function executeTerminalCommand(
           // reflects TRUE delivery. A later reconciler tick
           // (decideClaimReconcile) flips it once the PR actually merges.
           revertPrematureDone(ports, terminalStoryId, ctx.preCycleStatus);
+        }
+      } else if (cmd.status === "waiting_capacity" && terminalStoryId !== "") {
+        // US-WS-017b: capacity pressure is a neutral scheduler wait. Release the
+        // claim back to Todo without recording a failed/abandoned delivery.
+        if (!isParkedAtHold(ports, terminalStoryId)) {
+          ports.backlog.markStatus?.(ports.repoCwd, terminalStoryId, STATUS_MARKER.todo);
         }
       } else if ((cmd.status === "idle" || cmd.status === "gave_up" || cmd.status === "local") && terminalStoryId !== "") {
         // idle / gave_up / local never merged → the row goes back to 📋 Todo

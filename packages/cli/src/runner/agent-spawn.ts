@@ -42,7 +42,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Rig } from "@roll/spec";
 import { getAgentSpec } from "@roll/core";
-import { worktreeGitEnv } from "./main-checkout-guard.js";
+import { worktreeGitDiscoveryEnv } from "./main-checkout-guard.js";
 
 /**
  * FIX-204D — live-children registry. The signal teardown must kill an
@@ -735,21 +735,19 @@ function evidenceFrameEnv(runDir: string): NodeJS.ProcessEnv {
   };
 }
 
-function childEnv(opts: AgentSpawnOptions, profile?: AgentProfile): NodeJS.ProcessEnv {
+function childEnv(opts: AgentSpawnOptions): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
-  // FIX-1237: strip ALL inherited GIT_* env vars for EVERY spawned agent
-  // (not just codex), so no agent can poison the shared config via
-  // inherited git environment variables. Non-isolated agents then receive the
-  // runner-computed worktree git env so `git -C main` still lands in the cycle
-  // worktree instead of the shared checkout (FIX-1073).
+  // FIX-1473: strip ALL inherited GIT_* variables for EVERY spawned agent.
+  // Repository binding must come from each command's cwd, never a scheduler-
+  // injected GIT_DIR/GIT_WORK_TREE pair: fixed bindings make nested/temp/clone
+  // repositories write config, index, hooks and refs into the cycle repo.
   for (const key of Object.keys(env)) {
     if (key.startsWith("GIT_")) delete env[key];
   }
-  if (profile?.isolateGit) {
-    env["GIT_CEILING_DIRECTORIES"] = dirname(opts.cwd);
-  } else {
-    Object.assign(env, worktreeGitEnv(opts.cwd, opts.cwd));
-  }
+  // The cycle worktree itself remains discoverable from cwd. The ceiling only
+  // prevents an invalid/missing worktree from walking upward into the product
+  // checkout that physically contains `.roll/loop/worktrees`.
+  Object.assign(env, worktreeGitDiscoveryEnv(opts.cwd));
   env.PWD = opts.cwd;
   delete env.OLDPWD;
   return opts.runDir !== undefined && opts.runDir !== "" ? { ...env, ...evidenceFrameEnv(opts.runDir) } : env;
@@ -766,7 +764,7 @@ function withAgentProfileEnv(agent: string, opts: AgentSpawnOptions): AgentSpawn
   };
 }
 
-function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false, profile?: AgentProfile): Promise<AgentSpawnResult> {
+function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty = false): Promise<AgentSpawnResult> {
   // Operational trace (v2 logs its agent cmd too): goes to the runner's stderr,
   // which leg/cycle logs capture — argv mismatches become diagnosable.
   process.stderr.write(`[runner] spawn ${bin} argv=${JSON.stringify(args.map((a) => (a.length > 80 ? `${a.slice(0, 77)}...` : a)))}\n`);
@@ -780,7 +778,7 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
   return new Promise<AgentSpawnResult>((resolve) => {
     const child = spawn(bin, args, {
       cwd: opts.cwd,
-      env: childEnv(opts, profile),
+      env: childEnv(opts),
       stdio: ["ignore", "pipe", "pipe"],
       // FIX-224: the PTY-wrapped `script` leads its own process group so the
       // timeout/teardown can reap script AND the agent under it (killHard).
@@ -853,6 +851,6 @@ function spawnAndWait(bin: string, args: string[], opts: AgentSpawnOptions, pty 
 export const realAgentSpawn: AgentSpawn = (agent, opts) => {
   const profile = agentProfile(agent);
   const { bin, args, pty } = withPtyWrap(profile.buildSpawnCommand(opts), agent);
-  return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty, profile);
+  return spawnAndWait(bin, args, withAgentProfileEnv(agent, opts), pty);
 };
 realAgentSpawn.supportedPurposes = ["pick_ranking"];

@@ -71,6 +71,19 @@ defaults:
         strategy: health-aware
 `;
 
+const WORKSPACE = `schema: roll-agents/v1
+scope: workspace
+inherits: machine
+defaults:
+  story:
+    roles:
+      execute:
+        kind: select
+        from: [kimi, claude]
+        require: [execute]
+        strategy: first-available
+`;
+
 /** Build a {rollHome, repoCwd} pair seeded with the machine + project layers. */
 function fixture(): { rollHome: string; repoCwd: string } {
   const rollHome = mkdtempSync(join(tmpdir(), "roll-home-"));
@@ -88,9 +101,78 @@ function healthAwareFixture(): { rollHome: string; repoCwd: string } {
   return fx;
 }
 
+function workspaceFixture(): { rollHome: string; workspaceRoot: string } {
+  const rollHome = mkdtempSync(join(tmpdir(), "roll-ws-home-"));
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "roll-workspace-"));
+  dirs.push(rollHome, workspaceRoot);
+  writeFileSync(join(rollHome, "agents.yaml"), MACHINE);
+  writeFileSync(join(workspaceRoot, "workspace.yaml"), "{}\n");
+  writeFileSync(join(workspaceRoot, "agents.yaml"), WORKSPACE);
+  mkdirSync(join(workspaceRoot, ".roll"), { recursive: true });
+  writeFileSync(join(workspaceRoot, ".roll", "agents.yaml"), `schema: roll-agents/v1
+scope: project
+defaults:
+  story:
+    roles:
+      execute: { use: codex }
+`);
+  return { rollHome, workspaceRoot };
+}
+
 const ALL_INSTALLED = new Set(["claude", "agy", "kimi", "pi", "reasonix", "codex"]);
 
 describe("resolveScopedStoryExecute", () => {
+  it("US-WS-017a: workspace runtime loads root casting and ignores project fallback", () => {
+    const { rollHome, workspaceRoot } = workspaceFixture();
+    const route = resolveScopedStoryExecute(workspaceRoot, {
+      rollHome,
+      workspaceRoot,
+      installed: ALL_INSTALLED,
+      recentUse: {},
+      builderNoConsecutiveRepeat: false,
+    });
+
+    expect(route).not.toBeNull();
+    expect(route?.resolution.ok).toBe(true);
+    if (route?.resolution.ok) {
+      expect(route.resolution.resolved.agent).toBe("kimi");
+      expect(route.resolution.resolved.source).toBe(`${workspaceRoot}/agents.yaml:defaults.story.roles.execute`);
+    }
+  });
+
+  it("US-WS-017a: invalid workspace casting fails loud instead of falling back", () => {
+    const { rollHome, workspaceRoot } = workspaceFixture();
+    writeFileSync(join(workspaceRoot, "agents.yaml"), `schema: roll-agents/v1
+scope: workspace
+inherits: machine
+agents:
+  codex:
+    capabilities: [execute]
+`);
+
+    expect(() => resolveScopedStoryExecute(workspaceRoot, {
+      rollHome,
+      workspaceRoot,
+      installed: ALL_INSTALLED,
+    })).toThrow("invalid workspace agent scope");
+  });
+
+  it("US-WS-017a: repository cardinality does not create an agent scope", () => {
+    const { rollHome, workspaceRoot } = workspaceFixture();
+    const resolve = () => resolveScopedStoryExecute(workspaceRoot, {
+      rollHome,
+      workspaceRoot,
+      installed: ALL_INSTALLED,
+      recentUse: {},
+      builderNoConsecutiveRepeat: false,
+    });
+    writeFileSync(join(workspaceRoot, "workspace.yaml"), JSON.stringify({ repositories: [{ repoId: "app" }] }));
+    const oneRepository = resolve();
+    writeFileSync(join(workspaceRoot, "workspace.yaml"), JSON.stringify({ repositories: [{ repoId: "app" }, { repoId: "api" }] }));
+    const multiRepository = resolve();
+
+    expect(multiRepository).toEqual(oneRepository);
+  });
   it("keeps the assigned Supervisor visible without excluding it from the Builder pool by default", () => {
     const { rollHome, repoCwd } = fixture();
     const route = resolveScopedStoryExecute(repoCwd, { rollHome, installed: ALL_INSTALLED, recentUse: {} });

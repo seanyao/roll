@@ -27,6 +27,7 @@ import { runPeerReview, spawnPeerReviewAgent, type SpawnPeerReviewResult } from 
 import { guideExternalToolSetup, silentPreinstallChromium } from "../lib/external-tools.js";
 import { loopControlRunnerReadout, rollBin, staleLoopRunnerMessage } from "./loop-runner-readout.js";
 import { screenLockedCycleIds } from "../runner/screen-lock-events.js";
+import { emitBacklogTargetError, resolveBacklogCommandTarget, type BacklogTargetResolver } from "./backlog-target.js";
 
 /**
  * FIX-906: node fs-backed {@link FreshnessPort} for `ensureDeliveriesFresh`.
@@ -95,6 +96,9 @@ export interface StartTmuxInput {
   slug: string;
   args: string[];
   rollBin: string;
+  workspaceId?: string;
+  runtimeRoot?: string;
+  backlogPath?: string;
 }
 
 export interface LoopGoDeps {
@@ -117,6 +121,7 @@ export interface LoopGoDeps {
   preinstallChromium?: () => void;
   prEvidence?: (projectPath: string, storyId: string, backlogStatus: string) => Promise<AuditPrEvidence | undefined>;
   finalReview?: (input: GoalFinalReviewInput) => Promise<GoalFinalReviewResult>;
+  resolveTarget?: BacklogTargetResolver;
 }
 
 interface GoOptions {
@@ -264,6 +269,7 @@ function realDeps(): LoopGoDeps {
       silentPreinstallChromium();
     },
     prEvidence: defaultPrEvidence,
+    resolveTarget: resolveBacklogCommandTarget,
   };
 }
 
@@ -285,7 +291,13 @@ async function defaultPrEvidence(projectPath: string, _storyId: string, backlogS
 }
 
 function runtimeDir(projectPath: string): string {
-  return join(projectPath, ".roll", "loop");
+  const override = (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim();
+  return override === "" ? join(projectPath, ".roll", "loop") : override;
+}
+
+function backlogPath(projectPath: string): string {
+  const override = (process.env["ROLL_WORKSPACE_BACKLOG_PATH"] ?? "").trim();
+  return override === "" ? join(projectPath, ".roll", "backlog.md") : override;
 }
 
 function goalPath(projectPath: string): string {
@@ -468,6 +480,10 @@ function parseOptions(args: string[]): GoOptions {
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
+    if (arg === "--workspace") {
+      i += 1;
+      continue;
+    }
     if (arg === "--worker") {
       worker = true;
       continue;
@@ -597,11 +613,12 @@ function isGuidedRun(opts: GoOptions): boolean {
 
 function loopGoHelp(): string {
   return [
-    "Usage: roll loop go [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
+    "Usage: roll loop go [--workspace <id|path>] [--epic <name>|--cards <ids>|--all] [--for <duration>] [--max-cycles <n>] [--review <auto|hetero|self|off>] [--attach] [--no-tmux]",
     "  Chain goal-mode cycles until the scoped backlog is complete, paused, or capped.",
     "  按 goal 范围连续执行 cycle，直到完成、暂停或达到上限。",
     "",
     "Options:",
+    "  --workspace <id|path> Bind this goal session to one Workspace runtime and backlog.",
     "  --epic <name>       Limit the goal to one epic.",
     "  --cards <ids>       Limit the goal to comma/space separated card IDs.",
     "  --all               Reset the goal scope to the full Todo backlog (undo a prior --epic/--cards goal).",
@@ -723,7 +740,10 @@ export function planGoTmuxCommands(input: StartTmuxInput, state: GoTmuxState): s
     .concat("--worker")
     .map(shellQuote)
     .join(" ");
-  const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_NO_SCREENCAP=1 ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
+  const workspaceEnv = input.workspaceId === undefined
+    ? ""
+    : ` ROLL_WORKSPACE=${shellQuote(input.workspaceId)} ROLL_PROJECT_RUNTIME_DIR=${shellQuote(input.runtimeRoot ?? "")} ROLL_WORKSPACE_BACKLOG_PATH=${shellQuote(input.backlogPath ?? "")}`;
+  const command = `cd ${shellQuote(input.projectPath)} && ROLL_LOOP_GO_WORKER=1 ROLL_LOOP_NO_TMUX=1 ROLL_NO_SCREENCAP=1${workspaceEnv} ROLL_BIN=${shellQuote(input.rollBin)} ${shellQuote(input.rollBin)} loop go ${workerArgs}`;
   const plan: string[][] = [];
   if (!state.sessionExists) {
     plan.push(["new-session", "-d", "-s", session, "-x", "200", "-y", "50", "-n", "watch", watch]);
@@ -925,7 +945,7 @@ function readRunSnapshot(path: string): RunRowSnapshot {
 
 function readBacklogRows(projectPath: string): ScopeRow[] {
   try {
-    return parseBacklog(readFileSync(join(projectPath, ".roll", "backlog.md"), "utf8")).map((row) => ({
+    return parseBacklog(readFileSync(backlogPath(projectPath), "utf8")).map((row) => ({
       id: row.id,
       status: row.status,
     }));
@@ -976,7 +996,7 @@ function allScopeCardsSkipped(projectPath: string, goal: RollGoal, progress: Pro
 }
 
 function readRunRows(projectPath: string): TruthRunRow[] {
-  const runsPath = join(projectPath, ".roll", "loop", "runs.jsonl");
+  const runsPath = join(runtimeDir(projectPath), "runs.jsonl");
   let content = "";
   try {
     content = readFileSync(runsPath, "utf8");
@@ -1107,6 +1127,7 @@ function updateProgressFromRows(
   let accountableRows = 0;
   const lockedCycleIds = screenLockedCycleIds(eventsPath(projectPath));
   for (const row of rows) {
+    if (row["status"] === "waiting_capacity" || row["outcome"] === "waiting_capacity") continue;
     const cycleId = typeof row["cycle_id"] === "string" ? row["cycle_id"] : typeof row["cycleId"] === "string" ? row["cycleId"] : undefined;
     // FIX-1268b: a lock-screen wait is an externally imposed pause, not a
     // failed attempt. Its event is durable and cycle-bound, so only that exact
@@ -1335,7 +1356,7 @@ async function defaultFinalReview(input: GoalFinalReviewInput): Promise<GoalFina
 }
 
 function backlogExists(projectPath: string): boolean {
-  return existsSync(join(projectPath, ".roll", "backlog.md"));
+  return existsSync(backlogPath(projectPath));
 }
 
 interface FinalReviewGateResult {
@@ -1918,25 +1939,66 @@ export async function loopGoCommand(args: string[], deps: LoopGoDeps = realDeps(
     return 0;
   }
   const opts = parseOptions(args);
-  const id = await deps.identity();
-  if (!opts.worker && !opts.noTmux && deps.hasTmux()) {
-    const started = deps.startTmux({ projectPath: id.path, slug: id.slug, args, rollBin: rollBin() });
-    if (started) {
-      process.stdout.write(goStartupFeedback(id.slug, resolveEffectiveScope(id.path, opts)));
-      // FIX-289 (AC3): --attach follows the read-only live feed in the
-      // foreground. Ctrl-C there only stops this view; the cycle keeps running
-      // in its detached tmux window.
-      if (opts.attach && deps.followFeed !== undefined) {
-        process.stdout.write(
-          "Following live feed (Ctrl-C stops the view, not the loop) …\n" +
-            "正在跟随实时输出 (Ctrl-C 只停止查看，不会停止 loop) …\n",
-        );
-        await deps.followFeed(id.path, rollBin());
-      }
-      return 0;
-    }
+  let id: ProjectId;
+  let workspace: { workspaceId: string; runtimeRoot: string; backlogPath: string } | undefined;
+  if (deps.resolveTarget !== undefined) {
+    const selectorArgs: string[] = [];
+    const workspaceIndex = args.indexOf("--workspace");
+    if (workspaceIndex >= 0) selectorArgs.push("--workspace", args[workspaceIndex + 1] ?? "");
+    const decision = deps.resolveTarget(selectorArgs, "mutation");
+    if (!decision.ok) return emitBacklogTargetError(decision);
+    if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+    id = { path: decision.workspaceRoot, slug: decision.workspaceId };
+    workspace = {
+      workspaceId: decision.workspaceId,
+      runtimeRoot: decision.runtimeRoot,
+      backlogPath: decision.backlogPath,
+    };
+  } else {
+    id = await deps.identity();
   }
-  return runGoWorker(id, opts, deps);
+
+  const savedWorkspace = process.env["ROLL_WORKSPACE"];
+  const savedRuntime = process.env["ROLL_PROJECT_RUNTIME_DIR"];
+  const savedBacklog = process.env["ROLL_WORKSPACE_BACKLOG_PATH"];
+  if (workspace !== undefined) {
+    process.env["ROLL_WORKSPACE"] = workspace.workspaceId;
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = workspace.runtimeRoot;
+    process.env["ROLL_WORKSPACE_BACKLOG_PATH"] = workspace.backlogPath;
+  }
+  try {
+    if (!opts.worker && !opts.noTmux && deps.hasTmux()) {
+      const started = deps.startTmux({
+        projectPath: id.path,
+        slug: id.slug,
+        args,
+        rollBin: rollBin(),
+        ...(workspace === undefined ? {} : workspace),
+      });
+      if (started) {
+        process.stdout.write(goStartupFeedback(id.slug, resolveEffectiveScope(id.path, opts)));
+        // FIX-289 (AC3): --attach follows the read-only live feed in the
+        // foreground. Ctrl-C there only stops this view; the cycle keeps running
+        // in its detached tmux window.
+        if (opts.attach && deps.followFeed !== undefined) {
+          process.stdout.write(
+            "Following live feed (Ctrl-C stops the view, not the loop) …\n" +
+              "正在跟随实时输出 (Ctrl-C 只停止查看，不会停止 loop) …\n",
+          );
+          await deps.followFeed(id.path, rollBin());
+        }
+        return 0;
+      }
+    }
+    return await runGoWorker(id, opts, deps);
+  } finally {
+    if (savedWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+    else process.env["ROLL_WORKSPACE"] = savedWorkspace;
+    if (savedRuntime === undefined) delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    else process.env["ROLL_PROJECT_RUNTIME_DIR"] = savedRuntime;
+    if (savedBacklog === undefined) delete process.env["ROLL_WORKSPACE_BACKLOG_PATH"];
+    else process.env["ROLL_WORKSPACE_BACKLOG_PATH"] = savedBacklog;
+  }
 }
 
 async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Promise<number> {
@@ -2176,6 +2238,10 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
       // count survives this session ending (resume-safe global backstop).
       goal = goalWithProgress(goal, progress);
       writeGoal(gPath, goal);
+      if (appendedRows.some((row) => row["status"] === "waiting_capacity" || row["outcome"] === "waiting_capacity")) {
+        stopReason = "waiting_capacity";
+        break;
+      }
       // Hook 2 (post-cycle): the dead-loop breaker now occupies the slot the
       // budget gate vacated. K consecutive whole-goal no-progress cycles STOP.
       const progressGate = applyProgressGate(id.path, bus, sid, id.slug, goal, progress, deps);
@@ -2242,7 +2308,11 @@ async function runGoWorker(id: ProjectId, opts: GoOptions, deps: LoopGoDeps): Pr
     }
 
     const finalReason = stopReason ?? "stop_requested";
-    const finalGoal = goal.status === "complete" || goal.status === "paused" ? goal : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
+    const finalGoal = finalReason === "waiting_capacity"
+      ? goal
+      : goal.status === "complete" || goal.status === "paused"
+        ? goal
+        : pauseGoal(id.path, bus, finalReason, deps.nowIso(), deps.nowSec()) ?? goal;
     bus.appendEvent(evPath, {
       type: "goal:session_end",
       sessionId: sid,

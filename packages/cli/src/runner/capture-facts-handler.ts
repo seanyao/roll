@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import {
   DEFAULT_MAX_REPAIR_ROUNDS,
   EventBus,
+  acForStory,
   agentsInstalled,
   cycleActivityFromEvents,
   decideRepair,
@@ -20,13 +21,10 @@ import { parseEventLine, type RollEvent } from "@roll/spec";
 import { realAgentEnv } from "../commands/agent-list.js";
 import { cardArchiveDir } from "../lib/archive.js";
 import { formatEvaluationContractForScorer, parseEvaluationContract } from "../lib/evaluation-contract.js";
+import { evaluateReviewScoreGate } from "../lib/review-score.js";
 import { blockIfAgentCredentialsMissing, projectAllowedAgents } from "./agent-routing.js";
 import { readAttestGateMode, runAttestGate, verificationReportHasContent } from "./attest-gate.js";
-import {
-  acMapPath,
-  runAcMapSelfHeal,
-  type DraftEvidence,
-} from "./attest-remediation.js";
+import { acMapPath, runAcMapSelfHeal } from "./attest-remediation.js";
 import { applyCorrectionAction } from "./correction-actuator.js";
 import { writeEvaluatorArtifact } from "./execution-profile.js";
 import { checkMainDirty, readMainDirtyBaseline, readMainHeadBaseline } from "./main-checkout-guard.js";
@@ -42,12 +40,16 @@ import {
 } from "./pairing-gate.js";
 import { cycleChangedFiles, peerEvidencePresent, readPeerGateMode, readPeerOnPoolTimeout, runPeerGate } from "./peer-gate.js";
 import { createCapturePeerHelpers } from "./capture-peer-helpers.js";
+import { recordPeerPoolUnavailable } from "./capture-peer-unavailable.js";
+import { collectDraftEvidence, collectWorkspaceDiffEvidence } from "./capture-diff-evidence.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
-import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
-import { resolveIntegrationBranch } from "@roll/infra";
+import { resolveIntegrationBranch, resolveWorkspaceBacklogStorySpec } from "@roll/infra";
+import { executeRepositoryCaptureFactsCommand } from "./repository-verification.js";
+import { writeWorkspaceAcceptanceArtifacts } from "./workspace-acceptance.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +61,13 @@ export async function executeCaptureFactsCommand(
   ctx: CycleContext,
 ): Promise<ExecuteResult> {
   void cmd;
+      const workspaceExecution = ctx.repositoryExecution;
+      const repositoryCapture = workspaceExecution === undefined
+        ? undefined
+        : await executeRepositoryCaptureFactsCommand(ports, ctx);
+      const workspaceAcceptance = workspaceExecution === undefined
+        ? undefined
+        : writeWorkspaceAcceptanceArtifacts(ctx);
       // E4: the agent built/committed inside the EXECUTION worktree (the submodule
       // cycle worktree when the story declared a target_submodule, else the
       // superproject worktree). Every git OBSERVATION of the agent's delivery
@@ -67,8 +76,16 @@ export async function executeCaptureFactsCommand(
       // (spec/evidence/attest — `ports.paths.worktreePath`, where the loop `.roll`
       // is symlinked) are deliberately NOT routed: the submodule subdir has no
       // `.roll`. No targetSubmodule ⇒ both equal today's paths (zero regression).
-      const execCwd = resolveExecutionCwd(ports, ctx);
-      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      const representativeRepository = workspaceExecution === undefined
+        ? undefined
+        : Object.values(workspaceExecution.repositories)
+          .filter((repository) => repository.access === "write")
+          .sort((left, right) => left.alias.localeCompare(right.alias))[0];
+      if (workspaceExecution !== undefined && representativeRepository === undefined) {
+        throw new Error("missing_writable_repository");
+      }
+      const execCwd = representativeRepository?.worktreePath ?? resolveExecutionCwd(ports, ctx);
+      const execRepoCwd = representativeRepository?.worktreePath ?? resolveExecutionRepoCwd(ports, ctx);
       // E8: observe commits/TCR against the EXECUTION repo's integration branch,
       // NOT the hardwired origin/main. A submodule cycle worktree is a detached
       // `worktree add --detach` off the submodule's integration branch and has NO
@@ -80,13 +97,18 @@ export async function executeCaptureFactsCommand(
       // to origin/main again). No targetSubmodule ⇒ resolveIntegrationBranch(repoCwd)
       // → origin/main default, byte-identical to the prior hardcode.
       const observeBase = resolveIntegrationBranch(execRepoCwd);
-      await quarantineMainCheckoutForCycle(ports, ctx, "capture");
-      const commitsAhead = await ports.git.commitsAhead(execCwd, observeBase);
+      if (workspaceExecution === undefined) await quarantineMainCheckoutForCycle(ports, ctx, "capture");
+      const repositoryFacts = repositoryCapture?.event?.type === "facts_captured"
+        ? repositoryCapture.event.facts
+        : undefined;
+      const commitsAhead = repositoryFacts?.commitsAhead ?? await ports.git.commitsAhead(execCwd, observeBase);
       let mainAhead = 0;
-      try {
-        mainAhead = await ports.git.mainAhead(ports.repoCwd);
-      } catch {
-        /* drift probe is best-effort */
+      if (workspaceExecution === undefined) {
+        try {
+          mainAhead = await ports.git.mainAhead(ports.repoCwd);
+        } catch {
+          /* drift probe is best-effort */
+        }
       }
       // FIX-1475: scope the ahead probe to THIS cycle, exactly like E10 scopes
       // the dirt probe below. Pre-existing ahead commits on the shared main
@@ -120,40 +142,61 @@ export async function executeCaptureFactsCommand(
       // so this is a strict zero-regression widening). The protection is intact: a
       // builder that truly writes a NEW main-checkout path still yields a non-empty
       // newDirty → mainDirty:true.
-      const mainDirtyAll = await checkMainDirty(ports.repoCwd);
-      const mainDirtyBaseline = new Set(readMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? ""));
+      const mainDirtyAll = workspaceExecution === undefined ? await checkMainDirty(ports.repoCwd) : [];
+      const mainDirtyBaseline = new Set(
+        workspaceExecution === undefined ? readMainDirtyBaseline(guardRuntimeDir(ports), ctx.cycleId ?? "") : [],
+      );
       const mainDirtyFiles = mainDirtyAll.filter((path) => !mainDirtyBaseline.has(path));
       const mainDirty = mainDirtyFiles.length > 0;
       // FIX-208: count real `tcr:` commits while the worktree is still alive
       // (the done/cleanup path removes it before the runs row is written). Folded
       // into liveCtx so buildRunRow stops hardcoding 0. Best-effort → 0 on error.
-      let tcrCount = 0;
-      try {
-        // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
-        // on THIS path (the publish-path gates already treat 0 conservatively);
-        // the timeout teardown's measure_worktree is where unknown stays unknown.
-        tcrCount = (await ports.git.tcrCount(execCwd, observeBase)) ?? 0;
-      } catch {
-        /* count is best-effort; a git miss must not fail the cycle */
+      let tcrCount = repositoryCapture?.ctxPatch?.tcrCount ?? 0;
+      if (workspaceExecution === undefined) {
+        try {
+          // FIX-1244: undefined = undeterminable (git error) → keep the legacy 0
+          // on THIS path (the publish-path gates already treat 0 conservatively);
+          // the timeout teardown's measure_worktree is where unknown stays unknown.
+          tcrCount = (await ports.git.tcrCount(execCwd, observeBase)) ?? 0;
+        } catch {
+          /* count is best-effort; a git miss must not fail the cycle */
+        }
       }
       // FIX-1039: check whether the worktree has uncommitted/untracked files.
       // Best-effort → false on git error (the probe must never fail the cycle).
-      let worktreeDirty = false;
-      try {
-        const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
-          cwd: execCwd,
-          encoding: "utf8",
-        });
-        worktreeDirty = stdout.trim() !== "";
-      } catch {
-        /* probe is best-effort */
+      let worktreeDirty = repositoryFacts?.worktreeDirty === true;
+      if (workspaceExecution === undefined) {
+        try {
+          const { stdout } = await execFileAsync("git", ["status", "--porcelain", "--untracked-files=all"], {
+            cwd: execCwd,
+            encoding: "utf8",
+          });
+          worktreeDirty = stdout.trim() !== "";
+        } catch {
+          /* probe is best-effort */
+        }
       }
-      const { attributeBlockCause, savePeerRawOutput, peerAvailable, reviewPeer, cycleDiff } = createCapturePeerHelpers({
+      const peerHelpers = createCapturePeerHelpers({
         ports,
         ctx,
         commitsAhead,
         tcrCount,
+        ...(workspaceExecution === undefined ? {} : { reviewCwd: execCwd }),
       });
+      const { attributeBlockCause, savePeerRawOutput, peerAvailable, reviewPeer } = peerHelpers;
+      let workspaceDiffFailure: string | undefined;
+      const workspaceDiffEvidence = workspaceExecution === undefined
+        ? undefined
+        : await collectWorkspaceDiffEvidence(workspaceExecution).catch((error: unknown) => {
+          workspaceDiffFailure = error instanceof Error ? error.message : "workspace_diff_unavailable";
+          return undefined;
+        });
+      const cycleDiff = workspaceExecution === undefined
+        ? peerHelpers.cycleDiff
+        : async () => workspaceDiffEvidence?.diff ?? "";
+      const changedFiles = workspaceExecution === undefined
+        ? cycleChangedFiles
+        : async () => [...(workspaceDiffEvidence?.changedFiles ?? [])];
       // FIX-293 peer gate: agent-agnostic, runs in EVERY cycle's capture step.
       // High-complexity delivery (>3 files / cross-module / high-risk) WITHOUT
       // peer evidence → ALERT + `peer:gate` event AND, in the default HARD mode,
@@ -191,7 +234,7 @@ export async function executeCaptureFactsCommand(
             ts: eventTs(ports),
           }),
       };
-      const peerGateOpts = { heteroAvailable: peerHeteroAvailable };
+      const peerGateOpts = { heteroAvailable: peerHeteroAvailable, changedFiles };
       // FIX-362: the peer-gate EXECUTION moved to AFTER the pairing loop below. The
       // hetero pairing review (runPairing) is what WRITES the peer-evidence file the
       // gate reads (peerEvidencePresent), so the gate MUST run after it. Running it
@@ -237,7 +280,7 @@ export async function executeCaptureFactsCommand(
           isAvailable: peerAvailable,
           reviewPeer,
           ...(pairHistory !== undefined ? { history: pairHistory } : {}),
-          changedFiles: cycleChangedFiles,
+          changedFiles,
           diff: cycleDiff,
           event: (e: PairEvent) => ports.events.appendEvent(ports.paths.eventsPath, e as RollEvent),
           now: () => eventTs(ports),
@@ -257,8 +300,22 @@ export async function executeCaptureFactsCommand(
       // and is NOT blocked. When pairing is OFF (no pairing.yaml) no evidence exists,
       // so the gate's own retryPeerConsult fallback runs (single-agent path, unchanged).
       let peerGate = await runPeerGate(execCwd, runtimeDir, cycleIdStr, peerGateMode, peerGateSinks, peerGateOpts);
+      if (workspaceDiffFailure !== undefined) {
+        peerGate = {
+          verdict: "skipped",
+          mode: peerGateMode,
+          reasons: [workspaceDiffFailure],
+          blocked: true,
+          heteroAvailable: peerHeteroAvailable,
+        };
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `Workspace review input blocked for ${ctx.storyId ?? ""}: ${workspaceDiffFailure} — cycle ${cycleIdStr}`,
+        );
+        peerGateSinks.event({ cycleId: cycleIdStr, verdict: "skipped", reasons: [workspaceDiffFailure] });
+      }
       let peerBlocked = peerGate.blocked;
-      if (peerGate.blocked) {
+      if (peerGate.blocked && workspaceDiffFailure === undefined) {
         // AC-H3: bounded retry — exactly one re-attempt via the existing consult.
         const retryInstalled = peerGateInstalled.filter((a) => peerAvailable(a));
         const retry = await retryPeerConsult(execCwd, runtimeDir, cycleIdStr, {
@@ -277,53 +334,7 @@ export async function executeCaptureFactsCommand(
           peerBlocked = peerGate.blocked;
         }
         if (peerBlocked && retry.status === "timeout" && readPeerOnPoolTimeout(ports.repoCwd) === "degrade") {
-          // FIX-1234: the retry already rotated through EVERY hetero peer
-          // (FIX-331) and the pool still produced no evidence because the peers
-          // RAN but could not answer inside the timebox (timeout) — runtime-
-          // proven UNAVAILABILITY, a different fact from a peer REFUSING or
-          // ERRORING on the work. Blocking here left the delivery
-          // with no path at all (intel-radar 2026-07-07: a 2-agent pool whose
-          // only hetero peer timed out on every cycle deadlocked the project).
-          // Owner ruling stands — "self only when hetero is truly impossible" —
-          // so timebox-proven unavailability downgrades to the SAME recorded
-          // self-review fallback that install-time absence gets (peer-gate
-          // verdict `self-review-allowed`), with the unavailability written as
-          // first-class evidence for audit/release gates. `error` / `empty` /
-          // `none-available` keep the FIX-312 hard BLOCK (a misconfigured,
-          // crashing, or hollow-answering peer must stay loud, not be waived —
-          // only the timebox distinguishes true capacity unavailability), and
-          // the review QUALITY
-          // floor is untouched: the fresh-session Review Score gate still blocks
-          // a delivery nobody scored.
-          const how = retry.sameTypeFallback === true ? "same-type separate-session review" : "peer review";
-          const unavailableDir = join(runtimeDir, "peer-unavailable");
-          mkdirSync(unavailableDir, { recursive: true });
-          writeFileSync(
-            join(unavailableDir, `cycle-${cycleIdStr}.json`),
-            JSON.stringify(
-              {
-                cycleId: cycleIdStr,
-                status: retry.status,
-                how,
-                peer: retry.peer ?? null,
-                attempts: 2,
-                ts: eventTs(ports),
-              },
-              null,
-              2,
-            ),
-            "utf8",
-          );
-          ports.events.appendEvent(ports.paths.eventsPath, {
-            type: "peer:unavailable",
-            cycleId: cycleIdStr,
-            status: retry.status,
-            ts: eventTs(ports),
-          } as unknown as RollEvent);
-          ports.events.appendAlert(
-            ports.paths.alertsPath,
-            `peer gate (hard): peer pool unavailable after retry — the ${how} produced no evidence (${retry.status}) — cycle ${cycleIdStr} downgraded to recorded self-review fallback (peer_unavailable evidence written; Review Score gate still applies)`,
-          );
+          recordPeerPoolUnavailable({ ports, runtimeDir, cycleId: cycleIdStr, retry });
           peerGate = {
             ...peerGate,
             verdict: "self-review-allowed",
@@ -351,6 +362,7 @@ export async function executeCaptureFactsCommand(
       // stage is never run) is never mis-flagged: needs_review is gated on
       // commitsAhead>0 anyway, so the default only matters when the stage ran.
       let scoreStatus: "none-available" | "scored" | "timeout" | "error" = "scored";
+      let scoreQualityFailure: string | undefined;
       // FIX-343 (step ③) pipeline order: peer-score → report render → attest gate
       // → terminal → teardown. The score stage runs BEFORE the report render so
       // the report embeds the FRESHLY-written peer score (never a stale one). A
@@ -360,7 +372,7 @@ export async function executeCaptureFactsCommand(
       // interest). When no peer can score (no candidate / timeout / error) NO note is
       // written: the attest gate then fails loud (`missing peer review score`)
       // and the cycle honestly fails — there is no runner-derived fallback.
-      if (commitsAhead > 0 && storyId !== "") {
+      if (commitsAhead > 0 && storyId !== "" && workspaceDiffFailure === undefined) {
         // FIX-910 — emit a per-attempt score-stage failure event so every null
         // return from a scorer is OBSERVABLE (no more silently swallowed nulls).
         // The cause distinguishes unparseable / timeout / auth-block / exit-error.
@@ -478,9 +490,13 @@ export async function executeCaptureFactsCommand(
           // origin/main) and run it in the execution worktree. No targetSubmodule ⇒
           // resolveIntegrationBranch(ports.repoCwd) which defaults to origin/main —
           // byte-identical to the prior hardcode.
-          const diffBase = resolveIntegrationBranch(execRepoCwd);
-          const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
-          diffStat = stdout.slice(0, 4_000);
+          if (workspaceExecution !== undefined) {
+            diffStat = workspaceDiffEvidence?.diffStat ?? "";
+          } else {
+            const diffBase = resolveIntegrationBranch(execRepoCwd);
+            const { stdout } = await execFileAsync("git", ["diff", "--stat", `${diffBase}...HEAD`], { cwd: execCwd, encoding: "utf8" });
+            diffStat = stdout.slice(0, 4_000);
+          }
         } catch {
           /* summary degrades gracefully */
         }
@@ -490,12 +506,24 @@ export async function executeCaptureFactsCommand(
         // loop). Best-effort: a missing/unreadable spec degrades to the id-only line.
         let goalLine = "";
         let evalContractFormatted = "";
+        let acceptanceCriteriaFormatted = "";
         try {
-          const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
-          if (existsSync(specPath)) {
-            const specText = readFileSync(specPath, "utf8");
+          let specText: string | undefined;
+          if (workspaceExecution !== undefined) {
+            const workspaceRoot = dirname(dirname(workspaceExecution.issueRoot));
+            const resolved = resolveWorkspaceBacklogStorySpec(workspaceRoot, storyId);
+            if (resolved.ok) specText = resolved.text;
+          } else {
+            const specPath = join(cardArchiveDir(ports.repoCwd, storyId), "spec.md");
+            if (existsSync(specPath)) specText = readFileSync(specPath, "utf8");
+          }
+          if (specText !== undefined) {
             const title = (/^title:\s*(.+)$/m.exec(specText)?.[1] ?? "").trim();
             if (title !== "") goalLine = `Goal: ${title}\n`;
+            const criteria = acForStory(specText, storyId, { fileOwned: workspaceExecution !== undefined });
+            if (criteria.length > 0) {
+              acceptanceCriteriaFormatted = `Acceptance criteria:\n${criteria.map((item) => `  - ${item.text}`).join("\n")}\n`;
+            }
             // US-SKILL-030: pass evaluation contract to scorer so it grades against
             // the story's intended evidence/focus, not just generic code quality.
             evalContractFormatted = formatEvaluationContractForScorer(parseEvaluationContract(specText));
@@ -503,7 +531,7 @@ export async function executeCaptureFactsCommand(
         } catch {
           /* best-effort — the scorer still gets the diff stat */
         }
-        const summary = `Story: ${storyId}\n${goalLine}Delivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
+        const summary = `Story: ${storyId}\n${goalLine}${acceptanceCriteriaFormatted}Delivery: peer-reviewed cycle, scoring stage\nDiff stat:\n${diffStat}`;
         const skill = storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "roll-fix" : "roll-build";
         // Write to the PERSISTENT .roll (repoCwd) so the peer score note survives
         // worktree teardown and the gate (reading repoCwd) finds it. FIX-343: use
@@ -526,9 +554,24 @@ export async function executeCaptureFactsCommand(
           allowedAgents: peerGateAllowedAgents,
         });
         scoreStatus = scoreResult.status;
+        if (workspaceExecution !== undefined && scoreStatus === "scored") {
+          const quality = evaluateReviewScoreGate(
+            ports.repoCwd,
+            storyId,
+            ctx.builderSessionId ?? "",
+            ctx.cycleId ?? "",
+          );
+          if (quality.status !== "pass") scoreQualityFailure = quality.reason;
+        }
       }
       let attestRenderExitCode = 0;
-      if (commitsAhead > 0 && storyId !== "" && ctx.evidenceRunDir !== undefined && ctx.evidenceRunDir !== "") {
+      if (
+        workspaceExecution === undefined &&
+        commitsAhead > 0 &&
+        storyId !== "" &&
+        ctx.evidenceRunDir !== undefined &&
+        ctx.evidenceRunDir !== ""
+      ) {
         const remediationAgent = ctx.agent ?? "claude";
         const selfHeal = await runAcMapSelfHeal({
           // E4: the remediation agent inspects the delivery + collects git evidence
@@ -596,56 +639,63 @@ export async function executeCaptureFactsCommand(
       let attestVerdict: "produced" | "skipped" | "unknown" = "unknown";
       let attestReasons: readonly string[] = [];
       if (commitsAhead > 0 && storyId !== "") {
-        const mode = readAttestGateMode(ports.repoCwd);
-        const res = runAttestGate(
-          ports.paths.worktreePath,
-          storyId,
-          ctx.cycleId ?? "",
-          mode,
-          ctx.startSec,
-          {
-            alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
-            event: (p) =>
-              ports.events.appendEvent(ports.paths.eventsPath, {
-                type: "attest:gate",
-                cycleId: p.cycleId,
-                verdict: p.verdict,
-                reasons: p.reasons,
-                ts: eventTs(ports),
-              }),
-          },
-          // FIX-343: read the peer score from the PERSISTENT .roll (repoCwd) —
-          // where runScorePairing wrote it — not the ephemeral worktree; thread
-          // the BUILDER SESSION ID (step ①) so the gate verifies the scorer's
-          // session ≠ the builder's session (an independent fresh session scored
-          // this, never the builder's own in-session/sub-agent grading). The
-          // vendor-name comparison is gone — a same-vendor fresh session is valid.
-          ports.repoCwd,
-          ctx.builderSessionId ?? "",
-          attestRenderExitCode,
-          // E9 (PR9): resolve the SPEC (design truth) from the LIVE `.roll`
-          // (ports.repoCwd), aligning attest with the picker/designer
-          // (`storySpecPath(ports.repoCwd, id)`). This is the spec-resolution cwd
-          // ONLY — evidence/score keep the worktree/scoreRepoCwd semantics above.
-          // A tracked-`.roll` project's uncommitted spec is otherwise invisible in
-          // the worktree snapshot (mis-read as "not found"); a non-tracked project's
-          // worktree `.roll` is symlinked to repoCwd's, so this is byte-identical.
-          ports.repoCwd,
-        );
-        if (res.verdict === "skipped") {
-          applyCorrectionAction({
-            projectPath: ports.repoCwd,
-            eventsPath: ports.paths.eventsPath,
-            alertsPath: ports.paths.alertsPath,
-            storyId,
+        if (workspaceExecution !== undefined) {
+          attestBlocked = repositoryFacts?.repositoryVerificationPending === true || workspaceAcceptance?.produced !== true ||
+            workspaceDiffFailure !== undefined || scoreQualityFailure !== undefined;
+          attestVerdict = attestBlocked ? "skipped" : "produced";
+          attestReasons = repositoryFacts?.repositoryVerificationPending === true
+            ? ["repository_verification_pending"]
+            : [
+              ...(workspaceAcceptance?.reasons ?? ["workspace_acceptance_artifacts_missing"]),
+              ...(workspaceDiffFailure === undefined ? [] : [workspaceDiffFailure]),
+              ...(scoreQualityFailure === undefined ? [] : [scoreQualityFailure]),
+            ];
+          ports.events.appendEvent(ports.paths.eventsPath, {
+            type: "attest:gate",
             cycleId: ctx.cycleId ?? "",
-            reasons: res.reasons,
-            nowSec: ports.clock(),
+            verdict: attestVerdict,
+            reasons: [...attestReasons],
+            ts: eventTs(ports),
           });
+        } else {
+          const mode = readAttestGateMode(ports.repoCwd);
+          const res = runAttestGate(
+            ports.paths.worktreePath,
+            storyId,
+            ctx.cycleId ?? "",
+            mode,
+            ctx.startSec,
+            {
+              alert: (m) => ports.events.appendAlert(ports.paths.alertsPath, m),
+              event: (p) =>
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  type: "attest:gate",
+                  cycleId: p.cycleId,
+                  verdict: p.verdict,
+                  reasons: p.reasons,
+                  ts: eventTs(ports),
+                }),
+            },
+            ports.repoCwd,
+            ctx.builderSessionId ?? "",
+            attestRenderExitCode,
+            ports.repoCwd,
+          );
+          if (res.verdict === "skipped") {
+            applyCorrectionAction({
+              projectPath: ports.repoCwd,
+              eventsPath: ports.paths.eventsPath,
+              alertsPath: ports.paths.alertsPath,
+              storyId,
+              cycleId: ctx.cycleId ?? "",
+              reasons: res.reasons,
+              nowSec: ports.clock(),
+            });
+          }
+          attestBlocked = res.blocked;
+          attestVerdict = res.verdict;
+          attestReasons = res.reasons;
         }
-        attestBlocked = res.blocked;
-        attestVerdict = res.verdict;
-        attestReasons = res.reasons;
       }
       // US-V4-005: for verified/designed profiles, write the Evaluator artifact
       // (eval-report.md + artifact-manifest.json) into the run dir, ASSEMBLED from
@@ -661,7 +711,10 @@ export async function executeCaptureFactsCommand(
         commitsAhead > 0 &&
         storyId !== ""
       ) {
-        const blocking = attestBlocked || peerBlocked ? attestReasons : [];
+        const blocking = [
+          ...(attestBlocked || peerBlocked ? attestReasons : []),
+          ...(workspaceExecution !== undefined && scoreStatus !== "scored" ? ["missing_workspace_review_score"] : []),
+        ];
         const ev = writeEvaluatorArtifact(ports, ctx, { attestStatus: attestVerdict, blockingFindings: blocking });
         if (ev.written && !ev.valid) {
           evaluatorBlocked = true;
@@ -684,7 +737,7 @@ export async function executeCaptureFactsCommand(
       // no-output failure. Probe the cycle branch's PR state into the facts so
       // classifyCaptured can see it; a failed probe degrades to plain failed.
       let prState: string | undefined;
-      if (attestBlocked && commitsAhead > 0) {
+      if (workspaceExecution === undefined && attestBlocked && commitsAhead > 0) {
         prState = await ports.github.prState(ports.repoCwd, ctx.branch).catch(() => undefined);
       }
       // Hook 1 (productivity floor): reaching capture means an agent WAS spawned
@@ -696,7 +749,8 @@ export async function executeCaptureFactsCommand(
       const agentExecuted = (ctx.agent ?? "").trim() !== "";
       // US-V4-005: a verified/designed cycle with an invalid Evaluator artifact is
       // gate-blocked (fail-closed) alongside the attest/peer gates.
-      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked;
+      const gateBlocked = attestBlocked || peerBlocked || evaluatorBlocked ||
+        (workspaceExecution !== undefined && commitsAhead > 0 && (scoreStatus !== "scored" || scoreQualityFailure !== undefined));
       // FIX-908: a gate-blocked cycle that did REAL work (≥1 commit AND ≥1 tcr:
       // commit) but is only missing a REQUIRED acceptance artifact — the
       // independent peer Review Score was not produced (scoreStatus ≠ "scored") OR
@@ -710,7 +764,7 @@ export async function executeCaptureFactsCommand(
       // on a 0-commit / 0-tcr give-up — those stay `failed`/`gave_up`/`idle`.
       const missingRequiredArtifact =
         scoreStatus !== "scored" ||
-        (storyId !== "" && !verificationReportHasContent(ports.paths.worktreePath, storyId, ports.repoCwd));
+        (workspaceExecution === undefined && storyId !== "" && !verificationReportHasContent(ports.paths.worktreePath, storyId, ports.repoCwd));
       const needsReview =
         gateBlocked &&
         commitsAhead > 0 &&
@@ -719,6 +773,7 @@ export async function executeCaptureFactsCommand(
         prState !== "OPEN" &&
         prState !== "MERGED";
       const facts: CapturedFacts = {
+        ...repositoryFacts,
         usedWorktree: true,
         agentExecuted,
         // The real agent process exit code (from agent_exited), NOT the
@@ -740,45 +795,12 @@ export async function executeCaptureFactsCommand(
         ...(ctx.agentInternalFailure !== undefined ? { agentInternalFailure: ctx.agentInternalFailure } : {}),
         ...(prState !== undefined ? { prState } : {}),
       };
-      return { event: { type: "facts_captured", facts }, ctxPatch: { tcrCount, ...(mainDirty ? { mainDirty: true } : {}) } };
-}
-
-/**
- * FIX-912 — collect the git evidence the ac-map draft generator needs.
- * Three cheap git calls in the worktree; each has a hard cap so they never
- * stall the cycle (a single cycle's worth of commits + diff is small).
- * Best-effort: on ANY failure returns an empty evidence structure (the draft
- * generator then produces an all-`needs-confirmation` skeleton). The cap
- * values are generous for a normal cycle but bounded for safety.
- *
- * E4: `repoCwd` (the EXECUTION repo root) resolves the diff baseline — a submodule
- * cycle diffs against the SUBMODULE's own integration branch, not the
- * superproject's origin/main. Absent/superproject ⇒ resolveIntegrationBranch
- * defaults to origin/main (byte-identical to the prior hardcode).
- */
-async function collectDraftEvidence(worktreeCwd: string, repoCwd: string): Promise<DraftEvidence> {
-  const empty: DraftEvidence = { commitLines: [], diffStatLines: [], changedFilenames: [] };
-  const base = resolveIntegrationBranch(repoCwd);
-  try {
-    const [commits, diffStat, changedFiles] = await Promise.all([
-      execFileAsync("git", ["log", "--oneline", `${base}..HEAD`, "-n", "50"], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--stat", `${base}...HEAD`], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-      execFileAsync("git", ["diff", "--name-only", `${base}...HEAD`], {
-        cwd: worktreeCwd,
-        encoding: "utf8",
-        timeout: 15_000,
-      }).then((r) => r.stdout.trim().split("\n").filter((l) => l !== ""), () => [] as string[]),
-    ]);
-    return { commitLines: commits, diffStatLines: diffStat, changedFilenames: changedFiles };
-  } catch {
-    return empty;
-  }
+      return {
+        event: { type: "facts_captured", facts },
+        ctxPatch: {
+          ...repositoryCapture?.ctxPatch,
+          tcrCount,
+          ...(mainDirty ? { mainDirty: true } : {}),
+        },
+      };
 }

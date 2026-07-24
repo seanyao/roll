@@ -3,9 +3,20 @@
  * Parses .roll/backlog.md and renders items grouped by type; management
  * subcommands (lint/unstick/sync/block/defer/unblock/promote) stay on bash.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { classifyStatus, resolveLang, t, v2Catalog } from "@roll/spec";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { validateStoryId } from "@roll/core";
+import { classifyStatus, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { c, pad, renderState, RESET_RAW, row, trunc } from "../render.js";
+import {
+  emitBacklogTargetError,
+  resolveBacklogCommandTarget,
+  workspaceOwnsPath,
+  type BacklogAggregateEntry,
+  type BacklogOperation,
+  type BacklogTargetDecision,
+  type ResolvedBacklogTarget,
+} from "./backlog-target.js";
 
 export const BACKLOG_MGMT_SUBCOMMANDS = [
   "lint",
@@ -19,12 +30,13 @@ export const BACKLOG_MGMT_SUBCOMMANDS = [
 
 interface Item {
   id: string;
+  link?: string;
   desc: string;
   status: string;
   reason: string;
 }
 
-const ID_RE = /\[([^\]]+)\]\([^)]+\)/;
+const ID_RE = /\[([^\]]+)\]\(([^)]+)\)/;
 const REASON_RE = /\[([^\]]+)\]/;
 
 function parseBacklog(path: string): Item[] {
@@ -39,13 +51,14 @@ function parseBacklog(path: string): Item[] {
     const statusCell = parts[3] ?? "";
     const m = ID_RE.exec(idCell);
     const itemId = m !== null ? (m[1] ?? "") : idCell.trim();
+    const link = m?.[2]?.trim();
     if (!/^(US|FIX|REFACTOR|IDEA)-/.test(itemId)) continue;
     let reason = "";
     if (classifyStatus(statusCell) === "hold") {
       const rm = REASON_RE.exec(statusCell);
       reason = rm !== null ? (rm[1] ?? "") : "";
     }
-    items.push({ id: itemId, desc: descCell, status: statusCell, reason });
+    items.push({ id: itemId, desc: descCell, status: statusCell, reason, ...(link === undefined ? {} : { link }) });
   }
   return items;
 }
@@ -53,25 +66,118 @@ function parseBacklog(path: string): Item[] {
 const MAX_DESC = 62;
 const BG_RUN = "\x1b[48;2;40;20;70m";
 
-export function backlogCommand(args: string[]): number {
+export interface BacklogCommandDeps {
+  readonly resolveTarget: (args: readonly string[], operation: BacklogOperation) => BacklogTargetDecision;
+}
+
+const realBacklogCommandDeps: BacklogCommandDeps = { resolveTarget: resolveBacklogCommandTarget };
+
+function currentLang(): Lang {
+  return resolveLang({
+    rollLang: process.env["ROLL_LANG"],
+    lcAll: process.env["LC_ALL"],
+    lang: process.env["LANG"],
+  });
+}
+
+function msg(key: string, ...args: ReadonlyArray<string | number>): string {
+  return t(v3Catalog, currentLang(), key, ...args);
+}
+
+function emitError(
+  code: string,
+  candidates: readonly BacklogAggregateEntry[] = [],
+  migrationCheckCommand?: string,
+): number {
+  const key = code === "story_not_found" || code === "invalid_arguments"
+    ? `backlog.error.${code}`
+    : `workspace.error.${code}`;
+  process.stderr.write(`${msg("backlog.error.line", code, msg(key))}\n`);
+  if (candidates.length > 0) {
+    process.stderr.write(`${msg("backlog.error.candidates", candidates.map((entry) => `${entry.workspaceId}=${entry.workspaceRoot}`).join(", "))}\n`);
+  }
+  if (migrationCheckCommand !== undefined) process.stderr.write(`${msg("backlog.error.migration_command", migrationCheckCommand)}\n`);
+  return 1;
+}
+
+function positionalArgs(args: readonly string[]): string[] | undefined {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--all" || arg === "--no-color") continue;
+    if (arg === "--workspace") {
+      if (args[index + 1] === undefined) return undefined;
+      index += 1;
+      continue;
+    }
+    if (arg?.startsWith("-")) return undefined;
+    if (arg !== undefined) values.push(arg);
+  }
+  return values;
+}
+
+function renderAggregate(entries: readonly BacklogAggregateEntry[]): number {
+  const lines = [msg("backlog.header")];
+  for (const entry of entries) {
+    if (!workspaceOwnsPath(entry.canonicalRoot, entry.backlogPath)) return emitError("invalid_target", entries);
+    if (!existsSync(entry.backlogPath)) continue;
+    for (const item of parseBacklog(entry.backlogPath)) {
+      lines.push([entry.workspaceId, item.id, item.status, item.desc].join("\t"));
+    }
+  }
+  if (lines.length === 1) lines.push(msg("backlog.empty"));
+  process.stdout.write(`${lines.join("\n")}\n`);
+  return 0;
+}
+
+function contained(root: string, target: string): boolean {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel));
+}
+
+function showStory(target: ResolvedBacklogTarget, storyId: string): number {
+  if (!existsSync(target.backlogPath)) return emitError("story_not_found");
+  const item = parseBacklog(target.backlogPath).find((candidate) => candidate.id === storyId);
+  const linkPath = item?.link?.split("#", 1)[0]?.split("?", 1)[0];
+  if (linkPath === undefined || linkPath === "" || isAbsolute(linkPath)) return emitError("story_not_found");
+  const path = resolve(linkPath.startsWith("backlog/") ? target.workspaceRoot : dirname(target.backlogPath), linkPath);
+  if (!existsSync(path)) return emitError("story_not_found");
+  const canonicalPath = realpathSync(path);
+  if (!contained(target.canonicalRoot, canonicalPath)) return emitError("story_not_found");
+  process.stdout.write([
+    msg("backlog.show.title", storyId, target.workspaceId),
+    msg("backlog.show.path", canonicalPath),
+    readFileSync(canonicalPath, "utf8").trimEnd(),
+    "",
+  ].join("\n"));
+  return 0;
+}
+
+export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBacklogCommandDeps): number {
   const noColor =
     args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
 
-  const backlog = ".roll/backlog.md";
+  const positional = positionalArgs(args);
+  if (positional === undefined) return emitError("invalid_arguments");
+  const show = positional[0] === "show";
+  if ((show && (positional.length !== 2 || args.includes("--all"))) || (!show && positional.length !== 0)) {
+    return emitError("invalid_arguments");
+  }
+  const storyId = show ? positional[1] : undefined;
+  if (storyId !== undefined && !validateStoryId(storyId).ok) return emitError("invalid_arguments");
+
+  const decision = deps.resolveTarget(args, "read");
+  if (!decision.ok) {
+    return emitBacklogTargetError(decision);
+  }
+  if ("aggregate" in decision) return renderAggregate(decision.aggregate);
+  if (!workspaceOwnsPath(decision.canonicalRoot, decision.backlogPath)) return emitError("invalid_target");
+  if (storyId !== undefined) return showStory(decision, storyId);
+
+  const backlog = decision.backlogPath;
   if (!existsSync(backlog)) {
-    // Mirrors cmd_backlog's pre-check (bash err + msg catalog) — exit 1.
-    const lang = resolveLang({
-      rollLang: process.env["ROLL_LANG"],
-      lcAll: process.env["LC_ALL"],
-      lang: process.env["LANG"],
-    });
-    const RED = noColor ? "" : "\x1b[0;31m";
-    const NC = noColor ? "" : "\x1b[0m";
-    process.stderr.write(
-      `${RED}[roll]${NC} ${t(v2Catalog, lang, "backlog.roll_backlog_md_not_found_run")}\n`,
-    );
-    return 1;
+    return emitError("target_missing");
   }
 
   const items = parseBacklog(backlog);
@@ -106,6 +212,7 @@ export function backlogCommand(args: string[]): number {
   const out: string[] = [];
   const todoTotal = todoFix.length + todoUs.length + todoRef.length + todoIdea.length;
 
+  out.push(msg("backlog.title", decision.workspaceId, decision.canonicalRoot));
   out.push("");
   let tags = c("fg", `${todoTotal + inProgress.length} Pending`, { bold: true });
   if (hold.length > 0) tags += c("muted", " · ") + c("amber", `${hold.length} Hold`);

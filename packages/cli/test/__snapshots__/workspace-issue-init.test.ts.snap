@@ -1,0 +1,217 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-WS-008 roll workspace issue init > freezes EN/ZH --help > help-en 1`] = `
+"Usage: roll workspace issue init <story-id> --workspace <id> [--check] [--json]
+  --check resolves the Story Contract, Workspace bindings and every repository target's state with zero writes.
+  Apply creates/reuses/repairs one Issue root: an immutable roll.issue/v1 manifest and one worktree per declared repository target.
+
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes EN/ZH --help > help-zh 1`] = `
+"用法：roll workspace issue init <Story ID> --workspace <ID> [--check] [--json]
+  --check 只读解析 Story Contract、工作区绑定与每个仓库目标的状态，零写入。
+  Apply 创建/复用/修复一个 Issue root：不可变的 roll.issue/v1 manifest 与每个声明仓库目标各一个 worktree。
+
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes governed-branch conflict and stale-registration repair check output > governed-branch-conflict-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-check/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "report": {
+    "manifest": {
+      "state": "absent"
+    },
+    "targets": {
+      "sot": {
+        "alias": "sot",
+        "access": "write",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/sot",
+        "workBranch": "roll/ws-demo/US-XX1/sot",
+        "decision": "conflict"
+      },
+      "docs": {
+        "alias": "docs",
+        "access": "read",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/docs",
+        "workBranch": null,
+        "decision": "created"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes governed-branch conflict and stale-registration repair check output > stale-registration-repaired-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-check/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "report": {
+    "manifest": {
+      "state": "compatible"
+    },
+    "targets": {
+      "sot": {
+        "alias": "sot",
+        "access": "write",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/sot",
+        "workBranch": "roll/ws-demo/US-XX1/sot",
+        "decision": "repaired"
+      },
+      "docs": {
+        "alias": "docs",
+        "access": "read",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/docs",
+        "workBranch": null,
+        "decision": "reused"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON contract for check/create/reuse/failure > check-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-check/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "report": {
+    "manifest": {
+      "state": "absent"
+    },
+    "targets": {
+      "sot": {
+        "alias": "sot",
+        "access": "write",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/sot",
+        "workBranch": "roll/ws-demo/US-XX1/sot",
+        "decision": "created"
+      },
+      "docs": {
+        "alias": "docs",
+        "access": "read",
+        "repoId": "<REPO_ID>",
+        "cachePath": "<HOME>/.roll/repos/<REPO_ID>.git",
+        "cacheState": "compatible",
+        "baseSha": "<SHA>",
+        "worktreePath": "<HOME>/workspace/issues/US-XX1/docs",
+        "workBranch": null,
+        "decision": "created"
+      }
+    }
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON contract for check/create/reuse/failure > created-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-apply/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "outcome": "created",
+  "manifest": {
+    "schema": "roll.issue/v1",
+    "workspaceId": "ws-demo",
+    "storyId": "US-XX1",
+    "requirements": [],
+    "repositories": [
+      {
+        "repoId": "<REPO_ID>",
+        "alias": "sot",
+        "access": "write",
+        "requiredDelivery": true,
+        "noChangePolicy": "changes_required"
+      },
+      {
+        "repoId": "<REPO_ID>",
+        "alias": "docs",
+        "access": "read",
+        "requiredDelivery": false
+      }
+    ]
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON contract for check/create/reuse/failure > failure-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-error/v1",
+  "error": {
+    "code": "story_not_found",
+    "message": "No Story spec was found for this id",
+    "candidates": []
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > freezes the scrubbed full JSON contract for check/create/reuse/failure > reused-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-apply/v1",
+  "storyId": "US-XX1",
+  "workspaceId": "ws-demo",
+  "outcome": "reused",
+  "manifest": {
+    "schema": "roll.issue/v1",
+    "workspaceId": "ws-demo",
+    "storyId": "US-XX1",
+    "requirements": [],
+    "repositories": [
+      {
+        "repoId": "<REPO_ID>",
+        "alias": "sot",
+        "access": "write",
+        "requiredDelivery": true,
+        "noChangePolicy": "changes_required"
+      },
+      {
+        "repoId": "<REPO_ID>",
+        "alias": "docs",
+        "access": "read",
+        "requiredDelivery": false
+      }
+    ]
+  }
+}
+"
+`;
+
+exports[`US-WS-008 roll workspace issue init > rejects a SECOND target's pre-existing governed branch before creating the first target > later-target-preflight-rejected-json 1`] = `
+"{
+  "schema": "roll.workspace-issue-error/v1",
+  "error": {
+    "code": "rejected",
+    "message": "Issue init plan was rejected before mutation",
+    "candidates": []
+  }
+}
+"
+`;

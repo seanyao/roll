@@ -33,6 +33,7 @@ import { releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } f
 import { applyCorrectionCircuitBreaker } from "../runner/correction-circuit.js";
 import { classifyCycleFailure, playbookForFailure, readCycleEvents, recordRootCauseFailure, type FailureAttribution } from "../runner/failure-attribution.js";
 import { readSkillBody as readSkillBodyGeneric } from "../runner/skill-body.js";
+import { auditWorkspaceWorktrees } from "./workspace-worktree-lifecycle.js";
 import { currentLang, realAgentEnv } from "./agent-list.js";
 import { cardArchiveDir, reportFileName, reviewFileName } from "../lib/archive.js";
 import { readLatestResizeSignal } from "../lib/review-score.js";
@@ -48,7 +49,9 @@ import { requireNetwork, tcpConnect } from "../lib/require-network.js";
 import { gcCommand } from "./gc.js";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import { emitBacklogTargetError, resolveBacklogCommandTarget, stripBacklogScopeArgs, type ResolvedBacklogTarget } from "./backlog-target.js";
 import { resolveLang, t, v3Catalog } from "@roll/spec";
+import { resolveStoryLeasePath } from "../runner/story-lease-path.js";
 
 export const PUBLISHED_DELIVERY_MESSAGE =
   "loop run-once: delivery published — PR open, awaiting reconciliation (Delivery Reconciler advances merge and credits main evidence)\n" +
@@ -78,7 +81,7 @@ export function announceReport(
   const label = currentLang() === "zh" ? "验收 Review Page" : "Acceptance Review Page";
   process.stdout.write(`${label}: ${report}\n`);
   const muted =
-    existsSync(join(projectPath, ".roll", "loop", `mute-${slug}`)) ||
+    existsSync(join(runtimeDir(projectPath), `mute-${slug}`)) ||
     existsSync(
       join(process.env["ROLL_SHARED_ROOT"] || join(process.env["HOME"] ?? "", ".shared", "roll"), "loop", `mute-${slug}`),
     );
@@ -107,6 +110,7 @@ export interface SignalTeardownDeps {
   now?: () => number;
   repoCwd?: string;
   runtimeDir?: string;
+  releaseCapacity?: (cycleId: string) => import("@roll/spec").AgentCapacityOwnershipResult;
 }
 
 const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
@@ -126,7 +130,7 @@ const SIGNUM: Record<string, number> = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
  * after a clean terminal (lock already released) must not double-write.
  */
 export function cycleSignalTeardown(
-  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath">,
+  paths: Pick<RunnerPaths, "eventsPath" | "runsPath" | "lockPath" | "storyLeasePath">,
   cycleId: string,
   branch: string,
   sig: NodeJS.Signals,
@@ -141,6 +145,15 @@ export function cycleSignalTeardown(
     kill("SIGKILL");
   } catch {
     /* no agent in flight */
+  }
+
+  try {
+    const released = deps.releaseCapacity?.(cycleId);
+    if (released?.kind === "ownership_lost") {
+      process.stderr.write(`loop run-once: capacity ownership lost during ${sig}: ${released.reason}\n`);
+    }
+  } catch {
+    /* terminal/lock cleanup still proceeds */
   }
 
   let owned = false;
@@ -224,7 +237,7 @@ export function cycleSignalTeardown(
     const terminalStoryId = ctx.storyId ?? "";
     if (terminalStoryId !== "") {
       try {
-        releaseStoryLease(join(dirname(paths.eventsPath), "leases"), terminalStoryId, { source: "cycle", pid: process.pid });
+        releaseStoryLease(paths.storyLeasePath ?? join(dirname(paths.eventsPath), "leases"), terminalStoryId, { source: "cycle", pid: process.pid });
       } catch {
         /* lease cleanup must never block signal teardown */
       }
@@ -261,6 +274,7 @@ export function installCycleSignalTeardown(
   branch: string,
   repoCwd?: string,
   runtimeDirPath?: string,
+  releaseCapacity?: (cycleId: string) => import("@roll/spec").AgentCapacityOwnershipResult,
 ): () => void {
   const sigs: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
   const handlers = new Map<NodeJS.Signals, () => void>();
@@ -268,6 +282,7 @@ export function installCycleSignalTeardown(
     const h = (): void => cycleSignalTeardown(paths, cycleId, branch, sig, {
       ...(repoCwd !== undefined ? { repoCwd } : {}),
       ...(runtimeDirPath !== undefined ? { runtimeDir: runtimeDirPath } : {}),
+      ...(releaseCapacity !== undefined ? { releaseCapacity } : {}),
     });
     handlers.set(sig, h);
     process.on(sig, h);
@@ -292,6 +307,11 @@ function runtimeDir(projectPath: string): string {
   return env !== "" ? env : join(projectPath, ".roll", "loop");
 }
 
+function resolvedBacklogFile(projectPath: string): string {
+  const env = (process.env["ROLL_WORKSPACE_BACKLOG_PATH"] ?? "").trim();
+  return env !== "" ? env : join(projectPath, ".roll", "backlog.md");
+}
+
 // ── FIX-216b: consecutive-failure auto-PAUSE ──────────────────────────────────
 
 const PAUSE_THRESHOLD = 3;
@@ -308,22 +328,23 @@ const CARD_SKIP_THRESHOLD = 3;
  * FIX-363: a card was just skip-listed (failed K times). Write an ACTIONABLE
  * alert so the owner knows WHICH card was parked and that the loop kept going —
  * instead of the loop silently auto-pausing on it. The card stays Todo; an owner
- * fixes it (or clears `.roll/loop/skip-cards.json`) to re-arm it.
+ * fixes it (or clears the active runtime's `skip-cards.json`) to re-arm it.
  */
-function writeCardSkipAlert(
+export function writeCardSkipAlert(
   alertsPath: string,
   eventsPath: string,
   cycleId: string,
   storyId: string,
   count: number,
 ): void {
+  const skipCardsPath = join(dirname(eventsPath), "skip-cards.json");
   const msg =
     `# ALERT — poison-pill card parked (loop kept running)\n\n` +
     `**Cycle**: ${cycleId}\n` +
     `**Card**: ${storyId}\n` +
     `**Reason**: failed ${count}× — skip-listed so the loop keeps delivering OTHER cards instead of pausing.\n` +
     `**Action**: investigate ${storyId} (it likely needs a smaller split, a spec fix, or manual delivery). ` +
-    `Once addressed, remove it from \`.roll/loop/skip-cards.json\` (or just fix the card) to re-arm it.\n`;
+    `Once addressed, remove it from \`${skipCardsPath}\` (or just fix the card) to re-arm it.\n`;
   try {
     appendFileSync(alertsPath, `${msg}\n`, "utf8");
   } catch {
@@ -374,7 +395,7 @@ function incrementConsecutiveFails(
   const threshold = readFailurePauseThreshold(projectPath);
   if (count < threshold) return;
 
-  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
   if (existsSync(pauseMarker)) return;
   const alertMsg =
     `# ALERT — loop auto-paused after ${count} consecutive failures\n\n` +
@@ -419,7 +440,7 @@ function writeRootCausePause(
   count: number,
   snapshotPath: string | undefined,
 ): void {
-  const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+  const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
   if (existsSync(pauseMarker)) return;
   const playbook = playbookForFailure(attribution.failureClass, attribution.rootCauseKey);
   const alertMsg =
@@ -772,7 +793,7 @@ function writeReviewerBlockedAlert(
     /* best-effort */
   }
   if (block.cause === "auth") {
-    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
     if (!existsSync(pauseMarker)) {
       try {
         writeFileSync(pauseMarker, msg, "utf8");
@@ -834,20 +855,35 @@ export function buildLoopRouteDeps(projectPath: string): RouteDeps {
 
 /** `roll loop run-once --help` usage. Bilingual on separate lines (EN then ZH). */
 export const RUN_ONCE_USAGE =
-  "Usage: roll loop run-once [--dry-run] [--race]\n" +
+  "Usage: roll loop run-once [--workspace <id|path>] [--dry-run] [--race]\n" +
   "  Run ONE loop cycle now: pick a Todo card, build it through TCR, run the\n" +
   "  gates (attest + peer), and publish a PR. Exits when the cycle terminates.\n" +
+  "  --workspace Bind the cycle runtime, backlog, locks, and events to one Workspace.\n" +
   "  --dry-run   Print the command plan only — no git / gh / agent side effects.\n" +
   "  --race      Opt in to same-card parallel racing (default: one-card-one-lease).\n" +
   "              The first merge atomically supersedes the remaining siblings.\n" +
   "立即跑一个 loop 周期:选一张 Todo 卡,经 TCR 建造,过闸(验收+同行评审),发 PR。\n" +
+  "  --workspace 将周期 runtime、backlog、锁和事件绑定到一个 Workspace。\n" +
   "  --dry-run   只打印命令计划——不动 git / gh / agent。\n" +
   "  --race      显式开同卡并行竞速(默认一卡一租约);首个 merge 原子取消其余 sibling。";
+
+export interface LoopRunOnceDeps {
+  readonly requireNetwork?: typeof requireNetwork;
+  readonly checkRepoPushable?: typeof checkRepoPushable;
+  readonly readSkillBody?: typeof readSkillBody;
+  readonly buildRouteDeps?: typeof buildLoopRouteDeps;
+  readonly agentSpawn?: AgentSpawn;
+  readonly warnIfBinaryStale?: typeof warnIfBinaryStale;
+  readonly branchCanaryTrips?: typeof branchCanaryTrips;
+  readonly workspaceBranchCanaryTrips?: typeof workspaceBranchCanaryTrips;
+  readonly runReconcileTick?: typeof runReconcileTick;
+  readonly backfillMergedRuns?: typeof backfillMergedRuns;
+}
 
 /**
  * The `loop run-once` entry. Returns a process exit code (0 ok).
  */
-export async function loopRunOnceCommand(args: string[]): Promise<number> {
+export async function loopRunOnceCommand(args: string[], deps: LoopRunOnceDeps = {}): Promise<number> {
   // FIX-351: `--help`/`-h` must PRINT usage and exit — never start a cycle. This
   // guard runs BEFORE any side effect (project identity, lock, network probe,
   // agent spawn), so a help flag can never burn a cycle.
@@ -868,10 +904,40 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // projectIdentity() resolve to the wrong checkout. Detect and unset before
   // any identity-dependent code runs. Also stores the healing detail so an ALERT
   // can be written once `alertsPath` is available.
-  const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
-  const coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
-
-  const id = await projectIdentity(identityRoot);
+  const workspaceRequested = args.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "").trim() !== "";
+  const legacyRunnerBound = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() !== "" ||
+    (process.env["ROLL_PROJECT_RUNTIME_DIR"] ?? "").trim() !== "";
+  let workspaceTarget: ResolvedBacklogTarget | undefined;
+  if (workspaceRequested || !legacyRunnerBound) {
+    const scoped = stripBacklogScopeArgs(args);
+    if (!scoped.ok) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+    const selectorArgs: string[] = [];
+    const workspaceIndex = args.indexOf("--workspace");
+    if (workspaceIndex >= 0) selectorArgs.push("--workspace", args[workspaceIndex + 1] ?? "");
+    const decision = resolveBacklogCommandTarget(selectorArgs, "mutation");
+    if (!decision.ok) {
+      if (workspaceRequested || decision.code === "migration_required") return emitBacklogTargetError(decision);
+    } else {
+      if ("aggregate" in decision) return emitBacklogTargetError({ ok: false, code: "invalid_target", candidates: [] });
+      workspaceTarget = decision;
+    }
+  }
+  let coreWorktreeHeal: ReturnType<typeof checkCoreWorktreeContamination>;
+  let id: { path: string; slug: string };
+  let workspaceBinding: { workspaceId: string; runtimeRoot: string; backlogPath: string } | undefined;
+  if (workspaceTarget === undefined) {
+    const identityRoot = (process.env["ROLL_MAIN_PROJECT"] ?? "").trim() || process.cwd();
+    coreWorktreeHeal = checkCoreWorktreeContamination(identityRoot);
+    id = await projectIdentity(identityRoot);
+  } else {
+    workspaceBinding = {
+      workspaceId: workspaceTarget.workspaceId,
+      runtimeRoot: workspaceTarget.runtimeRoot,
+      backlogPath: workspaceTarget.backlogPath,
+    };
+    coreWorktreeHeal = { healed: false, detail: "" };
+    id = { path: workspaceTarget.workspaceRoot, slug: workspaceTarget.workspaceId };
+  }
   const cycleId = makeCycleId();
 
   // FIX-1209: identity assertion — if the resolved project path contains a cycle
@@ -923,6 +989,12 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
 
+  if (workspaceBinding !== undefined) {
+    process.env["ROLL_WORKSPACE"] = workspaceBinding.workspaceId;
+    process.env["ROLL_PROJECT_RUNTIME_DIR"] = workspaceBinding.runtimeRoot;
+    process.env["ROLL_WORKSPACE_BACKLOG_PATH"] = workspaceBinding.backlogPath;
+  }
+
   const rt = runtimeDir(id.path);
   // FIX-216a: alerts go to project-local .roll/loop/ALERT-<slug>.md —
   // same location `roll loop alert` reads from (FIX-052: per-project state).
@@ -953,6 +1025,9 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     alertsPath,
     lockPath: join(rt, "inner.lock"),
     heartbeatPath: join(rt, "heartbeat"),
+    ...(workspaceBinding === undefined
+      ? {}
+      : { storyLeasePath: join(rt, "locks", "leases") }),
     worktreePath: join(rt, "worktrees", `cycle-${cycleId}`),
   };
 
@@ -1014,7 +1089,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
       lang: process.env["LANG"],
     });
     const guardLines: string[] = [];
-    const net = await requireNetwork(`loop run-once (cycle ${cycleId})`, id.path, {
+    const net = await (deps.requireNetwork ?? requireNetwork)(`loop run-once (cycle ${cycleId})`, id.path, {
       lang,
       emit: (line) => {
         guardLines.push(line);
@@ -1039,30 +1114,32 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // FIX-1019 / FIX-1020: before burning agent tokens, verify the project has a
   // pushable GitHub remote. Missing remote / unreachable repo → fast failure
   // with an actionable ALERT instead of N failed cycles.
-  const repoCheck = checkRepoPushable(id.path);
-  if (!repoCheck.ok) {
-    writeRepoAlert(alertsPath, paths.eventsPath, cycleId, repoCheck);
-    const lang = resolveLang({
-      rollLang: process.env["ROLL_LANG"],
-      lcAll: process.env["LC_ALL"],
-      lang: process.env["LANG"],
-    });
-    const key =
-      repoCheck.reason === "not_git"
-        ? "loop.not_a_git_repo"
-        : repoCheck.reason === "no_remote"
-          ? "loop.no_remote"
-          : "loop.repo_unreachable";
-    process.stderr.write(
-      `loop run-once: ${t(v3Catalog, lang, key)}\n` +
-        `loop run-once: ${repoCheck.detail !== "" ? `(${repoCheck.detail})` : ""}\n`,
-    );
-    return 1;
+  if (workspaceBinding === undefined) {
+    const repoCheck = (deps.checkRepoPushable ?? checkRepoPushable)(id.path);
+    if (!repoCheck.ok) {
+      writeRepoAlert(alertsPath, paths.eventsPath, cycleId, repoCheck);
+      const lang = resolveLang({
+        rollLang: process.env["ROLL_LANG"],
+        lcAll: process.env["LC_ALL"],
+        lang: process.env["LANG"],
+      });
+      const key =
+        repoCheck.reason === "not_git"
+          ? "loop.not_a_git_repo"
+          : repoCheck.reason === "no_remote"
+            ? "loop.no_remote"
+            : "loop.repo_unreachable";
+      process.stderr.write(
+        `loop run-once: ${t(v3Catalog, lang, key)}\n` +
+          `loop run-once: ${repoCheck.detail !== "" ? `(${repoCheck.detail})` : ""}\n`,
+      );
+      return 1;
+    }
   }
 
   // FIX-204A: an empty workflow document = a blind agent burning tokens for
   // nothing — halt loudly BEFORE any lock/worktree/agent side effect.
-  const skillBody = readSkillBody(id.path);
+  const skillBody = (deps.readSkillBody ?? readSkillBody)(id.path);
   if (skillBody === null) {
     const msg =
       `[${new Date().toISOString()}] ALERT loop run-once: roll-loop SKILL.md not found ` +
@@ -1083,14 +1160,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
 
   // Build scoped route dependencies. Legacy local/pairing configuration is not
   // consulted by the execution path.
-  const routeDeps: RouteDeps = buildLoopRouteDeps(id.path);
+  const routeDeps: RouteDeps = (deps.buildRouteDeps ?? buildLoopRouteDeps)(id.path);
 
   // FIX-220: manual `roll loop now` (ROLL_LOOP_FORCE=1) runs in an interactive
   // terminal — strip --verbose and --output-format stream-json so the user sees
   // readable text instead of a JSON flood.
   const isInteractive = (process.env["ROLL_LOOP_FORCE"] ?? "").trim() !== "";
-  let interactiveAgentSpawn: AgentSpawn | undefined;
-  if (isInteractive) {
+  let interactiveAgentSpawn = deps.agentSpawn;
+  if (interactiveAgentSpawn === undefined && isInteractive) {
     interactiveAgentSpawn = (agent, opts) => realAgentSpawn(agent, { ...opts, interactive: true });
     interactiveAgentSpawn.supportedPurposes = realAgentSpawn.supportedPurposes;
   }
@@ -1100,6 +1177,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     paths,
     skillBody,
     routeDeps,
+    ...(workspaceBinding === undefined ? {} : { backlogPath: workspaceBinding.backlogPath }),
     ...(interactiveAgentSpawn !== undefined ? { agentSpawn: interactiveAgentSpawn } : {}),
   });
   const ports =
@@ -1126,7 +1204,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // at most one network call per machine per day, fully best-effort, NEVER blocks
   // the cycle. A miss (offline / curl absent) is a silent no-op.
   try {
-    await warnIfBinaryStale(rollHome(), rollVersion(), (msg) => {
+    await (deps.warnIfBinaryStale ?? warnIfBinaryStale)(rollHome(), rollVersion(), (msg) => {
       try {
         appendFileSync(alertsPath, `${msg}\n`, "utf8");
       } catch {
@@ -1140,22 +1218,39 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // US-LOOP-096: branch-leak canary circuit breaker — if ephemeral branches /
   // worktrees have piled up (cleanup contract broke), refuse to start a new
   // cycle (it would only add more), write a PAUSE + ALERT, and skip this tick.
-  if (branchCanaryTrips(id.path, id.slug, rt, alertsPath)) {
+  const canaryTripped = workspaceBinding === undefined
+    ? (deps.branchCanaryTrips ?? branchCanaryTrips)(id.path, id.slug, rt, alertsPath)
+    : (deps.workspaceBranchCanaryTrips ?? workspaceBranchCanaryTrips)({
+        workspaceId: workspaceBinding.workspaceId,
+        workspaceRoot: id.path,
+        runtimeRoot: rt,
+        alertsPath,
+      });
+  if (canaryTripped) {
     process.stdout.write("loop run-once: branch-leak canary tripped — loop paused (see ALERT); skipped\n");
     return 0;
   }
 
   // US-DELIV-009: pre-pick reconcile tick — merge any CI-green awaiting_merge
   // PRs before starting new work. Idempotent, crash-safe, silent.
-  try {
-    await runReconcileTick(id.path, { silent: true });
-  } catch {
-    /* reconcile tick must never block the cycle */
+  if (workspaceBinding === undefined) {
+    try {
+      await (deps.runReconcileTick ?? runReconcileTick)(id.path, { silent: true });
+    } catch {
+      /* reconcile tick must never block the cycle */
+    }
   }
 
   // FIX-204D: between here and the walk's own finally, signals get a clean
   // teardown instead of a half-state corpse.
-  const disposeSignals = installCycleSignalTeardown(paths, cycleId, branch, id.path, rt);
+  const disposeSignals = installCycleSignalTeardown(
+    paths,
+    cycleId,
+    branch,
+    id.path,
+    rt,
+    (ownedCycleId) => ports.capacity.releaseCurrent(ownedCycleId),
+  );
   let result;
   try {
     result = await runCycleOnce({ ports, ctx });
@@ -1169,6 +1264,14 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     return 0;
   }
   process.stdout.write(`loop run-once: cycle ${cycleId} → ${result.terminal ?? "unknown"}\n`);
+
+  if (result.terminal === "waiting_capacity") {
+    process.stdout.write(
+      "loop run-once: machine agent capacity is busy — Story returned to Todo for a later tick\n" +
+        "loop run-once: 机器 agent 容量正忙——Story 已回到 Todo，等待后续 tick\n",
+    );
+    return 0;
+  }
 
   // US-AGENT-041: reviewer-triggered re-split. If THIS cycle's independent
   // reviewer flagged the SCOPE as too large (a resize signal on a low score),
@@ -1264,18 +1367,18 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     // Best-effort: dormancy must NEVER break the idle cycle.
     try {
       const bus = new EventBus();
-      const backlogFile = join(id.path, ".roll", "backlog.md");
+      const backlogFile = resolvedBacklogFile(id.path);
       const nowSec = Math.floor(Date.now() / 1000);
       const outcome = await maybeEnterDormancy({
         slug: id.slug,
         count: idleCount,
-        resolveState: () => resolveLoopRunState(id.path, id.slug),
+        resolveState: () => resolveLoopRunState(id.path, id.slug, runtimeDir(id.path)),
         readBacklog: () => (existsSync(backlogFile) ? readFileSync(backlogFile, "utf8") : ""),
         scheduler: createScheduler(process.platform, { uid: process.getuid?.() ?? 0 }),
         loopLabel: launchdLabel("loop", id.slug),
         now: () => new Date().toISOString(),
         emit: (event) => bus.appendEvent(paths.eventsPath, event as never),
-        writeDormant: (body) => writeDormantMarker(dormantMarkerPath(id.path, id.slug), body),
+        writeDormant: (body) => writeDormantMarker(dormantMarkerPath(id.path, id.slug, runtimeDir(id.path)), body),
         upsertDormantRun: () =>
           bus.upsertRun(
             paths.runsPath,
@@ -1287,7 +1390,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
             ),
           ),
         writePause: (reason) => {
-          const p = join(id.path, ".roll", "loop", `PAUSE-${id.slug}`);
+          const p = join(runtimeDir(id.path), `PAUSE-${id.slug}`);
           mkdirSync(dirname(p), { recursive: true });
           writeFileSync(p, `# loop paused — dormancy bootout failed\n\n${reason}\n`, "utf8");
         },
@@ -1374,7 +1477,7 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
     const failedAgent = (result.state?.ctx?.agent ?? "").trim();
     const zeroTcr = isZeroTcrStall(result.terminal, tcr);
     if (sid !== "" && failedAgent !== "" && zeroTcr) {
-      const backlogFile = join(id.path, ".roll", "backlog.md");
+      const backlogFile = resolvedBacklogFile(id.path);
       const bus = new EventBus();
       // FIX-932 kill-switch: only attempt the agent SWAP when auto-recovery is on.
       // ROLL_LOOP_NO_AUTO_RECOVER=1 skips switch + split entirely → the zero-TCR
@@ -1491,25 +1594,27 @@ export async function loopRunOnceCommand(args: string[]): Promise<number> {
   // US-DELIV-009: post-publish reconcile tick — after the cycle terminal,
   // reconcile all awaiting_merge cycles. A CI-green PR gets merge_now→merged
   // →delivered on the next tick. Idempotent, crash-safe, silent.
-  try {
-    await runReconcileTick(id.path, { silent: true });
-  } catch {
-    /* reconcile tick must never block the cycle terminal */
-  }
-
-  // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/
-  // failed) whose cycle branch's PR really MERGED flip to merged/delivered.
-  // Best-effort + bounded (≤20 gh probes); never blocks the cycle terminal.
-  try {
-    const credited = await backfillMergedRuns(id.path, paths.runsPath);
-    for (const c of credited) {
-      process.stdout.write(
-        `loop run-once: backfill credited cycle ${c.cycleId} → merged (${c.mergeCommit})\n` +
-          `loop run-once: 回填记账 cycle ${c.cycleId} → 已合并 (${c.mergeCommit})\n`,
-      );
+  if (workspaceBinding === undefined) {
+    try {
+      await (deps.runReconcileTick ?? runReconcileTick)(id.path, { silent: true });
+    } catch {
+      /* reconcile tick must never block the cycle terminal */
     }
-  } catch {
-    /* backfill must never mask the cycle terminal result */
+
+    // FIX-243: merge-evidence backfill — claim-shaped rows (built/published/
+    // failed) whose cycle branch's PR really MERGED flip to merged/delivered.
+    // Best-effort + bounded (≤20 gh probes); never blocks the cycle terminal.
+    try {
+      const credited = await (deps.backfillMergedRuns ?? backfillMergedRuns)(id.path, paths.runsPath);
+      for (const c of credited) {
+        process.stdout.write(
+          `loop run-once: backfill credited cycle ${c.cycleId} → merged (${c.mergeCommit})\n` +
+            `loop run-once: 回填记账 cycle ${c.cycleId} → 已合并 (${c.mergeCommit})\n`,
+        );
+      }
+    } catch {
+      /* backfill must never mask the cycle terminal result */
+    }
   }
 
   const breaker = applyCorrectionCircuitBreaker(id.path, id.slug, paths.eventsPath, alertsPath);
@@ -1637,7 +1742,7 @@ export async function egressBlocked(
 
 /** True iff a PAUSE marker exists for this project/slug. */
 function isLoopPaused(projectPath: string, slug: string): boolean {
-  return existsSync(join(projectPath, ".roll", "loop", `PAUSE-${slug}`));
+  return existsSync(join(runtimeDir(projectPath), `PAUSE-${slug}`));
 }
 
 /**
@@ -1674,7 +1779,7 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
     alreadyPaused: isLoopPaused(projectPath, slug),
   });
   if (verdict.shouldPause) {
-    const pauseMarker = join(projectPath, ".roll", "loop", `PAUSE-${slug}`);
+    const pauseMarker = join(runtimeDir(projectPath), `PAUSE-${slug}`);
     // FIX-1273 AC1: enumerate the EXACT counted branches + loop worktrees with
     // their fresh audit disposition so the pause is auditable and points at the
     // safe recovery route — not a bare number. The audit runs ONLY on trip (rare)
@@ -1712,6 +1817,89 @@ function branchCanaryTrips(projectPath: string, slug: string, rt: string, alerts
         /* best-effort observability */
       }
     }
+  }
+  return verdict.tripped;
+}
+
+export interface WorkspaceBranchCanaryInput {
+  readonly workspaceId: string;
+  readonly workspaceRoot: string;
+  readonly runtimeRoot: string;
+  readonly alertsPath: string;
+}
+
+function writeWorkspaceCanaryPause(input: WorkspaceBranchCanaryInput, message: string): void {
+  const pauseMarker = join(input.runtimeRoot, `PAUSE-${input.workspaceId}`);
+  try {
+    mkdirSync(input.runtimeRoot, { recursive: true });
+    writeFileSync(pauseMarker, message, "utf8");
+  } catch {
+    /* stdout still makes the failure observable */
+  }
+  try {
+    appendFileSync(input.alertsPath, `${message}\n`, "utf8");
+  } catch {
+    /* stdout still makes the failure observable */
+  }
+}
+
+export function workspaceBranchCanaryTrips(
+  input: WorkspaceBranchCanaryInput,
+  auditWorkspace: typeof auditWorkspaceWorktrees = auditWorkspaceWorktrees,
+): boolean {
+  const pauseMarker = join(input.runtimeRoot, `PAUSE-${input.workspaceId}`);
+  const alreadyPaused = existsSync(pauseMarker);
+  const parsed = Number.parseInt(process.env["ROLL_BRANCH_CANARY_MAX"] ?? "", 10);
+  const threshold = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BRANCH_CANARY_MAX;
+  let audit: ReturnType<typeof auditWorkspaceWorktrees>;
+  try {
+    audit = auditWorkspace({
+      selectedWorkspaceId: input.workspaceId,
+      selectedWorkspaceRoot: input.workspaceRoot,
+      rollHome: rollHome(),
+    });
+  } catch (error) {
+    if (!alreadyPaused) {
+      const detail = error instanceof Error ? error.message : String(error);
+      writeWorkspaceCanaryPause(
+        input,
+        `# ALERT — Workspace loop auto-paused: worktree audit failed\n\n` +
+          `**Workspace**: ${input.workspaceId}\n` +
+          `**Failure**: ${detail}\n` +
+          `**Safe recovery**: \`roll worktree audit --workspace ${input.workspaceId}\` → ` +
+          `\`roll worktree cleanup --workspace ${input.workspaceId} --dry-run\` → ` +
+          `\`--apply\` → \`roll loop resume --workspace ${input.workspaceId}\`\n`,
+      );
+    }
+    return true;
+  }
+  const verdict = branchCanaryVerdict({
+    ephemeralBranchCount: audit.summary.ephemeralBranches,
+    worktreeCount: audit.summary.worktrees,
+    threshold,
+    alreadyPaused,
+  });
+  if (verdict.shouldPause) {
+    const branches = audit.ephemeralBranches.length === 0
+      ? "  - none"
+      : audit.ephemeralBranches.map((branch) => `  - ${branch.repoId}:${branch.branch}`).join("\n");
+    const worktrees = audit.records.length === 0
+      ? "  - none"
+      : audit.records.map((record) =>
+          `  - ${record.workspaceId ?? "unknown"}/${record.storyId ?? "unknown"}/` +
+          `${record.repositoryAlias ?? record.repoId ?? "unknown"}: ${record.path} [${record.disposition}]`,
+        ).join("\n");
+    writeWorkspaceCanaryPause(
+      input,
+      `# ALERT — Workspace loop auto-paused: branch/worktree leak canary tripped\n\n` +
+        `**Workspace**: ${input.workspaceId}\n` +
+        `**Leak count**: ${verdict.total} (ephemeral branches ${audit.summary.ephemeralBranches} + ` +
+        `worktrees ${audit.summary.worktrees}) > threshold ${threshold}\n\n` +
+        `**Counted branches**\n${branches}\n\n` +
+        `**Counted worktrees**\n${worktrees}\n\n` +
+        `**Safe recovery**: \`roll worktree cleanup --workspace ${input.workspaceId} --dry-run\` → ` +
+        `\`--apply\` → \`roll loop resume --workspace ${input.workspaceId}\`\n`,
+    );
   }
   return verdict.tripped;
 }

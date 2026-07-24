@@ -2,16 +2,16 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type CycleCommand, type CycleContext } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
-import { agentSpawnEnvironment } from "./agent-spawn.js";
+import { agentSpawnEnvironment, type AgentSpawnOptions } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
-import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination, worktreeGitEnv } from "./main-checkout-guard.js";
+import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection, repairCoreWorktreeContamination } from "./main-checkout-guard.js";
 import { recoverKimiUsage, recoverPiUsage } from "./usage-recovery.js";
 import { blockIfAgentCredentialsMissing, detectAgyInternalFailure } from "./agent-routing.js";
-import { buildLowScoreFixForwardPrompt, maybeInjectProjectMap } from "./project-map.js";
+import { buildLowScoreFixForwardPrompt, injectRepositoryContext, maybeInjectProjectMap } from "./project-map.js";
 import { readProjectMapEnabled } from "./runner-policy.js";
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
-import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startBuilderLivenessProbe, startCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
-import { persistWorktreeAlerts, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { ActivitySignalRecorder, createCaptureMarkerSink, readCycleTimeoutThresholds, readStallThreshold, startBuilderLivenessProbe, startCycleObserver, startRepositoryCycleObserver, startSpawnTimeoutWatchdog, startStallDetector } from "./spawn-observers.js";
+import { persistWorktreeAlerts, repositoryAgentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { runDesignerStage } from "./execution-profile.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { readSkillBody } from "./skill-body.js";
@@ -19,6 +19,10 @@ import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktr
 import { resolveIntegrationBranch } from "@roll/infra";
 import { recordSpawnRound } from "./round-journal-emit.js";
 import type { ExecuteResult, Ports } from "./ports.js";
+import {
+  RepositoryObservationError,
+  observeWritableRepositoryCommitCount,
+} from "./repository-observation.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
 
@@ -26,6 +30,22 @@ function executionSkillBody(ports: Ports, storyId: string | undefined): string {
   if (!ports.skillBody.startsWith("# Roll Loop")) return ports.skillBody;
   const skillName = storyId?.startsWith("FIX-") || storyId?.startsWith("BUG-") ? "roll-fix" : "roll-build";
   return readSkillBody(ports.repoCwd, { skillName }) ?? ports.skillBody;
+}
+
+/** Apply the repository context resolved after Story pick. The spawn port itself
+ * remains context-free; only the Builder command carrying the live CycleContext
+ * can select the Issue root and authoritative repository prompt. */
+export function applyRepositoryBuilderContext(
+  ctx: CycleContext,
+  options: AgentSpawnOptions,
+): AgentSpawnOptions {
+  const execution = ctx.repositoryExecution;
+  if (execution === undefined) return options;
+  return {
+    ...options,
+    cwd: execution.issueRoot,
+    skillBody: injectRepositoryContext(options.skillBody, execution),
+  };
 }
 
 export async function executeSpawnAgentCommand(
@@ -52,8 +72,11 @@ export async function executeSpawnAgentCommand(
       // submodule cycle worktree, where its edits/build/test/commits land and E2's
       // landing reads the HEAD. No targetSubmodule ⇒ ports.paths.worktreePath
       // (execRepoCwd ⇒ ports.repoCwd), byte-identical to today.
-      const execCwd = resolveExecutionCwd(ports, ctx);
-      const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+      const legacyExecCwd = resolveExecutionCwd(ports, ctx);
+      const execCwd = ctx.repositoryExecution?.issueRoot ?? legacyExecCwd;
+      const execRepoCwd = ctx.repositoryExecution === undefined
+        ? resolveExecutionRepoCwd(ports, ctx)
+        : undefined;
       // E8: the cycle observer and the timeout watchdog's commit probe count the
       // builder's commits against the EXECUTION repo's integration branch (the
       // submodule's own working branch), NOT the hardwired origin/main. A submodule
@@ -62,8 +85,10 @@ export async function executeSpawnAgentCommand(
       // commits (no cycle:tcr events) and the watchdog's commitCount read 0. The
       // baseline is resolved from execRepoCwd, never the detached worktree. No
       // targetSubmodule ⇒ resolveIntegrationBranch(repoCwd) → origin/main default.
-      const observeBase = resolveIntegrationBranch(execRepoCwd);
-      await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
+      const observeBase = execRepoCwd === undefined ? undefined : resolveIntegrationBranch(execRepoCwd);
+      if (ctx.repositoryExecution === undefined) {
+        await quarantineMainCheckoutForCycle(ports, ctx, "pre-spawn");
+      }
       const credentialBlock = blockIfAgentCredentialsMissing(cmd.agent, "build", ports, ctx);
       if (credentialBlock !== null) {
         const suspended = suspendRig(guardRuntimeDir(ports), cmd.agent, "auth", credentialBlock, eventTs(ports));
@@ -123,7 +148,9 @@ export async function executeSpawnAgentCommand(
       // git commits on the worktree branch + the wall clock — and DERIVES standard
       // cycle:tcr / cycle:phase / build-heartbeat events into events.ndjson. It
       // never parses the agent's stdout, so a single path serves EVERY agent.
-      const observer = await startCycleObserver(ports, ctx.cycleId ?? "", execCwd, observeBase);
+      const observer = ctx.repositoryExecution === undefined
+        ? await startCycleObserver(ports, ctx.cycleId ?? "", legacyExecCwd, observeBase)
+        : await startRepositoryCycleObserver(ports, ctx);
       // FIX-907 — the HUNG-BUILDER KILLER. The agentSpawn below is a single
       // blocking await, so the orchestrator's between-step watchdog can NEVER
       // fire while a builder hangs (process alive, 0% CPU, no commits/output) —
@@ -150,15 +177,48 @@ export async function executeSpawnAgentCommand(
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
         thresholdSec: readStallThreshold(ports.repoCwd).thresholdSec,
       });
+      const repositoryPorts = ctx.repositoryExecution === undefined
+        ? undefined
+        : ports.repositories?.bind(ctx);
+      if (ctx.repositoryExecution !== undefined && repositoryPorts === undefined) {
+        throw new Error("missing_repository_ports");
+      }
+      const reportedCommitProbeFailures = new Set<string>();
       // FIX-1477: the dirty-state probe rides the same git port (optional — a
-      // port without it runs the state fuse on commits only).
+      // port without it runs the state fuse on commits only). A repository
+      // cycle's Issue root is not itself a git worktree, so the state fuse
+      // stays commit-only there until a per-leg signature exists.
       const statusSignature = ports.git.worktreeStatusSignature;
       const timeoutWatchdog = startSpawnTimeoutWatchdog({
         cycleId: ctx.cycleId ?? "",
         thresholds: readCycleTimeoutThresholds(ports.repoCwd),
         clock: ports.clock,
-        commitCount: () => ports.git.commitsAhead(execCwd, observeBase),
-        ...(statusSignature !== undefined ? { stateSignature: () => statusSignature(execCwd) } : {}),
+        commitCount: repositoryPorts === undefined
+          ? () => ports.git.commitsAhead(execCwd, observeBase)
+          : () => observeWritableRepositoryCommitCount(ctx, repositoryPorts),
+        ...(repositoryPorts === undefined ? {} : {
+          onCommitProbeError: (error: unknown) => {
+            const failure = error instanceof RepositoryObservationError ? error : undefined;
+            const key = failure === undefined ? "unknown" : `${failure.repoId}:${failure.operation}`;
+            if (reportedCommitProbeFailures.has(key)) return;
+            reportedCommitProbeFailures.add(key);
+            if (failure !== undefined) {
+              repositoryPorts.events.append(failure.repoId, {
+                type: "repository:observation_failed",
+                operation: failure.operation,
+                detail: failure.cause instanceof Error ? failure.cause.message : String(failure.cause ?? "unknown"),
+                ts: Date.now(),
+              });
+            }
+            ports.events.appendAlert(
+              ports.paths.alertsPath,
+              `repository_observation_failed: ${failure?.repoId ?? "unknown"}: ${failure?.operation ?? "commits_ahead"} (cycle ${ctx.cycleId ?? ""})`,
+            );
+          },
+        }),
+        ...(repositoryPorts === undefined && statusSignature !== undefined
+          ? { stateSignature: () => statusSignature(execCwd) }
+          : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
       // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
@@ -224,18 +284,20 @@ export async function executeSpawnAgentCommand(
       // US-CYCLE-004: wall-clock start for the round-journal builder turn.
       const roundStart = Date.now();
       try {
-        appendWriteProtectionEvent(
-          ports,
-          applyMainCheckoutWriteProtection({
-            repoCwd: ports.repoCwd,
-            runtimeDir: guardRuntimeDir(ports),
-            cycleId: ctx.cycleId ?? "",
-            nowMs: () => eventTs(ports),
-          }),
-        );
-        mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+        if (ctx.repositoryExecution === undefined) {
+          appendWriteProtectionEvent(
+            ports,
+            applyMainCheckoutWriteProtection({
+              repoCwd: ports.repoCwd,
+              runtimeDir: guardRuntimeDir(ports),
+              cycleId: ctx.cycleId ?? "",
+              nowMs: () => eventTs(ports),
+            }),
+          );
+          mainLeakWatchdog = startMainCheckoutLeakWatchdog(ports, ctx);
+        }
         res = await Promise.race([
-          ports.agentSpawn(cmd.agent, {
+          ports.agentSpawn(cmd.agent, applyRepositoryBuilderContext(ctx, {
           purpose: "builder",
           // E4: the builder runs in the submodule cycle worktree for a submodule
           // story (execCwd); its git env + writable roots target the submodule's
@@ -243,12 +305,15 @@ export async function executeSpawnAgentCommand(
           cwd: execCwd,
           skillBody: finalSkillBody,
           ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-          writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
+          ...(ctx.repositoryExecution !== undefined
+            ? { writableRoots: repositoryAgentWritableRoots(ctx.repositoryExecution) }
+            : execRepoCwd === undefined
+              ? {}
+              : { writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath) }),
           ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
           env: {
             ...process.env,
             ROLL_LOOP_ALERT: ports.paths.alertsPath,
-            ...worktreeGitEnv(execCwd, ports.repoCwd),
             ...agentSpawnEnvironment(cmd.agent),
           },
           // FIX-204B: pin the executor-picked story into the agent prompt — the
@@ -276,7 +341,7 @@ export async function executeSpawnAgentCommand(
           onSpawn: (child) => {
             spawnedPid = child.pid;
           },
-          }),
+          })),
           lostRace,
         ]);
       } finally {
@@ -287,15 +352,17 @@ export async function executeSpawnAgentCommand(
         if (mainLeakWatchdog !== undefined) {
           activeMainLeak = await mainLeakWatchdog.stop();
         }
-        appendWriteProtectionEvent(
-          ports,
-          releaseMainCheckoutWriteProtection({
-            repoCwd: ports.repoCwd,
-            runtimeDir: guardRuntimeDir(ports),
-            cycleId: ctx.cycleId ?? "",
-            nowMs: () => eventTs(ports),
-          }),
-        );
+        if (ctx.repositoryExecution === undefined) {
+          appendWriteProtectionEvent(
+            ports,
+            releaseMainCheckoutWriteProtection({
+              repoCwd: ports.repoCwd,
+              runtimeDir: guardRuntimeDir(ports),
+              cycleId: ctx.cycleId ?? "",
+              nowMs: () => eventTs(ports),
+            }),
+          );
+        }
         signalRecorder.flush();
         // Stop the timer AND take one final synchronous-await snapshot so the LAST
         // TCR commits (landed between the last tick and agent exit) are not lost.
@@ -313,11 +380,13 @@ export async function executeSpawnAgentCommand(
       // E4: scoop ALERT*.md the builder dropped in its OWN cwd (the submodule
       // cycle worktree for a submodule story).
       persistWorktreeAlerts(execCwd, ports.paths.alertsPath, ports.events);
-      if (activeMainLeak.detected) {
-        await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
-        res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
-      } else {
-        await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+      if (ctx.repositoryExecution === undefined) {
+        if (activeMainLeak.detected) {
+          await quarantineMainCheckoutForCycle(ports, ctx, "active-spawn");
+          res = { ...res, exitCode: res.exitCode === 0 ? 1 : res.exitCode, timedOut: true };
+        } else {
+          await quarantineMainCheckoutForCycle(ports, ctx, "post-spawn");
+        }
       }
 
       // US-CYCLE-004: record this builder turn in the per-card round-journal.
@@ -334,7 +403,7 @@ export async function executeSpawnAgentCommand(
       // immediately after EVERY agent spawn completes, not just at pre-init
       // and terminal.  Catches any poisoning the agent did during its run so
       // sibling worktrees never see a poisoned config before the next step.
-      {
+      if (ctx.repositoryExecution === undefined) {
         const repair = repairCoreWorktreeContamination(ports.repoCwd);
         if (repair.healed) {
           ports.events.appendEvent(ports.paths.eventsPath, {

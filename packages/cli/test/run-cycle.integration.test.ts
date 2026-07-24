@@ -294,6 +294,147 @@ function fixedClock(start: number): { clock: () => number; set: (v: number) => v
 }
 
 describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
+  it("US-WS-017b capacity exhaustion emits a neutral zero-spawn terminal and restores Todo", async () => {
+    const { repo } = makeFixture("capacity-wait");
+    const rt = tmp("capacity-wait-rt");
+    const cycleId = "20260722-230000-1701";
+    const p = paths(rt, cycleId);
+    let spawnCount = 0;
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-wait-broker"),
+    });
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        spawnCount += 1;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      },
+      capacity: {
+        ...base.capacity,
+        acquire: () => ({
+          kind: "waiting",
+          retryAtMs: 1_800_000_000,
+          contenders: [{ agent: "claude", cycleId: "private-contender-cycle" }],
+          suspect: false,
+        }),
+      },
+    };
+
+    const result = await runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    });
+
+    expect(result.terminal).toBe("waiting_capacity");
+    expect(spawnCount).toBe(0);
+    expect(readFileSync(join(repo, ".roll", "backlog.md"), "utf8")).toContain("| US-RUN-001 | Runner adapter smoke story est_min:5 | 📋 Todo |");
+    const events = readFileSync(p.eventsPath, "utf8");
+    expect(events).toContain('"type":"workspace:waiting_capacity"');
+    expect(events).toContain('"contenders":["claude"]');
+    expect(events).not.toContain("private-contender-cycle");
+    const row = JSON.parse(readFileSync(p.runsPath, "utf8").trim()) as Record<string, unknown>;
+    expect(row).toMatchObject({ status: "waiting_capacity", outcome: "waiting_capacity" });
+  });
+
+  it("US-WS-017b unexpected agent throw releases the residual exact-owned capacity lease", async () => {
+    const { repo } = makeFixture("capacity-throw");
+    const rt = tmp("capacity-throw-rt");
+    const cycleId = "20260722-230000-1702";
+    const p = paths(rt, cycleId);
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-throw-broker"),
+    });
+    let releases = 0;
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        throw new Error("fixture agent exploded");
+      },
+      capacity: {
+        ...base.capacity,
+        release(leaseId, ownerToken) {
+          releases += 1;
+          return base.capacity.release(leaseId, ownerToken);
+        },
+      },
+    };
+
+    await expect(runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+    })).rejects.toThrow("fixture agent exploded");
+
+    expect(releases).toBe(1);
+    expect(readFileSync(p.eventsPath, "utf8")).toContain('"outcome":"aborted_no_delivery"');
+  });
+
+  it("US-WS-017b heartbeat ownership loss kills the live agent before failing loud", async () => {
+    const { repo } = makeFixture("capacity-heartbeat-loss");
+    const rt = tmp("capacity-heartbeat-loss-rt");
+    const cycleId = "20260722-230000-1703";
+    const p = paths(rt, cycleId);
+    const base = nodePorts({
+      repoCwd: repo,
+      paths: p,
+      skillBody: "deliver",
+      routeDeps,
+      capacityRoot: tmp("capacity-heartbeat-loss-broker"),
+    });
+    let heartbeatCalls = 0;
+    let releaseCalls = 0;
+    let killCalls = 0;
+    let finishSpawn!: () => void;
+    const spawnFinished = new Promise<void>((resolve) => {
+      finishSpawn = resolve;
+    });
+    const ports: Ports = {
+      ...base,
+      github: fakeGithub(0),
+      agentSpawn: async () => {
+        await spawnFinished;
+        return { stdout: "", stderr: "", exitCode: 137, timedOut: false };
+      },
+      capacity: {
+        ...base.capacity,
+        heartbeatIntervalMs: 5,
+        heartbeat(leaseId, ownerToken) {
+          heartbeatCalls += 1;
+          if (heartbeatCalls === 1) return base.capacity.heartbeat(leaseId, ownerToken);
+          return { kind: "ownership_lost", reason: "lease_missing_or_unreadable" };
+        },
+        release(leaseId, ownerToken) {
+          releaseCalls += 1;
+          return base.capacity.release(leaseId, ownerToken);
+        },
+      },
+    };
+
+    await expect(runCycleOnce({
+      ports,
+      ctx: { cycleId, branch: `loop/cycle-${cycleId}`, loop: "ci" as never },
+      killAgents: () => {
+        killCalls += 1;
+        finishSpawn();
+        return 1;
+      },
+    })).rejects.toThrow("agent_capacity_ownership_lost:lease_missing_or_unreadable");
+
+    expect(killCalls).toBe(1);
+    expect(releaseCalls).toBe(1);
+    expect(readFileSync(p.alertsPath, "utf8")).toContain("killed live agent process");
+    expect(readFileSync(p.eventsPath, "utf8")).toContain('"outcome":"aborted_no_delivery"');
+  });
+
   it("US-LOOP-098 proves detached cycle branch governance against real git refs", async () => {
     const { repo, remote } = makeGitignoredFixture("branch-gov");
     // CI runners carry no global git identity; the cycle's own commits (worktree
@@ -437,7 +578,39 @@ describe("runCycleOnce E2E (fixture repo + shim agent + faked gh)", () => {
       firstInstalled: () => "claude-stream",
     };
     const base = nodePorts({ repoCwd: repo, paths: p, skillBody: "deliver", routeDeps: claudeStreamRoute });
-    const ports: Ports = { ...base, agentSpawn: shim, github: fakeGithub(0) };
+    const ports: Ports = {
+      ...base,
+      agentSpawn: shim,
+      github: fakeGithub(0),
+      capacity: {
+        ...base.capacity,
+        acquire(pending, ctx) {
+          return {
+            kind: "acquired",
+            lease: {
+              schema: "roll-agent-capacity-lease/v1",
+              key: pending.key,
+              owner: {
+                leaseId: `lease:${pending.spawnId}`,
+                ownerToken: `token:${pending.spawnId}`,
+                workspaceId: "legacy-cost-fixture",
+                storyId: ctx.storyId ?? "",
+                cycleId: ctx.cycleId,
+                spawnId: pending.spawnId,
+                host: "fixture",
+                pid: process.pid,
+                processStartedAtMs: 1,
+              },
+              acquiredAtMs: 1,
+              heartbeatAtMs: 1,
+            },
+          };
+        },
+        heartbeat: () => ({ kind: "updated" }),
+        release: () => ({ kind: "released" }),
+        releaseCurrent: () => ({ kind: "already_released" }),
+      },
+    };
 
     const result = await runCycleOnce({
       ports,

@@ -1,5 +1,11 @@
 /** Cycle contracts (BC2/BC8, I11/I12). */
 import type { ToolCost } from "./tool.js";
+import type {
+  IssueIdentity,
+  RepositoryExecutionMap,
+  RepositoryIssueIdentity,
+  WorkspaceIdentity,
+} from "./workspace.js";
 
 export type CyclePhase =
   | "pick"
@@ -38,3 +44,37 @@ export interface CycleCost {
   /** US-TOOL-001: per-tool cost rows accumulated during this cycle. */
   toolCosts?: ToolCost[];
 }
+
+/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
+export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
+  readonly issueRoot: string;
+  readonly repositories: RepositoryExecutionMap;
+}
+
+/** Required identity envelope for every repository-specific Cycle fact. */
+export interface RepositoryCycleIdentity extends RepositoryIssueIdentity {
+  readonly cycleId: string;
+}
+
+/** Issue-local repository event body. Identity is never accepted from callers;
+ * the repository writer injects the Cycle envelope after repoId validation. */
+export interface RepositoryExecutionEventPayload {
+  readonly type: string;
+  readonly ts: number;
+  readonly [key: string]: unknown;
+}
+
+export type RepositoryExecutionEvent = RepositoryCycleIdentity & RepositoryExecutionEventPayload;
+
+/** Story-level Issue event envelope for facts that span repository legs. */
+export interface IssueCycleIdentity extends IssueIdentity {
+  readonly cycleId: string;
+}
+
+export interface IssueExecutionEventPayload {
+  readonly type: string;
+  readonly ts: number;
+  readonly [key: string]: unknown;
+}
+
+export type IssueExecutionEvent = IssueCycleIdentity & IssueExecutionEventPayload;

@@ -1,5 +1,5 @@
 /** Ported-command registry — one line per migrated subcommand. */
-import { resolveLang } from "@roll/spec";
+import { resolveLang, t, v3Catalog } from "@roll/spec";
 import { registerPorted, usage } from "../bridge.js";
 import { renderState } from "../render.js";
 import { renderLoopHelp } from "../lib/loop-help.js";
@@ -52,6 +52,7 @@ import { initCommand } from "./init.js";
 import { NEXT_USAGE, nextCommand } from "./next.js";
 import { northCommand } from "./north.js";
 import { designCommand } from "./design.js";
+import { deliveryCommand, deliveryUsage } from "./delivery.js";
 // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
 // The lang module's write/clear/read surfaces are consumed by config.ts.
 import { loopFmtCommand } from "./loop-fmt.js";
@@ -63,7 +64,7 @@ import {
   loopTestCommand,
   loopUnmuteCommand,
 } from "./loop-maint.js";
-import { loopReconcileCommand } from "./loop-reconcile.js";
+import { loopDeliveryReconcileCommand, loopReconcileCommand } from "./loop-reconcile.js";
 import { loopReconcilePendingCommand } from "./loop-reconcile-pending.js";
 import { loopReviewResizeCommand } from "./loop-review-resize.js";
 import { loopExhaustionSplitCommand } from "./loop-exhaustion-split.js";
@@ -76,6 +77,7 @@ import {
   loopPauseCommand,
   loopResumeCommand,
   loopFallbackCommand,
+  loopWorkspaceStatusCommand,
 } from "./loop-sched.js";
 import { offboardCommand } from "./offboard.js";
 import { pricesCommand } from "./prices.js";
@@ -95,6 +97,11 @@ import { versionCommand } from "./version.js";
 import { worktreeAuditCommand } from "./worktree-audit.js";
 import { worktreeCleanupCommand } from "./worktree-cleanup.js";
 import { deltaCommand } from "./delta.js";
+import {
+  workspaceWorktreeAuditCommand,
+  workspaceWorktreeCleanupCommand,
+} from "./workspace-worktree-lifecycle.js";
+import { workspaceCommand, workspaceUsage } from "./workspace.js";
 
 let registered = false;
 
@@ -110,6 +117,20 @@ function currentHelpLang() {
     lcAll: process.env["LC_ALL"],
     lang: process.env["LANG"],
   });
+}
+
+function backlogUsage(): string {
+  return currentHelpLang() === "zh"
+    ? "用法：roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+        "      roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
+        "  读取或管理一个明确工作区的 backlog；--all 只允许只读聚合，变更命令会拒绝。\n"
+    : "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+        "       roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
+        "  Read or manage one resolved Workspace backlog; --all is read-only and mutations are rejected.\n";
+}
+
+function agentUsage(): string {
+  return t(v3Catalog, currentHelpLang(), "agent.usage");
 }
 
 const DOCTOR_TOOLS_USAGE =
@@ -158,6 +179,8 @@ export function registerAll(): void {
     if (args[0] === "pulse") return pulseCommand(args.slice(1));
     return statusCommand(args);
   }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。" });
+  registerPorted("workspace", workspaceCommand, { help: workspaceUsage });
+  registerPorted("delivery", deliveryCommand, { help: deliveryUsage });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.
   // Collected top-level verbs print a one-line redirect instead of behaving as
@@ -261,7 +284,7 @@ export function registerAll(): void {
   registerPorted("agent", (args) => {
     if (args[0] === "cast") return castCommand(args.slice(1));
     return agentCommand(args);
-  }, { help: "Usage: roll agent [migrate [--dry-run]|list|cast]\n  View Agent Scope roles, migrate legacy config, list installed agents, or print role casting.\n查看 Agent Scope 角色、迁移旧配置、列出 installed agent，或打印角色分工。" });
+  }, { help: agentUsage });
   registerPorted("agents", agentListCommand, { hidden: true }); // US-AGENT-048: bash-oracle `roll agents` alias for `roll agent list`
   // `pair`: v3-native Cross-Agent Pairing (US-PAIR-001). `pair init` scaffolds
   // legacy pairing compatibility commands. No bash fallback
@@ -284,7 +307,7 @@ export function registerAll(): void {
     if (sub === "unstick") return backlogUnstickCommand(args.slice(1));
     if (sub === "sync") return backlogSyncCommand(args.slice(1));
     return backlogCommand(args);
-  }, { help: "Usage: roll backlog\n  Render the backlog board.\n渲染任务板。" });
+  }, { help: backlogUsage });
   // FIX-356a: `roll brief` retired — US-PORT-002 was an immature owner digest.
   // The absent-command convention (standard unknown-command error from the bridge)
   // is the chosen retired-surface behaviour.
@@ -433,8 +456,20 @@ export function registerAll(): void {
   // FIX-1273: `worktree cleanup` — safe, audit-derived recovery for canary pressure
   registerPorted("delta", deltaCommand, { hidden: true });
   registerPorted("worktree", (args): number | Promise<number> => {
-    if (args[0] === "audit") return worktreeAuditCommand(args.slice(1));
-    if (args[0] === "cleanup") return worktreeCleanupCommand(args.slice(1));
+    if (args[0] === "audit") {
+      const rest = args.slice(1);
+      if (rest.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "") !== "") {
+        return workspaceWorktreeAuditCommand(rest);
+      }
+      return worktreeAuditCommand(rest);
+    }
+    if (args[0] === "cleanup") {
+      const rest = args.slice(1);
+      if (rest.includes("--workspace") || (process.env["ROLL_WORKSPACE"] ?? "") !== "") {
+        return workspaceWorktreeCleanupCommand(rest);
+      }
+      return worktreeCleanupCommand(rest);
+    }
     process.stderr.write("roll worktree: unknown subcommand. Try 'roll worktree audit' or 'roll worktree cleanup'.\n");
     return 1;
   }, { help: "Usage: roll worktree <audit|cleanup> [options]\n  audit    Read-only audit of all git worktrees: ownership, dirt, merge evidence, disposition.\n  cleanup  Safe, audit-derived recovery for branch/worktree canary pressure (--dry-run first, then --apply, then roll loop resume).\n只读审计所有 git worktree,并对 canary 压力提供仅基于审计的安全清理(先 --dry-run,再 --apply,最后 roll loop resume)。" });
@@ -448,6 +483,9 @@ export function registerAll(): void {
     // default `loop status` dashboard output is unchanged.
     if ((args[0] === undefined || args[0] === "status") && args.includes("--capture")) {
       return captureCommand(["status", ...args.slice(1).filter((a) => a !== "--capture")]);
+    }
+    if (args[0] === "status" && (args.includes("--workspace") || args.includes("--all"))) {
+      return loopWorkspaceStatusCommand(args.slice(1));
     }
     if (args[0] === undefined || args[0] === "status") return dashboardCommand(args.slice(1));
     // `loop eval` / `loop story`: read-face commands (US-PORT-007) — thin TS
@@ -501,9 +539,10 @@ export function registerAll(): void {
     // US-LOOP-077 renderer. Never writes/signals the loop; not network-gated
     // (local file tail only — see networkNeeds). `--attach` = tmux attach -r.
     if (args[0] === "watch") return loopWatchCommand(args.slice(1));
-    // `loop reconcile`: US-DELIV-002 layered reconcile-from-main — probes
-    // awaiting cycles against main (PR state + patch-id), emits delivery:reconciled.
-    if (args[0] === "reconcile") return loopReconcileCommand(args.slice(1));
+    // `loop reconcile`: US-WS-015 Workspace-scoped alias of `delivery reconcile`.
+    // The legacy reconcile-from-main engine remains internal to runner ticks;
+    // the public alias never revives repository-local operation.
+    if (args[0] === "reconcile") return loopDeliveryReconcileCommand(args.slice(1));
     // `loop reconcile-pending`: FIX-1052 bounded PR polling reconciler — polls
     // pending-merge PRs, fetches origin/main on merge, and updates delivery truth.
     if (args[0] === "reconcile-pending") return loopReconcilePendingCommand(args.slice(1));

@@ -5,6 +5,49 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+export interface WorkspaceSchedulerIdentity {
+  readonly workspaceId: string;
+  readonly workspaceRoot: string;
+}
+
+export interface WorkspaceSchedulerPaths extends WorkspaceSchedulerIdentity {
+  readonly runtimeRoot: string;
+  readonly eventsPath: string;
+  readonly runsPath: string;
+  readonly alertsPath: string;
+  readonly cycleLockPath: string;
+  readonly goLockPath: string;
+  readonly heartbeatPath: string;
+  readonly worktreesRoot: string;
+  readonly pauseMarkerPath: string;
+  readonly dormantMarkerPath: string;
+  readonly goalPath: string;
+  readonly backlogPath: string;
+}
+
+/**
+ * The scheduler owns only Workspace operational state. Product repositories
+ * never contribute a second runtime root, lock, event stream or pause marker.
+ */
+export function workspaceSchedulerPaths(input: WorkspaceSchedulerIdentity): WorkspaceSchedulerPaths {
+  const runtimeRoot = join(input.workspaceRoot, "runtime");
+  return {
+    ...input,
+    runtimeRoot,
+    eventsPath: join(runtimeRoot, "events.ndjson"),
+    runsPath: join(runtimeRoot, "runs.jsonl"),
+    alertsPath: join(runtimeRoot, "alerts", `ALERT-${input.workspaceId}.md`),
+    cycleLockPath: join(runtimeRoot, "locks", "cycle.lock"),
+    goLockPath: join(runtimeRoot, "locks", "go.lock"),
+    heartbeatPath: join(runtimeRoot, "heartbeats", "scheduler"),
+    worktreesRoot: join(runtimeRoot, "worktrees"),
+    pauseMarkerPath: join(runtimeRoot, `PAUSE-${input.workspaceId}`),
+    dormantMarkerPath: join(runtimeRoot, `DORMANT-${input.workspaceId}`),
+    goalPath: join(runtimeRoot, "goal.yaml"),
+    backlogPath: join(input.workspaceRoot, "backlog", "index.md"),
+  };
+}
+
 export type RollOperatingMode = "guided" | "autonomous";
 
 type InstallState = "enabled" | "stale" | "not_installed";

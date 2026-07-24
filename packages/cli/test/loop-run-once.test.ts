@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { dispatch, isPorted, registerAll } from "../src/index.js";
-import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter } from "../src/commands/loop-run-once.js";
+import { PUBLISHED_DELIVERY_MESSAGE, RUN_ONCE_USAGE, buildLoopRouteDeps, checkCoreWorktreeContamination, idleCounterPath, incrementConsecutiveIdle, isZeroTcrStall, loopRunOnceCommand, readExternalBlock, readSkillBody, resetConsecutiveIdle, shouldSuppressGoalChildFailureCounter, writeCardSkipAlert } from "../src/commands/loop-run-once.js";
 import { buildRunOnceChildEnv } from "../src/commands/loop-go.js";
 import { GOAL_ALLOWED_CARDS_ENV, GOAL_GUIDED_ENV } from "../src/lib/goal-progress.js";
 import { readPendingPublish } from "../src/runner/pending-publish.js";
@@ -83,6 +83,17 @@ async function runPausedRunOnce(project: string, childEnv: NodeJS.ProcessEnv): P
 }
 
 describe("loop run-once CLI wiring", () => {
+  it("writes the active runtime skip-cards path in poison-pill alerts", () => {
+    const runtime = tmp("skip-alert-runtime");
+    const alertsPath = join(runtime, "alerts.md");
+    const eventsPath = join(runtime, "events.ndjson");
+
+    writeCardSkipAlert(alertsPath, eventsPath, "cycle-1", "US-WS-016", 3);
+
+    expect(readFileSync(alertsPath, "utf8")).toContain(join(runtime, "skip-cards.json"));
+    expect(readFileSync(alertsPath, "utf8")).not.toContain(".roll/loop/skip-cards.json");
+  });
+
   it("registers `loop` TS-first (run-once + status are ported)", () => {
     registerAll();
     expect(isPorted("loop")).toBe(true);
@@ -161,7 +172,8 @@ describe("loop run-once CLI wiring", () => {
   });
 
   it("US-DELIV-005: usage documents --race (same-card parallel opt-in)", () => {
-    expect(RUN_ONCE_USAGE).toContain("[--dry-run] [--race]");
+    expect(RUN_ONCE_USAGE).toContain("[--workspace <id|path>] [--dry-run] [--race]");
+    expect(RUN_ONCE_USAGE).toContain("cycle runtime, backlog, locks, and events to one Workspace");
     expect(RUN_ONCE_USAGE).toContain("--race");
   });
 
@@ -591,6 +603,7 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
     writeFileSync(p.lockPath, `${process.pid}:1780680000\n`, "utf8");
     let exitCode = -1;
     let killed = 0;
+    let capacityReleased = 0;
     cycleSignalTeardown(p, "20260606-040000-9001", "loop/cycle-20260606-040000-9001", "SIGTERM", {
       killAgents: () => {
         killed += 1;
@@ -600,9 +613,15 @@ describe("FIX-204D — signal teardown keeps I8 on the kill paths", () => {
         exitCode = c;
       },
       now: () => 1780680123,
+      releaseCapacity: (cycleId) => {
+        expect(cycleId).toBe("20260606-040000-9001");
+        capacityReleased += 1;
+        return { kind: "released" };
+      },
     });
     expect(exitCode).toBe(143);
     expect(killed).toBe(1);
+    expect(capacityReleased).toBe(1);
     const { readFileSync: rf, existsSync: ex } = await import("node:fs");
     const events = rf(p.eventsPath, "utf8");
     expect(events).toContain('"cycle:end"');

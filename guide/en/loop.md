@@ -11,6 +11,12 @@ owner asks `roll supervisor next/why` and starts any long-running Story work
 explicitly. `roll loop resume` switches back to autonomous without changing
 agent bindings.
 
+Workspace mode keys each scheduler by immutable Workspace ID. `roll loop on`,
+`go`, `pause`, and `resume` accept or derive exactly one Workspace target and
+keep runtime, events, locks, and failure state under that Workspace. Multiple
+active Workspaces can run independently; `roll loop status --all` is the
+read-only aggregate view and never mutates any Workspace.
+
 ## How It Works
 
 1. Reads `BACKLOG.md`, picks the highest-priority `📋 Todo` item.

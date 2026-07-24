@@ -282,11 +282,21 @@ export function isOwnerHeld(
  * thing that decides ownership is which process wins the kernel-atomic `mkdir`.
  *
  * @param staleSec  {@link OUTER_LOCK_STALE_SEC} or {@link INNER_LOCK_STALE_SEC}.
+ * @param unparseableIsHeld fail closed while a winning process is between the
+ *   atomic mkdir and owner-metadata write; callers that can repair abandoned
+ *   empty locks explicitly should use this for cross-process mutual exclusion.
  */
 export function acquireLock(
   lockPath: string,
   pid: number = process.pid,
-  opts: { now?: Clock; staleSec?: number; pidAlive?: PidAlive; cycleId?: string; hostname?: string } = {},
+  opts: {
+    now?: Clock;
+    staleSec?: number;
+    pidAlive?: PidAlive;
+    cycleId?: string;
+    hostname?: string;
+    unparseableIsHeld?: boolean;
+  } = {},
 ): AcquireResult {
   const now = (opts.now ?? systemClock)();
   const staleSec = opts.staleSec ?? OUTER_LOCK_STALE_SEC;
@@ -307,6 +317,9 @@ export function acquireLock(
 
   // EEXIST: someone holds it (dir) OR a legacy file is in the way. Decide.
   const held = readLockOwner(lockPath);
+  if (held === undefined && opts.unparseableIsHeld === true) {
+    return { acquired: false, heldByPid: undefined };
+  }
   if (isOwnerHeld(held, now, staleSec, pidAlive, selfHost)) {
     return { acquired: false, heldByPid: held?.pid };
   }

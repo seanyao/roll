@@ -17,6 +17,7 @@ import {
   stallVerdict,
   type ActivitySignal,
   type AgentActivityNormalizer,
+  type CycleContext,
   type CycleObserverState,
   type NormalizerState,
 } from "@roll/core";
@@ -26,6 +27,11 @@ import { killLiveAgents } from "./agent-spawn.js";
 import type { CapturePort, Ports } from "./ports.js";
 import { epochMs } from "./runner-time.js";
 import { parsePolicy } from "@roll/core";
+import {
+  RepositoryObservationError,
+  observeRepositoryRecentCommits,
+  writableRepositoryIds,
+} from "./repository-observation.js";
 
 export class ActivitySignalRecorder {
   private buffered = "";
@@ -148,6 +154,105 @@ export async function startCycleObserver(
       clearInterval(timer);
       // One final synchronous snapshot — captures the TCR commits that landed
       // between the last tick and the agent exiting.
+      await tick();
+    },
+  };
+}
+
+/** Workspace build observer. Git is read exclusively through repository-bound
+ * ports; the Issue root is a Builder coordination cwd and is never treated as a
+ * repository. Repository commit facts are written once to the Issue stream,
+ * while Story lifecycle/heartbeat events remain one per Cycle. */
+export async function startRepositoryCycleObserver(
+  ports: Ports,
+  ctx: CycleContext,
+): Promise<{ stop(): Promise<void> }> {
+  const cycleId = ctx.cycleId ?? "";
+  if (cycleId === "") return { stop: async () => {} };
+  const repositories = ports.repositories?.bind(ctx);
+  if (repositories === undefined) throw new Error("missing_repository_ports");
+  const repoIds = writableRepositoryIds(ctx);
+  const states = new Map<string, CycleObserverState>();
+  for (const repoId of repoIds) {
+    const state = newCycleObserverState(cycleId);
+    baselineCommits(await observeRepositoryRecentCommits(repoId, repositories), state);
+    states.set(repoId, state);
+  }
+
+  const storyState = newCycleObserverState(cycleId);
+  for (const event of observeBuildStart(storyState, Date.now())) {
+    ports.events.appendEvent(ports.paths.eventsPath, event);
+  }
+  const reportedFailures = new Set<string>();
+  const reportFailure = (error: unknown): void => {
+    const failure = error instanceof RepositoryObservationError
+      ? error
+      : new RepositoryObservationError("unknown", "recent_commits", { cause: error });
+    const key = `${failure.repoId}:${failure.operation}`;
+    if (reportedFailures.has(key)) return;
+    reportedFailures.add(key);
+    try {
+      repositories.events.append(failure.repoId, {
+        type: "repository:observation_failed",
+        operation: failure.operation,
+        detail: failure.cause instanceof Error ? failure.cause.message : String(failure.cause ?? "unknown"),
+        ts: Date.now(),
+      });
+    } catch {
+      /* the global alert below remains the fail-loud projection */
+    }
+    ports.events.appendAlert(
+      ports.paths.alertsPath,
+      `repository_observation_failed: ${failure.repoId}: ${failure.operation} (cycle ${cycleId})`,
+    );
+  };
+
+  const pollGapMs = Number((process.env["ROLL_OBSERVE_POLL_MS"] ?? "").trim()) || OBSERVE_POLL_MS;
+  let running = false;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      const nowMs = Date.now();
+      for (const repoId of repoIds) {
+        const state = states.get(repoId);
+        if (state === undefined) throw new Error(`missing repository observer state: ${repoId}`);
+        try {
+          const commits = await observeRepositoryRecentCommits(repoId, repositories);
+          for (const event of observeCommits(commits, state, nowMs)) {
+            if (event.type !== "cycle:tcr" && event.type !== "cycle:first_edit") continue;
+            repositories.events.append(repoId, event);
+            if (event.type === "cycle:tcr") {
+              const storyEvents = observeCommits([{
+                hash: `${repoId}:${event.commitHash}`,
+                message: event.message,
+                tsSec: event.commitTs === undefined ? 0 : event.commitTs / 1_000,
+              }], storyState, nowMs);
+              for (const storyEvent of storyEvents) {
+                if (storyEvent.type !== "cycle:first_edit") continue;
+                ports.events.appendEvent(ports.paths.eventsPath, {
+                  ...storyEvent,
+                  commitHash: event.commitHash,
+                });
+              }
+            }
+          }
+        } catch (error) {
+          reportFailure(error);
+        }
+      }
+      for (const event of maybeBuildHeartbeat(storyState, nowMs)) {
+        ports.events.appendEvent(ports.paths.eventsPath, event);
+      }
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), pollGapMs);
+  timer.unref?.();
+  return {
+    stop: async () => {
+      clearInterval(timer);
       await tick();
     },
   };
@@ -284,6 +389,8 @@ export function startSpawnTimeoutWatchdog(opts: {
   clock: () => number;
   /** Observe commits-ahead on the worktree branch (progress signal). */
   commitCount: () => Promise<number>;
+  /** Make a failed progress probe observable without converting it to zero. */
+  onCommitProbeError?: (error: unknown) => void;
   /** FIX-1477 — fingerprint the worktree DIRTY state (e.g. raw
    *  `git status --porcelain` output); a CHANGE is progress. Optional: without
    *  it the state fuse tracks commits only. A thrown error is a blip — skipped,
@@ -332,8 +439,12 @@ export function startSpawnTimeoutWatchdog(opts: {
           lastProgressSec = now;
           lastStateSec = now;
         }
-      } catch {
-        /* a git-probe blip is NOT progress and NOT a reason to kill — skip */
+      } catch (error) {
+        try {
+          opts.onCommitProbeError?.(error);
+        } catch {
+          /* observability failure must not topple the watchdog */
+        }
       }
       // FIX-1477 — a dirty-state signature CHANGE (files written/edited before
       // or between commits) is also git-state progress: it bumps BOTH clocks.
@@ -391,8 +502,12 @@ export function startSpawnTimeoutWatchdog(opts: {
   void (async () => {
     try {
       lastCommitCount = await commitCount();
-    } catch {
-      /* baseline best-effort */
+    } catch (error) {
+      try {
+        opts.onCommitProbeError?.(error);
+      } catch {
+        /* observability failure must not topple the watchdog */
+      }
     }
     if (stateSignature !== undefined) {
       try {
@@ -510,138 +625,9 @@ export function startStallDetector(opts: {
   };
 }
 
-// ── FIX-1474: builder-child LIVENESS probe (the lost-child killer) ──────────
-
-/** Default poll cadence (ms) for the builder-child liveness probe. Cheap (one
- *  `kill(pid, 0)` per tick). Overridable via ROLL_LIVENESS_POLL_MS for tests. */
-const LIVENESS_POLL_MS = 5_000;
-
-/** Consecutive DEAD observations required before a child is declared lost. One
- *  tick can race the OS reap/`close` handshake (a just-exited child can read
- *  as a zombie for a moment), so a single dead read is a blip, never a verdict. */
-const LIVENESS_CONFIRM_TICKS = 2;
-
-/** A live liveness-probe handle. `stop()` clears the timer and returns whether
- *  the probe declared the child lost (so the caller can fold it into the
- *  returned `agent_exited` event). */
-export interface BuilderLivenessProbe {
-  stop(): { lost: boolean };
-}
-
-/** Default liveness check: signal 0. ESRCH (no such process) ⇒ dead; EPERM
- *  means the process EXISTS but is owned by someone else ⇒ alive. */
-function defaultIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as { code?: string }).code === "EPERM";
-  }
-}
-
-/**
- * FIX-1474 — start the bounded liveness probe around a blocking builder spawn.
- * The FIX-907 timeout watchdog covers a child that is ALIVE (hung / silent /
- * thrashing); it CANNOT see a child that DIED out-of-band while the spawn
- * await never settled (external SIGKILL of a process-tree member, PTY leader
- * death, lost exit delivery) — the exact shape that hung supervised cycles
- * forever with no terminal state.
- *
- * Each tick it reads the spawned child's pid (reported via the `onSpawn`
- * spawn seam; `undefined` until the spawn starts — nothing to accuse yet) and
- * asks the injected `isAlive`. After {@link LIVENESS_CONFIRM_TICKS} consecutive
- * dead observations it declares the child LOST:
- *   1. records the auditable `cycle:agent_lost` event FIRST (durable, so the
- *      death is observable even if the kill races),
- *   2. reaps the leftover process tree ({@link killLiveAgents} SIGKILL — a
- *      no-op when the tree is already gone),
- *   3. fires `onLost` so the caller can resolve its spawn race and converge
- *      the cycle to the explicit `aborted` terminal.
- *
- * The probe stands down the moment the spawn settles (`spawnPending()` false)
- * so a finished cycle is never accused. Best-effort throughout: a probe blip
- * (a throwing `isAlive`) reads as ALIVE — never a death verdict. Injectable
- * seams (`pid`, `spawnPending`, `isAlive`, `appendEvent`, `kill`, `onLost`,
- * `pollMs`, `confirmTicks`) keep it unit-testable with no real process/timer.
- */
-export function startBuilderLivenessProbe(opts: {
-  cycleId: string;
-  agent: string;
-  /** The spawned child's pid; `undefined` until the spawn reports it. */
-  pid: () => number | undefined;
-  /** True while the spawn await is unsettled; a settled spawn ⇒ inert probe. */
-  spawnPending: () => boolean;
-  /** Liveness check (default: `kill(pid, 0)`). A THROW is a blip ⇒ alive. */
-  isAlive?: (pid: number) => boolean;
-  /** Append the cycle:agent_lost event (best-effort). */
-  appendEvent: (ev: RollEvent) => void;
-  /** Reap the leftover agent process tree (returns count signalled). */
-  kill?: () => number;
-  /** Fired once when the child is declared lost (drives the spawn race). */
-  onLost?: (info: { pid: number }) => void;
-  /** Poll cadence ms (default {@link LIVENESS_POLL_MS}; tests pin a small value). */
-  pollMs?: number;
-  /** Consecutive dead observations before declaring lost (default
-   *  {@link LIVENESS_CONFIRM_TICKS}). */
-  confirmTicks?: number;
-}): BuilderLivenessProbe {
-  const { cycleId, agent, appendEvent } = opts;
-  const isAlive = opts.isAlive ?? defaultIsAlive;
-  const kill = opts.kill ?? ((): number => killLiveAgents("SIGKILL"));
-  const pollMs = opts.pollMs ?? (Number((process.env["ROLL_LIVENESS_POLL_MS"] ?? "").trim()) || LIVENESS_POLL_MS);
-  const confirmTicks = opts.confirmTicks ?? LIVENESS_CONFIRM_TICKS;
-  let lost = false;
-  let deadStreak = 0;
-
-  const tick = (): void => {
-    if (lost || !opts.spawnPending()) return;
-    const pid = opts.pid();
-    if (pid === undefined) {
-      deadStreak = 0;
-      return;
-    }
-    let alive = true;
-    try {
-      alive = isAlive(pid);
-    } catch {
-      /* a probe blip is NOT a death — skip */
-    }
-    if (alive) {
-      deadStreak = 0;
-      return;
-    }
-    deadStreak += 1;
-    if (deadStreak < confirmTicks) return;
-    lost = true;
-    clearInterval(timer);
-    // Record FIRST (durable), then reap + signal — the death must be
-    // observable even if the kill races the cycle's own teardown.
-    try {
-      appendEvent({ type: "cycle:agent_lost", cycleId, agent, pid, ts: Date.now() });
-    } catch {
-      /* event append is best-effort */
-    }
-    try {
-      kill();
-    } catch {
-      /* the tree may already be gone — the verdict stands */
-    }
-    try {
-      opts.onLost?.({ pid });
-    } catch {
-      /* the caller's race resolve must never crash the probe */
-    }
-  };
-
-  const timer = setInterval(tick, pollMs);
-  timer.unref?.();
-  return {
-    stop: () => {
-      clearInterval(timer);
-      return { lost };
-    },
-  };
-}
+// FIX-1474 liveness probe lives beside the block-signature/rig lifecycle logic
+// it belongs to; re-exported here so runner call sites keep one observer import.
+export { startBuilderLivenessProbe, type BuilderLivenessProbe } from "./agent-liveness.js";
 
 export function createCaptureMarkerSink(runDir: string, capture: CapturePort): { onChunk(chunk: Buffer): void; flush(): Promise<void> } {
   let buf = "";

@@ -27,6 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+      - run: pnpm test:e2e
       # FIX-340 — story-id uniqueness guard. A no-op in the public repo (the
       # `.roll/features` corpus lives in the roll-meta repo, absent here → exit
       # 0), but it runs in any checkout that DOES carry the data and reds on a

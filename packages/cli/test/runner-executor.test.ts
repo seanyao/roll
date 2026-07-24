@@ -1057,6 +1057,32 @@ function fakePorts(over: Partial<Ports> = {}): { ports: Ports; calls: Record<str
       releaseLock: vi.fn(rec("releaseLock")),
       writeHeartbeat: vi.fn(rec("heartbeat")),
     },
+    capacity: {
+      heartbeatIntervalMs: 10_000,
+      acquire: vi.fn((pending, ctx) => ({
+        kind: "acquired" as const,
+        lease: {
+          schema: "roll-agent-capacity-lease/v1" as const,
+          key: pending.key,
+          owner: {
+            leaseId: `lease:${pending.spawnId}`,
+            ownerToken: `token:${pending.spawnId}`,
+            workspaceId: ctx.repositoryExecution?.workspaceId ?? "test-workspace",
+            storyId: ctx.storyId ?? "",
+            cycleId: ctx.cycleId,
+            spawnId: pending.spawnId,
+            host: "test-host",
+            pid: 123,
+            processStartedAtMs: 1,
+          },
+          acquiredAtMs: 1,
+          heartbeatAtMs: 1,
+        },
+      })),
+      heartbeat: vi.fn(() => ({ kind: "updated" as const })),
+      release: vi.fn(() => ({ kind: "released" as const })),
+      releaseCurrent: vi.fn(() => ({ kind: "already_released" as const })),
+    },
     events: {
       ensureEventFiles: vi.fn(rec("ensure")),
       appendEvent: vi.fn(rec("event")),
@@ -1116,6 +1142,73 @@ function checkMainDirtyList(repo: string): string[] {
 }
 
 describe("executeCommand — command → executor mapping", () => {
+  it("maps capacity acquire and exact release through the broker port", async () => {
+    const { ports } = fakePorts();
+    const pending = {
+      spawnId: "cycle:agent:1",
+      key: { agent: "codex", model: "gpt", contextKey: "codex:default" },
+      process: { kind: "agent" as const, agent: "codex", attempt: 1 },
+    };
+    const acquired = await executeCommand({ kind: "acquire_capacity", pending }, ports, CTX);
+    expect(acquired.event).toMatchObject({
+      type: "capacity_acquired",
+      spawnId: pending.spawnId,
+      lease: { key: pending.key },
+    });
+    const lease = acquired.event?.type === "capacity_acquired" ? acquired.event.lease : undefined;
+    expect(lease).toBeDefined();
+    const released = await executeCommand({
+      kind: "release_capacity",
+      leaseId: lease!.owner.leaseId,
+      ownerToken: lease!.owner.ownerToken,
+    }, ports, CTX);
+    expect(released.capacityReleased).toBe(true);
+  });
+
+  it("maps exhausted capacity to waiting with zero process spawn", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      capacity: {
+        ...base.ports.capacity,
+        acquire: vi.fn(() => ({
+          kind: "waiting" as const,
+          retryAtMs: 9_000,
+          contenders: [{ agent: "codex", cycleId: "redacted-upstream" }],
+          suspect: false,
+        })),
+      },
+    });
+    const pending = {
+      spawnId: "cycle:agent:1",
+      key: { agent: "codex", model: "gpt", contextKey: "codex:default" },
+      process: { kind: "agent" as const, agent: "codex", attempt: 1 },
+    };
+    const result = await executeCommand({ kind: "acquire_capacity", pending }, ports, CTX);
+    expect(result.event).toEqual({
+      type: "waiting_capacity",
+      spawnId: pending.spawnId,
+      retryAtMs: 9_000,
+      contenders: [{ agent: "codex", cycleId: "redacted-upstream" }],
+      suspect: false,
+    });
+    expect(ports.agentSpawn).not.toHaveBeenCalled();
+  });
+
+  it("fails loud when exact capacity ownership is lost", async () => {
+    const base = fakePorts();
+    const { ports } = fakePorts({
+      capacity: {
+        ...base.ports.capacity,
+        release: vi.fn(() => ({ kind: "ownership_lost" as const, reason: "owner_token_mismatch" })),
+      },
+    });
+    await expect(executeCommand({
+      kind: "release_capacity",
+      leaseId: "lease",
+      ownerToken: "wrong",
+    }, ports, CTX)).rejects.toThrow("agent_capacity_ownership_lost:owner_token_mismatch");
+  });
+
   it("US-LOOP-091: all suspended rigs make route pending instead of spawning a builder", async () => {
     const rt = mkdtempSync(join(tmpdir(), "roll-rig-pending-"));
     execDirs.push(rt);
@@ -5362,8 +5455,8 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
     expect(coreWorktree).toBe("");
   });
 
-  it("FIX-1073: git env pins commits to the cycle worktree even when the agent runs git -C main", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1073-")));
+  it("FIX-1473: cycle and nested repositories keep independent config, index, hooks, refs and commits", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "roll-fix1473-")));
     execDirs.push(root);
     const main = join(root, "main");
     const wt = join(root, "wt");
@@ -5374,7 +5467,6 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
     writeFileSync(join(main, "README.md"), "base\n");
     execFileSync("git", ["add", "README.md"], { cwd: main });
     execFileSync("git", ["commit", "-m", "base"], { cwd: main });
-    const mainBase = execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim();
     execFileSync("git", ["worktree", "add", "-b", "cycle", wt], { cwd: main });
 
     const shim = join(root, "pi");
@@ -5383,13 +5475,24 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
       [
         "#!/bin/sh",
         "set -eu",
-        'test -n "${GIT_DIR:-}"',
-        'test -n "${GIT_WORK_TREE:-}"',
-        "printf 'probe\\n' > \"$GIT_WORK_TREE/probe.txt\"",
-        "git -C \"$MAIN_CHECKOUT\" add probe.txt",
-        "git -C \"$MAIN_CHECKOUT\" commit -m 'tcr: FIX-1073 git env probe'",
-        "printf 'top=%s\\n' \"$(git -C \"$MAIN_CHECKOUT\" rev-parse --show-toplevel)\"",
-        "printf 'worktree=%s\\n' \"$GIT_WORK_TREE\"",
+        'test -z "${GIT_DIR:-}"',
+        'test -z "${GIT_WORK_TREE:-}"',
+        'test -z "${GIT_COMMON_DIR:-}"',
+        'test -z "${GIT_INDEX_FILE:-}"',
+        "printf 'cycle\\n' > cycle.txt",
+        "git add cycle.txt",
+        "git commit -m 'tcr: FIX-1473 cycle commit'",
+        "mkdir nested",
+        "git -C nested init -q -b nested-main",
+        "git -C nested config user.email nested@example.test",
+        "git -C nested config user.name 'Nested Test'",
+        "printf '#!/bin/sh\\nprintf hook-ran > hook-ran.txt\\n' > nested/.git/hooks/pre-commit",
+        "chmod +x nested/.git/hooks/pre-commit",
+        "printf 'nested\\n' > nested/nested.txt",
+        "git -C nested add nested.txt",
+        "git -C nested commit -q -m 'nested commit'",
+        "printf 'cycle_top=%s\\n' \"$(git rev-parse --show-toplevel)\"",
+        "printf 'nested_top=%s\\n' \"$(git -C nested rev-parse --show-toplevel)\"",
         "",
       ].join("\n"),
     );
@@ -5399,16 +5502,29 @@ describe("FIX-914 — builder process cwd/PWD is pinned to the cycle worktree", 
       cwd: wt,
       skillBody: "X",
       bin: shim,
-      env: { ...process.env, MAIN_CHECKOUT: main },
+      env: {
+        ...process.env,
+        GIT_DIR: "/poison/git-dir",
+        GIT_WORK_TREE: "/poison/work-tree",
+        GIT_COMMON_DIR: "/poison/common-dir",
+        GIT_INDEX_FILE: "/poison/index",
+      },
       timeoutMs: 15000,
     });
 
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain(`top=${wt}`);
-    expect(r.stdout).toContain(`worktree=${wt}`);
+    expect(r.stdout).toContain(`cycle_top=${wt}`);
+    expect(r.stdout).toContain(`nested_top=${join(wt, "nested")}`);
     expect(execFileSync("git", ["rev-list", "--count", "main..HEAD"], { cwd: wt }).toString().trim()).toBe("1");
+    expect(execFileSync("git", ["log", "-1", "--format=%s"], { cwd: join(wt, "nested"), encoding: "utf8" }).trim()).toBe(
+      "nested commit",
+    );
+    expect(readFileSync(join(wt, "nested", "hook-ran.txt"), "utf8")).toBe("hook-ran");
+    expect(execFileSync("git", ["symbolic-ref", "--short", "HEAD"], { cwd: join(wt, "nested"), encoding: "utf8" }).trim()).toBe(
+      "nested-main",
+    );
     expect(execFileSync("git", ["status", "--short"], { cwd: main }).toString().trim()).toBe("");
-    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: main, encoding: "utf8" }).trim()).toBe(mainBase);
+    expect(spawnSync("git", ["config", "--local", "--get", "core.worktree"], { cwd: main }).status).not.toBe(0);
   });
 });
 
@@ -6362,6 +6478,30 @@ describe("FIX-907 startSpawnTimeoutWatchdog — kills a hung builder, never the 
       vi.useRealTimers();
     }
   });
+
+  it("reports commit-probe failures instead of silently treating them as zero progress", async () => {
+    vi.useFakeTimers();
+    try {
+      const probeError = new Error("repository observation failed");
+      const onCommitProbeError = vi.fn();
+      const wd = startSpawnTimeoutWatchdog({
+        cycleId: "c-probe-error",
+        thresholds: { wallSec: 100000, noProgressSec: 100000 },
+        clock: () => 0,
+        commitCount: async () => { throw probeError; },
+        onCommitProbeError,
+        appendEvent: () => {},
+        pollMs: 1000,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      wd.stop();
+
+      expect(onCommitProbeError).toHaveBeenCalledWith(probeError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -7139,7 +7279,7 @@ describe("US-LOOP-102 — adversarial-pairing (spawn_role executor + plan seam)"
       let next: CycleEvent | undefined;
       for (const c of commands) {
         if (c.kind === "spawn_role") roles.push(`${c.role}@${c.round}`);
-        if (c.kind === "emit_event") emitted.push(c.event.type);
+        if (c.kind === "emit_event" && !c.event.type.startsWith("workspace:capacity_")) emitted.push(c.event.type);
         if (c.kind === "capture_facts") continue; // hermetic: don't run the heavy capture path
         const res = await executeCommand(c, ports, CTX);
         if (res.event !== undefined) next = res.event;

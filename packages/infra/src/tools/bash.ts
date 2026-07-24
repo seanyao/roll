@@ -217,14 +217,8 @@ function envCommandIndex(args: readonly string[]): number {
   return -1;
 }
 
-const NODE_OPTIONS_WITH_VALUE = new Set([
-  "-r", "--require", "--import", "--loader", "--experimental-loader", "--conditions",
-  "--input-type", "--env-file", "--env-file-if-exists",
-  "--inspect-port", "--title", "--icu-data-dir", "--openssl-config", "--redirect-warnings",
-  "--diagnostic-dir", "--cpu-prof-dir", "--heap-prof-dir", "--report-dir", "--test-reporter",
-]);
-
 function nodeEvalDenied(args: readonly string[]): boolean {
+  let ambiguousOptionValue = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? "";
     if (argument === "--") return false;
@@ -232,8 +226,19 @@ function nodeEvalDenied(args: readonly string[]): boolean {
       argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=") ||
       argument === "-p" || argument.startsWith("-p") || argument === "--print" || argument.startsWith("--print=")
     ) return true;
-    if (!argument.startsWith("-")) return false;
-    if (NODE_OPTIONS_WITH_VALUE.has(argument)) index += 1;
+    if (!argument.startsWith("-")) {
+      if (ambiguousOptionValue) {
+        ambiguousOptionValue = false;
+        continue;
+      }
+      return false;
+    }
+    // Node's long option set changes between releases. Treat a separate token
+    // after any option as a possible option value, so an incomplete allowlist
+    // cannot turn that value into a false script boundary before -e/--print.
+    ambiguousOptionValue = argument.startsWith("--")
+      ? !argument.includes("=")
+      : argument.length === 2;
   }
   return false;
 }

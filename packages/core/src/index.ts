@@ -113,6 +113,7 @@ export * from "./truth/collect-dossier-state.js";
 export * from "./delta-team/admission.js";
 export * from "./delta-team/projection.js";
 export * from "./delta-team/model-resolution.js";
+export * from "./delta-team/artifact-protocol.js";
 export * from "./tools/index.js";
 export * from "./browser-operations/index.js";
 

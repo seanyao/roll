@@ -26,9 +26,11 @@ import {
   type PrepareInput,
 } from "../lib/delta-allocation.js";
 import { loadLocalPresets } from "../lib/delta-artifacts.js";
-import { EventBus, projectDelegationStatus, readLeases } from "@roll/core";
+import { EventBus, projectDelegationStatus, readLeases, validateDeltaManifest } from "@roll/core";
+import type { DeltaArtifactManifest } from "@roll/spec";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 // ── Locale resolution ────────────────────────────────────────────────────────
 
@@ -469,6 +471,86 @@ function defaultValidator(input: DeltaValidationInput): ValidatorResult {
       role: input.stage,
     };
   }
+  // US-DELTA-004: deep artifact-protocol enforcement (digest / path / role-access
+  // / host-attestation / identity-collision / evidence-format).
+  let manifest: DeltaArtifactManifest;
+  try {
+    const parsed = JSON.parse(readFileSync(input.manifestPath, "utf8")) as { schemaVersion?: unknown };
+    if (parsed?.schemaVersion !== 2) {
+      // v1 / placeholder manifests remain PARSEABLE but cannot satisfy a NEW run.
+      return {
+        ok: false,
+        reason: "artifact_invalid",
+        detail: `manifest at ${input.manifestPath} is not schemaVersion 2 (a new Delta run requires a v2 manifest)`,
+        role: input.stage,
+      };
+    }
+    manifest = parsed as unknown as DeltaArtifactManifest;
+  } catch (e) {
+    return { ok: false, reason: "artifact_invalid", detail: `manifest unreadable/invalid JSON at ${input.manifestPath}: ${String(e)}`, role: input.stage };
+  }
+  // The manifest's declared role MUST match the stage being validated — else an
+  // evaluator-stage file declaring `designer` would bypass the evaluator-only
+  // identity + report-format checks yet still publish an evaluator event.
+  if (manifest.role !== input.stage) {
+    return { ok: false, reason: "artifact_invalid", detail: `manifest role '${manifest.role}' ≠ validated stage '${input.stage}'`, role: input.stage };
+  }
+  const frameDir = input.frameDir;
+  const contains = (p: string): boolean => {
+    const abs = resolve(frameDir, p);
+    return abs === frameDir || abs.startsWith(frameDir + sep);
+  };
+  const readBytes = (p: string): string | null => {
+    try {
+      return readFileSync(resolve(frameDir, p), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  // Builder and Evaluator MUST publish their evidence document (fail-closed): a
+  // missing evidence/report output — or an unreadable one — is a violation, not
+  // a skipped format check.
+  let evidenceContent: string | undefined;
+  if (input.stage === "builder" || input.stage === "evaluator") {
+    const wantKind = input.stage === "builder" ? "evidence" : "report";
+    const ref = manifest.outputs.find((o) => o.kind === wantKind);
+    if (ref === undefined) {
+      return { ok: false, reason: "artifact_invalid", detail: `${input.stage} manifest declares no '${wantKind}' output`, role: input.stage };
+    }
+    const content = readBytes(ref.path);
+    if (content === null) {
+      return { ok: false, reason: "artifact_invalid", detail: `${input.stage} ${wantKind} artifact missing on disk: ${ref.path}`, role: input.stage };
+    }
+    evidenceContent = content;
+  }
+  // The Evaluator MUST validate identity distinctness against a published Builder
+  // manifest (fail-closed): no valid Builder manifest → the evaluator stage
+  // cannot be admitted (it runs AFTER the Builder).
+  let builderManifest: DeltaArtifactManifest | undefined;
+  if (input.stage === "evaluator") {
+    const bp = join(frameDir, "role-artifacts", "builder", "evaluation-manifest.json");
+    try {
+      const bm = existsSync(bp) ? (JSON.parse(readFileSync(bp, "utf8")) as { schemaVersion?: unknown; role?: unknown }) : undefined;
+      // Must be a v2 manifest that ACTUALLY declares role "builder" — a wrong-role
+      // v2 file at the builder path must not satisfy the identity-distinctness
+      // requirement.
+      if (bm?.schemaVersion === 2 && bm.role === "builder") builderManifest = bm as unknown as DeltaArtifactManifest;
+    } catch {
+      /* fall through to the fail-closed block below */
+    }
+    if (builderManifest === undefined) {
+      return { ok: false, reason: "artifact_invalid", detail: `evaluator requires a published v2 Builder manifest (role: "builder") for identity distinctness (none valid at ${bp})`, role: input.stage };
+    }
+  }
+  const r = validateDeltaManifest(manifest, {
+    contains,
+    readBytes,
+    ...(builderManifest !== undefined ? { builderManifest } : {}),
+    ...(evidenceContent !== undefined ? { evidenceContent } : {}),
+  });
+  if (!r.ok) {
+    return { ok: false, reason: r.reason ?? "artifact_invalid", detail: r.detail ?? "artifact protocol violation", role: input.stage };
+  }
   return { ok: true };
 }
 
@@ -747,7 +829,15 @@ function validateCommand(args: string[]): number {
     storyId,
     role: stage,
     path: stageArtifactPath,
-    sha256: "", // US-004 will compute real digest
+    // US-DELTA-004: real digest of the published stage artifact for the truth
+    // projection to cross-check (empty only if the file vanished mid-publish).
+    sha256: (() => {
+      try {
+        return createHash("sha256").update(readFileSync(stageArtifactPath)).digest("hex");
+      } catch {
+        return "";
+      }
+    })(),
     manifestPath: evaluationManifestPath,
     sessionId: "host-native",
     roleInstanceId: (roleResolved?.roleInstanceId as string) ?? "",

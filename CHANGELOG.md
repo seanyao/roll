@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Delta Team
+- `roll delta validate` 现在对每个角色的交接产物做实质校验,而不只是检查文件存在:核对每个产物的 SHA-256 摘要与实际内容一致、产物路径不越出委托证据目录、角色的读写权限正确(只有 Builder 能写工作区)、host-native 角色带完整的 host attestation、Evaluator 的会话/角色实例令牌与 Builder 不相同、以及 Builder/Evaluator 证据文档的必要小节齐全。任一不符即 fail-closed 阻断并记录具体原因(digest 不符/路径越界/越权写/attestation 缺失/身份撞车)。历史 v1/占位 manifest 仍可解析但不能满足新的 Delta run(US-DELTA-004)[delta]
+
 ### 可观测性
 - 每张卡现在有一份"轮次账本"(round-journal):每一轮谁(角色/模型)做了多久、结局如何、门禁花了多少时间,自动追加记录到卡夹(`.roll/features/<卡>/round-journal.jsonl` 机器读 + `.md` 人读),不需手工记。`roll cycle journal <卡号>` 一条命令看这张卡的中位数/均值/p90 时长与门禁占比,还能按"时代(era)"分窗对比,给后续提效提供基线与回滚判据(US-CYCLE-004)[cycle]
 

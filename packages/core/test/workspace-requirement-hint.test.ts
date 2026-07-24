@@ -6,6 +6,8 @@ import {
 } from "@roll/spec";
 import {
   MAX_REQUIREMENT_HINT_ITEMS,
+  MAX_REQUIREMENT_HINT_VALUE_LENGTH,
+  MAX_REQUIREMENT_SEMANTIC_TERM_LENGTH,
   normalizeRequirementHint,
 } from "../src/index.js";
 
@@ -113,6 +115,85 @@ describe("US-WS-027 RequirementHintV1 normalization", () => {
     })).toMatchObject({
       ok: false,
       findings: [expect.objectContaining({ code: "value_too_long", path: "semanticTerms[0]" })],
+    });
+  });
+
+  it.each([
+    ["null", null, { code: "invalid_type", path: "$" }],
+    ["array", [], { code: "invalid_type", path: "$" }],
+    ["unknown top-level field", { extra: true }, { code: "unknown_field", path: "extra" }],
+    ["unknown source field", {
+      sources: [{ key: { provider: "jira", ref: "APE-234" }, provenance: "explicit_user", extra: true }],
+    }, { code: "unknown_field", path: "sources[0].extra" }],
+    ["unknown source-key field", {
+      sources: [{ key: { provider: "jira", ref: "APE-234", extra: true }, provenance: "explicit_user" }],
+    }, { code: "unknown_field", path: "sources[0].key.extra" }],
+    ["unknown story field", {
+      storyIds: [{ storyId: "US-WS-027", provenance: "cli_argument", extra: true }],
+    }, { code: "unknown_field", path: "storyIds[0].extra" }],
+    ["unknown repository field", {
+      repositoryRemotes: [{ remote: "https://github.com/Owner/Repo", provenance: "cli_argument", extra: true }],
+    }, { code: "unknown_field", path: "repositoryRemotes[0].extra" }],
+    ["unknown path field", {
+      paths: [{ path: "/work/ws", provenance: "cli_argument", extra: true }],
+    }, { code: "unknown_field", path: "paths[0].extra" }],
+    ["malformed source entry", { sources: [null] }, { code: "invalid_type", path: "sources[0]" }],
+    ["malformed source key", {
+      sources: [{ key: null, provenance: "explicit_user" }],
+    }, { code: "invalid_type", path: "sources[0].key" }],
+    ["unknown provenance", {
+      storyIds: [{ storyId: "US-WS-027", provenance: "model_guess" }],
+    }, { code: "invalid_provenance", path: "storyIds[0].provenance" }],
+    ["wrong schema", { schema: "roll.requirement-hint/v2" }, { code: "invalid_schema", path: "schema" }],
+  ] as const)("fails closed for %s", (_name, input, expected) => {
+    expect(normalizeRequirementHint(input)).toMatchObject({
+      ok: false,
+      findings: expect.arrayContaining([expect.objectContaining(expected)]),
+    });
+  });
+
+  it.each([
+    ["sources", { sources: Array.from({ length: MAX_REQUIREMENT_HINT_ITEMS + 1 }, () => (
+      { key: { provider: "jira", ref: "APE-234" }, provenance: "explicit_user" }
+    )) }],
+    ["storyIds", { storyIds: Array.from({ length: MAX_REQUIREMENT_HINT_ITEMS + 1 }, () => (
+      { storyId: "US-WS-027", provenance: "explicit_user" }
+    )) }],
+    ["repositoryRemotes", { repositoryRemotes: Array.from({ length: MAX_REQUIREMENT_HINT_ITEMS + 1 }, () => (
+      { remote: "https://github.com/Owner/Repo", provenance: "cli_argument" }
+    )) }],
+    ["paths", { paths: Array.from({ length: MAX_REQUIREMENT_HINT_ITEMS + 1 }, () => (
+      { path: "/work/ws", provenance: "cwd_repository" }
+    )) }],
+    ["semanticTerms", { semanticTerms: Array.from({ length: MAX_REQUIREMENT_HINT_ITEMS + 1 }, () => "resolver") }],
+  ] as const)("enforces the %s count boundary with an exact finding path", (path, input) => {
+    expect(normalizeRequirementHint(input)).toMatchObject({
+      ok: false,
+      findings: expect.arrayContaining([expect.objectContaining({ code: "item_limit", path })]),
+    });
+  });
+
+  it.each([
+    ["sources[0].key.provider", {
+      sources: [{ key: { provider: "x".repeat(MAX_REQUIREMENT_HINT_VALUE_LENGTH + 1), ref: "APE-234" }, provenance: "explicit_user" }],
+    }],
+    ["sources[0].key.ref", {
+      sources: [{ key: { provider: "jira", ref: "x".repeat(MAX_REQUIREMENT_HINT_VALUE_LENGTH + 1) }, provenance: "explicit_user" }],
+    }],
+    ["storyIds[0].storyId", {
+      storyIds: [{ storyId: "x".repeat(MAX_REQUIREMENT_HINT_VALUE_LENGTH + 1), provenance: "cli_argument" }],
+    }],
+    ["repositoryRemotes[0].remote", {
+      repositoryRemotes: [{ remote: "x".repeat(MAX_REQUIREMENT_HINT_VALUE_LENGTH + 1), provenance: "cli_argument" }],
+    }],
+    ["paths[0].path", {
+      paths: [{ path: `/${"x".repeat(MAX_REQUIREMENT_HINT_VALUE_LENGTH + 1)}`, provenance: "cwd_repository" }],
+    }],
+    ["semanticTerms[0]", { semanticTerms: ["x".repeat(MAX_REQUIREMENT_SEMANTIC_TERM_LENGTH + 1)] }],
+  ] as const)("enforces the %s length boundary with an exact finding", (path, input) => {
+    expect(normalizeRequirementHint(input)).toMatchObject({
+      ok: false,
+      findings: expect.arrayContaining([expect.objectContaining({ code: "value_too_long", path })]),
     });
   });
 });

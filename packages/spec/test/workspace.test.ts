@@ -344,6 +344,22 @@ describe("RepositoryBinding and WorkspaceManifest", () => {
   });
 
   it.each([
+    ["root secret", { ...workspaceContexts(), credential: "workspace-secret-sentinel" }, "contexts.credential"],
+    [
+      "binding cache path",
+      { ...workspaceContexts(), bindings: [{ ...workspaceContexts().bindings[0], cachePath: "workspace-secret-sentinel" }] },
+      "contexts.bindings[0].cachePath",
+    ],
+  ])("rejects %s through parseWorkspaceManifest without echoing secret values", (_label, contextsValue, path) => {
+    const parsed = parseWorkspaceManifest({ ...workspace(), contexts: contextsValue }, {});
+    expect(parsed).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([expect.objectContaining({ code: "unknown_field", path })]),
+    });
+    expect(JSON.stringify(parsed)).not.toContain("workspace-secret-sentinel");
+  });
+
+  it.each([
     ["unknown version", { ...workspace(), schema: "roll.workspace/v2" }, "unknown_version", "schema", {}],
     ["unknown root", { ...workspace(), root: "/tmp/workspace" }, "unknown_field", "root", {}],
     ["mutable lifecycle", { ...workspace(), lifecycle: "active" }, "unknown_field", "lifecycle", {}],

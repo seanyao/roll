@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CONTEXT_PROVIDER_REGISTRY_V1,
   type ContextProviderRegistryV1,
@@ -43,9 +43,39 @@ function contexts(overrides: Partial<WorkspaceContextsV1> = {}): WorkspaceContex
 describe("compileContextProviderExecutionPlans", () => {
   it("is synchronous and stays inside the pure core boundary", () => {
     const source = readFileSync(new URL("../src/context/execution-plan.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/(?:node:fs|node:child_process|process\.cwd|\bfetch\s*\()/u);
+    expect([...source.matchAll(/from\s+["']([^"']+)["']/gu)].map((match) => match[1])).toEqual([
+      "node:crypto",
+      "@roll/spec",
+    ]);
+    expect(source).not.toMatch(/(?:node:fs|node:child_process|node:http|node:https|node:net|process\.cwd|\bfetch\s*\(|\bimport\s*\()/u);
     const result = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] });
     expect(result).not.toBeInstanceOf(Promise);
+  });
+
+  it("blocks invalid and unbound refs synchronously without touching global network effects", () => {
+    const fetchCanary = vi.fn(() => {
+      throw new Error("network effect must remain unreachable");
+    });
+    vi.stubGlobal("fetch", fetchCanary);
+    try {
+      const invalid = compileContextProviderExecutionPlans({
+        registry: registry(),
+        contexts: contexts(),
+        refs: ["not-a-context-ref"],
+      });
+      const unbound = compileContextProviderExecutionPlans({
+        registry: registry(),
+        contexts: contexts(),
+        refs: ["context://other/wiki/index.md"],
+      });
+      expect(invalid).toMatchObject({ outcome: "blocked", plans: [] });
+      expect(unbound).toMatchObject({ outcome: "blocked", plans: [] });
+      expect(invalid).not.toBeInstanceOf(Promise);
+      expect(unbound).not.toBeInstanceOf(Promise);
+      expect(fetchCanary).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([
@@ -261,5 +291,100 @@ describe("compileContextProviderExecutionPlans", () => {
     expect(scp.plans[0]?.provider.remote).toBe("ssh://github.com/Bipo/bipo-enterprise");
     expect(ssh.plans[0]?.providerConfigDigest).toBe(scp.plans[0]?.providerConfigDigest);
     expect(https.plans[0]?.providerConfigDigest).not.toBe(scp.plans[0]?.providerConfigDigest);
+  });
+
+  it("canonicalizes digests independently of environment, time, key order and requested refs without mutating inputs", () => {
+    const providerInput = provider();
+    const registryInput = registry({ providers: [providerInput] });
+    const bindingInput = {
+      providerId: "bipo-enterprise",
+      enabled: true,
+      required: true,
+      entrypoints: ["wiki/index.md", "wiki/systems/axis.md", "wiki/index.md"],
+    } as const;
+    const contextsInput = contexts({ bindings: [bindingInput] });
+    const before = structuredClone({ registryInput, contextsInput });
+    const oldWorkspace = process.env["ROLL_WORKSPACE"];
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      process.env["ROLL_WORKSPACE"] = "one";
+      const first = compileContextProviderExecutionPlans({
+        registry: registryInput,
+        contexts: contextsInput,
+        refs: ["context://bipo-enterprise/wiki/workflows/release.md"],
+      });
+      vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+      process.env["ROLL_WORKSPACE"] = "two";
+      const reorderedProvider = {
+        fetch_timeout_seconds: providerInput.fetch_timeout_seconds,
+        branch: providerInput.branch,
+        remote: providerInput.remote,
+        enabled: providerInput.enabled,
+        type: providerInput.type,
+        id: providerInput.id,
+      };
+      const second = compileContextProviderExecutionPlans({
+        registry: registry({ providers: [reorderedProvider] }),
+        contexts: contexts({
+          bindings: [{ ...bindingInput, entrypoints: ["wiki/index.md", "wiki/systems/axis.md"] }],
+        }),
+        refs: [],
+      });
+      expect(second.plans[0]?.providerConfigDigest).toBe(first.plans[0]?.providerConfigDigest);
+      expect(second.plans[0]?.bindingDigest).toBe(first.plans[0]?.bindingDigest);
+      expect({ registryInput, contextsInput }).toEqual(before);
+    } finally {
+      vi.useRealTimers();
+      if (oldWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+      else process.env["ROLL_WORKSPACE"] = oldWorkspace;
+    }
+  });
+
+  it("changes only the digest owned by changed Provider or binding content", () => {
+    const base = compileContextProviderExecutionPlans({ registry: registry(), contexts: contexts(), refs: [] }).plans[0]!;
+    for (const changed of [
+      { ...provider(), fetch_timeout_seconds: 60 },
+      { ...provider(), remote: "https://github.com/Bipo/other-context" },
+      { ...provider(), branch: "release" },
+    ]) {
+      const plan = compileContextProviderExecutionPlans({
+        registry: registry({ providers: [changed] }),
+        contexts: contexts(),
+        refs: [],
+      }).plans[0]!;
+      expect(plan.providerConfigDigest).not.toBe(base.providerConfigDigest);
+      expect(plan.bindingDigest).toBe(base.bindingDigest);
+    }
+    for (const changed of [
+      { ...contexts().bindings[0]!, required: false },
+      { ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md"] },
+      { ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] },
+    ]) {
+      const plan = compileContextProviderExecutionPlans({
+        registry: registry(),
+        contexts: contexts({ bindings: [changed] }),
+        refs: [],
+      }).plans[0]!;
+      expect(plan.providerConfigDigest).toBe(base.providerConfigDigest);
+      expect(plan.bindingDigest).not.toBe(base.bindingDigest);
+    }
+
+    const ordered = compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts({
+        bindings: [{ ...contexts().bindings[0]!, entrypoints: ["wiki/index.md", "wiki/overview.md"] }],
+      }),
+      refs: [],
+    }).plans[0]!;
+    const reordered = compileContextProviderExecutionPlans({
+      registry: registry(),
+      contexts: contexts({
+        bindings: [{ ...contexts().bindings[0]!, entrypoints: ["wiki/overview.md", "wiki/index.md"] }],
+      }),
+      refs: [],
+    }).plans[0]!;
+    expect(reordered.providerConfigDigest).toBe(ordered.providerConfigDigest);
+    expect(reordered.bindingDigest).not.toBe(ordered.bindingDigest);
   });
 });

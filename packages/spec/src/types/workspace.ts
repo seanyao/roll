@@ -3,6 +3,7 @@ import type { JsonSchema } from "./json-schema.js";
 import { parseWorkspaceContexts, workspaceContextsV1Schema, type WorkspaceContextsV1 } from "./context.js";
 
 export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
+export const WORKSPACE_EXECUTION_CONTEXT_V1 = "roll.workspace-execution-context/v1" as const;
 export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
 export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
@@ -425,6 +426,67 @@ export interface RepositoryExecutionContext {
 /** The sole repository carrier for a Cycle. Keys are stable repoId values;
  * cardinality one and many intentionally share this exact contract. */
 export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecutionContext>>;
+
+/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
+export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
+  readonly issueRoot: string;
+  readonly repositories: RepositoryExecutionMap;
+}
+
+export type WorkspaceMatchEvidenceKind =
+  | "issue_exact"
+  | "requirement_source_exact"
+  | "repository_exact"
+  | "path_contained"
+  | "semantic_supported";
+
+export interface WorkspaceMatchEvidence {
+  readonly kind: WorkspaceMatchEvidenceKind;
+  readonly value: string;
+  readonly hard: boolean;
+  readonly score: number;
+}
+
+export interface WorkspaceExecutionContextAuthoritiesV1 {
+  readonly backlog: string;
+  readonly features: string;
+  readonly design: string;
+  readonly requirements: string;
+  readonly policy: string;
+  readonly evidence: string;
+  readonly toolDumps: string;
+  readonly events: string;
+  readonly runtime: string;
+  readonly locks: string;
+}
+
+/**
+ * Complete, versioned Workspace authority handed to every scoped operation.
+ * It preserves resolution evidence, repository bindings, Issue execution
+ * facts and authority paths; Context Engineering consumes this contract
+ * without rediscovering or reducing Workspace identity.
+ */
+export interface WorkspaceExecutionContextV1 {
+  readonly schema: typeof WORKSPACE_EXECUTION_CONTEXT_V1;
+  readonly workspace: {
+    readonly workspaceId: string;
+    readonly root: string;
+    readonly canonicalRoot: string;
+    readonly lifecycle: WorkspaceLifecycle;
+  };
+  readonly resolution: {
+    readonly source: "explicit" | "environment" | "cwd_manifest" | "issue_manifest" | "requirement_discovery";
+    readonly evidence: readonly WorkspaceMatchEvidence[];
+  };
+  readonly bindings: readonly RepositoryBinding[];
+  readonly contexts?: WorkspaceContextsV1;
+  readonly issue?: {
+    readonly storyId: string;
+    readonly manifestPath: string;
+    readonly execution: CycleRepositoryExecutionContext;
+  };
+  readonly authorities: WorkspaceExecutionContextAuthoritiesV1;
+}
 
 export interface IssueManifest {
   readonly schema: typeof ISSUE_MANIFEST_V1;

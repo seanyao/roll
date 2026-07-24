@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import * as publicSpec from "../src/index.js";
 import {
   CONTEXT_PROVIDER_REGISTRY_V1,
@@ -6,13 +6,38 @@ import {
   CONTEXT_READ_REQUEST_V1,
   CONTEXT_READ_RESULT_V1,
   contextProviderRegistryV1Schema,
+  contextDiagnosticV1Schema,
+  contextProviderExecutionPlanV1Schema,
   contextReadRequestV1Schema,
   contextReadResultV1Schema,
   parseContextProviderRegistry,
   parseContextRef,
   parseWorkspaceContexts,
   workspaceContextsV1Schema,
+  workspaceExecutionContextV1Schema,
 } from "../src/types/context.js";
+import {
+  REPOSITORY_BINDING_V1,
+  WORKSPACE_EXECUTION_CONTEXT_V1,
+} from "../src/types/workspace.js";
+import type {
+  ContextDiagnosticV1,
+  ContextProviderExecutionPlanV1,
+  ContextReadRequestV1,
+  ContextReadResultV1,
+  GitLlmWikiProviderConfigV1,
+  RepositoryExecutionMap,
+  WorkspaceContextBindingV1,
+  WorkspaceExecutionContextV1,
+} from "../src/index.js";
+
+type SchemaView = {
+  type?: string;
+  additionalProperties?: boolean | SchemaView;
+  properties?: Record<string, SchemaView>;
+  items?: SchemaView;
+  required?: readonly string[];
+};
 
 function registry() {
   return {
@@ -54,6 +79,10 @@ describe("Context v1 contracts", () => {
       workspaceContextsV1Schema: expect.any(Object),
       contextReadRequestV1Schema: expect.any(Object),
       contextReadResultV1Schema: expect.any(Object),
+      contextDiagnosticV1Schema: expect.any(Object),
+      contextProviderExecutionPlanV1Schema: expect.any(Object),
+      workspaceExecutionContextV1Schema: expect.any(Object),
+      WORKSPACE_EXECUTION_CONTEXT_V1: "roll.workspace-execution-context/v1",
     });
   });
 
@@ -86,6 +115,108 @@ describe("Context v1 contracts", () => {
     expect(workspaceContextsV1Schema).toMatchObject({ type: "object", additionalProperties: false });
     expect(contextReadRequestV1Schema).toMatchObject({ type: "object", additionalProperties: false });
     expect(contextReadResultV1Schema).toMatchObject({ type: "object", additionalProperties: false });
+  });
+
+  it("publishes deeply closed request, result, diagnostic and execution-plan schemas", () => {
+    const request = contextReadRequestV1Schema as SchemaView;
+    const workspace = workspaceExecutionContextV1Schema as SchemaView;
+    const result = contextReadResultV1Schema as SchemaView;
+    const diagnostic = contextDiagnosticV1Schema as SchemaView;
+    const plan = contextProviderExecutionPlanV1Schema as SchemaView;
+
+    expect(request.properties?.workspace).toBe(workspaceExecutionContextV1Schema);
+    expect(workspace).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.workspace).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.resolution).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.resolution?.properties?.evidence?.items).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.bindings?.items).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.issue).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.issue?.properties?.execution).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.authorities).toMatchObject({ type: "object", additionalProperties: false });
+    expect(workspace.properties?.contexts).toBe(workspaceContextsV1Schema);
+
+    expect(result.properties?.requestScope).toMatchObject({ type: "object", additionalProperties: false });
+    expect(result.properties?.providers?.items).toMatchObject({ type: "object", additionalProperties: false });
+    expect(result.properties?.providers?.items?.properties?.files?.items).toMatchObject({ type: "object", additionalProperties: false });
+    expect(result.properties?.providers?.items?.properties?.files?.items?.properties?.page).toMatchObject({ type: "object", additionalProperties: false });
+    expect(result.properties?.providers?.items?.properties?.warnings?.items).toBe(contextDiagnosticV1Schema);
+    expect(result.properties?.gaps?.items).toBe(contextDiagnosticV1Schema);
+    expect(diagnostic).toMatchObject({ type: "object", additionalProperties: false });
+    expect(plan).toMatchObject({ type: "object", additionalProperties: false });
+    expect(plan.properties?.provider).toMatchObject({ type: "object", additionalProperties: false });
+    expect(plan.properties?.binding).toMatchObject({ type: "object", additionalProperties: false });
+  });
+
+  it("binds Context requests to the complete versioned Workspace authority contract", () => {
+    const execution: WorkspaceExecutionContextV1 = {
+      schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+      workspace: {
+        workspaceId: "roll",
+        root: "/workspaces/roll",
+        canonicalRoot: "/real/workspaces/roll",
+        lifecycle: "active",
+      },
+      resolution: {
+        source: "requirement_discovery",
+        evidence: [{ kind: "requirement_source_exact", value: "jira:APE-234", hard: true, score: 100 }],
+      },
+      bindings: [{
+        schema: REPOSITORY_BINDING_V1,
+        repoId: "repo-8d325f3875d5",
+        alias: "product",
+        remote: "https://github.com/Owner/Repo",
+        integrationBranch: "main",
+        provider: "github",
+        workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: ["test"] },
+      }],
+      contexts: contexts(),
+      issue: {
+        storyId: "US-CONTEXT-001",
+        manifestPath: "/workspaces/roll/issues/US-CONTEXT-001/manifest.json",
+        execution: {
+          workspaceId: "roll",
+          issueRoot: "/workspaces/roll/issues/US-CONTEXT-001",
+          repositories: {
+            "repo-8d325f3875d5": {
+              repoId: "repo-8d325f3875d5",
+              alias: "product",
+              access: "write",
+              requiredDelivery: true,
+              noChangePolicy: "changes_required",
+              worktreePath: "/workspaces/roll/issues/US-CONTEXT-001/product",
+              baseSha: "a".repeat(40),
+              headSha: "b".repeat(40),
+              commands: { test: ["pnpm test"], integration: ["pnpm test:e2e"] },
+            },
+          },
+        },
+      },
+      authorities: {
+        backlog: "/workspaces/roll/backlog",
+        features: "/workspaces/roll/features",
+        design: "/workspaces/roll/design",
+        requirements: "/workspaces/roll/requirements",
+        policy: "/workspaces/roll/policy",
+        evidence: "/workspaces/roll/evidence",
+        toolDumps: "/workspaces/roll/tool-dumps",
+        events: "/workspaces/roll/events",
+        runtime: "/workspaces/roll/runtime",
+        locks: "/workspaces/roll/locks",
+      },
+    };
+    const request: ContextReadRequestV1 = {
+      schema: CONTEXT_READ_REQUEST_V1,
+      workspace: execution,
+      stage: "build",
+      refs: [],
+    };
+    expectTypeOf(request.workspace).toEqualTypeOf<WorkspaceExecutionContextV1>();
+    expectTypeOf(request.workspace.issue?.execution.repositories).toEqualTypeOf<RepositoryExecutionMap | undefined>();
+    expectTypeOf<ContextReadResultV1["gaps"][number]>().toEqualTypeOf<ContextDiagnosticV1>();
+    expectTypeOf<ContextProviderExecutionPlanV1["provider"]>().toEqualTypeOf<GitLlmWikiProviderConfigV1>();
+    expectTypeOf<ContextProviderExecutionPlanV1["binding"]>().toEqualTypeOf<WorkspaceContextBindingV1>();
+    expect(request.workspace.contexts).toEqual(contexts());
+    expect(request.workspace.authorities.runtime).toBe("/workspaces/roll/runtime");
   });
 
   it("parses a registry and normalizes its credential-free remote identity", () => {

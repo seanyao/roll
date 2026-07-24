@@ -1,5 +1,5 @@
 import type { JsonSchema } from "./json-schema.js";
-import type { ContractError, ContractResult } from "./workspace.js";
+import type { ContractError, ContractResult, WorkspaceExecutionContextV1 } from "./workspace.js";
 
 export const CONTEXT_PROVIDER_REGISTRY_V1 = "roll.context-providers/v1" as const;
 export const CONTEXT_READ_REQUEST_V1 = "roll.context-read-request/v1" as const;
@@ -99,14 +99,9 @@ export interface ContextDiagnosticV1 {
   readonly matchedScope?: Readonly<Record<string, readonly string[]>>;
 }
 
-/**
- * The Workspace execution context is supplied by Workspace Coordination.
- * This generic boundary deliberately avoids inventing a reduced duplicate of
- * WorkspaceExecutionContextV1 inside Context Engineering.
- */
-export interface ContextReadRequestV1<TWorkspaceExecutionContext = unknown> {
+export interface ContextReadRequestV1 {
   readonly schema: typeof CONTEXT_READ_REQUEST_V1;
-  readonly workspace: TWorkspaceExecutionContext;
+  readonly workspace: WorkspaceExecutionContextV1;
   readonly storyId?: string;
   readonly stage: ContextStage;
   readonly environmentIds?: readonly string[];
@@ -193,6 +188,81 @@ const bindingSchema = objectSchema({
   entrypoints: { type: "array", items: stringSchema },
 }, ["providerId", "enabled", "required", "entrypoints"]);
 
+const repositoryWorkflowSchema = objectSchema({
+  branchPattern: stringSchema,
+  requiredChecks: { type: "array", items: stringSchema },
+}, ["branchPattern", "requiredChecks"]);
+
+const repositoryBindingSchema = objectSchema({
+  schema: { const: "roll.repository-binding/v1" },
+  repoId: stringSchema,
+  alias: stringSchema,
+  remote: stringSchema,
+  integrationBranch: stringSchema,
+  provider: stringSchema,
+  workflow: repositoryWorkflowSchema,
+}, ["schema", "repoId", "alias", "remote", "integrationBranch", "provider", "workflow"]);
+
+const stringArraySchema: JsonSchema = { type: "array", items: stringSchema };
+const stringArrayRecordSchema: JsonSchema = { type: "object", additionalProperties: stringArraySchema };
+
+export const contextDiagnosticV1Schema: JsonSchema = objectSchema({
+  code: { type: "string", enum: CONTEXT_DIAGNOSTIC_CODES },
+  severity: { type: "string", enum: ["warning", "gap", "blocking"] },
+  providerId: stringSchema,
+  ref: stringSchema,
+  message: stringSchema,
+  mismatchedDimensions: stringArraySchema,
+  matchedScope: stringArrayRecordSchema,
+}, ["code", "severity", "message"]);
+
+const repositoryExecutionCommandsSchema = objectSchema({
+  test: stringArraySchema,
+  integration: stringArraySchema,
+}, ["test", "integration"]);
+
+const repositoryExecutionContextSchema = objectSchema({
+  repoId: stringSchema,
+  alias: stringSchema,
+  access: { type: "string", enum: ["read", "write"] },
+  requiredDelivery: { type: "boolean" },
+  noChangePolicy: { type: "string", enum: ["changes_required", "no_change_allowed"] },
+  dependsOnRepo: stringSchema,
+  worktreePath: stringSchema,
+  baseSha: stringSchema,
+  headSha: stringSchema,
+  commands: repositoryExecutionCommandsSchema,
+}, ["repoId", "alias", "access", "requiredDelivery", "worktreePath", "baseSha", "headSha", "commands"]);
+
+const cycleRepositoryExecutionContextSchema = objectSchema({
+  workspaceId: stringSchema,
+  issueRoot: stringSchema,
+  repositories: { type: "object", additionalProperties: repositoryExecutionContextSchema },
+}, ["workspaceId", "issueRoot", "repositories"]);
+
+const workspaceMatchEvidenceSchema = objectSchema({
+  kind: {
+    type: "string",
+    enum: ["issue_exact", "requirement_source_exact", "repository_exact", "path_contained", "semantic_supported"],
+  },
+  value: stringSchema,
+  hard: { type: "boolean" },
+  score: { type: "number" },
+}, ["kind", "value", "hard", "score"]);
+
+const workspaceAuthorityPathsSchema = objectSchema({
+  backlog: stringSchema,
+  features: stringSchema,
+  design: stringSchema,
+  requirements: stringSchema,
+  policy: stringSchema,
+  evidence: stringSchema,
+  toolDumps: stringSchema,
+  events: stringSchema,
+  runtime: stringSchema,
+  locks: stringSchema,
+}, ["backlog", "features", "design", "requirements", "policy", "evidence", "toolDumps", "events", "runtime", "locks"]);
+
 export const contextProviderRegistryV1Schema: JsonSchema = objectSchema({
   schema: { const: CONTEXT_PROVIDER_REGISTRY_V1 },
   enabled: { type: "boolean" },
@@ -206,9 +276,34 @@ export const workspaceContextsV1Schema: JsonSchema = objectSchema({
 
 const contextStages = ["clarify", "design", "tasking", "build", "qa", "review", "fix", "operation"] as const;
 
+export const workspaceExecutionContextV1Schema: JsonSchema = objectSchema({
+  schema: { const: "roll.workspace-execution-context/v1" },
+  workspace: objectSchema({
+    workspaceId: stringSchema,
+    root: stringSchema,
+    canonicalRoot: stringSchema,
+    lifecycle: { type: "string", enum: ["registered", "active", "paused", "archived"] },
+  }, ["workspaceId", "root", "canonicalRoot", "lifecycle"]),
+  resolution: objectSchema({
+    source: {
+      type: "string",
+      enum: ["explicit", "environment", "cwd_manifest", "issue_manifest", "requirement_discovery"],
+    },
+    evidence: { type: "array", items: workspaceMatchEvidenceSchema },
+  }, ["source", "evidence"]),
+  bindings: { type: "array", items: repositoryBindingSchema },
+  contexts: workspaceContextsV1Schema,
+  issue: objectSchema({
+    storyId: stringSchema,
+    manifestPath: stringSchema,
+    execution: cycleRepositoryExecutionContextSchema,
+  }, ["storyId", "manifestPath", "execution"]),
+  authorities: workspaceAuthorityPathsSchema,
+}, ["schema", "workspace", "resolution", "bindings", "authorities"]);
+
 export const contextReadRequestV1Schema: JsonSchema = objectSchema({
   schema: { const: CONTEXT_READ_REQUEST_V1 },
-  workspace: { type: "object" },
+  workspace: workspaceExecutionContextV1Schema,
   storyId: stringSchema,
   stage: { type: "string", enum: contextStages },
   environmentIds: { type: "array", items: stringSchema },
@@ -217,6 +312,56 @@ export const contextReadRequestV1Schema: JsonSchema = objectSchema({
   includeRestrictedReferences: { type: "boolean" },
 }, ["schema", "workspace", "stage", "refs"]);
 
+const contextPageScopeSchema = objectSchema({
+  workspace_ids: stringArraySchema,
+  repository_ids: stringArraySchema,
+  environment_ids: stringArraySchema,
+  story_ids: stringArraySchema,
+  stages: { type: "array", items: { type: "string", enum: contextStages } },
+});
+
+const contextPageMetadataSchema = objectSchema({
+  schema: { const: CONTEXT_PAGE_V1 },
+  title: stringSchema,
+  page_type: stringSchema,
+  status: { type: "string", enum: ["active", "deprecated", "proposed"] },
+  confidence: { type: "string", enum: ["approved", "source", "inferred", "low"] },
+  updated_at: stringSchema,
+  scope: contextPageScopeSchema,
+  sources: stringArraySchema,
+  sensitivity: { type: "string", enum: ["public", "internal", "restricted_reference"] },
+}, ["schema", "title", "page_type", "status", "confidence", "updated_at", "scope", "sources", "sensitivity"]);
+
+const contextReadFileSchema = objectSchema({
+  ref: stringSchema,
+  path: stringSchema,
+  sha256: stringSchema,
+  bytes: { type: "integer", minimum: 0 },
+  page: contextPageMetadataSchema,
+  matchedScope: stringArrayRecordSchema,
+  content: { type: "string" },
+}, ["ref", "path", "sha256", "bytes", "content"]);
+
+const contextReadProviderSnapshotSchema = objectSchema({
+  providerId: stringSchema,
+  remoteIdentity: stringSchema,
+  branch: stringSchema,
+  fetchedAt: stringSchema,
+  revision: stringSchema,
+  providerConfigDigest: stringSchema,
+  bindingDigest: stringSchema,
+  files: { type: "array", items: contextReadFileSchema },
+  warnings: { type: "array", items: contextDiagnosticV1Schema },
+}, ["providerId", "remoteIdentity", "branch", "fetchedAt", "revision", "providerConfigDigest", "bindingDigest", "files", "warnings"]);
+
+const contextRequestScopeSchema = objectSchema({
+  workspaceId: stringSchema,
+  storyId: stringSchema,
+  repositoryIds: stringArraySchema,
+  environmentIds: stringArraySchema,
+  stage: { type: "string", enum: contextStages },
+}, ["workspaceId", "repositoryIds", "environmentIds", "stage"]);
+
 export const contextReadResultV1Schema: JsonSchema = objectSchema({
   schema: { const: CONTEXT_READ_RESULT_V1 },
   snapshotId: stringSchema,
@@ -224,10 +369,18 @@ export const contextReadResultV1Schema: JsonSchema = objectSchema({
   createdAt: stringSchema,
   artifactPath: stringSchema,
   outcome: { type: "string", enum: ["completed", "partial", "blocked", "disabled"] },
-  requestScope: { type: "object" },
-  providers: { type: "array", items: { type: "object" } },
-  gaps: { type: "array", items: { type: "object" } },
+  requestScope: contextRequestScopeSchema,
+  providers: { type: "array", items: contextReadProviderSnapshotSchema },
+  gaps: { type: "array", items: contextDiagnosticV1Schema },
 }, ["schema", "snapshotId", "snapshotDigest", "createdAt", "artifactPath", "outcome", "requestScope", "providers", "gaps"]);
+
+export const contextProviderExecutionPlanV1Schema: JsonSchema = objectSchema({
+  provider: providerSchema,
+  binding: bindingSchema,
+  paths: stringArraySchema,
+  providerConfigDigest: stringSchema,
+  bindingDigest: stringSchema,
+}, ["provider", "binding", "paths", "providerConfigDigest", "bindingDigest"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

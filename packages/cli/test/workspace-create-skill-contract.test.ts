@@ -19,8 +19,14 @@ describe("US-WS-023 roll-ws-create static mutation contract", () => {
     const commands = shellBlocks(skill);
 
     expect(commands).toContain("roll workspace create ws-demo --config /absolute/path/workspace-create.yaml --check --json");
-    expect(commands).toContain("roll workspace create ws-demo --config /absolute/path/workspace-create.yaml --json");
+    expect(commands).toContain("roll workspace create ws-demo --config /absolute/path/workspace-create.yaml --authorization /absolute/path/workspace-create-authorization.json --json");
+    expect(commands).not.toContain("roll workspace create ws-demo --config /absolute/path/workspace-create.yaml --json");
     expect(commands.join("\n")).not.toMatch(/(?:^|\n)\s*(?:mkdir|touch|cp|git\s+(?:clone|init|worktree))\b/u);
+
+    expect(skill).toContain("`workspaceId` + `configSha256` + `planSha256`");
+    expect(skill).toContain('"schema": "roll.workspace-create-apply-authorization/v1"');
+    expect(skill).toContain('"source": "owner_after_preview"');
+    expect(skill).toMatch(/action `create_new` is\s+preview only: it never authorizes apply/u);
 
     expect(skill).toMatch(/Never create Workspace directories or files with `mkdir`, `touch`, `cp`,/u);
     expect(skill).toMatch(/Never run `git clone`, `git init`, `git worktree`, or edit cache paths/u);

@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { PHYSICAL_SCREENSHOT_TOOL_CONTRACT } from "@roll/spec";
 import type { ExecResult, RollCaptureRequestV1, RollCaptureResponseV1, ToolDeclaration, ToolDeps, ToolErrorCode, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { PLAYWRIGHT_PIN } from "../playwright-pin.js";
@@ -171,6 +171,9 @@ export class BrowserTool {
       invocation.context!.authorities.toolDumps,
       `${invocation.invocationId}.png`,
     );
+    if (!workspaceArtifactPathAllowed(screenshotPath, invocation.context!)) {
+      return fail(invocation, startedAt, deps.now(), "sandbox_denied", "screenshot path is outside Workspace evidence authorities", false);
+    }
     if (shouldUseHeadless(invocation)) return this.executeHeadlessScreenshot(invocation, deps, screenshotPath, startedAt);
 
     const aqua = await hasAquaSession(deps, invocation.policy.timeoutMs);
@@ -241,6 +244,9 @@ export class BrowserTool {
     deps: ToolDeps,
     startedAt: number,
   ): Promise<ToolResult<PhysicalScreenshotOutput>> {
+    if (!workspaceArtifactPathAllowed(invocation.input.out, invocation.context!)) {
+      return fail(invocation, startedAt, deps.now(), "sandbox_denied", "physical capture path is outside Workspace evidence authorities", false);
+    }
     try {
       await this.rollCaptureProvider.writeRequest(invocation.input);
       const result = await this.rollCaptureProvider.waitForResponse(invocation.input, { timeoutMs: invocation.policy.timeoutMs ?? invocation.input.timeoutMs });
@@ -296,6 +302,14 @@ export class BrowserTool {
       meta: meta(invocation, startedAt, deps.now()),
     };
   }
+}
+
+function workspaceArtifactPathAllowed(path: string, context: NonNullable<ToolInvocation["context"]>): boolean {
+  if (!isAbsolute(path)) return false;
+  return [context.authorities.evidence, context.authorities.toolDumps].some((authority) => {
+    const descendant = relative(resolve(authority), resolve(path));
+    return descendant === "" || (descendant !== ".." && !descendant.startsWith("../") && !isAbsolute(descendant));
+  });
 }
 
 function browserInputSchema(id: BrowserToolId): ToolDeclaration["inputSchema"] {

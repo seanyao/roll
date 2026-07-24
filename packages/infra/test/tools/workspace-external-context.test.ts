@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { deriveWorkspaceExecutionAuthorities } from "@roll/core";
 import {
   REPOSITORY_BINDING_V1,
+  ROLL_CAPTURE_PROTOCOL_V1,
   WORKSPACE_EXECUTION_CONTEXT_V1,
   type MinimalFs,
   type ToolDeps,
@@ -151,6 +152,45 @@ describe("US-WS-036 external tools consume frozen Workspace authority", () => {
       meta: { correlation: { workspaceId: "alpha", storyId, repoId } },
     });
     expect(dependencies.writes.get(expected)).toBe("PNG");
+  });
+
+  it("rejects an explicit browser screenshot path outside Workspace authorities", async () => {
+    const dependencies = deps();
+    const result = await new BrowserTool("browser.screenshot").execute(
+      invocation<BrowserScreenshotInput>("browser.screenshot", {
+        url: "https://example.test",
+        screenshotPath: "/tmp/outside-workspace.png",
+      }),
+      dependencies,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+    expect(dependencies.calls).toHaveLength(0);
+    expect(dependencies.writes.size).toBe(0);
+  });
+
+  it("rejects a physical capture path outside Workspace authorities before provider mutation", async () => {
+    let wroteRequest = false;
+    const tool = new BrowserTool("physical.screenshot", undefined, {
+      writeRequest: async () => {
+        wroteRequest = true;
+        return "/tmp/request.json";
+      },
+      waitForResponse: async () => ({ status: "timeout", reason: "not expected" }),
+    });
+    const result = await tool.execute(invocation("physical.screenshot", {
+      protocol: ROLL_CAPTURE_PROTOCOL_V1,
+      requestId: "outside-physical",
+      storyId,
+      kind: "physical_terminal",
+      target: { type: "window", appName: "Terminal" },
+      out: "/tmp/outside-physical.png",
+      timeoutMs: 1000,
+      createdAt: "2026-07-24T00:00:00.000Z",
+    }), deps());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
+    expect(wroteRequest).toBe(false);
   });
 
   it.each([

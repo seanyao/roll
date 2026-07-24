@@ -4,7 +4,7 @@ import {
   repositoryIdFromRemote,
   type RequirementHintProvenance,
   type RequirementHintV1,
-  type WorkspaceMatchEvidence,
+  type WorkspaceRequirementMatchEvidence,
 } from "@roll/spec";
 import { normalizeRequirementSourceReference } from "./requirement-source.js";
 
@@ -47,7 +47,7 @@ export interface RequirementMatchFinding {
 }
 
 export interface WorkspaceRequirementMatchResult {
-  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly evidence: readonly WorkspaceRequirementMatchEvidence[];
   readonly hardMatch: boolean;
   readonly score: number;
   readonly findings: readonly RequirementMatchFinding[];
@@ -73,12 +73,12 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function evidenceKey(value: WorkspaceMatchEvidence): string {
+function evidenceKey(value: WorkspaceRequirementMatchEvidence): string {
   return [value.kind, value.value, value.source, value.detail].join("\0");
 }
 
-function stableEvidence(values: readonly WorkspaceMatchEvidence[]): readonly WorkspaceMatchEvidence[] {
-  const unique = new Map<string, WorkspaceMatchEvidence>();
+function stableEvidence(values: readonly WorkspaceRequirementMatchEvidence[]): readonly WorkspaceRequirementMatchEvidence[] {
+  const unique = new Map<string, WorkspaceRequirementMatchEvidence>();
   for (const value of values) {
     const key = evidenceKey(value);
     const current = unique.get(key);
@@ -192,7 +192,7 @@ function exactEvidence(
   source: string,
   detail: string,
   score: number,
-): WorkspaceMatchEvidence | undefined {
+): WorkspaceRequirementMatchEvidence | undefined {
   if (!HARD_PROVENANCE.has(provenance)) return undefined;
   return { kind, value, hard: true, score, source, provenance, detail };
 }
@@ -201,7 +201,7 @@ export function matchWorkspaceRequirement(input: {
   readonly requirement: RequirementHintV1;
   readonly facts: WorkspaceRequirementMatchFacts;
 }): WorkspaceRequirementMatchResult {
-  const evidence: WorkspaceMatchEvidence[] = [];
+  const evidence: WorkspaceRequirementMatchEvidence[] = [];
   const findings: RequirementMatchFinding[] = [];
 
   const issueIds = new Set(input.facts.issues.map((issue) => issue.storyId));

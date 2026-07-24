@@ -5,7 +5,7 @@ import type {
   WorkspaceDiscoveryDiagnosticV1,
   WorkspaceManifest,
   WorkspaceMatchCandidateV1,
-  WorkspaceMatchEvidence,
+  WorkspaceRequirementMatchEvidence,
   WorkspaceIntentV1,
 } from "@roll/spec";
 import { normalizeRequirementHint } from "./requirement-hint.js";
@@ -22,7 +22,7 @@ export type ResolvedTargetRequirementValidation =
   | {
       readonly ok: true;
       readonly state: "matched" | "matched_ambiguous" | "unbound";
-      readonly evidence: readonly WorkspaceMatchEvidence[];
+      readonly evidence: readonly WorkspaceRequirementMatchEvidence[];
       readonly warnings: readonly string[];
     }
   | {

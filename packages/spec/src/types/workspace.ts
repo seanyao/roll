@@ -315,15 +315,15 @@ export interface RequirementHintV1 {
   readonly semanticTerms?: readonly string[];
 }
 
-export type WorkspaceMatchEvidenceKind =
+export type WorkspaceRequirementMatchEvidenceKind =
   | "issue_exact"
   | "requirement_source_exact"
   | "repository_exact"
   | "path_contained"
   | "semantic_supported";
 
-export interface WorkspaceMatchEvidence {
-  readonly kind: WorkspaceMatchEvidenceKind;
+export interface WorkspaceRequirementMatchEvidence {
+  readonly kind: WorkspaceRequirementMatchEvidenceKind;
   readonly value: string;
   readonly hard: boolean;
   readonly score: number;
@@ -357,7 +357,7 @@ export interface WorkspaceMatchCandidateV1 {
   readonly workspaceId: string;
   readonly root: string;
   readonly lifecycle: WorkspaceLifecycle;
-  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly evidence: readonly WorkspaceRequirementMatchEvidence[];
   readonly hardMatch: boolean;
   readonly score: number;
 }

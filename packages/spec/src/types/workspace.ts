@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import type { JsonSchema } from "./json-schema.js";
+import {
+  parseWorkspaceContexts,
+  workspaceContextsV1Schema,
+  type WorkspaceContextsV1,
+} from "./context-binding.js";
 
 export const WORKSPACE_MANIFEST_V1 = "roll.workspace/v1" as const;
+export const WORKSPACE_EXECUTION_CONTEXT_V1 = "roll.workspace-execution-context/v1" as const;
 export const REPOSITORY_BINDING_V1 = "roll.repository-binding/v1" as const;
 export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
@@ -336,6 +342,7 @@ export interface WorkspaceManifest {
   readonly createdAt?: string;
   readonly requirements: readonly RequirementSourceReference[];
   readonly repositories: readonly RepositoryBinding[];
+  readonly contexts?: WorkspaceContextsV1;
 }
 
 export interface WorkspaceManifestExpectations {
@@ -424,6 +431,67 @@ export interface RepositoryExecutionContext {
  * cardinality one and many intentionally share this exact contract. */
 export type RepositoryExecutionMap = Readonly<Record<string, RepositoryExecutionContext>>;
 
+/** Workspace/Issue-root execution boundary carried by one Story Cycle. */
+export interface CycleRepositoryExecutionContext extends WorkspaceIdentity {
+  readonly issueRoot: string;
+  readonly repositories: RepositoryExecutionMap;
+}
+
+export type WorkspaceMatchEvidenceKind =
+  | "issue_exact"
+  | "requirement_source_exact"
+  | "repository_exact"
+  | "path_contained"
+  | "semantic_supported";
+
+export interface WorkspaceMatchEvidence {
+  readonly kind: WorkspaceMatchEvidenceKind;
+  readonly value: string;
+  readonly hard: boolean;
+  readonly score: number;
+}
+
+export interface WorkspaceExecutionContextAuthoritiesV1 {
+  readonly backlog: string;
+  readonly features: string;
+  readonly design: string;
+  readonly requirements: string;
+  readonly policy: string;
+  readonly evidence: string;
+  readonly toolDumps: string;
+  readonly events: string;
+  readonly runtime: string;
+  readonly locks: string;
+}
+
+/**
+ * Complete, versioned Workspace authority handed to every scoped operation.
+ * It preserves resolution evidence, repository bindings, Issue execution
+ * facts and authority paths; Context Engineering consumes this contract
+ * without rediscovering or reducing Workspace identity.
+ */
+export interface WorkspaceExecutionContextV1 {
+  readonly schema: typeof WORKSPACE_EXECUTION_CONTEXT_V1;
+  readonly workspace: {
+    readonly workspaceId: string;
+    readonly root: string;
+    readonly canonicalRoot: string;
+    readonly lifecycle: WorkspaceLifecycle;
+  };
+  readonly resolution: {
+    readonly source: "explicit" | "environment" | "cwd_manifest" | "issue_manifest" | "requirement_discovery";
+    readonly evidence: readonly WorkspaceMatchEvidence[];
+  };
+  readonly bindings: readonly RepositoryBinding[];
+  readonly contexts?: WorkspaceContextsV1;
+  readonly issue?: {
+    readonly storyId: string;
+    readonly manifestPath: string;
+    readonly execution: CycleRepositoryExecutionContext;
+  };
+  readonly authorities: WorkspaceExecutionContextAuthoritiesV1;
+}
+
 export interface IssueManifest {
   readonly schema: typeof ISSUE_MANIFEST_V1;
   readonly workspaceId: string;
@@ -472,6 +540,99 @@ export const repositoryBindingV1Schema: JsonSchema = objectSchema(
   ["schema", "repoId", "alias", "remote", "integrationBranch", "provider", "workflow"],
 );
 
+const workspaceStringArraySchema: JsonSchema = { type: "array", items: stringSchema };
+const workspaceRepositoryExecutionCommandsSchema = objectSchema(
+  { test: workspaceStringArraySchema, integration: workspaceStringArraySchema },
+  ["test", "integration"],
+);
+const workspaceRepositoryExecutionContextSchema = objectSchema(
+  {
+    repoId: stringSchema,
+    alias: stringSchema,
+    access: { type: "string", enum: ["read", "write"] },
+    requiredDelivery: { type: "boolean" },
+    noChangePolicy: { type: "string", enum: ["changes_required", "no_change_allowed"] },
+    dependsOnRepo: stringSchema,
+    worktreePath: stringSchema,
+    baseSha: stringSchema,
+    headSha: stringSchema,
+    commands: workspaceRepositoryExecutionCommandsSchema,
+  },
+  ["repoId", "alias", "access", "requiredDelivery", "worktreePath", "baseSha", "headSha", "commands"],
+);
+const workspaceCycleExecutionContextSchema = objectSchema(
+  {
+    workspaceId: stringSchema,
+    issueRoot: stringSchema,
+    repositories: { type: "object", additionalProperties: workspaceRepositoryExecutionContextSchema },
+  },
+  ["workspaceId", "issueRoot", "repositories"],
+);
+const workspaceMatchEvidenceSchema = objectSchema(
+  {
+    kind: {
+      type: "string",
+      enum: ["issue_exact", "requirement_source_exact", "repository_exact", "path_contained", "semantic_supported"],
+    },
+    value: stringSchema,
+    hard: { type: "boolean" },
+    score: { type: "number" },
+  },
+  ["kind", "value", "hard", "score"],
+);
+const workspaceAuthoritiesV1Schema = objectSchema(
+  {
+    backlog: stringSchema,
+    features: stringSchema,
+    design: stringSchema,
+    requirements: stringSchema,
+    policy: stringSchema,
+    evidence: stringSchema,
+    toolDumps: stringSchema,
+    events: stringSchema,
+    runtime: stringSchema,
+    locks: stringSchema,
+  },
+  ["backlog", "features", "design", "requirements", "policy", "evidence", "toolDumps", "events", "runtime", "locks"],
+);
+
+export const workspaceExecutionContextV1Schema: JsonSchema = objectSchema(
+  {
+    schema: { const: WORKSPACE_EXECUTION_CONTEXT_V1 },
+    workspace: objectSchema(
+      {
+        workspaceId: stringSchema,
+        root: stringSchema,
+        canonicalRoot: stringSchema,
+        lifecycle: { type: "string", enum: ["registered", "active", "paused", "archived"] },
+      },
+      ["workspaceId", "root", "canonicalRoot", "lifecycle"],
+    ),
+    resolution: objectSchema(
+      {
+        source: {
+          type: "string",
+          enum: ["explicit", "environment", "cwd_manifest", "issue_manifest", "requirement_discovery"],
+        },
+        evidence: { type: "array", items: workspaceMatchEvidenceSchema },
+      },
+      ["source", "evidence"],
+    ),
+    bindings: { type: "array", items: repositoryBindingV1Schema },
+    contexts: workspaceContextsV1Schema,
+    issue: objectSchema(
+      {
+        storyId: stringSchema,
+        manifestPath: stringSchema,
+        execution: workspaceCycleExecutionContextSchema,
+      },
+      ["storyId", "manifestPath", "execution"],
+    ),
+    authorities: workspaceAuthoritiesV1Schema,
+  },
+  ["schema", "workspace", "resolution", "bindings", "authorities"],
+);
+
 export const workspaceManifestV1Schema: JsonSchema = objectSchema(
   {
     schema: { const: WORKSPACE_MANIFEST_V1 },
@@ -480,6 +641,7 @@ export const workspaceManifestV1Schema: JsonSchema = objectSchema(
     createdAt: stringSchema,
     requirements: { type: "array", items: requirementSourceSchema },
     repositories: { type: "array", items: repositoryBindingV1Schema, minItems: 1 },
+    contexts: workspaceContextsV1Schema,
   },
   ["schema", "workspaceId", "displayName", "requirements", "repositories"],
 );
@@ -1091,7 +1253,7 @@ export function parseWorkspaceManifest(
   if (!isRecord(value)) return fail("invalid_type", "workspace", "Workspace manifest must be an object");
   const errors = unknownFieldErrors(
     value,
-    ["schema", "workspaceId", "displayName", "createdAt", "requirements", "repositories"],
+    ["schema", "workspaceId", "displayName", "createdAt", "requirements", "repositories", "contexts"],
     "",
   );
   if (value["schema"] !== WORKSPACE_MANIFEST_V1) {
@@ -1113,6 +1275,10 @@ export function parseWorkspaceManifest(
     }
   }
   errors.push(...duplicateErrors(repositories));
+  const parsedContexts = value["contexts"] === undefined
+    ? undefined
+    : parseWorkspaceContexts(value["contexts"]);
+  if (parsedContexts !== undefined && !parsedContexts.ok) errors.push(...parsedContexts.errors);
 
   if (workspaceId !== undefined && !isSafeIdentifier(workspaceId)) {
     errors.push({ code: "invalid_value", path: "workspaceId", message: "Workspace ID contains unsafe characters" });
@@ -1132,6 +1298,7 @@ export function parseWorkspaceManifest(
       ...(createdAt !== undefined ? { createdAt } : {}),
       requirements,
       repositories,
+      ...(parsedContexts?.ok === true ? { contexts: parsedContexts.value } : {}),
     },
   };
 }

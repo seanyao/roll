@@ -220,6 +220,8 @@ export interface GitResult {
 export interface GitExecutionOptions {
   /** Maximum wall-clock time before the Git child is terminated. */
   readonly timeoutMs?: number;
+  /** Narrow environment overrides for one Git invocation. */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** True only for a full, lowercase-hex Git object id — NEVER a ref name, a
@@ -254,6 +256,7 @@ export async function rawGit(
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
       timeout: options.timeoutMs,
+      ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
     }, (error, stdout, stderr) => {
       if (error === null) {
         resolveGit({ code: 0, stdout, stderr });
@@ -329,6 +332,7 @@ export async function git(
       invocation,
       await rawGit(invocation.input.args, invocation.input.cwd, {
         timeoutMs: invocation.policy.timeoutMs,
+        ...(options.env === undefined ? {} : { env: options.env }),
       }),
     ),
   });

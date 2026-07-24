@@ -85,8 +85,16 @@ export interface IdeaCommandDeps {
  * has not synced yet (the multi-site collision that produced FIX-1272/1273/1473).
  * Best-effort across both layouts — nested roll-meta (`.roll` is its own repo,
  * `backlog.md` at its root) and in-repo (`.roll/backlog.md` tracked by the
- * product repo). Any failure (offline, no remote, not a repo) → [] (degrade to
- * local; never block capture).
+ * product repo).
+ *
+ * When `fetch` is true (the default) a FRESH `git fetch origin main` is REQUIRED
+ * for a layout to count as reachable: if the fetch fails we do NOT fall back to
+ * a stale local `origin/main` ref — that layout is skipped, and if no layout can
+ * refresh the result is `[]` (the caller degrades to local-only + a visible
+ * hint). This is what makes the pre-write re-check able to see a concurrent
+ * site's just-pushed id (AC2) and honours AC1's offline-degrade contract.
+ * `fetch:false` reads the already-fetched ref without re-fetching. Any
+ * git/parse failure → `[]` (degrade to local; never block capture).
  */
 function realRemoteBacklogIds(projectPath: string, opts?: { fetch?: boolean }): string[] {
   const doFetch = opts?.fetch !== false;
@@ -96,15 +104,17 @@ function realRemoteBacklogIds(projectPath: string, opts?: { fetch?: boolean }): 
   ];
   for (const { cwd, ref } of layouts) {
     if (!existsSync(cwd)) continue;
-    try {
-      if (doFetch) {
-        // Freshness is best-effort; a stale origin/main ref still beats local-only.
-        try {
-          execFileSync("git", ["fetch", "--quiet", "origin", "main"], { cwd, stdio: "ignore", timeout: 15_000 });
-        } catch {
-          /* offline / no remote — fall through to whatever ref we have */
-        }
+    if (doFetch) {
+      try {
+        execFileSync("git", ["fetch", "--quiet", "origin", "main"], { cwd, stdio: "ignore", timeout: 15_000 });
+      } catch {
+        // Could not refresh this layout's origin/main — treat as unreachable
+        // (never read a STALE ref and pass it off as authoritative). Try the
+        // next layout; if none refreshes, the caller degrades to local-only.
+        continue;
       }
+    }
+    try {
       const content = execFileSync("git", ["show", ref], {
         cwd,
         encoding: "utf8",
@@ -188,10 +198,12 @@ export function ideaCommand(args: string[], deps: IdeaCommandDeps = {}): number 
   }
 
   // FIX-1481 AC2: fail-loud if the chosen id was taken on the remote between the
-  // allocation read and now (a concurrent site minted it). A fresh, fetch-free
-  // re-check against origin/main; a hit means re-run rather than silently write a
-  // duplicate number.
-  const freshRemoteIds = (deps.remoteBacklogIds ?? realRemoteBacklogIds)(projectPath, { fetch: false });
+  // allocation read and now (a concurrent site minted it). This re-check FETCHES
+  // fresh (fetch:true) so it actually sees the other site's just-pushed id — a
+  // fetch-free read of the stale local origin/main would miss it. If the remote
+  // is unreachable the seam returns [] and we proceed (can't verify → don't
+  // block offline capture; the local-only degrade hint was already shown).
+  const freshRemoteIds = (deps.remoteBacklogIds ?? realRemoteBacklogIds)(projectPath, { fetch: true });
   if (freshRemoteIds.includes(plan.id)) {
     process.stderr.write(
       `${RED}[roll]${NC} ${lang === "zh" ? `取号 ${plan.id} 已被其他现场占用(远端已存在)— 请重跑 roll idea` : `id ${plan.id} was just taken by another site (exists on remote) — re-run roll idea`}\n`,

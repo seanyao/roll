@@ -153,15 +153,21 @@ describe("FIX-1481 — id allocation folds in the remote authoritative backlog",
   });
 
   it("AC2: fails loud when the chosen id was taken on the remote after allocation", () => {
-    // Allocation pool (fetch:true) sees nothing → mints FIX-002; the pre-write
-    // re-check (fetch:false) reports a concurrent site already took FIX-002.
-    const r = runWithDeps(["a", "racing", "bug"], LOCAL, (_p, opts) =>
-      opts?.fetch === false ? ["FIX-002"] : ["FIX-001"],
-    );
+    // 1st call = allocation pool: sees only FIX-001 → mints FIX-002. 2nd call =
+    // pre-write re-check: a concurrent site has now pushed FIX-002. The re-check
+    // MUST fetch fresh (fetch:true) — a stale read would miss it.
+    const fetchFlags: Array<boolean | undefined> = [];
+    let call = 0;
+    const r = runWithDeps(["a", "racing", "bug"], LOCAL, (_p, opts) => {
+      fetchFlags.push(opts?.fetch);
+      return call++ === 0 ? ["FIX-001"] : ["FIX-001", "FIX-002"];
+    });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("FIX-002");
     // Nothing was written — the collision was refused, not silently duplicated.
     expect(r.backlog).toBe(LOCAL);
+    // The pre-write re-check requested a FRESH fetch (not a stale local read).
+    expect(fetchFlags[1]).toBe(true);
   });
 
   it("AC3: degrades to local (with a visible hint) when the remote is unreachable", () => {

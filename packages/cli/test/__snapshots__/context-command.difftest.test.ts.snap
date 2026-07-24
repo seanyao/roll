@@ -56,11 +56,10 @@ Diagnostic: fetch_failed · gap · provider=optional-wiki
 }
 `;
 
-exports[`US-CONTEXT-007 context command snapshots > prints the complete versioned result only on JSON stdout and progress only on stderr > read-completed-json 1`] = `
+exports[`US-CONTEXT-007 context command snapshots > prints the complete versioned result on JSON stdout without human progress on stderr > read-completed-json 1`] = `
 {
   "status": 0,
-  "stderr": "context: fetching fresh Provider content...
-",
+  "stderr": "",
   "stdout": "{
   "schema": "roll.context-read-result/v1",
   "snapshotId": "ctx_20260724T060000000Z_aaaaaaaaaaaa",

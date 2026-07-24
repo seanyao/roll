@@ -8,6 +8,7 @@ import {
   type ContextReadResultV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
+import { createContextReadService } from "@roll/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   contextCommand,
@@ -123,11 +124,51 @@ function deps(overrides: Partial<ContextCommandDeps> = {}): ContextCommandDeps {
     readRegistry: vi.fn(() => registry()),
     readLatestSnapshot: vi.fn(() => result()),
     createReadService: vi.fn(() => ({ read: vi.fn(async () => result()) })),
+    authorizeRestrictedReference: vi.fn(() => false),
     writeSnapshot: vi.fn(),
     recordAudit: vi.fn(),
     now: () => Date.parse("2026-07-24T06:00:01.000Z"),
     ...overrides,
   };
+}
+
+function restrictedReadFactory(): ContextCommandDeps["createReadService"] {
+  return (input) => createContextReadService({
+    registry: input.registry,
+    adapter: {
+      read: vi.fn(async () => ({
+        ok: true as const,
+        revision: {
+          providerId: "enterprise-wiki",
+          remoteIdentity: "https://example.test/company/context",
+          branch: "main",
+          fetchedAt: "2026-07-24T05:59:59.000Z",
+          revision: "1".repeat(40),
+        },
+        files: [{
+          ref: "context://enterprise-wiki/wiki/accounts/test.md",
+          path: "wiki/accounts/test.md",
+          sha256: "d".repeat(64),
+          bytes: 32,
+          page: {
+            schema: "roll.context-page/v1" as const,
+            title: "Test account",
+            page_type: "account_reference",
+            status: "active" as const,
+            confidence: "approved" as const,
+            updated_at: "2026-07-24",
+            scope: {},
+            sources: ["secret://accounts/test"],
+            sensitivity: "restricted_reference" as const,
+          },
+          content: "credential_ref: secret://accounts/test\n",
+        }],
+        warnings: [],
+      })),
+    },
+    authorizeRestrictedReference: (_request, file) => input.authorizeRestrictedReference(file),
+    now: () => Date.parse("2026-07-24T06:00:00.000Z"),
+  });
 }
 
 async function capture(args: string[], commandDeps: ContextCommandDeps): Promise<CapturedRun> {
@@ -206,7 +247,7 @@ describe("US-CONTEXT-007 context command snapshots", () => {
     expect(run).toMatchSnapshot(`read-${outcome}-plain-en`);
   });
 
-  it("prints the complete versioned result only on JSON stdout and progress only on stderr", async () => {
+  it("prints the complete versioned result on JSON stdout without human progress on stderr", async () => {
     const run = await capture([
       "read", "--workspace", "roll", "--story", "US-CONTEXT-007", "--stage", "qa",
       "--environment", "sit", "--ref", "context://enterprise-wiki/wiki/index.md", "--json",
@@ -220,25 +261,27 @@ describe("US-CONTEXT-007 context command snapshots", () => {
     expect(run).toMatchSnapshot("read-completed-json");
   });
 
-  it("treats allow-restricted as intent while policy remains independently deny-by-default", async () => {
-    let factoryInput: ContextReadServiceFactoryInput | undefined;
+  it.each([
+    { name: "explicit intent plus policy authorization", allow: true, policy: true, exit: 0, outcome: "completed", calls: 1 },
+    { name: "explicit intent without policy authorization", allow: true, policy: false, exit: 2, outcome: "blocked", calls: 1 },
+    { name: "policy authorization without explicit intent", allow: false, policy: true, exit: 2, outcome: "blocked", calls: 0 },
+  ])("enforces the restricted-reference three-gate contract: $name", async ({ allow, policy, exit, outcome, calls }) => {
+    const authorizeRestrictedReference = vi.fn(() => policy);
     const commandDeps = deps({
-      createReadService: vi.fn((input) => {
-        factoryInput = input;
-        return { read: vi.fn(async () => result("blocked")) };
-      }),
+      createReadService: restrictedReadFactory(),
+      authorizeRestrictedReference,
     });
-    const run = await capture([
+    const args = [
       "read", "--workspace", "roll", "--story", "US-CONTEXT-007", "--stage", "qa",
-      "--ref", "context://enterprise-wiki/wiki/accounts/test.md", "--allow-restricted", "--json",
-    ], commandDeps);
+      "--ref", "context://enterprise-wiki/wiki/accounts/test.md", "--json",
+      ...(allow ? ["--allow-restricted"] : []),
+    ];
 
-    expect(run.status).toBe(2);
-    expect(factoryInput?.authorizeRestrictedReference(result().providers[0]!.files[0]!)).toBe(false);
-    expect(JSON.parse(run.stdout)).toMatchObject({
-      outcome: "blocked",
-      gaps: [{ code: "restricted_context_denied" }],
-    });
+    const run = await capture(args, commandDeps);
+
+    expect(run.status).toBe(exit);
+    expect(JSON.parse(run.stdout)).toMatchObject({ outcome });
+    expect(authorizeRestrictedReference).toHaveBeenCalledTimes(calls);
   });
 
   it("creates a fresh service per read invocation and emits metadata-only audit events", async () => {
@@ -262,6 +305,55 @@ describe("US-CONTEXT-007 context command snapshots", () => {
       diagnosticCodes: [],
     });
     expect(JSON.stringify(audits)).not.toMatch(/SECRET BODY|accounts\/test|credential|token/u);
+  });
+
+  it("retains transport revision and bytes when post-fetch policy blocks the Provider", async () => {
+    const audits: ContextCommandAuditEventV1[] = [];
+    const commandDeps = deps({
+      createReadService: vi.fn((input) => ({
+        read: vi.fn(async () => {
+          input.audit({
+            type: "context:git-llm-wiki-read",
+            providerId: "enterprise-wiki",
+            remoteIdentity: "https://example.test/company/context",
+            branch: "main",
+            startedAt: "2026-07-24T05:59:59.000Z",
+            finishedAt: "2026-07-24T06:00:00.000Z",
+            durationMs: 1_000,
+            outcome: "completed",
+            revision: "1".repeat(40),
+            bytes: 30,
+          } as Parameters<ContextReadServiceFactoryInput["audit"]>[0] & { readonly bytes: number });
+          return result("blocked");
+        }),
+      })),
+      recordAudit: (event) => { audits.push(event); },
+    });
+
+    const run = await capture([
+      "read", "--workspace", "roll", "--story", "US-CONTEXT-007", "--stage", "qa", "--allow-restricted",
+    ], commandDeps);
+
+    expect(run.status).toBe(2);
+    expect(audits).toEqual([expect.objectContaining({
+      providerId: "enterprise-wiki",
+      fetchOutcome: "completed",
+      revision: "1".repeat(40),
+      bytes: 30,
+      diagnosticCodes: ["restricted_context_denied"],
+    })]);
+    expect(JSON.stringify(audits)).not.toMatch(/SECRET BODY|accounts\/test|credential|token/u);
+  });
+
+  it("keeps JSON runtime errors independently parseable on stderr", async () => {
+    const run = await capture([
+      "read", "--workspace", "roll", "--story", "US-CONTEXT-007", "--stage", "qa", "--json",
+    ], deps({ createReadService: vi.fn(() => ({ read: vi.fn(async () => { throw new Error("secret failure"); }) })) }));
+
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe("");
+    expect(JSON.parse(run.stderr)).toMatchObject({ schema: "roll.context-command-error/v1", code: "read_failure" });
+    expect(run.stderr).not.toMatch(/fetching fresh|secret failure/u);
   });
 
   it("puts versioned usage and target errors on stderr with exit 2", async () => {

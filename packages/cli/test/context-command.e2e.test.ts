@@ -156,6 +156,31 @@ afterEach(() => {
 });
 
 describe("US-CONTEXT-007 context command E2E", () => {
+  it("defaults the production operation-policy seam to deny and honors explicit authorization", async () => {
+    const f = fixture();
+    const defaultDeps = createContextCommandDeps({ rollHome: f.rollHome, cwd: () => f.outside });
+    const target = await defaultDeps.resolveTarget("ws-context");
+    if ("error" in target) throw new Error(target.error.code);
+    const request: ContextReadRequestV1 = {
+      schema: CONTEXT_READ_REQUEST_V1,
+      workspace: target.workspace,
+      storyId: "US-CONTEXT-007",
+      stage: "qa",
+      refs: ["context://enterprise-wiki/wiki/index.md"],
+    };
+    const file = result(request, 1).providers[0]!.files[0]!;
+    const policy = vi.fn(() => true);
+    const allowedDeps = createContextCommandDeps({
+      rollHome: f.rollHome,
+      cwd: () => f.outside,
+      authorizeRestrictedReference: policy,
+    });
+
+    expect(defaultDeps.authorizeRestrictedReference(request, file)).toBe(false);
+    expect(allowedDeps.authorizeRestrictedReference(request, file)).toBe(true);
+    expect(policy).toHaveBeenCalledWith(request, file);
+  });
+
   it("status reads an immutable local snapshot reference without fetching", async () => {
     const f = fixture();
     const deps = createContextCommandDeps({ rollHome: f.rollHome, cwd: () => f.outside });
@@ -292,7 +317,8 @@ describe("US-CONTEXT-007 context command E2E", () => {
         noChangePolicy: "changes_required",
       }],
     }, null, 2)}\n`, "utf8");
-    const factory = vi.fn(() => ({ read: vi.fn() }));
+    let ordinal = 0;
+    const factory = vi.fn(() => ({ read: vi.fn(async (request: ContextReadRequestV1) => result(request, ++ordinal)) }));
     const deps = createContextCommandDeps({
       rollHome: f.rollHome,
       cwd: () => issueCwd,
@@ -302,17 +328,27 @@ describe("US-CONTEXT-007 context command E2E", () => {
     });
     expect(await deps.resolveTarget("ws-context")).toMatchObject({ issueStoryId: "US-CONTEXT-007" });
 
+    const equivalent = await capture([
+      "read", "--workspace", "ws-context", "--story", "us-context-007", "--stage", "qa", "--json",
+    ], deps);
     const run = await capture([
       "read", "--workspace", "ws-context", "--story", "US-CONTEXT-999", "--stage", "qa", "--json",
     ], deps);
+    const invalid = await capture([
+      "read", "--workspace", "ws-context", "--story", "../US-CONTEXT-007", "--stage", "qa", "--json",
+    ], deps);
 
+    expect(equivalent.status).toBe(0);
+    expect(JSON.parse(equivalent.stdout)).toMatchObject({ requestScope: { storyId: "US-CONTEXT-007" } });
     expect(run.status).toBe(2);
     expect(run.stdout).toBe("");
     expect(JSON.parse(run.stderr)).toMatchObject({
       schema: "roll.context-command-error/v1",
       code: "story_conflict",
     });
-    expect(factory).not.toHaveBeenCalled();
+    expect(invalid.status).toBe(2);
+    expect(JSON.parse(invalid.stderr)).toMatchObject({ code: "invalid_arguments" });
+    expect(factory).toHaveBeenCalledTimes(1);
     expect(existsSync(join(issueCwd, ".roll"))).toBe(false);
   });
 });

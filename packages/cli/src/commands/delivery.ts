@@ -17,6 +17,7 @@ import {
   rebuildRequirementAttest,
   readIssueCompletionEvidence,
   readWorkspace,
+  loadWorkspaceDiscovery,
 } from "@roll/infra";
 import {
   STATUS_MARKER,
@@ -30,7 +31,15 @@ import {
   type IssueIntegrationAcceptanceEvidence,
   type IssueManifest,
   type RepositoryMergeEvidence,
+  type WorkspaceClarificationHandoffV1,
 } from "@roll/spec";
+import {
+  askDirectWorkspaceClarification,
+  parseWorkspaceInteractionArgs,
+  resolveWorkspaceTargetInteraction,
+  type WorkspaceInteractionModeDecision,
+  type WorkspaceInteractionHost,
+} from "../lib/workspace-interaction.js";
 import { configLang } from "./lang.js";
 import {
   resolveBacklogCommandTarget,
@@ -40,6 +49,7 @@ import {
   type BacklogTargetResolver,
   type ResolvedBacklogTarget,
 } from "./backlog-target.js";
+import { workspaceRollHome } from "./workspace-target.js";
 
 const DELIVERY_LIST_V1 = "roll.delivery-list/v1" as const;
 const DELIVERY_VIEW_V1 = "roll.delivery-view/v1" as const;
@@ -131,6 +141,7 @@ export interface DeliveryWorkspaceView {
 
 export interface DeliveryCommandDeps {
   readonly resolveTarget?: BacklogTargetResolver;
+  readonly interaction?: WorkspaceInteractionHost;
 }
 
 function currentLanguage(): "en" | "zh" {
@@ -386,6 +397,9 @@ function emitError(
   json: boolean,
   candidates: readonly BacklogAggregateEntry[] = [],
   migrationCheckCommand?: string,
+  clarification?: WorkspaceClarificationHandoffV1,
+  nextAction?: string,
+  commands: readonly string[] = [],
 ): number {
   const message = errorMessage(code);
   if (json) {
@@ -399,6 +413,9 @@ function emitError(
           path: candidate.canonicalRoot,
         })),
         ...(migrationCheckCommand === undefined ? {} : { migrationCheckCommand }),
+        ...(clarification === undefined ? {} : { clarification }),
+        ...(nextAction === undefined ? {} : { nextAction }),
+        ...(commands.length === 0 ? {} : { commands }),
       },
     }, null, 2)}\n`);
   } else {
@@ -407,6 +424,8 @@ function emitError(
       process.stderr.write(`${msg("delivery.error.candidates", candidates.map((candidate) => `${candidate.workspaceId}=${candidate.workspaceRoot}`).join(", "))}\n`);
     }
     if (migrationCheckCommand !== undefined) process.stderr.write(`${msg("delivery.error.migration_command", migrationCheckCommand)}\n`);
+    if (nextAction !== undefined) process.stderr.write(`${msg("delivery.error.migration_command", nextAction)}\n`);
+    for (const command of commands) process.stderr.write(`${msg("delivery.error.migration_command", command)}\n`);
   }
   return 1;
 }
@@ -414,13 +433,70 @@ function emitError(
 function emitTargetError(
   decision: Extract<BacklogTargetDecision, { readonly ok: false }>,
   json: boolean,
+  clarification?: WorkspaceClarificationHandoffV1,
 ): number {
   return emitError(
     decision.code,
     json,
     decision.candidates,
     "migrationCheckCommand" in decision ? decision.migrationCheckCommand : undefined,
+    clarification,
   );
+}
+
+function realInteractionHost(): WorkspaceInteractionHost {
+  return {
+    cwd: process.cwd(),
+    capabilities: {
+      stdinTTY: process.stdin.isTTY === true,
+      stderrTTY: process.stderr.isTTY === true,
+      agentQuestionCapable: false,
+    },
+    ask: askDirectWorkspaceClarification,
+    loadDiscovery: () => loadWorkspaceDiscovery({ rollHome: workspaceRollHome() }),
+  };
+}
+
+type DeliveryTargetResolution =
+  | { readonly ok: true; readonly decision: Extract<BacklogTargetDecision, { readonly ok: true }>; readonly args: readonly string[] }
+  | { readonly ok: false; readonly status: number };
+
+function resolveInteractiveTargets(
+  args: readonly string[],
+  operation: BacklogOperation,
+  resolver: BacklogTargetResolver,
+  interaction: WorkspaceInteractionHost,
+  json: boolean,
+  parsedInteraction: Extract<WorkspaceInteractionModeDecision, { readonly ok: true }>,
+): DeliveryTargetResolution {
+  const target = resolveWorkspaceTargetInteraction({
+    args,
+    operation,
+    resolveTarget: resolver,
+    host: interaction,
+    parsedInteraction,
+  });
+  if (target.kind === "interaction_failure") {
+    return {
+      ok: false,
+      status: emitError(
+        target.code,
+        json,
+        [],
+        undefined,
+        target.clarification,
+        target.nextAction,
+        target.commands,
+      ),
+    };
+  }
+  if (target.kind === "target_failure") {
+    const failure = target.result;
+    if (failure.ok) return { ok: false, status: emitError("invalid_target", json) };
+    return { ok: false, status: emitTargetError(failure, json, target.clarification) };
+  }
+  if (!target.result.ok) return { ok: false, status: emitTargetError(target.result, json) };
+  return { ok: true, decision: target.result, args: target.args };
 }
 
 function flagValue(args: readonly string[], flag: string): string | undefined {
@@ -635,14 +711,17 @@ function rebuildLinkedRequirementAttests(
   return changed;
 }
 
-function listCommand(args: readonly string[], resolver: BacklogTargetResolver): number {
+function listCommand(args: readonly string[], resolver: BacklogTargetResolver, interaction: WorkspaceInteractionHost): number {
   const json = args.includes("--json");
-  const positional = positionalArgs(args, new Set(["--workspace", "--all", "--json"]));
-  if (positional === undefined || positional.length > 0 || (args.includes("--all") && args.includes("--workspace"))) {
+  const parsedInteraction = parseWorkspaceInteractionArgs(args, interaction.capabilities);
+  if (!parsedInteraction.ok) return emitError(parsedInteraction.code, json);
+  const positional = positionalArgs(parsedInteraction.args, new Set(["--workspace", "--all", "--json"]));
+  if (positional === undefined || positional.length > 0 || (parsedInteraction.args.includes("--all") && parsedInteraction.args.includes("--workspace"))) {
     return emitError("invalid_arguments", json);
   }
-  const decision = resolveTargets(args, "read", resolver);
-  if (!decision.ok) return emitTargetError(decision, json);
+  const target = resolveInteractiveTargets(args, "read", resolver, interaction, json, parsedInteraction);
+  if (!target.ok) return target.status;
+  const decision = target.decision;
   try {
     const workspaces = selectedWorkspaces(decision);
     process.stdout.write(json
@@ -657,15 +736,18 @@ function listCommand(args: readonly string[], resolver: BacklogTargetResolver): 
   }
 }
 
-function showCommand(args: readonly string[], resolver: BacklogTargetResolver): number {
+function showCommand(args: readonly string[], resolver: BacklogTargetResolver, interaction: WorkspaceInteractionHost): number {
   const json = args.includes("--json");
-  const positional = positionalArgs(args, new Set(["--workspace", "--json"]));
+  const parsedInteraction = parseWorkspaceInteractionArgs(args, interaction.capabilities);
+  if (!parsedInteraction.ok) return emitError(parsedInteraction.code, json);
+  const positional = positionalArgs(parsedInteraction.args, new Set(["--workspace", "--json"]));
   const storyId = positional?.[0];
   if (positional === undefined || positional.length !== 1 || storyId === undefined || !validateStoryId(storyId).ok) {
     return emitError("invalid_arguments", json);
   }
-  const decision = resolveTargets(args, "read", resolver);
-  if (!decision.ok) return emitTargetError(decision, json);
+  const target = resolveInteractiveTargets(args, "read", resolver, interaction, json, parsedInteraction);
+  if (!target.ok) return target.status;
+  const decision = target.decision;
   if ("aggregate" in decision) return emitError("invalid_arguments", json);
   const issuePath = join(decision.workspaceRoot, "issues", storyId);
   if (!existsSync(issuePath)) return emitError("story_not_found", json);
@@ -738,9 +820,10 @@ export function deliveryCommand(args: string[], deps: DeliveryCommandDeps = {}):
     return 0;
   }
   const resolver = deps.resolveTarget ?? resolveBacklogCommandTarget;
+  const interaction = deps.interaction ?? realInteractionHost();
   const [subcommand, ...rest] = args;
-  if (subcommand === "list") return listCommand(rest, resolver);
-  if (subcommand === "show") return showCommand(rest, resolver);
+  if (subcommand === "list") return listCommand(rest, resolver, interaction);
+  if (subcommand === "show") return showCommand(rest, resolver, interaction);
   if (subcommand === "reconcile") return reconcileWorkspaceDeliveries(rest, resolver);
   return emitError("invalid_arguments", args.includes("--json"));
 }

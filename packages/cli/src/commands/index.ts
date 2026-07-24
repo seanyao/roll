@@ -122,12 +122,12 @@ function currentHelpLang() {
 
 function backlogUsage(): string {
   return currentHelpLang() === "zh"
-    ? "用法：roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+    ? "用法：roll backlog [show <story-id>] [--workspace <id|path>] [--interactive|--no-input] [--all]\n" +
         "      roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
-        "  读取或管理一个明确工作区的 backlog；--all 只允许只读聚合，变更命令会拒绝。\n"
-    : "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--all]\n" +
+        "  读取时可显式启用/禁用 Workspace 澄清；--all 只允许只读聚合，变更命令会拒绝。\n"
+    : "Usage: roll backlog [show <story-id>] [--workspace <id|path>] [--interactive|--no-input] [--all]\n" +
         "       roll backlog <block|defer|unblock|promote|claim|lint|unstick|sync> ... [--workspace <id|path>]\n" +
-        "  Read or manage one resolved Workspace backlog; --all is read-only and mutations are rejected.\n";
+        "  Reads may explicitly enable/disable Workspace clarification; --all is read-only and mutations are rejected.\n";
 }
 
 function agentUsage(): string {

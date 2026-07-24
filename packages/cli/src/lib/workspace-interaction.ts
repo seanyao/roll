@@ -3,6 +3,7 @@ import {
   buildWorkspaceClarificationHandoff,
   discoverWorkspaceForIntent,
   resolveWorkspaceClarificationAnswer,
+  validateResolvedTargetRequirement,
 } from "@roll/core";
 import type { WorkspaceDiscoveryLoadResultV1 } from "@roll/infra";
 import {
@@ -169,7 +170,12 @@ function parsedAnswer(
 }
 
 export type DirectWorkspaceClarificationAnswer<T> =
-  | { readonly kind: "selected"; readonly canonicalSelector: string; readonly result: T }
+  | {
+      readonly kind: "selected";
+      readonly workspaceId: string;
+      readonly canonicalSelector: string;
+      readonly result: T;
+    }
   | {
       readonly kind: "create";
       readonly nextAction: "roll workspace create <ID> --config <path> --check";
@@ -209,6 +215,7 @@ export function answerDirectWorkspaceClarification<T>(input: {
     case "retry_resolution":
       return {
         kind: "selected",
+        workspaceId: resolution.explicitSelector.workspaceId,
         canonicalSelector: resolution.canonicalSelector,
         result: input.rerunResolver(resolution.explicitSelector.workspaceId),
       };
@@ -305,8 +312,9 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
   readonly operation: "read" | "mutation";
   readonly resolveTarget: (args: readonly string[], operation: "read" | "mutation") => T;
   readonly host: WorkspaceInteractionHost;
+  readonly parsedInteraction?: Extract<WorkspaceInteractionModeDecision, { readonly ok: true }>;
 }): WorkspaceTargetInteractionOutcome<T> {
-  const interaction = parseWorkspaceInteractionArgs(input.args, input.host.capabilities);
+  const interaction = input.parsedInteraction ?? parseWorkspaceInteractionArgs(input.args, input.host.capabilities);
   if (!interaction.ok) {
     return { kind: "interaction_failure", args: interaction.args, code: interaction.code };
   }
@@ -329,6 +337,14 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
     return { kind: "target_failure", args: interaction.args, result: initial, clarification: handoff };
   }
   const answer = input.host.ask(renderDirectWorkspaceClarificationPrompt(handoff));
+  if (answer === null || /^(?:q|quit|cancel)$/iu.test(answer.trim())) {
+    return {
+      kind: "interaction_failure",
+      args: interaction.args,
+      code: "workspace_clarification_cancelled",
+      clarification: handoff,
+    };
+  }
   const currentDiscovery = input.host.loadDiscovery();
   const resolved = answerDirectWorkspaceClarification({
     handoff,
@@ -341,6 +357,34 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
   });
   switch (resolved.kind) {
     case "selected": {
+      const selectedFacts = currentDiscovery.workspaces.find(
+        (facts) => facts.candidate.workspaceId === resolved.workspaceId,
+      );
+      const requirementValidation = selectedFacts === undefined
+        ? undefined
+        : validateResolvedTargetRequirement({
+            target: selectedFacts,
+            allWorkspaces: currentDiscovery.workspaces,
+            requirement: directIntent({
+              operation: input.operation,
+              mode: interaction.mode,
+              cwd: input.host.cwd,
+            }).requirement,
+            operation: input.operation,
+          });
+      if (requirementValidation === undefined || !requirementValidation.ok) {
+        return {
+          kind: "interaction_failure",
+          args: interaction.args,
+          code: "invalid_workspace_clarification",
+          clarification: buildDirectWorkspaceClarification({
+            operation: input.operation,
+            mode: interaction.mode,
+            cwd: input.host.cwd,
+            discovery: currentDiscovery,
+          }) ?? handoff,
+        };
+      }
       const selectedArgs = [...interaction.args, ...resolved.canonicalSelector.split(" ")];
       return resolved.result.ok
         ? { kind: "resolved", args: selectedArgs, result: resolved.result }
@@ -365,7 +409,17 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
     case "cancelled":
       return { kind: "interaction_failure", args: interaction.args, code: resolved.code, clarification: handoff };
     case "invalid":
-      return { kind: "interaction_failure", args: interaction.args, code: resolved.code, clarification: handoff };
+      return {
+        kind: "interaction_failure",
+        args: interaction.args,
+        code: resolved.code,
+        clarification: buildDirectWorkspaceClarification({
+          operation: input.operation,
+          mode: interaction.mode,
+          cwd: input.host.cwd,
+          discovery: currentDiscovery,
+        }) ?? handoff,
+      };
   }
 }
 

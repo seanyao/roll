@@ -199,6 +199,7 @@ describe("US-WS-030 direct Workspace clarification", () => {
       rerunResolver,
     })).toEqual({
       kind: "selected",
+      workspaceId: "fields",
       canonicalSelector: "--workspace fields",
       result: { ok: true, selector: "fields" },
     });

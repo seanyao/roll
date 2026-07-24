@@ -71,8 +71,8 @@ export const v3Catalog: Catalog = {
     zh: "请使用 --workspace <ID|路径> 提供目标。",
   },
   "backlog.usage": {
-    en: "Usage: roll backlog [--workspace <id|path>]\n       roll backlog show <story-id> [--workspace <id|path>]\n       roll backlog --all",
-    zh: "用法：roll backlog [--workspace <ID|路径>]\n      roll backlog show <Story ID> [--workspace <ID|路径>]\n      roll backlog --all",
+    en: "Usage: roll backlog [--workspace <id|path>] [--interactive|--no-input]\n       roll backlog show <story-id> [--workspace <id|path>] [--interactive|--no-input]\n       roll backlog --all",
+    zh: "用法：roll backlog [--workspace <ID|路径>] [--interactive|--no-input]\n      roll backlog show <Story ID> [--workspace <ID|路径>] [--interactive|--no-input]\n      roll backlog --all",
   },
   "backlog.title": { en: "Backlog %s (%s)", zh: "待办 %s（%s）" },
   "backlog.header": { en: "Workspace\tStory\tStatus\tDescription", zh: "工作区\tStory\t状态\t说明" },
@@ -85,8 +85,8 @@ export const v3Catalog: Catalog = {
   "backlog.error.story_not_found": { en: "Story contract was not found in this Workspace backlog", zh: "该工作区待办中找不到 Story 契约" },
   "backlog.error.invalid_arguments": { en: "Invalid arguments; run `roll backlog --help`", zh: "参数无效；请运行 `roll backlog --help`" },
   "delivery.usage": {
-    en: "Usage: roll delivery <list|show|reconcile> [options]\n  `list [--workspace <id|path> | --all] [--json]`\n  `show <story-id> [--workspace <id|path>] [--json]`\n  `reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]`\n  Delivery is an Issue fact view; --all is read-only and reconciliation never reads backlog Markdown as completion truth.\n",
-    zh: "用法：roll delivery <list|show|reconcile> [选项]\n  `list [--workspace <ID|路径> | --all] [--json]`\n  `show <Story ID> [--workspace <ID|路径>] [--json]`\n  `reconcile [<Story ID>] --workspace <ID|路径> [--dry-run] [--json]`\n  Delivery 是 Issue 事实视图；--all 仅限只读，对账绝不把 backlog Markdown 当作完成真相。\n",
+    en: "Usage: roll delivery <list|show|reconcile> [options]\n  `list [--workspace <id|path> | --all] [--interactive|--no-input] [--json]`\n  `show <story-id> [--workspace <id|path>] [--interactive|--no-input] [--json]`\n  `reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]`\n  Interaction capability is independent from --json; prompts use the controlling TTY, never stdout. Delivery is an Issue fact view; --all is read-only and reconciliation never reads backlog Markdown as completion truth.\n",
+    zh: "用法：roll delivery <list|show|reconcile> [选项]\n  `list [--workspace <ID|路径> | --all] [--interactive|--no-input] [--json]`\n  `show <Story ID> [--workspace <ID|路径>] [--interactive|--no-input] [--json]`\n  `reconcile [<Story ID>] --workspace <ID|路径> [--dry-run] [--json]`\n  交互能力与 --json 相互独立；prompt 只写控制终端，绝不写 stdout。Delivery 是 Issue 事实视图；--all 仅限只读，对账绝不把 backlog Markdown 当作完成真相。\n",
   },
   "delivery.loop_reconcile_usage": {
     en: "Usage: roll loop reconcile [<story-id>] --workspace <id|path> [--dry-run] [--json]\n  Alias of `roll delivery reconcile`; folds Workspace Issue facts and never reads backlog Markdown as completion truth.\n",

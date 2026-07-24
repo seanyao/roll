@@ -199,6 +199,7 @@ export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBa
     operation: "read",
     resolveTarget: deps.resolveTarget,
     host: interactionHost,
+    parsedInteraction,
   });
   if (target.kind === "interaction_failure") {
     return emitError(target.code, [], [

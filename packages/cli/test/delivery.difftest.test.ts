@@ -262,7 +262,7 @@ function scrub(run: Run, workspaceRoots: readonly string[]): Run {
   const replace = (value: string): string => workspaceRoots.reduce((text, root, index) => {
     const canonical = realpathSync(root);
     return text.replaceAll(canonical, `<WS_${index + 1}>`).replaceAll(root, `<WS_${index + 1}>`);
-  }, value);
+  }, value).replace(/("discoveryFactsSha256":\s*")[0-9a-f]{64}(")/g, "$1<SHA256>$2");
   return { ...run, stdout: replace(run.stdout), stderr: replace(run.stderr) };
 }
 

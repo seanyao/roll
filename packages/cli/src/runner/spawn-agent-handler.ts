@@ -19,12 +19,55 @@ import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktr
 import { resolveIntegrationBranch } from "@roll/infra";
 import { recordSpawnRound } from "./round-journal-emit.js";
 import type { ExecuteResult, Ports } from "./ports.js";
+import { invalidContextHandoff, type ContextStageHandoffV1 } from "./context-handoff.js";
 import {
   RepositoryObservationError,
   observeWritableRepositoryCommitCount,
 } from "./repository-observation.js";
 
 type SpawnAgentCommand = Extract<CycleCommand, { kind: "spawn_agent" }>;
+
+export type ContextBuilderSkillBodyResult =
+  | {
+      readonly status: "ready";
+      readonly skillBody: string;
+      readonly handoff?: ContextStageHandoffV1;
+    }
+  | {
+      readonly status: "blocked";
+      readonly diagnostic: ReturnType<typeof invalidContextHandoff>;
+    };
+
+/** The production prompt boundary for Context-aware Builder stages. */
+export async function prepareContextBuilderSkillBody(
+  ports: Pick<Ports, "contextStage">,
+  storyId: string | undefined,
+  skillBody: string,
+): Promise<ContextBuilderSkillBodyResult> {
+  if (ports.contextStage === undefined || storyId === undefined || storyId === "") {
+    return { status: "ready", skillBody };
+  }
+  let result: Awaited<ReturnType<NonNullable<Ports["contextStage"]>["readForStage"]>>;
+  try {
+    result = await ports.contextStage.readForStage({
+      storyId,
+      stage: storyId.startsWith("FIX-") || storyId.startsWith("BUG-") ? "fix" : "build",
+    });
+  } catch {
+    return { status: "blocked", diagnostic: invalidContextHandoff() };
+  }
+  if (result.status === "ready") {
+    return {
+      status: "ready",
+      skillBody: `${skillBody}\n\n${result.encodedEnvelope}`,
+      handoff: result.handoff,
+    };
+  }
+  return {
+    status: "blocked",
+    diagnostic: result.status === "blocked" ? result.diagnostic : invalidContextHandoff(),
+  };
+}
 
 function executionSkillBody(ports: Ports, storyId: string | undefined): string {
   if (!ports.skillBody.startsWith("# Roll Loop")) return ports.skillBody;
@@ -119,6 +162,34 @@ export async function executeSpawnAgentCommand(
           return { event: { type: "agent_exited", exit: 1, timedOut: false }, ctxPatch: { builderSessionId } };
         }
       }
+      // Context must be resolved before any observer/watchdog starts. A missing
+      // or invalid handoff blocks the consuming stage without spawning an agent
+      // and without leaving background timers behind.
+      const skillBodyForSpawn = maybeInjectProjectMap(
+        executionSkillBody(ports, ctx.storyId),
+        execCwd,
+        readProjectMapEnabled(ports.repoCwd),
+        ctx.storyId,
+      );
+      const lowScoreFeedback = ctx.storyId !== undefined && ctx.storyId !== ""
+        ? buildLowScoreFixForwardPrompt(ports.repoCwd, ctx.storyId)
+        : "";
+      const preContextSkillBody =
+        lowScoreFeedback !== ""
+          ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
+          : skillBodyForSpawn;
+      const contextSkillBody = await prepareContextBuilderSkillBody(ports, ctx.storyId, preContextSkillBody);
+      if (contextSkillBody.status === "blocked") {
+        ports.events.appendAlert(
+          ports.paths.alertsPath,
+          `context stage blocked for ${ctx.storyId ?? "?"}: ${contextSkillBody.diagnostic.code} (cycle ${ctx.cycleId ?? "?"})`,
+        );
+        return {
+          event: { type: "agent_exited", exit: 1, timedOut: false },
+          ctxPatch: { builderSessionId },
+        };
+      }
+      const finalSkillBody = contextSkillBody.skillBody;
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.
@@ -221,29 +292,6 @@ export async function executeSpawnAgentCommand(
           : {}),
         appendEvent: (ev) => ports.events.appendEvent(ports.paths.eventsPath, ev),
       });
-      // FIX-338 (Phase B 杠杆2): when `loop_safety.project_map: true`, PREPEND a
-      // concise, bounded project map into the working agent's initial context so it
-      // doesn't burn execute time on sed/rg exploration. Agent-agnostic (one prompt
-      // body all shapes consume) + bounded (hard char cap). DEFAULT-OFF — a no-op
-      // until flipped on, in which case `ports.skillBody` is sent unchanged.
-      const skillBodyForSpawn = maybeInjectProjectMap(
-        executionSkillBody(ports, ctx.storyId),
-        // E4: map the tree the builder actually works in (the submodule for a
-        // submodule cycle), not the superproject shell.
-        execCwd,
-        readProjectMapEnabled(ports.repoCwd),
-        ctx.storyId,
-      );
-      // FIX-386: when the story was re-picked after a low peer review score,
-      // inject the reviewer's findings as a fix-forward task so the builder
-      // fixes on the same resumed branch instead of starting fresh.
-      const lowScoreFeedback = ctx.storyId !== undefined && ctx.storyId !== ""
-        ? buildLowScoreFixForwardPrompt(ports.repoCwd, ctx.storyId)
-        : "";
-      const finalSkillBody =
-        lowScoreFeedback !== ""
-          ? `${lowScoreFeedback}\n\n${skillBodyForSpawn}`
-          : skillBodyForSpawn;
       // lever-4 (cross-card warm-context): after the pool was narrowed to
       // 国产/开源 agents (kimi/pi/reasonix), NO current engine declares a
       // warm-reuse capability — every cycle runs COLD. The resume-resolution +

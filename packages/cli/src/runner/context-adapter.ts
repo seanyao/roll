@@ -84,6 +84,8 @@ export interface ContextHostAdapter {
   readForStage(input: ContextStageReadInputV1): Promise<ContextStageReadResultV1>;
 }
 
+const CONTEXT_BOOTSTRAP_STAGES = new Set<ContextStage>(["clarify", "design"]);
+
 function sameReference(left: ContextSnapshotReferenceV1, right: ContextSnapshotReferenceV1): boolean {
   return left.snapshotId === right.snapshotId &&
     left.snapshotDigest === right.snapshotDigest &&
@@ -127,6 +129,18 @@ function buildEnvelope(
   authorizedRestrictedOperation?: boolean,
 ): { readonly envelope?: ContextAgentEnvelopeV1; readonly diagnostic?: ContextDiagnosticV1 } {
   const explicitRefs = new Set(input.refs);
+  const capturedRefs = new Set(snapshot.providers.flatMap((provider) => provider.files.map((file) => file.ref)));
+  const missingRef = input.refs.find((ref) => !capturedRefs.has(ref));
+  if (missingRef !== undefined) {
+    return {
+      diagnostic: {
+        code: "context_file_missing",
+        severity: "blocking",
+        ref: missingRef,
+        message: "Explicit Context ref was not captured in the handed-off Snapshot",
+      },
+    };
+  }
   const operationAllowed = authorizedRestrictedOperation ?? restrictedOperationAllowed(options, input);
   const pages = [];
   for (const provider of snapshot.providers) {
@@ -275,6 +289,10 @@ export function createContextHostAdapter(options: CreateContextHostAdapterOption
         return snapshot === undefined
           ? { status: "blocked", diagnostic: invalidContextHandoff() }
           : ready(options, input, "handoff_snapshot", snapshot);
+      }
+
+      if (input.handoff === undefined && !CONTEXT_BOOTSTRAP_STAGES.has(input.stage)) {
+        return { status: "blocked", diagnostic: invalidContextHandoff() };
       }
 
       const operationAllowed = restrictedOperationAllowed(options, input);

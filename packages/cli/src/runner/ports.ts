@@ -11,6 +11,7 @@ import type {
   RollEvent,
   WorkspaceIssueInitFailureCode,
 } from "@roll/spec";
+import type { ContextStageHostPort } from "./context-stage-host.js";
 import type { CaptureMarker, Clock, ScreenshotResult } from "@roll/infra";
 import type { AgentSpawn } from "./agent-spawn.js";
 import type { ReachResult } from "./agent-liveness.js";
@@ -373,6 +374,9 @@ export interface Ports {
   capture: CapturePort;
   attest: AttestPort;
   agentSpawn: AgentSpawn;
+  /** Context-enabled Workspaces restore an exact Story Snapshot here before a
+   * consuming agent stage starts. Absence means Context is disabled. */
+  contextStage?: ContextStageHostPort;
   /** Test seam for credential readiness checks; production uses process.env. */
   agentCredentialEnv?: NodeJS.ProcessEnv;
   /** Test seam for agent profile dotfile readers; production uses the OS home dir. */

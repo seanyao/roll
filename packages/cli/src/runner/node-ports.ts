@@ -84,6 +84,7 @@ import {
 } from "./worktree-bootstrap.js";
 import { rescueLeakedMain } from "./sandbox-boundary.js";
 import { createNodeAgentCapacityPort } from "./capacity-port.js";
+import { createNodeContextStageHost } from "./context-stage-host.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -432,6 +433,7 @@ export function nodePorts(opts: {
   const repositories = existsSync(join(opts.repoCwd, "workspace.yaml"))
     ? createWorkspaceRepositoryPorts(opts.repoCwd, opts.repositoryAdapters)
     : undefined;
+  const contextStage = repositories === undefined ? undefined : createNodeContextStageHost(opts.repoCwd);
   const backlogPath = opts.backlogPath ?? (
     repositories === undefined
       ? join(opts.repoCwd, ".roll", "backlog.md")
@@ -509,6 +511,7 @@ export function nodePorts(opts: {
     paths: opts.paths,
     skillBody: opts.skillBody,
     ...(repositories === undefined ? {} : { repositories }),
+    ...(contextStage === undefined ? {} : { contextStage }),
     clock,
     agentSpawn: spawn,
     capacity,

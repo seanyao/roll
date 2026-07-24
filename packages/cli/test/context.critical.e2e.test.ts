@@ -1013,12 +1013,21 @@ describe("US-CONTEXT-009 critical compatibility matrix", () => {
       writeSnapshot: (value) => writeContextSnapshot(target.workspace, value),
       readSnapshot: (workspace, reference) => readContextSnapshot(workspace, reference),
     });
+    const design = await host.readForStage({
+      workspace: target.workspace,
+      storyId: STORY_ID,
+      stage: "design",
+      readMode: "fresh",
+      refs: [ref],
+    });
+    expect(design.status).toBe("ready");
+    if (design.status !== "ready") throw new Error("expected hostile design envelope");
     const result = await host.readForStage({
       workspace: target.workspace,
       storyId: STORY_ID,
       stage: "build",
-      readMode: "fresh",
       refs: [ref],
+      handoff: design.handoff,
     });
     expect(result.status).toBe("ready");
     if (result.status !== "ready") throw new Error("expected hostile envelope");

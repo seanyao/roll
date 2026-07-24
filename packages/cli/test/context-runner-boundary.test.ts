@@ -41,7 +41,15 @@ function fixture(): { root: string; workspace: WorkspaceExecutionContextV1; path
     workspaceId: "roll-context-runner",
     displayName: "Context runner fixture",
     requirements: [],
-    repositories: [],
+    repositories: [{
+      schema: "roll.repository-binding/v1",
+      repoId: "repo-83ced031389a",
+      alias: "primary",
+      remote: "https://github.com/seanyao/roll",
+      integrationBranch: "main",
+      provider: "generic",
+      workflow: { branchPattern: "roll/{workspace_id}/{story_id}", requiredChecks: [] },
+    }],
     contexts: {
       enabled: true,
       bindings: [{

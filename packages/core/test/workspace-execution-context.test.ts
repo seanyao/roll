@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ISSUE_MANIFEST_V1,
   REPOSITORY_BINDING_V1,
@@ -144,6 +144,19 @@ describe("buildWorkspaceExecutionContext", () => {
 
     (input.manifest.repositories[0]?.workflow.requiredChecks as string[]).push("changed-after-build");
     expect(JSON.stringify(result.context)).toBe(serialized);
+  });
+
+  it("does not consult or follow host cwd while deriving authority", () => {
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue("/unrelated/launch-directory");
+    const result = buildWorkspaceExecutionContext({ facts: facts(), source: "explicit", evidence });
+    const cwdCalls = cwd.mock.calls.length;
+    cwd.mockRestore();
+
+    expect(result).toMatchObject({
+      ok: true,
+      context: { authorities: { backlog: "/authority/workspaces/ws-demo/backlog/index.md" } },
+    });
+    expect(cwdCalls).toBe(0);
   });
 
   it("preserves the complete multi-repository execution contract", () => {

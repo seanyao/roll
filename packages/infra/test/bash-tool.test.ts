@@ -196,6 +196,7 @@ describe("US-TOOL-004 BashTool", () => {
       { command: "node", args: ["-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "node", args: ["--eval=require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "/usr/bin/env", args: ["node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
+      { command: "/usr/bin/env", args: ["-u", "NODE_OPTIONS", "node", "-e", "require('node:fs').readFileSync('/etc/passwd')"] },
       { command: "cat", args: ["escape/file.txt"] },
     ]) {
       const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
@@ -204,6 +205,17 @@ describe("US-TOOL-004 BashTool", () => {
       expect(result).toMatchObject({ ok: false, error: { code: "sandbox_denied" } });
       expect(deps.calls).toHaveLength(0);
     }
+  });
+
+  it("allows interpreter-like flags after the Node script boundary", async () => {
+    const deps = fakeDeps({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+    const result = await new BashTool().execute(
+      invocation({ command: "node", args: ["app.js", "-e", "development"], cwd: repo }),
+      deps,
+    );
+
+    expect(result).toMatchObject({ ok: true, output: { stdout: "ok" } });
+    expect(deps.calls).toHaveLength(1);
   });
 
   it("init and dispose are no-ops", async () => {

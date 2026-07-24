@@ -227,14 +227,19 @@ describe("US-TOOL-002 ToolRegistry", () => {
     });
     registry.register(tool());
 
-    const input = { token: secret, nested: { headers: [secret], password: "field-secret" } };
+    const input = { token: secret, nested: { headers: [secret], password: "field-secret", access_token: "access-secret" } };
     const result = await registry.invoke(TOOL_ID, request(input));
 
     expect(result).toMatchObject({ ok: true, output: input });
     const emitted = events.events.find((event) => event.type === "tool:invoke");
     expect(JSON.stringify(emitted)).not.toContain(secret);
     expect(emitted).toMatchObject({
-      invocation: { input: { token: "[REDACTED]", nested: { headers: ["[REDACTED]"], password: "[REDACTED]" } } },
+      invocation: {
+        input: {
+          token: "[REDACTED]",
+          nested: { headers: ["[REDACTED]"], password: "[REDACTED]", access_token: "[REDACTED]" },
+        },
+      },
     });
   });
 

@@ -152,6 +152,8 @@ describe("US-TOOL-014 infra tool delegation", () => {
         password: "structured-password",
         token: "structured-token",
         api_key: "structured-key",
+        access_token: "structured-access-token",
+        clientSecret: "structured-client-secret",
       },
       scope: "issue_required",
       context: executionContext,
@@ -174,6 +176,7 @@ describe("US-TOOL-014 infra tool delegation", () => {
     for (const secret of [
       "sk-example123456", "bearer-secret", "hunter2", "key-secret",
       "nested-secret", "structured-password", "structured-token", "structured-key",
+      "structured-access-token", "structured-client-secret",
     ]) {
       expect(persisted).not.toContain(secret);
     }

@@ -273,7 +273,7 @@ function sanitizeInvocation<I>(invocation: ToolInvocation<I>): ToolInvocation<I>
 }
 
 function sanitizeInvocationValue(value: unknown, key?: string): unknown {
-  if (key !== undefined && /^(?:api[_-]?key|authorization|cookie|credential|password|passwd|private[_-]?key|secret|token)$/iu.test(key)) {
+  if (key !== undefined && sensitiveInvocationKey(key)) {
     return "[REDACTED]";
   }
   if (typeof value === "string") return redactInfraToolValue(value);
@@ -284,4 +284,10 @@ function sanitizeInvocationValue(value: unknown, key?: string): unknown {
     );
   }
   return value;
+}
+
+function sensitiveInvocationKey(key: string): boolean {
+  const segments = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase().split(/[_-]+/u);
+  return segments.some((segment) => ["authorization", "cookie", "credential", "password", "passwd", "secret", "token"].includes(segment)) ||
+    segments.some((segment, index) => ["api", "private"].includes(segment) && segments[index + 1] === "key");
 }

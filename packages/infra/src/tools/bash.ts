@@ -188,19 +188,49 @@ function argumentsContained(command: string, args: readonly string[], cwd: strin
 function dynamicInterpreterDenied(command: string, args: readonly string[]): boolean {
   const executable = basename(command).toLowerCase();
   if (executable === "env") {
-    if (args.includes("-S") || args.includes("--split-string")) return true;
-    const nested = args.findIndex((argument) => !argument.startsWith("-") && !argument.includes("="));
+    if (args.some((argument) => argument === "-S" || argument === "--split-string" || argument.startsWith("--split-string="))) return true;
+    const nested = envCommandIndex(args);
     return nested >= 0 && dynamicInterpreterDenied(args[nested] ?? "", args.slice(nested + 1));
   }
   if (["bash", "dash", "fish", "sh", "zsh"].includes(executable)) {
     return args.some((argument) => /^-[^-]*c/u.test(argument));
   }
   if (executable === "node") {
-    return args.some((argument) => argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval="));
+    return nodeEvalDenied(args);
   }
   if (["perl", "ruby"].includes(executable)) return args.some((argument) => argument.startsWith("-e"));
   if (["python", "python2", "python3"].includes(executable)) return args.some((argument) => argument.startsWith("-c"));
   if (executable === "php") return args.some((argument) => argument.startsWith("-r"));
+  return false;
+}
+
+function envCommandIndex(args: readonly string[]): number {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
+    if (["-u", "--unset", "-C", "--chdir"].includes(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--unset=") || argument.startsWith("--chdir=") || argument.startsWith("-") || argument.includes("=")) continue;
+    return index;
+  }
+  return -1;
+}
+
+const NODE_OPTIONS_WITH_VALUE = new Set([
+  "-r", "--require", "--import", "--loader", "--experimental-loader", "--conditions",
+  "--inspect-port", "--title", "--icu-data-dir", "--openssl-config", "--redirect-warnings",
+  "--diagnostic-dir", "--cpu-prof-dir", "--heap-prof-dir", "--report-dir", "--test-reporter",
+]);
+
+function nodeEvalDenied(args: readonly string[]): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index] ?? "";
+    if (argument === "--") return false;
+    if (argument === "-e" || argument.startsWith("-e") || argument === "--eval" || argument.startsWith("--eval=")) return true;
+    if (!argument.startsWith("-")) return false;
+    if (NODE_OPTIONS_WITH_VALUE.has(argument)) index += 1;
+  }
   return false;
 }
 

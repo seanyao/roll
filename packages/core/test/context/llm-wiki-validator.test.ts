@@ -209,6 +209,31 @@ describe("fixed-revision LLM Wiki validation", () => {
     });
   });
 
+  it("ignores nashsu editor fields while preserving required Roll metadata and quoted list values", () => {
+    const content = page([
+      "type: entity",
+      "tags: [context, \"Roll, agent harness\"]",
+      "related: [\"systems/sample\", 'Runbook, shared']",
+      "created: 2026-07-01",
+      "updated: 2026-07-24",
+    ]).replace(
+      "sources:\n  - raw/sources/axis.md",
+      "sources: [\"raw/sources/axis.md\", \"wiki/references/Q1, revised.md\"]",
+    );
+    const result = validateLlmWikiRevision({
+      providerId: "enterprise-wiki",
+      refs: ["wiki/systems/axis.md"],
+      files: minimumFiles([blob("wiki/systems/axis.md", content)]),
+    });
+
+    expect(result.valid).toBe(true);
+    expect(result.files.at(-1)?.page).toMatchObject({
+      schema: "roll.context-page/v1",
+      page_type: "system_runbook",
+      sources: ["raw/sources/axis.md", "wiki/references/Q1, revised.md"],
+    });
+  });
+
   it.each([
     ["missing delimiter", "# no frontmatter"],
     ["missing field", page(["sensitivity:"])],
@@ -220,6 +245,17 @@ describe("fixed-revision LLM Wiki validation", () => {
     ["scope is not an object", page().replace(/scope:\n(?: {2,}.*\n)+sources:/u, "scope:\nsources:")],
     ["invalid scope stage", page().replace("    - build", "    - deploy")],
     ["unsafe source", page().replace("  - raw/sources/axis.md", "  - ../credentials/token")],
+    ["nashsu fields cannot replace Roll safety metadata", [
+      "---",
+      "type: entity",
+      "title: Axis system",
+      "tags: [context]",
+      "related: []",
+      "created: 2026-07-01",
+      "updated: 2026-07-24",
+      "---",
+      "# Axis",
+    ].join("\n")],
   ])("returns stable invalid_page_frontmatter for %s", (_label, content) => {
     const result = validateLlmWikiRevision({
       providerId: "enterprise-wiki",
@@ -373,6 +409,11 @@ describe("fixed-revision LLM Wiki validation", () => {
       files: readable,
     });
     expect(result.valid).toBe(true);
+    expect(result.files.at(-1)?.page).toMatchObject({
+      schema: "roll.context-page/v1",
+      page_type: "system",
+      sources: ["raw/sources/sample-source.md", "wiki/references/Q1, revised.md"],
+    });
     expect(allFixtureFiles.map((file) => file.path)).toContain("raw/sources/sample-source.md");
     expect(result.files.map((file) => file.path)).not.toContain("raw/sources/sample-source.md");
   });

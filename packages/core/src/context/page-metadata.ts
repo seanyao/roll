@@ -23,9 +23,15 @@ const TOP_LEVEL_KEYS = new Set([
   "scope",
   "sources",
   "sensitivity",
+  "type",
+  "tags",
+  "related",
+  "created",
+  "updated",
 ]);
 const SCOPE_KEYS = new Set(["workspace_ids", "repository_ids", "environment_ids", "story_ids", "stages"]);
 const STAGES = new Set<ContextStage>(["clarify", "design", "tasking", "build", "qa", "review", "fix", "operation"]);
+const NASH_SU_LIST_KEYS = new Set(["tags", "related"]);
 
 type ParsedFrontmatter = Readonly<Record<string, string | readonly string[] | Readonly<Record<string, readonly string[]>>>>;
 
@@ -54,7 +60,40 @@ function inlineList(value: string): readonly string[] | undefined {
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return undefined;
   const inner = trimmed.slice(1, -1).trim();
   if (inner === "") return [];
-  const items = inner.split(",").map((entry) => scalar(entry));
+
+  const entries: string[] = [];
+  let start = 0;
+  let quote: "\"" | "'" | undefined;
+  for (let index = 0; index < inner.length; index += 1) {
+    const character = inner[index];
+    if (quote === "\"") {
+      if (character === "\\") {
+        index += 1;
+        if (index >= inner.length) return undefined;
+      } else if (character === "\"") {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (quote === "'") {
+      if (character === "'" && inner[index + 1] === "'") {
+        index += 1;
+      } else if (character === "'") {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+    } else if (character === ",") {
+      entries.push(inner.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (quote !== undefined) return undefined;
+  entries.push(inner.slice(start));
+
+  const items = entries.map((entry) => scalar(entry));
   return items.every((entry): entry is string => entry !== undefined) ? items : undefined;
 }
 
@@ -137,7 +176,7 @@ function parseFrontmatter(frontmatter: string): ParsedFrontmatter | undefined {
       index = parsed.next;
       continue;
     }
-    if (key === "sources") {
+    if (key === "sources" || NASH_SU_LIST_KEYS.has(key)) {
       const parsedInline = inlineList(rest);
       if (parsedInline !== undefined) {
         result[key] = parsedInline;

@@ -300,9 +300,11 @@ describe("US-WS-010 repository Builder context", () => {
     expect(await repositories?.git.tcrCount(fixture.repoId)).toBe(0);
     expect(await repositories?.git.recentCommits(fixture.repoId)).toEqual([]);
     expect(await repositories?.git.headSha(fixture.repoId)).toBe(fixture.headSha);
+    const verificationScript = join(resolved?.repositories[fixture.repoId]?.worktreePath ?? "", "verify.mjs");
+    writeFileSync(verificationScript, "process.stdout.write('verified')\n", "utf8");
     const verification = await repositories?.verification.runRepository(
       fixture.repoId,
-      ["node", "-e", "process.stdout.write('verified')"],
+      ["node", "verify.mjs"],
       { TOKEN: "ghp_abcdefghijklmnopqrstuvwxyz" },
     );
     const push = await repositories?.git.push(fixture.repoId, "story/US-WS-010");

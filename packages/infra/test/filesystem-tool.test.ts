@@ -157,6 +157,8 @@ describe("US-TOOL-008 FsTool", () => {
 
   it("writes redacted content under allowedPaths and reports bytes written", async () => {
     const root = tmpRoot();
+    mkdirSync(join(root, "out"), { recursive: true });
+    writeFileSync(join(root, "out", "result.txt"), "before");
     const result = await new FsTool("filesystem.write", { root, access: "write" }).execute(
       invocation<FsWriteInput>("filesystem.write", { path: "out/result.txt", content: "hello SECRET" }, root, { allowedPaths: [root] }),
       deps(),

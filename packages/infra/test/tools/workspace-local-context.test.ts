@@ -263,7 +263,8 @@ describe("US-WS-035 Workspace-local tool context", () => {
   it("contains filesystem writes to the selected repository and never treats Workspace metadata as a generic root", async () => {
     const root = tmp("filesystem-write");
     const repo = join(root, "issues", "US-WS-035", "product");
-    mkdirSync(repo, { recursive: true });
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "src", "result.txt"), "before");
     const executionContext = context(root, [repository("product", repo)]);
     const tool = new FsTool("filesystem.write", { root: repo, access: "write" });
 
@@ -369,28 +370,18 @@ describe("US-WS-035 Workspace-local tool context", () => {
     expect(JSON.stringify(result)).not.toContain(outside);
   });
 
-  it("revalidates a filesystem write after mkdir before following a replaced parent", async () => {
+  it("rejects a filesystem write through a symlink parent", async () => {
     const root = tmp("filesystem-parent-swap");
     const repo = join(root, "issues", "US-WS-035", "product");
     const outside = tmp("filesystem-parent-swap-outside");
     mkdirSync(repo, { recursive: true });
     const executionContext = context(root, [repository("product", repo)]);
     const targetParent = join(repo, "created");
-    const deps: ToolDeps = {
-      ...fsDeps(),
-      fs: {
-        readFile: async (path, encoding = "utf8") => readFileSync(path, encoding),
-        mkdir: async (path) => {
-          expect(path).toBe(targetParent);
-          symlinkSync(outside, path);
-        },
-        writeFile: async (path, data, encoding = "utf8") => writeFileSync(path, data, encoding),
-      },
-    };
+    symlinkSync(outside, targetParent);
 
     const result = await new FsTool("filesystem.write", { root: repo, access: "write" }).execute(
       fsInvocation<FsWriteInput>("filesystem.write", { path: "created/result.txt", content: "blocked" }, executionContext, "product"),
-      deps,
+      fsDeps(),
     );
 
     expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
@@ -402,6 +393,7 @@ describe("US-WS-035 Workspace-local tool context", () => {
     const repo = join(root, "issues", "US-WS-035", "product");
     const outside = tmp("filesystem-final-write-swap-outside");
     mkdirSync(join(repo, "created"), { recursive: true });
+    writeFileSync(join(repo, "created", "result.txt"), "before");
     const executionContext = context(root, [repository("product", repo)]);
     const deps: ToolDeps = {
       ...fsDeps(),
@@ -424,6 +416,21 @@ describe("US-WS-035 Workspace-local tool context", () => {
     expect(result).toMatchObject({ ok: true, output: { bytesWritten: 4 } });
     expect(readFileSync(join(repo, "created", "result.txt"), "utf8")).toBe("safe");
     expect(existsSync(join(outside, "result.txt"))).toBe(false);
+  });
+
+  it("fails closed for missing write targets instead of creating through a swappable parent pathname", async () => {
+    const root = tmp("filesystem-new-file");
+    const repo = join(root, "issues", "US-WS-035", "product");
+    mkdirSync(join(repo, "created"), { recursive: true });
+    const executionContext = context(root, [repository("product", repo)]);
+
+    const result = await new FsTool("filesystem.write", { root: repo, access: "write" }).execute(
+      fsInvocation<FsWriteInput>("filesystem.write", { path: "created/new.txt", content: "blocked" }, executionContext, "product"),
+      fsDeps(),
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { code: "invalid_execution_context" } });
+    expect(existsSync(join(repo, "created", "new.txt"))).toBe(false);
   });
 
   it("requires git cwd to equal the explicitly selected Issue worktree and preserves dirty status", async () => {

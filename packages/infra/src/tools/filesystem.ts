@@ -1,6 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, stat as nodeStat, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { lstat, open, stat as nodeStat } from "node:fs/promises";
 import type { ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { fsReadInputSchema, fsReadOutputSchema, fsStatInputSchema, fsStatOutputSchema, fsWriteInputSchema, fsWriteOutputSchema } from "./schema-contracts.js";
 import { isCanonicalPathContained, resolveContainedPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
@@ -112,7 +111,7 @@ export class FsTool {
         deps,
       );
       return output === undefined
-        ? failure(boundInvocation, startedAt, deps.now(), "invalid_execution_context", "filesystem path changed before write", false)
+        ? failure(boundInvocation, startedAt, deps.now(), "invalid_execution_context", "filesystem write target must remain an existing regular file", false)
         : ok(boundInvocation, startedAt, deps.now(), output);
     } catch {
       return failure(boundInvocation, startedAt, deps.now(), "adapter_error", "filesystem operation failed", true);
@@ -179,7 +178,6 @@ async function writeOutput(
   deps: ToolDeps,
 ): Promise<FsWriteOutput | undefined> {
   const content = deps.redact(input.content);
-  await deps.fs.mkdir(dirname(path), { recursive: true });
   const revalidated = resolveContainedPath(repositoryRoot, path, true);
   if (revalidated !== path) return undefined;
   return writeAnchoredFile(path, content, repositoryRoot);
@@ -191,14 +189,12 @@ async function writeAnchoredFile(
   repositoryRoot: string,
 ): Promise<FsWriteOutput | undefined> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
-  let created = false;
   try {
     try {
       handle = await open(path, constants.O_WRONLY | constants.O_NOFOLLOW);
     } catch (cause) {
-      if (!isNotFound(cause)) return undefined;
-      handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      created = true;
+      if (isNotFound(cause)) return undefined;
+      throw cause;
     }
     const descriptorStat = await handle.stat();
     const pathStat = await lstat(path);
@@ -207,9 +203,6 @@ async function writeAnchoredFile(
       !contained || !descriptorStat.isFile() || pathStat.isSymbolicLink() || !pathStat.isFile() ||
       descriptorStat.dev !== pathStat.dev || descriptorStat.ino !== pathStat.ino
     ) {
-      await handle.close();
-      handle = undefined;
-      if (created) await unlinkCreatedFile(path, descriptorStat.dev, descriptorStat.ino);
       return undefined;
     }
     await handle.truncate(0);
@@ -217,15 +210,6 @@ async function writeAnchoredFile(
     return { bytesWritten: Buffer.byteLength(content, "utf8") };
   } finally {
     await handle?.close();
-  }
-}
-
-async function unlinkCreatedFile(path: string, device: number, inode: number): Promise<void> {
-  try {
-    const current = await lstat(path);
-    if (!current.isSymbolicLink() && current.dev === device && current.ino === inode) await unlink(path);
-  } catch {
-    // The path has already disappeared or changed ownership; never unlink a replacement.
   }
 }
 

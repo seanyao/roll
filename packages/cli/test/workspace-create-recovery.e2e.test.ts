@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../../..");
 const rollBin = join(repoRoot, "packages", "cli", "bin", "roll.js");
+const evidenceDir = join(here, "fixtures", "workspace", "us-ws-024-terminal-evidence");
 const roots: string[] = [];
 
 interface CreateResult {
@@ -149,6 +150,24 @@ describe("US-WS-024 Workspace create authorization and recovery E2E", () => {
       outcome: "created",
       authorizationSource: "owner_after_preview",
     });
+
+    const transcript = readFileSync(join(evidenceDir, "transcript.txt"), "utf8");
+    expect(transcript).toContain(JSON.stringify({
+      mode: plan.mode,
+      outcome: plan.outcome,
+      workspaceId: plan.workspaceId,
+      configSha256: "<CONFIG_SHA256>",
+      planSha256: "<PLAN_SHA256>",
+    }, null, 2));
+    expect(transcript).toContain(JSON.stringify({ error: { code: "invalid_apply_authorization" } }, null, 2));
+    expect(transcript).toContain(JSON.stringify({
+      mode: "apply",
+      outcome: "created",
+      authorizationSource: "owner_after_preview",
+    }, null, 2));
+    const evidence = JSON.parse(readFileSync(join(evidenceDir, "evidence.json"), "utf8")) as Record<string, unknown>;
+    expect(evidence).toMatchObject({ physical: false, taken: false, reason: "headless_terminal_capture_unavailable" });
+    expect(readFileSync(join(evidenceDir, "capture-skip.txt"), "utf8")).toContain("No PNG was generated");
   });
 
   it("reconciles a completed legacy journal and fails closed when both journal generations exist", () => {
@@ -172,6 +191,11 @@ describe("US-WS-024 Workspace create authorization and recovery E2E", () => {
     const reused = run(completed, []);
     expect(reused.status, reused.stderr).toBe(0);
     expect(JSON.parse(reused.stdout)).toMatchObject({ outcome: "reused" });
+    const transcript = readFileSync(join(evidenceDir, "transcript.txt"), "utf8");
+    expect(transcript).toContain(JSON.stringify({
+      outcome: "repaired",
+      recovery: { kind: "legacy_completed", journalPath: "<ROLL_HOME>/workspace-init/ws-e2e.pending.json" },
+    }, null, 2));
 
     const conflict = fixture();
     const first = run(conflict, []);

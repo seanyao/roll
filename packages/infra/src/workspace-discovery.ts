@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -68,8 +72,13 @@ function contained(root: string, target: string): boolean {
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
-function sameFile(left: Stats, right: Stats): boolean {
-  return left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs;
+function sameIdentity(left: Stats, right: Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameSnapshotMetadata(left: Stats, right: Stats): boolean {
+  return sameIdentity(left, right) && left.size === right.size &&
+    left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
 function sha256(value: string | Buffer): string {
@@ -108,29 +117,70 @@ function safeAuthorityFile(
   dependencies: WorkspaceDiscoveryLoaderDependencies,
   missingCode: "invalid_workspace_manifest" | "invalid_issue_manifest",
 ): Buffer {
+  let fd: number | undefined;
   try {
-    const before = lstatSync(path);
-    if (before.isSymbolicLink()) {
+    const beforePath = lstatSync(path);
+    if (beforePath.isSymbolicLink()) {
       throw new DiscoveryAuthorityError("symlink_escape", path, "Workspace discovery authority must not be a symlink");
     }
-    if (!before.isFile()) {
+    if (!beforePath.isFile()) {
       throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority is not a regular file");
     }
-    if (before.size > MAX_DISCOVERY_AUTHORITY_BYTES) {
+    if (beforePath.size > MAX_DISCOVERY_AUTHORITY_BYTES) {
       throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority exceeds the bounded read limit");
     }
     const canonical = realpathSync(path);
     if (canonical !== path || !contained(workspaceRoot, canonical)) {
       throw new DiscoveryAuthorityError("symlink_escape", path, "Workspace discovery authority escapes its canonical root");
     }
-    const bytes = readFileSync(path);
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const beforeFd = fstatSync(fd);
+    if (!beforeFd.isFile() || !sameIdentity(beforePath, beforeFd)) {
+      throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority changed before its bounded read");
+    }
+    const bytes = Buffer.alloc(beforeFd.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    if (offset !== bytes.length) {
+      throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority could not be read completely");
+    }
     dependencies.afterAuthorityRead?.(path);
-    const after = lstatSync(path);
-    if (after.isSymbolicLink()) {
+    const afterPath = lstatSync(path);
+    if (afterPath.isSymbolicLink()) {
       throw new DiscoveryAuthorityError("symlink_escape", path, "Workspace discovery authority became a symlink during read");
     }
-    if (!sameFile(before, after) || bytes.length !== before.size) {
+    const afterFd = fstatSync(fd);
+    if (
+      !afterPath.isFile() || !sameIdentity(afterPath, afterFd) ||
+      !sameSnapshotMetadata(beforeFd, afterFd)
+    ) {
       throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority changed during read");
+    }
+    const verification = Buffer.alloc(afterFd.size);
+    let verificationOffset = 0;
+    while (verificationOffset < verification.length) {
+      const count = readSync(
+        fd,
+        verification,
+        verificationOffset,
+        verification.length - verificationOffset,
+        verificationOffset,
+      );
+      if (count === 0) break;
+      verificationOffset += count;
+    }
+    const finalFd = fstatSync(fd);
+    const finalPath = lstatSync(path);
+    if (
+      verificationOffset !== verification.length || finalPath.isSymbolicLink() || !finalPath.isFile() ||
+      !sameIdentity(finalPath, finalFd) || !sameSnapshotMetadata(afterFd, finalFd) ||
+      sha256(verification) !== sha256(bytes)
+    ) {
+      throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority snapshot was not stable");
     }
     return bytes;
   } catch (error) {
@@ -139,6 +189,8 @@ function safeAuthorityFile(
       throw new DiscoveryAuthorityError(missingCode, path, "Workspace discovery authority is missing", { cause: error });
     }
     throw new DiscoveryAuthorityError("discovery_io_failure", path, "Workspace discovery authority could not be read", { cause: error });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -288,9 +340,10 @@ function factsDigest(input: {
   return sha256(stableJson(input));
 }
 
-export function loadWorkspaceDiscovery(
+function loadWorkspaceDiscoveryInternal(
   input: { readonly rollHome: string },
-  dependencies: WorkspaceDiscoveryLoaderDependencies = {},
+  dependencies: WorkspaceDiscoveryLoaderDependencies,
+  explicitReadWorkspaceId?: string,
 ): WorkspaceDiscoveryLoadResultV1 {
   const registry = new WorkspaceRegistry({ rollHome: input.rollHome });
   let snapshot;
@@ -317,6 +370,7 @@ export function loadWorkspaceDiscovery(
   const workspaces: WorkspaceDiscoveryFactsV1[] = [];
   const diagnostics: WorkspaceDiscoveryDiagnosticV1[] = [];
   for (const entry of snapshot.entries) {
+    if (explicitReadWorkspaceId !== undefined && entry.workspaceId !== explicitReadWorkspaceId) continue;
     const lifecycle = lifecycleById.get(entry.workspaceId)?.lifecycle;
     if (lifecycle === undefined) {
       diagnostics.push({
@@ -328,7 +382,7 @@ export function loadWorkspaceDiscovery(
       });
       continue;
     }
-    if (lifecycle === "archived") continue;
+    if (lifecycle === "archived" && explicitReadWorkspaceId !== entry.workspaceId) continue;
     try {
       const workspaceRoot = safeCanonicalRoot(entry);
       const manifestPath = join(workspaceRoot, "workspace.yaml");
@@ -392,4 +446,18 @@ export function loadWorkspaceDiscovery(
     ...digestInput,
     discoveryFactsSha256: factsDigest(digestInput),
   };
+}
+
+export function loadWorkspaceDiscovery(
+  input: { readonly rollHome: string },
+  dependencies: WorkspaceDiscoveryLoaderDependencies = {},
+): WorkspaceDiscoveryLoadResultV1 {
+  return loadWorkspaceDiscoveryInternal(input, dependencies);
+}
+
+export function loadExplicitWorkspaceDiscovery(
+  input: { readonly rollHome: string; readonly workspaceId: string },
+  dependencies: WorkspaceDiscoveryLoaderDependencies = {},
+): WorkspaceDiscoveryLoadResultV1 {
+  return loadWorkspaceDiscoveryInternal(input, dependencies, input.workspaceId);
 }

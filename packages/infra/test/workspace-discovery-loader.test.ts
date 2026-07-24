@@ -20,6 +20,7 @@ import {
 } from "@roll/spec";
 import {
   WorkspaceRegistry,
+  loadExplicitWorkspaceDiscovery,
   loadWorkspaceDiscovery,
   workspaceDiscoveryIndexPath,
 } from "../src/index.js";
@@ -210,6 +211,69 @@ describe("US-WS-028 registry-bound Workspace discovery loader", () => {
     ]);
   });
 
+  it("rejects an Issue manifest replaced by a symlink after its bounded read", () => {
+    const base = sandbox();
+    const rollHome = join(base, "home");
+    const fields = createWorkspace(join(base, "fields"), "fields");
+    createIssue(fields, "fields", "US-FIELDS-001", ["APE-234"]);
+    register(rollHome, fields, "fields");
+    const canonicalIssuePath = join(realpathSync(fields), "issues", "US-FIELDS-001", "manifest.json");
+    const movedPath = join(realpathSync(fields), "issues", "US-FIELDS-001", "manifest-before.json");
+    let replaced = false;
+
+    const result = loadWorkspaceDiscovery({ rollHome }, {
+      afterAuthorityRead: (path) => {
+        if (path !== canonicalIssuePath || replaced) return;
+        replaced = true;
+        renameSync(path, movedPath);
+        symlinkSync(movedPath, path);
+      },
+    });
+
+    expect(result.workspaces).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ workspaceId: "fields", code: "symlink_escape", authorityPath: canonicalIssuePath }),
+    ]);
+  });
+
+  it.each(["workspace", "issue"] as const)(
+    "rejects a %s authority file replaced by changed regular content after read",
+    (authority) => {
+      const base = sandbox();
+      const rollHome = join(base, "home");
+      const fields = createWorkspace(join(base, "fields"), "fields", ["APE-234"]);
+      createIssue(fields, "fields", "US-FIELDS-001", ["APE-234"]);
+      register(rollHome, fields, "fields");
+      const canonicalRoot = realpathSync(fields);
+      const authorityPath = authority === "workspace"
+        ? join(canonicalRoot, "workspace.yaml")
+        : join(canonicalRoot, "issues", "US-FIELDS-001", "manifest.json");
+      const beforePath = `${authorityPath}.before`;
+      const changed = JSON.parse(readFileSync(authorityPath, "utf8")) as Record<string, unknown>;
+      if (authority === "workspace") changed["displayName"] = "changed-fields";
+      else changed["requirements"] = [{ provider: "jira", ref: "APE-999" }];
+      let replaced = false;
+
+      const result = loadWorkspaceDiscovery({ rollHome }, {
+        afterAuthorityRead: (path) => {
+          if (path !== authorityPath || replaced) return;
+          replaced = true;
+          renameSync(path, beforePath);
+          writeFileSync(path, `${JSON.stringify(changed, null, 2)}\n`, "utf8");
+        },
+      });
+
+      expect(result.workspaces).toEqual([]);
+      expect(result.diagnostics).toEqual([
+        expect.objectContaining({
+          workspaceId: "fields",
+          code: "discovery_io_failure",
+          authorityPath,
+        }),
+      ]);
+    },
+  );
+
   it("ignores archived authority unless a separate explicit-read path loads it", () => {
     const base = sandbox();
     const rollHome = join(base, "home");
@@ -224,6 +288,35 @@ describe("US-WS-028 registry-bound Workspace discovery loader", () => {
       workspaces: [],
       diagnostics: [],
     });
+  });
+
+  it("loads exactly one archived canonical root through the public explicit-read surface", () => {
+    const base = sandbox();
+    const rollHome = join(base, "home");
+    const active = createWorkspace(join(base, "active"), "active", ["IDEA-074"]);
+    const archived = createWorkspace(join(base, "archived"), "archived", ["APE-234"]);
+    createIssue(archived, "archived", "US-FIELDS-001", ["APE-234"]);
+    register(rollHome, active, "active", "active");
+    register(rollHome, archived, "archived", "archived");
+    const reads: string[] = [];
+
+    const result = loadExplicitWorkspaceDiscovery(
+      { rollHome, workspaceId: "archived" },
+      { afterAuthorityRead: (path) => reads.push(path) },
+    );
+
+    expect(result.workspaces).toEqual([
+      expect.objectContaining({
+        candidate: expect.objectContaining({ workspaceId: "archived", lifecycle: "archived" }),
+        issues: [expect.objectContaining({ storyId: "US-FIELDS-001" })],
+      }),
+    ]);
+    expect(result.diagnostics).toEqual([]);
+    expect(reads).toEqual([
+      join(realpathSync(archived), "workspace.yaml"),
+      join(realpathSync(archived), "issues", "US-FIELDS-001", "manifest.json"),
+    ]);
+    expect(reads.some((path) => path.startsWith(`${realpathSync(active)}/`))).toBe(false);
   });
 
   it("rebuilds the derived index from authority when cached content or digest is stale", () => {

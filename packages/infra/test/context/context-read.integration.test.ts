@@ -14,7 +14,10 @@ import { createContextReadService } from "@roll/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createContextReadAdapter } from "../../src/context/context-read-adapter.js";
 import { rawGit, type GitResult } from "../../src/git.js";
-import type { GitLlmWikiCommandRunner } from "../../src/context/git-llm-wiki-transport.js";
+import type {
+  GitLlmWikiCommandRunner,
+  GitLlmWikiReadAuditEventV1,
+} from "../../src/context/git-llm-wiki-transport.js";
 
 const sandboxes: string[] = [];
 const PUBLIC_REMOTE = "https://example.test/enterprise/context-wiki";
@@ -168,7 +171,13 @@ describe("Context read integration", () => {
       return result;
     });
     let clock = Date.parse("2026-07-24T06:00:00.000Z");
-    const adapter = createContextReadAdapter({ rollHome: join(root, "roll-home"), runGit, now: () => clock++ });
+    const audits: GitLlmWikiReadAuditEventV1[] = [];
+    const adapter = createContextReadAdapter({
+      rollHome: join(root, "roll-home"),
+      runGit,
+      now: () => clock++,
+      audit: (event) => { audits.push(event); },
+    });
     const service = createContextReadService({
       registry: {
         schema: CONTEXT_PROVIDER_REGISTRY_V1,
@@ -203,6 +212,12 @@ describe("Context read integration", () => {
       providers: [],
       gaps: [expect.objectContaining({ code: "fetch_failed", severity: "blocking" })],
     });
+    expect(audits).toMatchObject([
+      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: firstExpectedRevision },
+      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: secondRevision },
+      { providerId: "enterprise-wiki", branch: "main", outcome: "failed", diagnosticCode: "fetch_failed" },
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/secret-token|GIT_|credential/u);
     expect(JSON.stringify(failed)).not.toMatch(/axis-v[12]|secret-token/u);
 
     const fetches = mutableCalls.filter((args) => args.slice(12)[0] === "fetch");

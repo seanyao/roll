@@ -9,6 +9,31 @@
 import type { Catalog } from "./index.js";
 
 export const v3Catalog: Catalog = {
+  "context.usage": {
+    en: "Usage: roll context status [--workspace <id|path>] [--json]\n       roll context read [--workspace <id|path>] [--story <id>] --stage <stage> [--environment <id>]... [--ref <context-ref>]... [--include-non-active] [--allow-restricted] [--json]\n  status reads local registry, binding, and snapshot metadata only; it does not fetch and is not proof of remote freshness.\n  read performs a fresh Provider read every invocation. --allow-restricted expresses intent only; operation policy must still authorize access.\n",
+    zh: "用法：roll context status [--workspace <ID|路径>] [--json]\n      roll context read [--workspace <ID|路径>] [--story <ID>] --stage <阶段> [--environment <ID>]... [--ref <Context 引用>]... [--include-non-active] [--allow-restricted] [--json]\n  status 只读取本地 registry、binding 和 snapshot 元数据；不会 fetch，也不能证明远端最新。\n  read 每次调用都会重新读取 Provider。--allow-restricted 只表达意图，仍须 operation policy 授权。\n",
+  },
+  "context.error.invalid_arguments": { en: "Invalid arguments; run `roll context --help`", zh: "参数无效；请运行 `roll context --help`" },
+  "context.error.invalid_registry": { en: "Context Provider registry is missing or invalid", zh: "Context Provider registry 缺失或无效" },
+  "context.error.invalid_workspace": { en: "Workspace manifest is invalid", zh: "Workspace manifest 无效" },
+  "context.error.story_conflict": { en: "--story conflicts with the Issue execution context", zh: "--story 与 Issue execution context 冲突" },
+  "context.error.snapshot_failure": { en: "Context Snapshot metadata is invalid or could not be persisted", zh: "Context Snapshot 元数据无效或无法持久化" },
+  "context.error.read_failure": { en: "Context read failed before a versioned result was produced", zh: "Context read 在生成版本化结果前失败" },
+  "context.error.line": { en: "context: %s — %s", zh: "context：%s — %s" },
+  "context.status.title": { en: "Context status for Workspace %s", zh: "工作区 %s 的 Context 状态" },
+  "context.status.freshness": { en: "Freshness: local observation only; not remote freshness proof (no fetch)", zh: "新鲜度：仅本地观察；不能证明远端最新（未 fetch）" },
+  "context.status.registry": { en: "Registry: %s (%d providers)", zh: "Registry：%s（%d 个 Provider）" },
+  "context.status.binding": { en: "Binding: %s (%d bindings)", zh: "Binding：%s（%d 个 binding）" },
+  "context.status.latest": { en: "Latest snapshot: %s · %s · %s", zh: "最近 snapshot：%s · %s · %s" },
+  "context.status.none": { en: "Latest snapshot: none", zh: "最近 snapshot：无" },
+  "context.read.progress": { en: "context: fetching fresh Provider content...", zh: "context：正在重新获取 Provider 内容……" },
+  "context.read.title": { en: "Context read: %s", zh: "Context 读取：%s" },
+  "context.read.scope": { en: "Scope: workspace=%s story=%s stage=%s environments=%s", zh: "范围：workspace=%s story=%s stage=%s environments=%s" },
+  "context.read.snapshot": { en: "Snapshot: %s · digest %s", zh: "Snapshot：%s · digest %s" },
+  "context.read.provider": { en: "Provider: %s · branch %s · revision %s", zh: "Provider：%s · branch %s · revision %s" },
+  "context.read.ref": { en: "  ref: %s · sha256 %s · %d bytes", zh: "  引用：%s · sha256 %s · %d bytes" },
+  "context.read.diagnostic": { en: "Diagnostic: %s · %s · provider=%s", zh: "诊断：%s · %s · provider=%s" },
+  "context.read.none": { en: "Providers: none", zh: "Provider：无" },
   "backlog.usage": {
     en: "Usage: roll backlog [--workspace <id|path>]\n       roll backlog show <story-id> [--workspace <id|path>]\n       roll backlog --all",
     zh: "用法：roll backlog [--workspace <ID|路径>]\n      roll backlog show <Story ID> [--workspace <ID|路径>]\n      roll backlog --all",

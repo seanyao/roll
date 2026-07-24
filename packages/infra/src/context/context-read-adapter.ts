@@ -18,6 +18,7 @@ import {
 import {
   withFreshGitLlmWikiRead,
   type GitLlmWikiCommandRunner,
+  type GitLlmWikiReadAuditSink,
   type GitProviderRevisionV1,
 } from "./git-llm-wiki-transport.js";
 
@@ -25,6 +26,7 @@ export interface CreateContextReadAdapterOptions {
   readonly rollHome: string;
   readonly runGit?: GitLlmWikiCommandRunner;
   readonly now?: () => number;
+  readonly audit?: GitLlmWikiReadAuditSink;
 }
 
 interface GitObjectDescriptor {
@@ -253,6 +255,7 @@ export function createContextReadAdapter(options: CreateContextReadAdapterOption
           provider: input.plan.provider,
           runGit,
           ...(options.now === undefined ? {} : { now: options.now }),
+          ...(options.audit === undefined ? {} : { audit: options.audit }),
         }, async (revision) => readAtFixedRevision(input, revision, runGit));
         return result.value;
       } catch (error) {

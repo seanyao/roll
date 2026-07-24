@@ -28,6 +28,7 @@ import { castCommand } from "./cast.js";
 import { DOC_USAGE, docCommand } from "./doc.js";
 import { ciCommand, ciWaitCommand } from "./ci.js";
 import { configCommand } from "./config.js";
+import { contextCommand, contextUsage } from "./context.js";
 import { cycleCommand } from "./cycle.js";
 import { cyclesCommand } from "./cycles.js";
 import { SUPERVISOR_USAGE, supervisorCommand } from "./supervisor.js";
@@ -180,6 +181,7 @@ export function registerAll(): void {
     return statusCommand(args);
   }, { help: "Usage: roll status [ci|pulse]\n  Project health snapshot, CI status, or delivery pulse.\n项目健康、CI 状态或交付脉搏速览。" });
   registerPorted("workspace", workspaceCommand, { help: workspaceUsage });
+  registerPorted("context", contextCommand, { help: contextUsage });
   registerPorted("delivery", deliveryCommand, { help: deliveryUsage });
   // REFACTOR-049: `roll lang` retired → use `roll config lang <zh|en|--reset>`.
   // REFACTOR-052: machine-only surfaces stay callable but leave the main usage.

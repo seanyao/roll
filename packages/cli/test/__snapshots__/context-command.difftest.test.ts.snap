@@ -1,0 +1,233 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`US-CONTEXT-007 context command snapshots > maps blocked to exit 2 and keeps plain page bodies off stdout > read-blocked-plain-en 1`] = `
+{
+  "status": 2,
+  "stderr": "context: fetching fresh Provider content...
+",
+  "stdout": "Context read: blocked
+Scope: workspace=roll story=US-CONTEXT-007 stage=qa environments=sit
+Snapshot: ctx_20260724T060000000Z_aaaaaaaaaaaa · digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Providers: none
+Diagnostic: restricted_context_denied · blocking · provider=enterprise-wiki
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > maps completed to exit 0 and keeps plain page bodies off stdout > read-completed-plain-en 1`] = `
+{
+  "status": 0,
+  "stderr": "context: fetching fresh Provider content...
+",
+  "stdout": "Context read: completed
+Scope: workspace=roll story=US-CONTEXT-007 stage=qa environments=sit
+Snapshot: ctx_20260724T060000000Z_aaaaaaaaaaaa · digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Provider: enterprise-wiki · branch main · revision 1111111111111111111111111111111111111111
+  ref: context://enterprise-wiki/wiki/index.md · sha256 dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 30 bytes
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > maps disabled to exit 0 and keeps plain page bodies off stdout > read-disabled-plain-en 1`] = `
+{
+  "status": 0,
+  "stderr": "context: fetching fresh Provider content...
+",
+  "stdout": "Context read: disabled
+Scope: workspace=roll story=US-CONTEXT-007 stage=qa environments=sit
+Snapshot: ctx_20260724T060000000Z_aaaaaaaaaaaa · digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Providers: none
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > maps partial to exit 3 and keeps plain page bodies off stdout > read-partial-plain-en 1`] = `
+{
+  "status": 3,
+  "stderr": "context: fetching fresh Provider content...
+",
+  "stdout": "Context read: partial
+Scope: workspace=roll story=US-CONTEXT-007 stage=qa environments=sit
+Snapshot: ctx_20260724T060000000Z_aaaaaaaaaaaa · digest aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Provider: enterprise-wiki · branch main · revision 1111111111111111111111111111111111111111
+  ref: context://enterprise-wiki/wiki/index.md · sha256 dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd · 30 bytes
+Diagnostic: fetch_failed · gap · provider=optional-wiki
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > prints the complete versioned result only on JSON stdout and progress only on stderr > read-completed-json 1`] = `
+{
+  "status": 0,
+  "stderr": "context: fetching fresh Provider content...
+",
+  "stdout": "{
+  "schema": "roll.context-read-result/v1",
+  "snapshotId": "ctx_20260724T060000000Z_aaaaaaaaaaaa",
+  "snapshotDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "createdAt": "2026-07-24T06:00:00.000Z",
+  "artifactPath": "/workspaces/roll/runtime/context/US-CONTEXT-007/ctx_20260724T060000000Z_aaaaaaaaaaaa.json",
+  "outcome": "completed",
+  "requestScope": {
+    "workspaceId": "roll",
+    "storyId": "US-CONTEXT-007",
+    "repositoryIds": [
+      "https://github.com/seanyao/roll"
+    ],
+    "environmentIds": [
+      "sit"
+    ],
+    "stage": "qa"
+  },
+  "providers": [
+    {
+      "providerId": "enterprise-wiki",
+      "remoteIdentity": "https://example.test/company/context",
+      "branch": "main",
+      "fetchedAt": "2026-07-24T05:59:59.000Z",
+      "revision": "1111111111111111111111111111111111111111",
+      "providerConfigDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "bindingDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "files": [
+        {
+          "ref": "context://enterprise-wiki/wiki/index.md",
+          "path": "wiki/index.md",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "bytes": 30,
+          "content": "# SECRET BODY MUST NOT REACH PLAIN OUTPUT\\n"
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "gaps": []
+}
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > puts versioned usage and target errors on stderr with exit 2 > invalid-arguments-en 1`] = `
+{
+  "status": 2,
+  "stderr": "context: invalid_arguments — Invalid arguments; run \`roll context --help\`
+",
+  "stdout": "",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > puts versioned usage and target errors on stderr with exit 2 > target-error-json 1`] = `
+{
+  "status": 2,
+  "stderr": "{"schema":"roll.context-command-error/v1","code":"target_missing","message":"Provide one registered Workspace ID or path"}
+",
+  "stdout": "",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized help without resolving Workspace or reading Context > help-en 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "Usage: roll context status [--workspace <id|path>] [--json]
+       roll context read [--workspace <id|path>] [--story <id>] --stage <stage> [--environment <id>]... [--ref <context-ref>]... [--include-non-active] [--allow-restricted] [--json]
+  status reads local registry, binding, and snapshot metadata only; it does not fetch and is not proof of remote freshness.
+  read performs a fresh Provider read every invocation. --allow-restricted expresses intent only; operation policy must still authorize access.
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > renders localized help without resolving Workspace or reading Context > help-zh 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "用法：roll context status [--workspace <ID|路径>] [--json]
+      roll context read [--workspace <ID|路径>] [--story <ID>] --stage <阶段> [--environment <ID>]... [--ref <Context 引用>]... [--include-non-active] [--allow-restricted] [--json]
+  status 只读取本地 registry、binding 和 snapshot 元数据；不会 fetch，也不能证明远端最新。
+  read 每次调用都会重新读取 Provider。--allow-restricted 只表达意图，仍须 operation policy 授权。
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > status is local-only, names the freshness limitation and never creates a read service > status-json 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "{
+  "schema": "roll.context-status/v1",
+  "workspace": {
+    "workspaceId": "roll",
+    "root": "/workspaces/roll",
+    "lifecycle": "active"
+  },
+  "freshness": {
+    "source": "local_only",
+    "fetched": false,
+    "remoteFreshnessProof": false
+  },
+  "registry": {
+    "enabled": true,
+    "providers": [
+      {
+        "providerId": "enterprise-wiki",
+        "enabled": true,
+        "branch": "main"
+      }
+    ]
+  },
+  "binding": {
+    "enabled": true,
+    "providers": [
+      {
+        "providerId": "enterprise-wiki",
+        "enabled": true,
+        "required": true,
+        "entrypoints": [
+          "wiki/index.md"
+        ]
+      }
+    ]
+  },
+  "latestSnapshot": {
+    "snapshotId": "ctx_20260724T060000000Z_aaaaaaaaaaaa",
+    "snapshotDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "createdAt": "2026-07-24T06:00:00.000Z",
+    "outcome": "completed",
+    "requestScope": {
+      "workspaceId": "roll",
+      "storyId": "US-CONTEXT-007",
+      "repositoryIds": [
+        "https://github.com/seanyao/roll"
+      ],
+      "environmentIds": [
+        "sit"
+      ],
+      "stage": "qa"
+    },
+    "providers": [
+      {
+        "providerId": "enterprise-wiki",
+        "branch": "main",
+        "revision": "1111111111111111111111111111111111111111",
+        "bytes": 30,
+        "diagnosticCodes": []
+      }
+    ],
+    "diagnosticCodes": []
+  }
+}
+",
+}
+`;
+
+exports[`US-CONTEXT-007 context command snapshots > status is local-only, names the freshness limitation and never creates a read service > status-plain-en 1`] = `
+{
+  "status": 0,
+  "stderr": "",
+  "stdout": "Context status for Workspace roll
+Freshness: local observation only; not remote freshness proof (no fetch)
+Registry: enabled (1 providers)
+Binding: enabled (1 bindings)
+Latest snapshot: ctx_20260724T060000000Z_aaaaaaaaaaaa · completed · 2026-07-24T06:00:00.000Z
+",
+}
+`;

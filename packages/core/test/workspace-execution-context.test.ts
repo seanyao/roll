@@ -9,6 +9,7 @@ import {
   type IssueManifest,
   type RepositoryBinding,
   type WorkspaceExecutionAuthorityPaths,
+  type WorkspaceExecutionContextV1,
   type WorkspaceMatchEvidence,
 } from "@roll/spec";
 import {
@@ -128,6 +129,28 @@ const evidence: readonly WorkspaceMatchEvidence[] = [{
   provenance: "explicit_user",
   detail: "exact",
 }];
+
+type JsonRecord = Record<string, unknown>;
+
+function externalContext(): JsonRecord {
+  const built = buildWorkspaceExecutionContext({ facts: facts(), source: "explicit", evidence });
+  if (!built.ok) throw new Error("fixture failed");
+  return JSON.parse(JSON.stringify(built.context)) as JsonRecord;
+}
+
+function jsonRecord(value: unknown): JsonRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("fixture path is not a record");
+  return value as JsonRecord;
+}
+
+function repositoryRecord(context: JsonRecord): { readonly repositories: JsonRecord; readonly repoId: string; readonly repository: JsonRecord } {
+  const issue = jsonRecord(context["issue"]);
+  const executionContext = jsonRecord(issue["execution"]);
+  const repositories = jsonRecord(executionContext["repositories"]);
+  const repoId = Object.keys(repositories)[0];
+  if (repoId === undefined) throw new Error("fixture repository missing");
+  return { repositories, repoId, repository: jsonRecord(repositories[repoId]) };
+}
 
 describe("buildWorkspaceExecutionContext", () => {
   it("builds one frozen serializable authority snapshot without retaining mutable inputs", () => {
@@ -249,6 +272,65 @@ describe("resolveWorkspaceExecutionContextScope", () => {
     expect(resolveWorkspaceExecutionContextScope({ scope: "workspace_required_read", context: forgedAuthority })).toMatchObject({
       ok: false,
       error: { code: "authority_path_mismatch" },
+    });
+  });
+
+  it.each([
+    ["commands missing", (context: JsonRecord) => { delete repositoryRecord(context).repository["commands"]; }],
+    ["commands null", (context: JsonRecord) => { repositoryRecord(context).repository["commands"] = null; }],
+    ["commands array", (context: JsonRecord) => { repositoryRecord(context).repository["commands"] = []; }],
+    ["test missing", (context: JsonRecord) => { delete jsonRecord(repositoryRecord(context).repository["commands"])["test"]; }],
+    ["test scalar", (context: JsonRecord) => { jsonRecord(repositoryRecord(context).repository["commands"])["test"] = "pnpm test"; }],
+    ["test non-string item", (context: JsonRecord) => { jsonRecord(repositoryRecord(context).repository["commands"])["test"] = [1]; }],
+    ["integration missing", (context: JsonRecord) => { delete jsonRecord(repositoryRecord(context).repository["commands"])["integration"]; }],
+    ["integration scalar", (context: JsonRecord) => { jsonRecord(repositoryRecord(context).repository["commands"])["integration"] = "pnpm integration"; }],
+    ["integration non-string item", (context: JsonRecord) => { jsonRecord(repositoryRecord(context).repository["commands"])["integration"] = [false]; }],
+    ["repository null", (context: JsonRecord) => {
+      const repository = repositoryRecord(context);
+      repository.repositories[repository.repoId] = null;
+    }],
+    ["repository array", (context: JsonRecord) => {
+      const repository = repositoryRecord(context);
+      repository.repositories[repository.repoId] = [];
+    }],
+    ["bindings null", (context: JsonRecord) => { context["bindings"] = null; }],
+    ["binding malformed", (context: JsonRecord) => { context["bindings"] = [{}]; }],
+    ["binding duplicate", (context: JsonRecord) => {
+      const bindings = context["bindings"] as unknown[];
+      bindings.push(JSON.parse(JSON.stringify(bindings[0])) as unknown);
+    }],
+    ["workspace missing", (context: JsonRecord) => { delete context["workspace"]; }],
+    ["workspace null", (context: JsonRecord) => { context["workspace"] = null; }],
+    ["workspace open", (context: JsonRecord) => { jsonRecord(context["workspace"])["extra"] = true; }],
+    ["resolution missing", (context: JsonRecord) => { delete context["resolution"]; }],
+    ["resolution null", (context: JsonRecord) => { context["resolution"] = null; }],
+    ["resolution open", (context: JsonRecord) => { jsonRecord(context["resolution"])["extra"] = true; }],
+    ["authorities missing", (context: JsonRecord) => { delete context["authorities"]; }],
+    ["authorities null", (context: JsonRecord) => { context["authorities"] = null; }],
+    ["authorities open", (context: JsonRecord) => { jsonRecord(context["authorities"])["extra"] = "/tmp"; }],
+    ["issue null", (context: JsonRecord) => { context["issue"] = null; }],
+    ["issue open", (context: JsonRecord) => { jsonRecord(context["issue"])["extra"] = true; }],
+    ["execution missing", (context: JsonRecord) => { delete jsonRecord(context["issue"])["execution"]; }],
+    ["execution null", (context: JsonRecord) => { jsonRecord(context["issue"])["execution"] = null; }],
+    ["execution open", (context: JsonRecord) => { jsonRecord(jsonRecord(context["issue"])["execution"])["extra"] = true; }],
+    ["unknown schema", (context: JsonRecord) => { context["schema"] = "roll.workspace-execution-context/v0"; }],
+    ["unknown lifecycle", (context: JsonRecord) => { jsonRecord(context["workspace"])["lifecycle"] = "retired"; }],
+    ["unknown resolution source", (context: JsonRecord) => { jsonRecord(context["resolution"])["source"] = "ambient_cwd"; }],
+    ["top-level open", (context: JsonRecord) => { context["extra"] = true; }],
+  ])("fails closed without throwing for malformed external context: %s", (_name, mutate) => {
+    const context = externalContext();
+    mutate(context);
+
+    let result: ReturnType<typeof resolveWorkspaceExecutionContextScope> | undefined;
+    expect(() => {
+      result = resolveWorkspaceExecutionContextScope({
+        scope: "repository_required",
+        context: context as unknown as WorkspaceExecutionContextV1,
+      });
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: expect.stringMatching(/^(invalid_execution_context|repository_context_mismatch|authority_path_mismatch|issue_identity_mismatch)$/u) },
     });
   });
 

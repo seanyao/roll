@@ -99,15 +99,15 @@ describe("US-WS-023 public create-only surface audit", () => {
       .split(/\r?\n/u)
       .map((line, index) => ({ path, line: index + 1, text: line.trim() }))
       .filter((entry) => /roll\.workspace-init\/v1|Legacy Workspace init config|legacy_init_subcommand/u.test(entry.text))
-      .map((entry) => `${entry.path}:${entry.line}:${entry.text}`));
+      .map((entry) => `${entry.path}:${entry.text}`));
 
     expect(legacyLines).toEqual([
-      "packages/cli/src/commands/workspace.ts:298:process.stderr.write(`${msg(\"workspace.error.legacy_init_subcommand\")}\\n`);",
-      "packages/core/src/workspace/create-plan.ts:291:if (raw.schema === \"roll.workspace-init/v1\") {",
-      "packages/core/src/workspace/create-plan.ts:297:message: \"Legacy Workspace init config must be converted before create\",",
-      "packages/core/src/workspace/create-plan.ts:298:conversions: [{ path: \"schema\", from: \"roll.workspace-init/v1\", to: WORKSPACE_CREATE_CONFIG_V1 }],",
-      "packages/spec/src/i18n/catalog-v3.ts:218:\"workspace.error.legacy_init_subcommand\": { en: \"Unknown workspace subcommand \\\"init\\\". Use \\\"roll workspace create\\\".\", zh: \"未知工作区子命令“init”。请使用“roll workspace create”。\" },",
-      "packages/spec/src/i18n/catalog-v3.ts:228:\"workspace.create.error.legacy_create_config\": { en: \"Legacy Workspace init config must be converted before create\", zh: \"旧版工作区 init 配置必须转换后才能创建\" },",
+      "packages/cli/src/commands/workspace.ts:process.stderr.write(`${msg(\"workspace.error.legacy_init_subcommand\")}\\n`);",
+      "packages/core/src/workspace/create-plan.ts:if (raw.schema === \"roll.workspace-init/v1\") {",
+      "packages/core/src/workspace/create-plan.ts:message: \"Legacy Workspace init config must be converted before create\",",
+      "packages/core/src/workspace/create-plan.ts:conversions: [{ path: \"schema\", from: \"roll.workspace-init/v1\", to: WORKSPACE_CREATE_CONFIG_V1 }],",
+      "packages/spec/src/i18n/catalog-v3.ts:\"workspace.error.legacy_init_subcommand\": { en: \"Unknown workspace subcommand \\\"init\\\". Use \\\"roll workspace create\\\".\", zh: \"未知工作区子命令“init”。请使用“roll workspace create”。\" },",
+      "packages/spec/src/i18n/catalog-v3.ts:\"workspace.create.error.legacy_create_config\": { en: \"Legacy Workspace init config must be converted before create\", zh: \"旧版工作区 init 配置必须转换后才能创建\" },",
     ]);
   });
 

@@ -118,5 +118,6 @@ export * from "./tools/index.js";
 export * from "./browser-operations/index.js";
 
 export * from "./cycle/round-journal.js";
+export * from "./cycle/repair-briefing.js";
 export * from "./watch/run-watchdog.js";
 export * from "./watch/role-timeout-config.js";

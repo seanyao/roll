@@ -21,6 +21,17 @@ function block(reason: DeltaBlockReason, detail: string): ProtocolResult {
   return { ok: false, reason, detail };
 }
 
+/**
+ * The ONE digest primitive for the v2 artifact protocol: sha256 of an artifact's
+ * bytes as lowercase hex. {@link validateDigests} cross-checks a manifest's
+ * declared `sha256` against this, and any producer that records an artifact digest
+ * (e.g. the repair briefing, US-CYCLE-007) MUST use this same function so there is
+ * exactly one digest scheme, never a parallel one.
+ */
+export function computeArtifactSha256(bytes: Buffer | string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /** Worktree access each role's manifest MUST declare (only the Builder writes). */
 export function expectedWorktreeAccess(role: DeltaRole): "read-only" | "builder-write" {
   return role === "builder" ? "builder-write" : "read-only";
@@ -85,7 +96,7 @@ export function validateDigests(
     if (bytes === null) {
       return block("artifact_invalid", `output artifact missing on disk: ${ref.path}`);
     }
-    const actual = createHash("sha256").update(bytes).digest("hex");
+    const actual = computeArtifactSha256(bytes);
     if (actual !== ref.sha256) {
       return block("artifact_invalid", `digest mismatch for ${ref.path}: manifest ${ref.sha256} ≠ actual ${actual}`);
     }

@@ -6,7 +6,11 @@ import {
   rmSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { normalizeContextGitRemote, type GitLlmWikiProviderConfigV1 } from "@roll/spec";
+import {
+  normalizeContextGitRemote,
+  type ContextDiagnosticCode,
+  type GitLlmWikiProviderConfigV1,
+} from "@roll/spec";
 import { git, type GitExecutionOptions, type GitResult } from "../git.js";
 import { acquireLock, readLockOwner, releaseLock } from "../process.js";
 import {
@@ -39,7 +43,25 @@ export interface FreshGitLlmWikiReadInput {
   readonly lockTimeoutMs?: number;
   readonly lockRetryMs?: number;
   readonly now?: () => number;
+  readonly audit?: GitLlmWikiReadAuditSink;
 }
+
+export interface GitLlmWikiReadAuditEventV1 {
+  readonly type: "context:git-llm-wiki-read";
+  readonly providerId: string;
+  readonly remoteIdentity: string;
+  readonly branch: string;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly durationMs: number;
+  readonly outcome: "completed" | "failed";
+  readonly revision?: string;
+  readonly diagnosticCode?: ContextDiagnosticCode;
+}
+
+export type GitLlmWikiReadAuditSink = (
+  event: GitLlmWikiReadAuditEventV1,
+) => void | Promise<void>;
 
 interface ProviderReadLease {
   readonly token: string;
@@ -53,6 +75,14 @@ interface CheckedGitOptions {
 }
 
 const FULL_GIT_OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+const CONTEXT_GIT_ENV: Readonly<Record<string, string>> = {
+  LC_ALL: "C",
+  LANG: "C",
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_ASKPASS: "false",
+  SSH_ASKPASS: "false",
+  GCM_INTERACTIVE: "Never",
+};
 
 function policyCommand(operation: readonly string[]): readonly string[] {
   return [...GIT_LLM_WIKI_POLICY_ARGS, ...operation];
@@ -144,7 +174,7 @@ async function checkedGit(
   assertLease(identity, lease);
   let result: GitResult;
   try {
-    result = await runGit(args, cwd, { timeoutMs: options.timeoutMs });
+    result = await runGit(args, cwd, { timeoutMs: options.timeoutMs, env: CONTEXT_GIT_ENV });
   } catch {
     throw new ContextTransportError(
       options.failureCode ?? "fetch_failed",
@@ -232,7 +262,7 @@ async function initializeCache(
       identity,
       lease,
       runGit,
-      policyCommand(["remote", "add", identity.remoteName, identity.remoteIdentity]),
+      policyCommand(["remote", "add", identity.remoteName, identity.fetchEndpoint]),
       identity.temporaryPath,
       { operation: "remote setup", timeoutMs },
     );
@@ -324,11 +354,17 @@ export async function withFreshGitLlmWikiRead<T>(
   if (!Number.isFinite(lockTimeoutMs) || lockTimeoutMs < 0 || !Number.isFinite(lockRetryMs) || lockRetryMs <= 0) {
     throw new ContextTransportError("invalid_provider_config", "Context Provider lock timing is invalid", identity.providerId);
   }
-  prepareCacheRoots(identity);
-  const lease = await takeProviderReadLock(identity, lockTimeoutMs, lockRetryMs);
   const runGit = input.runGit ?? git;
   const timeoutMs = input.provider.fetch_timeout_seconds * 1_000;
+  const now = input.now ?? Date.now;
+  const startedAtMs = now();
+  let lease: ProviderReadLease | undefined;
+  let operation:
+    | { readonly ok: true; readonly revision: GitProviderRevisionV1; readonly value: T }
+    | { readonly ok: false; readonly error: unknown };
   try {
+    prepareCacheRoots(identity);
+    lease = await takeProviderReadLock(identity, lockTimeoutMs, lockRetryMs);
     assertLease(identity, lease);
     await ensureCache(identity, lease, runGit, timeoutMs);
     const revision = await fetchRevision(
@@ -337,13 +373,49 @@ export async function withFreshGitLlmWikiRead<T>(
       lease,
       runGit,
       timeoutMs,
-      input.now ?? Date.now,
+      now,
     );
     assertLease(identity, lease);
     const value = await readAtRevision(revision);
     assertLease(identity, lease);
-    return { revision, value };
+    operation = { ok: true, revision, value };
+  } catch (error) {
+    operation = { ok: false, error };
   } finally {
-    releaseProviderReadLock(identity, lease);
+    if (lease !== undefined) releaseProviderReadLock(identity, lease);
   }
+
+  const finishedAtMs = now();
+  const timing = {
+    startedAt: new Date(startedAtMs).toISOString(),
+    finishedAt: new Date(finishedAtMs).toISOString(),
+    durationMs: Math.max(0, finishedAtMs - startedAtMs),
+  };
+  if (!operation.ok) {
+    const event: GitLlmWikiReadAuditEventV1 = {
+      type: "context:git-llm-wiki-read",
+      providerId: identity.providerId,
+      remoteIdentity: identity.remoteIdentity,
+      branch: identity.branch,
+      ...timing,
+      outcome: "failed",
+      ...(operation.error instanceof ContextTransportError ? { diagnosticCode: operation.error.code } : {}),
+    };
+    try {
+      await input.audit?.(event);
+    } catch {
+      // Preserve the primary transport/read failure; audit sinks must not mask it.
+    }
+    throw operation.error;
+  }
+  await input.audit?.({
+    type: "context:git-llm-wiki-read",
+    providerId: identity.providerId,
+    remoteIdentity: identity.remoteIdentity,
+    branch: identity.branch,
+    ...timing,
+    outcome: "completed",
+    revision: operation.revision.revision,
+  });
+  return { revision: operation.revision, value: operation.value };
 }

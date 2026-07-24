@@ -66,6 +66,11 @@ export interface GitLlmWikiProviderConfigV1 {
   readonly fetch_timeout_seconds: number;
 }
 
+export interface ContextGitRemoteV1 {
+  readonly remoteIdentity: string;
+  readonly fetchEndpoint: string;
+}
+
 export interface ContextProviderRegistryV1 {
   readonly schema: typeof CONTEXT_PROVIDER_REGISTRY_V1;
   readonly enabled: boolean;
@@ -362,8 +367,8 @@ function normalizeHost(value: string): string | undefined {
   }
 }
 
-export function normalizeContextGitRemote(value: unknown): ContractResult<string> {
-  const fail = (): ContractResult<string> => ({
+export function resolveContextGitRemote(value: unknown): ContractResult<ContextGitRemoteV1> {
+  const fail = (): ContractResult<ContextGitRemoteV1> => ({
     ok: false,
     errors: [error("invalid_value", "remote", "Context provider remote must use credential-free HTTPS or SSH")],
   });
@@ -373,23 +378,46 @@ export function normalizeContextGitRemote(value: unknown): ContractResult<string
   if (https !== null) {
     const host = https[1] === undefined ? undefined : normalizeHost(https[1]);
     const path = https[2] === undefined ? undefined : safeRemotePath(https[2]);
-    return host === undefined || path === undefined ? fail() : { ok: true, value: `https://${host}/${path}` };
+    if (host === undefined || path === undefined) return fail();
+    const remoteIdentity = `https://${host}/${path}`;
+    return { ok: true, value: { remoteIdentity, fetchEndpoint: remoteIdentity } };
   }
 
-  const ssh = /^ssh:\/\/(?:[A-Za-z0-9._~-]+@)?([^/@:]+)(?::22)?\/(.+)$/u.exec(value);
+  const ssh = /^ssh:\/\/(?:([A-Za-z0-9._~-]+)@)?([^/@:]+)(?::22)?\/(.+)$/u.exec(value);
   if (ssh !== null) {
-    const host = ssh[1] === undefined ? undefined : normalizeHost(ssh[1]);
-    const path = ssh[2] === undefined ? undefined : safeRemotePath(ssh[2]);
-    return host === undefined || path === undefined ? fail() : { ok: true, value: `ssh://${host}/${path}` };
+    const user = ssh[1];
+    const host = ssh[2] === undefined ? undefined : normalizeHost(ssh[2]);
+    const path = ssh[3] === undefined ? undefined : safeRemotePath(ssh[3]);
+    if (host === undefined || path === undefined) return fail();
+    return {
+      ok: true,
+      value: {
+        remoteIdentity: `ssh://${host}/${path}`,
+        fetchEndpoint: `ssh://${user === undefined ? "" : `${user}@`}${host}/${path}`,
+      },
+    };
   }
 
   const scp = /^([A-Za-z0-9._~-]+)@([^:@/]+):(.+)$/u.exec(value);
   if (scp !== null) {
+    const user = scp[1];
     const host = scp[2] === undefined ? undefined : normalizeHost(scp[2]);
     const path = scp[3] === undefined ? undefined : safeRemotePath(scp[3]);
-    return host === undefined || path === undefined ? fail() : { ok: true, value: `ssh://${host}/${path}` };
+    if (user === undefined || host === undefined || path === undefined) return fail();
+    return {
+      ok: true,
+      value: {
+        remoteIdentity: `ssh://${host}/${path}`,
+        fetchEndpoint: `ssh://${user}@${host}/${path}`,
+      },
+    };
   }
   return fail();
+}
+
+export function normalizeContextGitRemote(value: unknown): ContractResult<string> {
+  const resolved = resolveContextGitRemote(value);
+  return resolved.ok ? { ok: true, value: resolved.value.remoteIdentity } : resolved;
 }
 
 export function isValidContextBranch(value: string): boolean {
@@ -417,14 +445,14 @@ function parseProvider(value: unknown, index: number, errors: ContractError[]): 
   if (!Number.isSafeInteger(timeout) || (timeout as number) < 5 || (timeout as number) > 300) {
     errors.push(error("invalid_value", `${path}.fetch_timeout_seconds`, "fetch timeout must be an integer from 5 to 300 seconds"));
   }
-  const remote = normalizeContextGitRemote(value["remote"]);
+  const remote = resolveContextGitRemote(value["remote"]);
   if (!remote.ok) errors.push(...remote.errors.map((entry) => ({ ...entry, path: `${path}.${entry.path}` })));
   if (
     id === undefined || enabled === undefined || branch === undefined || value["type"] !== "git_llm_wiki" ||
     !Number.isSafeInteger(timeout) || (timeout as number) < 5 || (timeout as number) > 300 || !remote.ok ||
     !isValidContextProviderId(id) || !isValidContextBranch(branch)
   ) return undefined;
-  return { id, type: "git_llm_wiki", enabled, remote: remote.value, branch, fetch_timeout_seconds: timeout as number };
+  return { id, type: "git_llm_wiki", enabled, remote: remote.value.fetchEndpoint, branch, fetch_timeout_seconds: timeout as number };
 }
 
 export function parseContextProviderRegistry(value: unknown): ContractResult<ContextProviderRegistryV1> {

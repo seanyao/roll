@@ -346,6 +346,23 @@ export type WorkspaceContextScope =
   | "repository_required"
   | "legacy_migration_only";
 
+export type WorkspaceContextPolicySurface = "cli" | "skill" | "tool";
+
+export type WorkspaceContextConsumer = "workspace" | "issue" | "repository";
+
+/** Closed, operation-level declaration for every public Workspace-aware surface. */
+export interface WorkspaceContextPolicy {
+  readonly surface: WorkspaceContextPolicySurface;
+  readonly id: string;
+  readonly operation: string;
+  readonly scope: WorkspaceContextScope;
+  readonly allowsAmbientCwd: boolean;
+  readonly allowsLegacyRollPath: boolean;
+  readonly acceptsWorkspaceSelector?: boolean;
+  readonly contextConsumer?: WorkspaceContextConsumer;
+  readonly rationale?: string;
+}
+
 export type WorkspaceExecutionContextResolutionSource =
   | "explicit"
   | "environment"

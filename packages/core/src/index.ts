@@ -35,6 +35,7 @@ export * from "./context/revision-comparator.js";
 export * from "./context/stage-handoff.js";
 export * from "./workspace/edit-plan.js";
 export * from "./workspace/execution-context.js";
+export * from "./workspace/context-policy.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

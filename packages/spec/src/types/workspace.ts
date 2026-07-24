@@ -13,6 +13,7 @@ export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as
 export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
 export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-reference-index/v1" as const;
 export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
+export const WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 = "roll.workspace-create-apply-authorization/v1" as const;
 
 export const REQUIREMENT_HINT_PROVENANCES = [
   "explicit_user",
@@ -24,6 +25,14 @@ export const REQUIREMENT_HINT_PROVENANCES = [
 ] as const;
 
 export type Sha256Digest = string;
+
+export interface WorkspaceCreateApplyAuthorizationV1 {
+  readonly schema: typeof WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1;
+  readonly workspaceId: string;
+  readonly configSha256: Sha256Digest;
+  readonly planSha256: Sha256Digest;
+  readonly source: "direct_cli_apply" | "owner_after_preview";
+}
 
 export type HistoricalRemoteTruth =
   | {

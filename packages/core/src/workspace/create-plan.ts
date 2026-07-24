@@ -1,12 +1,15 @@
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   REPOSITORY_BINDING_V1,
+  WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
   WORKSPACE_MANIFEST_V1,
   parseRepositoryBinding,
   repositoryIdFromRemote,
   type ContractErrorCode,
   type RepositoryBinding,
   type RequirementSourceReference,
+  type WorkspaceCreateApplyAuthorizationV1,
   type WorkspaceManifest,
 } from "@roll/spec";
 
@@ -41,8 +44,22 @@ export interface WorkspaceCreatePlan {
   readonly workspaceId: string;
   readonly root: string;
   readonly outcome: WorkspaceCreateAction;
+  readonly configSha256: string;
+  readonly planSha256: string;
   readonly steps: readonly WorkspaceCreatePlanStep[];
 }
+
+export type WorkspaceCreateApplyAuthorizationParseResult =
+  | { readonly ok: true; readonly value: WorkspaceCreateApplyAuthorizationV1 }
+  | { readonly ok: false; readonly code: "invalid_apply_authorization" };
+
+export type WorkspaceCreateApplyAuthorizationValidation =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly code: "apply_authorization_required" | "apply_authorization_stale";
+      readonly nextAction: string;
+    };
 
 export interface WorkspaceCreateParseError {
   readonly code: ContractErrorCode | "invalid_config" | "path_conflict" | "legacy_create_config";
@@ -188,6 +205,10 @@ function parseConfigDocument(text: string): unknown {
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[]): string[] {
   const allow = new Set(allowed);
   return Object.keys(value).filter((key) => !allow.has(key));
+}
+
+function sha256(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function nonEmptyString(value: unknown): value is string {
@@ -388,5 +409,82 @@ export function buildWorkspaceCreatePlan(config: WorkspaceCreateConfig, probe: W
   const outcome: WorkspaceCreateAction = steps.some((step) => step.action === "rejected") ? "rejected" :
     journalAction === "repaired" || businessActions.includes("repaired") ? "repaired" :
     businessActions.includes("created") ? "created" : "reused";
-  return { schema: "roll.workspace-create-plan/v1", workspaceId: config.workspaceId, root: config.root, outcome, steps };
+  const configSha256 = sha256({
+    workspaceId: config.workspaceId,
+    root: config.root,
+    manifest: config.manifest,
+  });
+  const planSha256 = sha256({
+    schema: "roll.workspace-create-plan/v1",
+    workspaceId: config.workspaceId,
+    root: config.root,
+    outcome,
+    configSha256,
+    steps,
+  });
+  return {
+    schema: "roll.workspace-create-plan/v1",
+    workspaceId: config.workspaceId,
+    root: config.root,
+    outcome,
+    configSha256,
+    planSha256,
+    steps,
+  };
+}
+
+export function buildWorkspaceCreateApplyAuthorization(
+  plan: WorkspaceCreatePlan,
+  source: WorkspaceCreateApplyAuthorizationV1["source"],
+): WorkspaceCreateApplyAuthorizationV1 {
+  return {
+    schema: WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
+    workspaceId: plan.workspaceId,
+    configSha256: plan.configSha256,
+    planSha256: plan.planSha256,
+    source,
+  };
+}
+
+export function parseWorkspaceCreateApplyAuthorization(text: string): WorkspaceCreateApplyAuthorizationParseResult {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  if (!isRecord(value) || exactKeys(value, ["schema", "workspaceId", "configSha256", "planSha256", "source"]).length > 0) {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  if (value["schema"] !== WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 ||
+    !nonEmptyString(value["workspaceId"]) ||
+    typeof value["configSha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(value["configSha256"]) ||
+    typeof value["planSha256"] !== "string" || !/^[0-9a-f]{64}$/u.test(value["planSha256"]) ||
+    (value["source"] !== "direct_cli_apply" && value["source"] !== "owner_after_preview")) {
+    return { ok: false, code: "invalid_apply_authorization" };
+  }
+  return {
+    ok: true,
+    value: {
+      schema: WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1,
+      workspaceId: value["workspaceId"],
+      configSha256: value["configSha256"],
+      planSha256: value["planSha256"],
+      source: value["source"],
+    },
+  };
+}
+
+export function validateWorkspaceCreateApplyAuthorization(
+  plan: WorkspaceCreatePlan,
+  authorization: WorkspaceCreateApplyAuthorizationV1 | undefined,
+): WorkspaceCreateApplyAuthorizationValidation {
+  const nextAction = `roll workspace create ${plan.workspaceId} --config <path> --check --json`;
+  if (authorization === undefined) return { ok: false, code: "apply_authorization_required", nextAction };
+  if (authorization.workspaceId !== plan.workspaceId ||
+    authorization.configSha256 !== plan.configSha256 ||
+    authorization.planSha256 !== plan.planSha256) {
+    return { ok: false, code: "apply_authorization_stale", nextAction };
+  }
+  return { ok: true };
 }

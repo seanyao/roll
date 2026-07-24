@@ -21,6 +21,7 @@ import { cardArchiveDir } from "../lib/archive.js";
 import { readLatestStoryReviewScore } from "../lib/review-score.js";
 import { storySpecPath } from "./attest-gate.js";
 import { resolveExecutionCwd } from "./submodule-worktree.js";
+import { spawnWatched } from "./spawn-observers.js";
 import type { Ports } from "./ports.js";
 import { eventTs } from "./runner-time.js";
 
@@ -230,7 +231,6 @@ function deliveredAcItems(repoCwd: string, storyId: string): string[] {
   }
 }
 
-const DESIGNER_TIMEOUT_MS = 20 * 60 * 1000;
 
 function buildDesignerPrompt(storyId: string, contractAbsPath: string): string {
   return [
@@ -268,12 +268,22 @@ export async function runDesignerStage(
   if (!existsSync(contractPath)) {
     try {
       mkdirSync(dir, { recursive: true });
-      await ports.agentSpawn(designerAgent, {
-        cwd: execCwd,
-        skillBody: buildDesignerPrompt(storyId, contractPath),
-        storyId,
-        timeoutMs: DESIGNER_TIMEOUT_MS,
-        runDir: dir,
+      // US-CYCLE-002: the designer sub-spawn goes through the shared watchdog —
+      // per-role cap (designer 20min) + liveness renewal in its own cwd, so a
+      // productive designer survives and a silent one dies on schedule.
+      await spawnWatched({
+        ports,
+        ctx,
+        purpose: "designer",
+        agent: designerAgent,
+        observeCwd: execCwd,
+        run: () =>
+          ports.agentSpawn(designerAgent, {
+            cwd: execCwd,
+            skillBody: buildDesignerPrompt(storyId, contractPath),
+            storyId,
+            runDir: dir,
+          }),
       });
     } catch {
       /* a designer spawn blip -> no contract -> validation below fails closed */

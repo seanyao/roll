@@ -47,6 +47,7 @@ import { eventTs, guardRuntimeDir } from "./runner-time.js";
 import { quarantineMainCheckoutForCycle } from "./sandbox-boundary.js";
 import { agentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
+import { spawnWatched } from "./spawn-observers.js";
 import { resolveIntegrationBranch } from "@roll/infra";
 
 const execFileAsync = promisify(execFile);
@@ -394,15 +395,26 @@ export async function executeCaptureFactsCommand(
           if (credentialBlock !== null) return { outcome: "auth-block", detail: credentialBlock };
           let res;
           try {
+            // US-CYCLE-002: the scorer sub-spawn is watchdog-wrapped (evaluator
+            // role) for uniform accounting + no bypass; its own short `timeoutMs`
+            // race remains the primary cap for this read-only scoring call.
             res = await Promise.race([
-              ports.agentSpawn(peer, {
-                // E4: the scorer inspects the committed delivery, so it runs in the
-                // execution worktree (submodule cycle worktree for a submodule story).
-                cwd: execCwd,
-                skillBody: prompt,
-                timeoutMs,
-                ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
-              }),
+              spawnWatched({
+                ports,
+                ctx,
+                purpose: "scorer",
+                agent: peer,
+                observeCwd: execCwd,
+                run: () =>
+                  ports.agentSpawn(peer, {
+                    // E4: the scorer inspects the committed delivery, so it runs in the
+                    // execution worktree (submodule cycle worktree for a submodule story).
+                    cwd: execCwd,
+                    skillBody: prompt,
+                    timeoutMs,
+                    ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
+                  }),
+              }).then((r) => r.result),
               new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs).unref()),
             ]);
           } catch (e) {

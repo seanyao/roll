@@ -91,6 +91,29 @@ export type RollEvent =
   // killed, the inflight lock released, and the worktree branch PRESERVED
   // (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
   | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number; ts: number }
+  // US-CYCLE-002 — a SUB-agent spawn (designer / evaluator / adversarial builder
+  // role / pick-ranking) was killed by the shared run-watchdog after breaching
+  // its per-role timeout cap. Unlike `cycle:timeout` (the main builder cycle),
+  // this carries role/agent/model so a supervisor delegating to sequential
+  // heterogeneous subagents can read WHICH role died, on WHICH model, WHY, and
+  // for HOW LONG — the terminal-visible accounting the epic requires. `reason`
+  // adds `external` (the run ended by something other than the watchdog).
+  | {
+      type: "spawn:kill";
+      cycleId: string;
+      role: string;
+      agent: string;
+      model?: string;
+      reason: "wall" | "no-progress" | "no-state-change" | "external";
+      durationSec: number;
+      ts: number;
+    }
+  // US-CYCLE-002 — the shared watchdog renewed a sub-agent spawn's liveness on
+  // observed git-state progress (a new commit or a worktree dirty-state change)
+  // in the run's own cwd, so a long PRODUCTIVE subagent is never mis-killed.
+  // Emitted only on git-state bumps (not per stdout chunk) to keep the stream
+  // legible; `idleSec` is how long the run had been idle before this renewal.
+  | { type: "spawn:renew"; cycleId: string; role: string; agent: string; signal: "commit" | "dirty"; idleSec: number; ts: number }
   // FIX-1474 — the builder child process was detected DEAD/MISSING by the
   // runner's liveness probe while its spawn await had NOT settled: an
   // out-of-band death (external SIGKILL of a process-tree member, PTY leader

@@ -64,6 +64,13 @@ export interface WatchRunOptions {
   /** Called once when the watchdog trips, BEFORE the kill (so the trip is
    *  durable even if the kill races the process exiting). Best-effort. */
   onTimeout: (info: RunTimeoutInfo) => void;
+  /** US-CYCLE-002 — called when a GIT-STATE bump (a new commit, or a worktree
+   *  dirty-state signature change) renews the liveness clocks. `idleSec` is how
+   *  long the run had been idle before this renewal. Fires ONLY on git-state
+   *  progress (never on `markProgress`/stdout), so a caller can surface a legible
+   *  "still working" signal without flooding on every output chunk. Best-effort;
+   *  omit to ignore renewals. */
+  onRenew?: (info: { signal: "commit" | "dirty"; idleSec: number }) => void;
   /** Kill the in-flight process tree; returns count signalled. */
   kill: () => number;
   /** Poll cadence (ms). */
@@ -87,7 +94,7 @@ export interface RunWatchHandle {
  * git-state observation happens on `opts.cwd` via the injected signals.
  */
 export function watchRun(opts: WatchRunOptions): RunWatchHandle {
-  const { cwd, clock, thresholds, progressSignals, onTimeout, kill, pollMs } = opts;
+  const { cwd, clock, thresholds, progressSignals, onTimeout, onRenew, kill, pollMs } = opts;
   const { commitCount, stateSignature } = progressSignals;
   // All criteria disabled → an inert handle (no timer). It never trips a window,
   // but STILL records an external termination so accounting stays complete.
@@ -120,8 +127,12 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
       try {
         const n = await commitCount(cwd);
         if (n > lastCommitCount) {
-          lastCommitCount = n;
           const now = clock();
+          // A new commit past the seeded baseline is a genuine renewal (the
+          // baseline seed sets lastCommitCount >= 0, so this fires only on real
+          // forward progress). Surface it before bumping the clocks.
+          if (lastCommitCount >= 0 && onRenew !== undefined) onRenew({ signal: "commit", idleSec: now - lastStateSec });
+          lastCommitCount = n;
           lastProgressSec = now;
           lastStateSec = now;
         }
@@ -135,6 +146,7 @@ export function watchRun(opts: WatchRunOptions): RunWatchHandle {
           const sig = await stateSignature(cwd);
           if (lastSignature !== undefined && sig !== lastSignature) {
             const now = clock();
+            if (onRenew !== undefined) onRenew({ signal: "dirty", idleSec: now - lastStateSec });
             lastProgressSec = now;
             lastStateSec = now;
           }

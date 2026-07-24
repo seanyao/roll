@@ -10,7 +10,7 @@ import {
   type ContextReadResultV1,
   type WorkspaceExecutionContextV1,
 } from "@roll/spec";
-import { computeContextSnapshotDigest, contextSnapshotId } from "@roll/core";
+import { advanceContextCycleStageState, computeContextSnapshotDigest, contextSnapshotId } from "@roll/core";
 import { readContextSnapshot, writeContextSnapshot } from "@roll/infra";
 import { describe, expect, it, vi } from "vitest";
 import { createContextHostAdapter } from "../src/runner/context-adapter.js";
@@ -300,6 +300,36 @@ describe("Context Agent handoff", () => {
         freshSnapshot: expect.objectContaining({ snapshotId: adoptedSnapshot.snapshotId }),
       }),
     }));
+
+    if (adopted.status !== "ready") throw new Error("expected adopted Context Snapshot");
+    const durableState = advanceContextCycleStageState({
+      refs: [ref],
+      readMode: "fresh",
+      handoff: blocked.previousHandoff,
+      revisionDecision: "adopt_new_snapshot",
+    }, adopted.handoff, "build");
+    expect(durableState).not.toHaveProperty("revisionDecision");
+    const laterSnapshot = snapshot(workspaceValue, "6", "f".repeat(40), [file(ref, "index-v6")], "build");
+    const laterHost = adapter(workspaceValue, [laterSnapshot]);
+    const { sourceStage: _sourceStage, ...laterInput } = durableState;
+    await expect(laterHost.host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      ...laterInput,
+      readMode: "fresh",
+    })).resolves.toMatchObject({
+      status: "blocked",
+      diagnostic: { code: "context_revision_changed", severity: "blocking" },
+      comparison: {
+        status: "changed",
+        handoffSnapshot: adopted.handoff.snapshot,
+        freshSnapshot: {
+          snapshotId: laterSnapshot.snapshotId,
+          snapshotDigest: laterSnapshot.snapshotDigest,
+        },
+      },
+    });
 
     const continuedSnapshot = snapshot(workspaceValue, "4", "d".repeat(40), [file(ref, "index-v4")], "build");
     const continuedHost = adapter(workspaceValue, [continuedSnapshot]);

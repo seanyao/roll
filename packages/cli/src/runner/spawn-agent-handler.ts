@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type ContextCycleStageStateV1, type CycleCommand, type CycleContext } from "@roll/core";
+import { advanceContextCycleStageState, extractUsage, getAgentSpec, toCycleCost, type AgentInternalFailure, type ContextCycleStageStateV1, type CycleCommand, type CycleContext } from "@roll/core";
 import type { CycleCost } from "@roll/spec";
 import { agentSpawnEnvironment, type AgentSpawnOptions } from "./agent-spawn.js";
 import { classifyBlockSignature, suspendRig } from "./agent-liveness.js";
@@ -211,12 +211,11 @@ export async function executeSpawnAgentCommand(
       const finalSkillBody = contextSkillBody.skillBody;
       const nextContextStage: ContextCycleStageStateV1 | undefined = contextSkillBody.handoff === undefined
         ? contextStage
-        : {
-            ...(contextStage ?? { refs: [] }),
-            readMode: "handoff_snapshot",
-            handoff: contextSkillBody.handoff,
-            sourceStage: ctx.storyId?.startsWith("FIX-") || ctx.storyId?.startsWith("BUG-") ? "fix" : "build",
-          };
+        : advanceContextCycleStageState(
+            contextStage,
+            contextSkillBody.handoff,
+            ctx.storyId?.startsWith("FIX-") || ctx.storyId?.startsWith("BUG-") ? "fix" : "build",
+          );
       // US-PORT-011: the live observation file — one stable path per project,
       // truncated at each agent start, fed every chunk in real time. The popup
       // (runner template) and any `tail -f` watcher read THIS, not buffers.

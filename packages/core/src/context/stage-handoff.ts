@@ -22,3 +22,19 @@ export interface ContextCycleStageStateV1 {
   readonly allowRestrictedReferences?: boolean;
   readonly sourceStage?: ContextStage;
 }
+
+/** Advance the durable stage state after a successful read. A revision
+ * decision authorizes exactly one comparison and is never carried forward. */
+export function advanceContextCycleStageState(
+  current: ContextCycleStageStateV1 | undefined,
+  handoff: ContextStageHandoffV1,
+  sourceStage: ContextStage,
+): ContextCycleStageStateV1 {
+  const { revisionDecision: _consumedDecision, ...carried } = current ?? { refs: [] };
+  return {
+    ...carried,
+    readMode: "handoff_snapshot",
+    handoff,
+    sourceStage,
+  };
+}

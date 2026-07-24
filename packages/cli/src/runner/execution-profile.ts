@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   applyExecutionPolicy,
+  advanceContextCycleStageState,
   assembleEvalReport,
   classifyStoryRisk,
   designContractVsDelivered,
@@ -292,12 +293,7 @@ export async function runDesignerStage(
         : "context revision needs reconciliation";
       return { ran: true, ok: false, reasons: [reason] };
     }
-    contextStage = {
-      ...requested,
-      readMode: "handoff_snapshot",
-      handoff: contextResult.handoff,
-      sourceStage: "design",
-    };
+    contextStage = advanceContextCycleStageState(requested, contextResult.handoff, "design");
     contextEnvelope = contextResult.encodedEnvelope;
   }
   try {

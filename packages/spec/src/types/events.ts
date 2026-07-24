@@ -91,6 +91,11 @@ export type RollEvent =
   // killed, the inflight lock released, and the worktree branch PRESERVED
   // (work salvageable). `elapsedSec`/`idleSec` make the trip auditable.
   | { type: "cycle:timeout"; cycleId: string; reason: "wall" | "no-progress" | "no-state-change"; elapsedSec: number; idleSec: number; ts: number }
+  // US-CYCLE-006 — a card needed more repair rounds than the threshold, so a
+  // `split-advice.md` was generated (from round-journal FACTS, not model guess)
+  // to feed the sizing error back to the design side. Signal only: no backlog /
+  // spec mutation. `rounds` is the distinct-round count observed in the journal.
+  | { type: "split:advice"; card: string; rounds: number; path: string; ts: number }
   // US-CYCLE-002 — a SUB-agent spawn (designer / evaluator / adversarial builder
   // role / pick-ranking) was killed by the shared run-watchdog after breaching
   // its per-role timeout cap. Unlike `cycle:timeout` (the main builder cycle),

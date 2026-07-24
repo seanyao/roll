@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ToolDeclaration } from "@roll/spec";
 import { commit, captureScreenshot, execFile, prCreate } from "../src/index.js";
 import { invokeInfraTool } from "../src/tools/delegation.js";
+import { TOOL_TEST_REPO_ID, toolWorkspaceContext } from "./tool-workspace-context.js";
 
 const dirs: string[] = [];
 const originalEnv = { ...process.env };
@@ -46,6 +47,54 @@ function fakeBin(name: string, script: string): void {
 }
 
 describe("US-TOOL-014 infra tool delegation", () => {
+  it("freezes and forwards Workspace context while isolating events under its authority", async () => {
+    delete process.env["ROLL_TOOL_EVENTS_PATH"];
+    delete process.env["ROLL_PROJECT_RUNTIME_DIR"];
+    const root = tmp("workspace-context");
+    const executionContext = toolWorkspaceContext("US-WS-036", root);
+    const declaration: ToolDeclaration = {
+      id: "network.test" as ToolDeclaration["id"],
+      kind: "network",
+      title: "Workspace-bound delegated test",
+      defaults: { enabled: true },
+    };
+    let receivedFrozen = false;
+
+    const result = await invokeInfraTool({
+      declaration,
+      input: { url: "https://example.test" },
+      caller: { cycleId: "cycle-context", storyId: "US-WS-036", agent: "codex" },
+      context: executionContext,
+      repoId: TOOL_TEST_REPO_ID,
+      run: async (invocation) => {
+        receivedFrozen = Object.isFrozen(invocation.context) && Object.isFrozen(invocation.context?.workspace);
+        return {
+          ok: true,
+          output: { accepted: true },
+          meta: {
+            invocationId: invocation.invocationId,
+            toolId: invocation.toolId,
+            caller: invocation.caller,
+            startedAt: invocation.ts,
+            endedAt: invocation.ts,
+            durationMs: 0,
+          },
+        };
+      },
+    });
+
+    expect(receivedFrozen).toBe(true);
+    expect(result).toMatchObject({
+      ok: true,
+      meta: { correlation: { workspaceId: "tool-tests", storyId: "US-WS-036", repoId: TOOL_TEST_REPO_ID } },
+    });
+    const authorityEvents = join(root, "runtime", "events", "tools.ndjson");
+    expect(events(authorityEvents).map((event) => event.invocation?.toolId ?? event.toolId)).toEqual([
+      "network.test",
+      "network.test",
+    ]);
+  });
+
   it("delegates public process execFile calls through the bash tool and appends events.ndjson entries", async () => {
     const dir = tmp("process");
     const eventsPath = setEventsPath(dir);

@@ -2,7 +2,7 @@ import { execFile as nodeExecFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { validateJsonSchemaValue } from "@roll/core";
+import { resolveWorkspaceExecutionContextScope, validateJsonSchemaValue } from "@roll/core";
 import type {
   ExecOpts,
   ExecResult,
@@ -12,8 +12,10 @@ import type {
   ToolInvocation,
   ToolPolicy,
   ToolResult,
+  WorkspaceContextScope,
   WorkspaceExecutionContextV1,
 } from "@roll/spec";
+import { toolCorrelation } from "./workspace-context.js";
 
 const execFileAsync = promisify(nodeExecFile);
 
@@ -29,6 +31,13 @@ export interface InfraToolOptions<I, O> {
 
 export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Promise<ToolResult<O>> {
   const caller = resolveCaller(options.caller);
+  const contextResolution = options.context === undefined
+    ? undefined
+    : resolveWorkspaceExecutionContextScope({
+        scope: delegatedScope(options.declaration, options.repoId),
+        context: options.context,
+      });
+  const frozenContext = contextResolution?.ok === true ? contextResolution.context : undefined;
   const invocation: ToolInvocation<I> = {
     invocationId: nextInvocationId(options.declaration.id),
     toolId: options.declaration.id,
@@ -36,9 +45,31 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     caller,
     policy: resolvePolicy(options.declaration, options.policy),
     ts: Date.now(),
-    ...(options.context === undefined ? {} : { context: options.context }),
+    ...(frozenContext === undefined ? {} : { context: frozenContext }),
     ...(options.repoId === undefined ? {} : { repoId: options.repoId }),
   };
+  if (contextResolution !== undefined && !contextResolution.ok) {
+    const result: ToolResult<never> = {
+      ok: false,
+      error: {
+        code: contextResolution.error.code.startsWith("missing_")
+          ? "missing_execution_context"
+          : "invalid_execution_context",
+        message: contextResolution.error.message,
+        retryable: false,
+      },
+      meta: invocationMeta(invocation, invocation.ts, Date.now()),
+    };
+    await appendToolEvent({
+      type: "tool:result",
+      cycleId: caller.cycleId,
+      invocationId: invocation.invocationId,
+      toolId: invocation.toolId,
+      result: sanitizeResult(result),
+      ts: Date.now(),
+    });
+    return result;
+  }
   const emitEvents = options.declaration.emitsEvents !== false;
   if (emitEvents) {
     await appendToolEvent({
@@ -60,14 +91,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
         retryable: false,
         detail: inputValidation.errors,
       },
-      meta: {
-        invocationId: invocation.invocationId,
-        toolId: invocation.toolId,
-        caller: invocation.caller,
-        startedAt: invocation.ts,
-        endedAt: Date.now(),
-        durationMs: Math.max(0, Date.now() - invocation.ts),
-      },
+      meta: invocationMeta(invocation, invocation.ts, Date.now()),
     };
     if (emitEvents || !result.ok) {
       await appendToolEvent({
@@ -82,7 +106,7 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     return result;
   }
 
-  const result = await options.run(invocation);
+  const result = withCorrelation(await options.run(invocation), invocation);
   if (emitEvents || !result.ok) {
     await appendToolEvent({
       type: "tool:result",
@@ -94,6 +118,38 @@ export async function invokeInfraTool<I, O>(options: InfraToolOptions<I, O>): Pr
     }, invocation.context);
   }
   return result;
+}
+
+function delegatedScope(declaration: ToolDeclaration, repoId: string | undefined): WorkspaceContextScope {
+  if (repoId !== undefined || ["bash", "filesystem", "git"].includes(String(declaration.kind))) {
+    return "repository_required";
+  }
+  if (["browser", "physical", "github", "mcp", "network"].includes(String(declaration.kind))) {
+    return "issue_required";
+  }
+  return "workspace_required_read";
+}
+
+function invocationMeta(
+  invocation: ToolInvocation<unknown>,
+  startedAt: number,
+  endedAt: number,
+): ToolResult<unknown>["meta"] {
+  const correlation = toolCorrelation(invocation);
+  return {
+    invocationId: invocation.invocationId,
+    toolId: invocation.toolId,
+    caller: invocation.caller,
+    startedAt,
+    endedAt,
+    durationMs: Math.max(0, endedAt - startedAt),
+    ...(correlation === undefined ? {} : { correlation }),
+  };
+}
+
+function withCorrelation<T>(result: ToolResult<T>, invocation: ToolInvocation<unknown>): ToolResult<T> {
+  const correlation = toolCorrelation(invocation);
+  return correlation === undefined ? result : { ...result, meta: { ...result.meta, correlation } };
 }
 
 export const infraToolFs: MinimalFs = {

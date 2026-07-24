@@ -1,8 +1,50 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { dispatch, registerPorted } from "../src/bridge.js";
+
+const WORKSPACE_SUBTREE_CASES: ReadonlyArray<{
+  readonly name: string;
+  readonly args: readonly string[];
+}> = [
+  { name: "list", args: ["list", "--json"] },
+  { name: "create passthrough", args: ["create", "demo", "--config", "demo.workspace.yaml", "--check", "--json"] },
+  { name: "edit passthrough", args: ["edit", "demo", "--display-name", "Demo", "--check", "--json"] },
+  { name: "init", args: ["init", "demo", "--config", "demo.workspace.yaml", "--check", "--json"] },
+  { name: "doctor", args: ["doctor", "demo", "--json"] },
+  { name: "issue", args: ["issue", "init", "US-WS-022", "--workspace", "roll", "--check", "--json"] },
+  { name: "requirement", args: ["requirement", "add", "--workspace", "roll", "--provider", "file", "--ref", "REQ-1"] },
+  { name: "migrate", args: ["migrate", "--from", "/tmp/repo", "--check", "--workspace", "roll", "--json"] },
+  { name: "show", args: ["show", "demo", "--json"] },
+  { name: "register", args: ["register", "demo", "/tmp/demo", "--json"] },
+  { name: "activate", args: ["activate", "demo", "--json"] },
+  { name: "pause", args: ["pause", "demo", "--json"] },
+  { name: "archive", args: ["archive", "demo", "--json"] },
+];
+
+let englishHome = "";
+let savedRollHome: string | undefined;
+let savedRollLang: string | undefined;
+
+beforeEach(() => {
+  savedRollHome = process.env["ROLL_HOME"];
+  savedRollLang = process.env["ROLL_LANG"];
+  englishHome = mkdtempSync(join(tmpdir(), "roll-workspace-alias-en-"));
+  const rollHome = join(englishHome, ".roll");
+  mkdirSync(rollHome, { recursive: true });
+  writeFileSync(join(rollHome, "config.yaml"), "lang: en\n");
+  process.env["ROLL_HOME"] = rollHome;
+  process.env["ROLL_LANG"] = "en";
+});
+
+afterEach(() => {
+  if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+  else process.env["ROLL_HOME"] = savedRollHome;
+  if (savedRollLang === undefined) delete process.env["ROLL_LANG"];
+  else process.env["ROLL_LANG"] = savedRollLang;
+  rmSync(englishHome, { recursive: true, force: true });
+});
 
 async function captureDispatch(argv: string[]): Promise<{
   readonly status: number;
@@ -27,28 +69,24 @@ async function captureDispatch(argv: string[]): Promise<{
 }
 
 describe("US-WS-022 workspace command alias", () => {
-  it("canonicalizes the complete `ws` subtree before the workspace handler", async () => {
-    const calls: string[][] = [];
-    registerPorted("workspace", (args) => {
-      calls.push(args);
-      process.stdout.write(`${JSON.stringify({ command: "workspace", args })}\n`);
-      return 0;
-    });
+  it("canonicalizes every representative workspace subtree through one handler", async () => {
+    for (const testCase of WORKSPACE_SUBTREE_CASES) {
+      const calls: string[][] = [];
+      registerPorted("workspace", (args) => {
+        calls.push(args);
+        process.stdout.write(`${JSON.stringify({ command: "workspace", args })}\n`);
+        return 7;
+      });
 
-    const canonical = await captureDispatch([
-      "workspace", "create", "demo", "--config", "demo.workspace.yaml", "--check", "--json",
-    ]);
-    const alias = await captureDispatch([
-      "ws", "create", "demo", "--config", "demo.workspace.yaml", "--check", "--json",
-    ]);
+      const canonical = await captureDispatch(["workspace", ...testCase.args]);
+      const alias = await captureDispatch(["ws", ...testCase.args]);
 
-    expect(alias).toEqual(canonical);
-    expect(calls).toEqual([
-      ["create", "demo", "--config", "demo.workspace.yaml", "--check", "--json"],
-      ["create", "demo", "--config", "demo.workspace.yaml", "--check", "--json"],
-    ]);
-    expect(alias.stdout).toContain('"command":"workspace"');
-    expect(alias.stdout).not.toContain('"command":"ws"');
+      expect(alias, testCase.name).toEqual(canonical);
+      expect(alias.status, testCase.name).toBe(7);
+      expect(calls, testCase.name).toEqual([[...testCase.args], [...testCase.args]]);
+      expect(alias.stdout, testCase.name).toContain('"command":"workspace"');
+      expect(alias.stdout, testCase.name).not.toContain('"command":"ws"');
+    }
   });
 
   it("keeps canonical help primary and derives the visible alias note", async () => {

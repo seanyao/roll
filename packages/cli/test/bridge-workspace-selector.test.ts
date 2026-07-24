@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   canonicalizeWorkspaceAliasTokens,
   dispatch,
@@ -36,13 +39,37 @@ async function captureDispatch(argv: string[]): Promise<{
 
 describe("US-WS-022 bridge Workspace selector normalization", () => {
   let calls: string[][];
+  let englishHome: string;
+  let savedRollHome: string | undefined;
+  let savedRollLang: string | undefined;
+  let savedRollWs: string | undefined;
 
   beforeEach(() => {
+    savedRollHome = process.env["ROLL_HOME"];
+    savedRollLang = process.env["ROLL_LANG"];
+    savedRollWs = process.env["ROLL_WS"];
+    englishHome = mkdtempSync(join(tmpdir(), "roll-workspace-selector-en-"));
+    const rollHome = join(englishHome, ".roll");
+    mkdirSync(rollHome, { recursive: true });
+    writeFileSync(join(rollHome, "config.yaml"), "lang: en\n");
+    process.env["ROLL_HOME"] = rollHome;
+    process.env["ROLL_LANG"] = "en";
+    delete process.env["ROLL_WS"];
     calls = [];
     registerPorted("backlog", (args) => {
       calls.push(args);
       return 0;
     });
+  });
+
+  afterEach(() => {
+    if (savedRollHome === undefined) delete process.env["ROLL_HOME"];
+    else process.env["ROLL_HOME"] = savedRollHome;
+    if (savedRollLang === undefined) delete process.env["ROLL_LANG"];
+    else process.env["ROLL_LANG"] = savedRollLang;
+    if (savedRollWs === undefined) delete process.env["ROLL_WS"];
+    else process.env["ROLL_WS"] = savedRollWs;
+    rmSync(englishHome, { recursive: true, force: true });
   });
 
   it("normalizes the full argv before a family dispatcher without reordering", async () => {
@@ -92,7 +119,21 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(result.stderr).not.toMatch(/(^|\s)--ws(?=\s|$)/u);
   });
 
-  it("keeps unsupported operations unsupported while still canonicalizing the token", async () => {
+  it("treats the option sentinel as a missing value for either selector spelling", async () => {
+    for (const selector of ["--workspace", "--ws"] as const) {
+      calls = [];
+      const result = await captureDispatch(["backlog", selector, "--", "--json"]);
+
+      expect(result.status, selector).toBe(1);
+      expect(calls, selector).toEqual([]);
+      expect(result.stderr, selector).toContain("workspace_selector_missing_value");
+      expect(result.stderr, selector).toContain("--workspace <id|path>");
+      expect(result.stderr, selector).not.toMatch(/(^|\s)--ws(?=\s|$)/u);
+      expect(() => JSON.parse(result.stderr), selector).toThrow();
+    }
+  });
+
+  it("canonicalizes the token for an unsupported family without granting selector semantics", async () => {
     const unsupportedCalls: string[][] = [];
     registerPorted("status", (args) => {
       unsupportedCalls.push(args);
@@ -105,6 +146,22 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(unsupportedCalls).toEqual([["--workspace"]]);
   });
 
+  it("does not rewrite lookalike options or introduce a ROLL_WS environment alias", async () => {
+    registerPorted("backlog", (args) => {
+      process.stdout.write(`${JSON.stringify(args)}\n`);
+      return 0;
+    });
+
+    const lookalikes = await captureDispatch(["backlog", "--ws=roll", "--wsx", "--json"]);
+    const withoutEnvAlias = await captureDispatch(["backlog", "--json"]);
+    process.env["ROLL_WS"] = "must-not-select-anything";
+    const withEnvAlias = await captureDispatch(["backlog", "--json"]);
+
+    expect(JSON.parse(lookalikes.stdout)).toEqual(["--ws=roll", "--wsx", "--json"]);
+    expect(withEnvAlias).toEqual(withoutEnvAlias);
+    expect(JSON.parse(withEnvAlias.stdout)).toEqual(["--json"]);
+  });
+
   it("parses one canonical selector without treating post-sentinel literals as flags", () => {
     expect(parseCanonicalWorkspaceSelectorArgs([
       "show", "US-WS-022", "--workspace", "roll", "--", "--workspace", "literal",
@@ -115,7 +172,7 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     });
   });
 
-  it("generates the alias contract from every declared selector capability", () => {
+  it("validates every declared selector capability and its exact alias mapping", () => {
     expect(() => validateWorkspaceSelectorOperations(WORKSPACE_SELECTOR_OPERATIONS)).not.toThrow();
 
     for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
@@ -127,6 +184,108 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
         ok: true,
         selector: "roll",
       });
+    }
+  });
+
+  it("dispatches canonical and alias selectors identically for every declared capability", async () => {
+    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+      const operationCalls: string[][] = [];
+      registerPorted(operation.command, (args) => {
+        operationCalls.push(args);
+        process.stdout.write(`${JSON.stringify({ command: operation.command, args })}\n`);
+        return 23;
+      });
+      const aliasArgs = operation.exampleArgs.map((arg) => arg === "--workspace" ? "--ws" : arg);
+
+      const canonical = await captureDispatch([operation.command, ...operation.exampleArgs]);
+      const alias = await captureDispatch([operation.command, ...aliasArgs]);
+      const canonicalWithSentinel = await captureDispatch([
+        operation.command, ...operation.exampleArgs, "--", "--ws", "literal",
+      ]);
+      const aliasWithSentinel = await captureDispatch([
+        operation.command, ...aliasArgs, "--", "--ws", "literal",
+      ]);
+
+      expect(alias, operation.id).toEqual(canonical);
+      expect(canonical.status, operation.id).toBe(23);
+      expect(aliasWithSentinel, `${operation.id} sentinel`).toEqual(canonicalWithSentinel);
+      expect(operationCalls, operation.id).toEqual([
+        [...operation.exampleArgs],
+        [...operation.exampleArgs],
+        [...operation.exampleArgs, "--", "--ws", "literal"],
+        [...operation.exampleArgs, "--", "--ws", "literal"],
+      ]);
+    }
+  });
+
+  it("generates every duplicate-selector matrix from bridge-owned canonical errors", async () => {
+    const duplicateCases = [
+      { name: "canonical+alias", first: "--workspace", second: "--ws" },
+      { name: "alias+alias", first: "--ws", second: "--ws" },
+      { name: "canonical+canonical", first: "--workspace", second: "--workspace" },
+    ] as const;
+
+    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+      for (const duplicate of duplicateCases) {
+        let handlerRuns = 0;
+        registerPorted(operation.command, () => {
+          handlerRuns += 1;
+          return 0;
+        });
+        const selectorIndex = operation.exampleArgs.indexOf("--workspace");
+        const args = [...operation.exampleArgs];
+        args[selectorIndex] = duplicate.first;
+        args.push(duplicate.second, "other", "--json");
+
+        const result = await captureDispatch([operation.command, ...args]);
+
+        expect(result.status, `${operation.id} ${duplicate.name}`).toBe(1);
+        expect(handlerRuns, `${operation.id} ${duplicate.name}`).toBe(0);
+        expect(JSON.parse(result.stderr), `${operation.id} ${duplicate.name}`).toEqual({
+          schema: "roll.workspace-selector-error/v1",
+          error: {
+            code: "duplicate_workspace_selector",
+            message: "Provide exactly one --workspace <id|path>.",
+            command: operation.canonicalCommand,
+            nextAction: "Remove the duplicate and use --workspace <id|path> once.",
+          },
+        });
+        expect(result.stderr, `${operation.id} ${duplicate.name}`).not.toContain('"--ws"');
+      }
+    }
+  });
+
+  it("generates missing-value failures for both spellings without running handlers", async () => {
+    for (const operation of WORKSPACE_SELECTOR_OPERATIONS) {
+      for (const selector of ["--workspace", "--ws"] as const) {
+        let handlerRuns = 0;
+        registerPorted(operation.command, () => {
+          handlerRuns += 1;
+          return 0;
+        });
+        const selectorIndex = operation.exampleArgs.indexOf("--workspace");
+        const args = [
+          ...operation.exampleArgs.slice(0, selectorIndex),
+          selector,
+          "--json",
+          ...operation.exampleArgs.slice(selectorIndex + 2),
+        ];
+
+        const result = await captureDispatch([operation.command, ...args]);
+
+        expect(result.status, `${operation.id} ${selector}`).toBe(1);
+        expect(handlerRuns, `${operation.id} ${selector}`).toBe(0);
+        expect(JSON.parse(result.stderr), `${operation.id} ${selector}`).toEqual({
+          schema: "roll.workspace-selector-error/v1",
+          error: {
+            code: "workspace_selector_missing_value",
+            message: "--workspace requires <id|path>; another flag is not a selector value.",
+            command: operation.canonicalCommand,
+            nextAction: "Provide a value with --workspace <id|path>.",
+          },
+        });
+        expect(result.stderr, `${operation.id} ${selector}`).not.toContain('"--ws"');
+      }
     }
   });
 

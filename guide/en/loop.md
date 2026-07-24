@@ -547,7 +547,7 @@ input, and capability/health ranking.
 Before scheduling, Supervisor also classifies agent toolchain health signals
 from the durable event stream. It distinguishes auth blocks, network blocks,
 setup/skill-root pollution, and worktree permission failures. Pollution signals
-are routed to the delta team as a FIX rather than misclassified as auth failures.
+are routed to the delivery team as a FIX rather than misclassified as auth failures.
 Use `roll supervisor health` for the dedicated board, or read the summary from
 `roll supervisor next` / `roll supervisor why`.
 

@@ -7,8 +7,18 @@ export const ISSUE_MANIFEST_V1 = "roll.issue/v1" as const;
 export const REQUIREMENT_SOURCE_V1 = "roll.requirement-source/v1" as const;
 export const REQUIREMENT_ATTEST_PROJECTION_V1 = "roll.requirement-attest-projection/v1" as const;
 export const REQUIREMENT_ARCHIVE_AUDIT_V1 = "roll.requirement-archive-audit/v1" as const;
+export const REQUIREMENT_HINT_V1 = "roll.requirement-hint/v1" as const;
 export const WORKSPACE_MIGRATION_FACTS_V1 = "roll.workspace-migration-facts/v1" as const;
 export const WORKSPACE_MIGRATION_PLAN_V1 = "roll.workspace-migration-plan/v1" as const;
+
+export const REQUIREMENT_HINT_PROVENANCES = [
+  "explicit_user",
+  "cli_argument",
+  "issue_manifest",
+  "cwd_repository",
+  "deterministic_extraction",
+  "semantic_inference",
+] as const;
 
 export type Sha256Digest = string;
 
@@ -252,6 +262,39 @@ export interface RequirementSourceReference {
 }
 
 export type RequirementProvider = "jira" | "github_issue" | "local_file" | "user_input";
+
+export type RequirementHintProvenance = typeof REQUIREMENT_HINT_PROVENANCES[number];
+export type StructuredRequirementProvenance = Exclude<
+  RequirementHintProvenance,
+  "cwd_repository" | "semantic_inference"
+>;
+export type RepositoryHintProvenance = Exclude<RequirementHintProvenance, "semantic_inference">;
+
+export interface RequirementSourceKey {
+  readonly provider: RequirementProvider;
+  readonly ref: string;
+}
+
+export interface RequirementHintV1 {
+  readonly schema: typeof REQUIREMENT_HINT_V1;
+  readonly sources: readonly {
+    readonly key: RequirementSourceKey;
+    readonly provenance: StructuredRequirementProvenance;
+  }[];
+  readonly storyIds: readonly {
+    readonly storyId: string;
+    readonly provenance: StructuredRequirementProvenance;
+  }[];
+  readonly repositoryRemotes: readonly {
+    readonly remote: string;
+    readonly provenance: RepositoryHintProvenance;
+  }[];
+  readonly paths: readonly {
+    readonly path: string;
+    readonly provenance: RepositoryHintProvenance;
+  }[];
+  readonly semanticTerms?: readonly string[];
+}
 
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;

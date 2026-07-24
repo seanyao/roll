@@ -14,6 +14,7 @@ export * from "./workspace/migration-detection.js";
 export * from "./workspace/lifecycle.js";
 export * from "./workspace/init-plan.js";
 export * from "./workspace/requirement-source.js";
+export * from "./workspace/requirement-hint.js";
 export * from "./workspace/requirement-archive-integrity.js";
 export * from "./workspace/requirement-attest.js";
 export * from "./workspace/issue-init-plan.js";

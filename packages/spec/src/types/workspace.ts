@@ -296,6 +296,23 @@ export interface RequirementHintV1 {
   readonly semanticTerms?: readonly string[];
 }
 
+export type WorkspaceMatchEvidenceKind =
+  | "issue_exact"
+  | "requirement_source_exact"
+  | "repository_exact"
+  | "path_contained"
+  | "semantic_supported";
+
+export interface WorkspaceMatchEvidence {
+  readonly kind: WorkspaceMatchEvidenceKind;
+  readonly value: string;
+  readonly hard: boolean;
+  readonly score: number;
+  readonly source: string;
+  readonly provenance: RequirementHintProvenance;
+  readonly detail: string;
+}
+
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;
   readonly sha256: string;

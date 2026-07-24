@@ -385,7 +385,7 @@ export function resolveWorkspaceTargetInteraction<T extends WorkspaceTargetDecis
           }) ?? handoff,
         };
       }
-      const selectedArgs = [...interaction.args, ...resolved.canonicalSelector.split(" ")];
+      const selectedArgs = [...interaction.args, "--workspace", resolved.workspaceId];
       return resolved.result.ok
         ? { kind: "resolved", args: selectedArgs, result: resolved.result }
         : { kind: "target_failure", args: selectedArgs, result: resolved.result };

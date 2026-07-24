@@ -152,6 +152,26 @@ function repositoryRecord(context: JsonRecord): { readonly repositories: JsonRec
   return { repositories, repoId, repository: jsonRecord(repositories[repoId]) };
 }
 
+function externalBuildInput(): JsonRecord {
+  return JSON.parse(JSON.stringify({ facts: facts(), source: "explicit", evidence })) as JsonRecord;
+}
+
+function buildFactsRecord(input: JsonRecord): JsonRecord {
+  return jsonRecord(input["facts"]);
+}
+
+function buildIssueRecord(input: JsonRecord): JsonRecord {
+  return jsonRecord(buildFactsRecord(input)["issue"]);
+}
+
+function buildRepositoryRecord(input: JsonRecord): { readonly repositories: JsonRecord; readonly repoId: string; readonly repository: JsonRecord } {
+  const executionContext = jsonRecord(buildIssueRecord(input)["execution"]);
+  const repositories = jsonRecord(executionContext["repositories"]);
+  const repoId = Object.keys(repositories)[0];
+  if (repoId === undefined) throw new Error("fixture repository missing");
+  return { repositories, repoId, repository: jsonRecord(repositories[repoId]) };
+}
+
 describe("buildWorkspaceExecutionContext", () => {
   it("builds one frozen serializable authority snapshot without retaining mutable inputs", () => {
     const input = facts();
@@ -233,6 +253,43 @@ describe("buildWorkspaceExecutionContext", () => {
       error: { code },
     });
   });
+
+  it.each([
+    ["candidate missing", (input: JsonRecord) => { delete buildFactsRecord(input)["candidate"]; }],
+    ["candidate null", (input: JsonRecord) => { buildFactsRecord(input)["candidate"] = null; }],
+    ["candidate open", (input: JsonRecord) => { jsonRecord(buildFactsRecord(input)["candidate"])["extra"] = true; }],
+    ["manifest missing", (input: JsonRecord) => { delete buildFactsRecord(input)["manifest"]; }],
+    ["manifest null", (input: JsonRecord) => { buildFactsRecord(input)["manifest"] = null; }],
+    ["manifest open", (input: JsonRecord) => { jsonRecord(buildFactsRecord(input)["manifest"])["extra"] = true; }],
+    ["authorities missing", (input: JsonRecord) => { delete buildFactsRecord(input)["authorities"]; }],
+    ["authorities null", (input: JsonRecord) => { buildFactsRecord(input)["authorities"] = null; }],
+    ["authorities open", (input: JsonRecord) => { jsonRecord(buildFactsRecord(input)["authorities"])["extra"] = "/tmp"; }],
+    ["Issue facts null", (input: JsonRecord) => { buildFactsRecord(input)["issue"] = null; }],
+    ["Issue manifest missing", (input: JsonRecord) => { delete buildIssueRecord(input)["manifest"]; }],
+    ["Issue manifest null", (input: JsonRecord) => { buildIssueRecord(input)["manifest"] = null; }],
+    ["Issue manifest open", (input: JsonRecord) => { jsonRecord(buildIssueRecord(input)["manifest"])["extra"] = true; }],
+    ["Issue execution missing", (input: JsonRecord) => { delete buildIssueRecord(input)["execution"]; }],
+    ["Issue execution null", (input: JsonRecord) => { buildIssueRecord(input)["execution"] = null; }],
+    ["repository commands missing", (input: JsonRecord) => { delete buildRepositoryRecord(input).repository["commands"]; }],
+    ["repository commands null", (input: JsonRecord) => { buildRepositoryRecord(input).repository["commands"] = null; }],
+    ["binding workflow missing", (input: JsonRecord) => {
+      const bindings = jsonRecord(buildFactsRecord(input)["manifest"])["repositories"] as unknown[];
+      delete jsonRecord(bindings[0])["workflow"];
+    }],
+    ["requiredDelivery wrong type", (input: JsonRecord) => { buildRepositoryRecord(input).repository["requiredDelivery"] = "yes"; }],
+  ])("fails closed without throwing for malformed runtime facts: %s", (_name, mutate) => {
+    const input = externalBuildInput();
+    mutate(input);
+
+    let result: ReturnType<typeof buildWorkspaceExecutionContext> | undefined;
+    expect(() => {
+      result = buildWorkspaceExecutionContext(input as unknown as Parameters<typeof buildWorkspaceExecutionContext>[0]);
+    }).not.toThrow();
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: expect.stringMatching(/^(invalid_execution_context|workspace_identity_mismatch|authority_path_mismatch|issue_identity_mismatch|repository_context_mismatch)$/u) },
+    });
+  });
 });
 
 describe("resolveWorkspaceExecutionContextScope", () => {
@@ -293,8 +350,13 @@ describe("resolveWorkspaceExecutionContextScope", () => {
       const repository = repositoryRecord(context);
       repository.repositories[repository.repoId] = [];
     }],
+    ["requiredDelivery wrong type", (context: JsonRecord) => { repositoryRecord(context).repository["requiredDelivery"] = "yes"; }],
     ["bindings null", (context: JsonRecord) => { context["bindings"] = null; }],
     ["binding malformed", (context: JsonRecord) => { context["bindings"] = [{}]; }],
+    ["binding workflow missing", (context: JsonRecord) => {
+      const bindings = context["bindings"] as unknown[];
+      delete jsonRecord(bindings[0])["workflow"];
+    }],
     ["binding duplicate", (context: JsonRecord) => {
       const bindings = context["bindings"] as unknown[];
       bindings.push(JSON.parse(JSON.stringify(bindings[0])) as unknown);

@@ -1,7 +1,9 @@
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  ISSUE_MANIFEST_V1,
   REPOSITORY_BINDING_V1,
   WORKSPACE_EXECUTION_CONTEXT_V1,
+  WORKSPACE_MANIFEST_V1,
   type CycleRepositoryExecutionContext,
   type IssueManifest,
   type RepositoryBinding,
@@ -215,6 +217,25 @@ function validEvidence(value: unknown): boolean {
     typeof value["detail"] === "string";
 }
 
+const AUTHORITY_KEYS = [
+  "backlog",
+  "features",
+  "design",
+  "requirements",
+  "policy",
+  "evidence",
+  "toolDumps",
+  "events",
+  "runtime",
+  "locks",
+] as const;
+
+function runtimeAuthorities(value: unknown): WorkspaceExecutionAuthorityPaths | undefined {
+  return exactRecord(value, AUTHORITY_KEYS) && AUTHORITY_KEYS.every((key) => nonEmptyString(value[key]))
+    ? value as unknown as WorkspaceExecutionAuthorityPaths
+    : undefined;
+}
+
 function runtimeBindingIndex(value: unknown): ReadonlyMap<string, UnknownRecord> | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const byId = new Map<string, UnknownRecord>();
@@ -236,6 +257,75 @@ function runtimeBindingIndex(value: unknown): ReadonlyMap<string, UnknownRecord>
     aliases.add(entry["alias"]);
   }
   return byId;
+}
+
+function validRequirementSource(value: unknown): boolean {
+  return exactRecord(value, ["provider", "ref"]) &&
+    nonEmptyString(value["provider"]) && nonEmptyString(value["ref"]);
+}
+
+function runtimeWorkspaceManifest(value: unknown): WorkspaceManifest | undefined {
+  if (!exactRecord(
+    value,
+    ["schema", "workspaceId", "displayName", "requirements", "repositories"],
+    ["createdAt"],
+  )) return undefined;
+  if (
+    value["schema"] !== WORKSPACE_MANIFEST_V1 || !nonEmptyString(value["workspaceId"]) ||
+    !nonEmptyString(value["displayName"]) ||
+    (value["createdAt"] !== undefined && !nonEmptyString(value["createdAt"])) ||
+    !Array.isArray(value["requirements"]) || !value["requirements"].every(validRequirementSource) ||
+    runtimeBindingIndex(value["repositories"]) === undefined
+  ) return undefined;
+  return value as unknown as WorkspaceManifest;
+}
+
+function validIssueTarget(value: unknown): boolean {
+  if (!exactRecord(
+    value,
+    ["repoId", "alias", "access", "requiredDelivery"],
+    ["noChangePolicy", "pathScope", "dependsOnRepo"],
+  )) return false;
+  if (
+    !nonEmptyString(value["repoId"]) || !nonEmptyString(value["alias"]) ||
+    (value["access"] !== "read" && value["access"] !== "write") ||
+    typeof value["requiredDelivery"] !== "boolean" ||
+    (value["pathScope"] !== undefined && !stringArray(value["pathScope"])) ||
+    (value["dependsOnRepo"] !== undefined && !nonEmptyString(value["dependsOnRepo"]))
+  ) return false;
+  return value["access"] === "read"
+    ? value["requiredDelivery"] === false && value["noChangePolicy"] === undefined
+    : ["changes_required", "no_change_allowed"].includes(String(value["noChangePolicy"]));
+}
+
+function runtimeIssueManifest(value: unknown): IssueManifest | undefined {
+  if (!exactRecord(
+    value,
+    ["schema", "workspaceId", "storyId", "requirements", "repositories"],
+    ["integrationAcceptance"],
+  )) return undefined;
+  const repositories = value["repositories"];
+  if (
+    value["schema"] !== ISSUE_MANIFEST_V1 || !nonEmptyString(value["workspaceId"]) ||
+    !nonEmptyString(value["storyId"]) ||
+    !Array.isArray(value["requirements"]) || !value["requirements"].every(validRequirementSource) ||
+    !Array.isArray(repositories) || repositories.length === 0 || !repositories.every(validIssueTarget)
+  ) return undefined;
+  const integrationAcceptance = value["integrationAcceptance"];
+  if (
+    integrationAcceptance !== undefined &&
+    (!exactRecord(integrationAcceptance, ["command"]) ||
+      !stringArray(integrationAcceptance["command"]) || integrationAcceptance["command"].length === 0)
+  ) return undefined;
+  const repoIds = new Set<string>();
+  const aliases = new Set<string>();
+  for (const repository of repositories) {
+    const target = repository as UnknownRecord;
+    if (repoIds.has(target["repoId"] as string) || aliases.has(target["alias"] as string)) return undefined;
+    repoIds.add(target["repoId"] as string);
+    aliases.add(target["alias"] as string);
+  }
+  return value as unknown as IssueManifest;
 }
 
 function validateContextSnapshot(
@@ -266,11 +356,9 @@ function validateContextSnapshot(
     return { code: "invalid_execution_context", message: "Workspace execution context resolution evidence is invalid" };
   }
   const authorities = context["authorities"];
-  const authorityKeys = ["backlog", "features", "design", "requirements", "policy", "evidence", "toolDumps", "events", "runtime", "locks"] as const;
+  const runtimeAuthorityPaths = runtimeAuthorities(authorities);
   if (!sameAuthorities(
-    exactRecord(authorities, authorityKeys) && authorityKeys.every((key) => nonEmptyString(authorities[key]))
-      ? authorities as unknown as WorkspaceExecutionAuthorityPaths
-      : {} as WorkspaceExecutionAuthorityPaths,
+    runtimeAuthorityPaths ?? {} as WorkspaceExecutionAuthorityPaths,
     deriveWorkspaceExecutionAuthorities(workspace["canonicalRoot"]),
   )) {
     return { code: "authority_path_mismatch", message: "Workspace execution context authority paths are invalid" };
@@ -343,12 +431,144 @@ function validateContextSnapshot(
   return undefined;
 }
 
+interface ValidatedWorkspaceExecutionContextInput {
+  readonly facts: WorkspaceExecutionContextFactsV1;
+  readonly source: WorkspaceExecutionContextResolutionSource;
+  readonly evidence: readonly WorkspaceMatchEvidence[];
+}
+
+type RuntimeBuildInputResult =
+  | { readonly ok: true; readonly input: ValidatedWorkspaceExecutionContextInput }
+  | { readonly ok: false; readonly error: WorkspaceExecutionContextError };
+
+function invalidRuntimeInput(message: string): RuntimeBuildInputResult {
+  return { ok: false, error: { code: "invalid_execution_context", message } };
+}
+
+function validateRuntimeBuildInput(value: unknown): RuntimeBuildInputResult {
+  if (!exactRecord(value, ["facts", "source", "evidence"])) {
+    return invalidRuntimeInput("Workspace execution context build input has an invalid or open shape");
+  }
+  const source = value["source"];
+  const evidence = value["evidence"];
+  if (
+    !["explicit", "environment", "cwd_manifest", "issue_manifest", "requirement_discovery"].includes(String(source)) ||
+    !Array.isArray(evidence) || !evidence.every(validEvidence)
+  ) {
+    return invalidRuntimeInput("Workspace execution context build resolution evidence is invalid");
+  }
+
+  const rawFacts = value["facts"];
+  if (!exactRecord(rawFacts, ["candidate", "manifest", "authorities"], ["issue"])) {
+    return invalidRuntimeInput("Workspace execution context facts have an invalid or open shape");
+  }
+  const rawCandidate = rawFacts["candidate"];
+  if (
+    !exactRecord(rawCandidate, [
+      "workspaceId",
+      "root",
+      "canonicalRoot",
+      "manifestWorkspaceId",
+      "pathState",
+      "lifecycle",
+    ]) ||
+    !nonEmptyString(rawCandidate["workspaceId"]) || !nonEmptyString(rawCandidate["root"]) ||
+    !nonEmptyString(rawCandidate["canonicalRoot"]) || !nonEmptyString(rawCandidate["manifestWorkspaceId"]) ||
+    !["valid", "stale"].includes(String(rawCandidate["pathState"])) ||
+    !["registered", "active", "paused", "archived"].includes(String(rawCandidate["lifecycle"]))
+  ) {
+    return invalidRuntimeInput("Selected Workspace registry fact has an invalid or open shape");
+  }
+  const manifest = runtimeWorkspaceManifest(rawFacts["manifest"]);
+  if (manifest === undefined) {
+    return invalidRuntimeInput("Workspace manifest facts are invalid");
+  }
+  const authorities = runtimeAuthorities(rawFacts["authorities"]);
+  if (authorities === undefined) {
+    return { ok: false, error: { code: "authority_path_mismatch", message: "Workspace authority path facts are invalid or open" } };
+  }
+
+  const candidate = rawCandidate as unknown as WorkspaceRegistryCandidate;
+  let issue: WorkspaceExecutionContextFactsV1["issue"];
+  const rawIssue = rawFacts["issue"];
+  if (rawIssue !== undefined) {
+    if (!exactRecord(rawIssue, ["manifest", "manifestPath", "execution"]) || !nonEmptyString(rawIssue["manifestPath"])) {
+      return invalidRuntimeInput("Issue execution facts have an invalid or open shape");
+    }
+    const issueManifest = runtimeIssueManifest(rawIssue["manifest"]);
+    if (issueManifest === undefined) {
+      return invalidRuntimeInput("Issue manifest facts are invalid");
+    }
+    const execution = rawIssue["execution"];
+    if (
+      !exactRecord(execution, ["workspaceId", "issueRoot", "repositories"]) ||
+      !nonEmptyString(execution["workspaceId"]) || !nonEmptyString(execution["issueRoot"]) ||
+      !isRecord(execution["repositories"])
+    ) {
+      return invalidRuntimeInput("Issue repository execution facts have an invalid or open shape");
+    }
+    issue = {
+      manifest: issueManifest,
+      manifestPath: rawIssue["manifestPath"],
+      execution: execution as unknown as CycleRepositoryExecutionContext,
+    };
+  }
+
+  const facts: WorkspaceExecutionContextFactsV1 = {
+    candidate,
+    manifest,
+    authorities,
+    ...(issue === undefined ? {} : { issue }),
+  };
+  const provisionalContext: WorkspaceExecutionContextV1 = {
+    schema: WORKSPACE_EXECUTION_CONTEXT_V1,
+    workspace: {
+      workspaceId: candidate.workspaceId,
+      root: candidate.root,
+      canonicalRoot: candidate.canonicalRoot,
+      lifecycle: candidate.lifecycle,
+    },
+    resolution: {
+      source: source as WorkspaceExecutionContextResolutionSource,
+      evidence: evidence as unknown as readonly WorkspaceMatchEvidence[],
+    },
+    bindings: facts.manifest.repositories,
+    ...(issue === undefined ? {} : {
+      issue: {
+        storyId: issue.manifest.storyId,
+        manifestPath: issue.manifestPath,
+        execution: issue.execution,
+      },
+    }),
+    authorities,
+  };
+  const validationError = validateContextSnapshot(provisionalContext);
+  if (validationError !== undefined) return { ok: false, error: validationError };
+
+  return {
+    ok: true,
+    input: {
+      facts,
+      source: source as WorkspaceExecutionContextResolutionSource,
+      evidence: evidence as unknown as readonly WorkspaceMatchEvidence[],
+    },
+  };
+}
+
 export function buildWorkspaceExecutionContext(input: {
   readonly facts: WorkspaceExecutionContextFactsV1;
   readonly source: WorkspaceExecutionContextResolutionSource;
   readonly evidence: readonly WorkspaceMatchEvidence[];
 }): WorkspaceExecutionContextBuildResult {
-  const { candidate, manifest } = input.facts;
+  let validated: RuntimeBuildInputResult;
+  try {
+    validated = validateRuntimeBuildInput(input);
+  } catch {
+    return failure("invalid_execution_context", "Workspace execution context build input could not be validated");
+  }
+  if (!validated.ok) return { ok: false, error: validated.error };
+  const buildInput = validated.input;
+  const { candidate, manifest } = buildInput.facts;
   if (
     candidate.pathState !== "valid" || !canonicalAbsolute(candidate.root) ||
     !canonicalAbsolute(candidate.canonicalRoot)
@@ -365,10 +585,10 @@ export function buildWorkspaceExecutionContext(input: {
     return failure("repository_context_mismatch", "Workspace repository bindings are incomplete or duplicated");
   }
   const expectedAuthorities = deriveWorkspaceExecutionAuthorities(candidate.canonicalRoot);
-  if (!sameAuthorities(input.facts.authorities, expectedAuthorities)) {
+  if (!sameAuthorities(buildInput.facts.authorities, expectedAuthorities)) {
     return failure("authority_path_mismatch", "Workspace authority paths are not derived from the canonical root");
   }
-  const issueError = validateIssue(input.facts);
+  const issueError = validateIssue(buildInput.facts);
   if (issueError !== undefined) return { ok: false, error: issueError };
 
   const context: WorkspaceExecutionContextV1 = {
@@ -379,16 +599,16 @@ export function buildWorkspaceExecutionContext(input: {
       canonicalRoot: candidate.canonicalRoot,
       lifecycle: candidate.lifecycle,
     },
-    resolution: { source: input.source, evidence: input.evidence },
+    resolution: { source: buildInput.source, evidence: buildInput.evidence },
     bindings: manifest.repositories,
-    ...(input.facts.issue === undefined ? {} : {
+    ...(buildInput.facts.issue === undefined ? {} : {
       issue: {
-        storyId: input.facts.issue.manifest.storyId,
-        manifestPath: input.facts.issue.manifestPath,
-        execution: input.facts.issue.execution,
+        storyId: buildInput.facts.issue.manifest.storyId,
+        manifestPath: buildInput.facts.issue.manifestPath,
+        execution: buildInput.facts.issue.execution,
       },
     }),
-    authorities: input.facts.authorities,
+    authorities: buildInput.facts.authorities,
   };
   const snapshot = immutableSerializableSnapshot(context);
   if (snapshot === undefined) {

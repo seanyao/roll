@@ -137,6 +137,48 @@ function adapter(workspaceValue: WorkspaceExecutionContextV1, fresh: readonly Co
 }
 
 describe("Context Agent handoff", () => {
+  it("allows bootstrap stages to start fresh but blocks every consuming stage without a handoff", async () => {
+    const bootstrapStages = ["clarify", "design"] as const;
+    const consumingStages = ["tasking", "build", "qa", "review", "fix", "operation"] as const;
+
+    for (const stage of bootstrapStages) {
+      const workspaceValue = workspace();
+      const current = snapshot(workspaceValue, "1", "a".repeat(40), [
+        file("context://enterprise-wiki/wiki/index.md", "# Index\n"),
+      ], stage);
+      const { host, freshRead } = adapter(workspaceValue, [current]);
+
+      await expect(host.readForStage({
+        workspace: workspaceValue,
+        storyId: STORY_ID,
+        stage,
+        readMode: "fresh",
+        refs: [],
+      })).resolves.toMatchObject({ status: "ready", source: "fresh" });
+      expect(freshRead).toHaveBeenCalledTimes(1);
+    }
+
+    for (const stage of consumingStages) {
+      const workspaceValue = workspace();
+      const current = snapshot(workspaceValue, "1", "a".repeat(40), [
+        file("context://enterprise-wiki/wiki/index.md", "# Index\n"),
+      ], stage);
+      const { host, freshRead } = adapter(workspaceValue, [current]);
+
+      await expect(host.readForStage({
+        workspace: workspaceValue,
+        storyId: STORY_ID,
+        stage,
+        readMode: "fresh",
+        refs: [],
+      })).resolves.toMatchObject({
+        status: "blocked",
+        diagnostic: { code: "invalid_context_snapshot", severity: "blocking" },
+      });
+      expect(freshRead).not.toHaveBeenCalled();
+    }
+  });
+
   it("creates a typed design fresh handoff and lets build reuse the same verified Snapshot with zero fetch", async () => {
     const workspaceValue = workspace();
     const axisRef = "context://enterprise-wiki/wiki/systems/axis.md";
@@ -460,5 +502,39 @@ describe("Context Agent handoff", () => {
     expect(freshRead.mock.calls[1]?.[0]).toMatchObject({ refs: [pageRef], stage: "design" });
     expect(decodeContextAgentEnvelope(selected.encodedEnvelope).pages.map((page) => page.content)).toEqual(["index-v2", "axis-v2"]);
     expect(selected.encodedEnvelope).not.toContain("index-v1");
+  });
+
+  it("blocks a handoff Snapshot when any explicitly requested ref was not captured", async () => {
+    const workspaceValue = workspace();
+    const indexRef = "context://enterprise-wiki/wiki/index.md";
+    const missingRef = "context://enterprise-wiki/wiki/systems/new-service.md";
+    const captured = snapshot(workspaceValue, "1", "a".repeat(40), [file(indexRef, "index-v1")]);
+    writeContextSnapshot(workspaceValue, captured);
+    const { host, freshRead } = adapter(workspaceValue, [captured]);
+
+    await expect(host.readForStage({
+      workspace: workspaceValue,
+      storyId: STORY_ID,
+      stage: "build",
+      refs: [indexRef, missingRef],
+      handoff: {
+        schema: "roll.context-stage-handoff/v1",
+        workspaceId: "roll",
+        storyId: STORY_ID,
+        snapshot: {
+          snapshotId: captured.snapshotId,
+          snapshotDigest: captured.snapshotDigest,
+          artifactPath: captured.artifactPath,
+        },
+      },
+    })).resolves.toMatchObject({
+      status: "blocked",
+      diagnostic: {
+        code: "context_file_missing",
+        severity: "blocking",
+        ref: missingRef,
+      },
+    });
+    expect(freshRead).not.toHaveBeenCalled();
   });
 });

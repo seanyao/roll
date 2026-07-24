@@ -355,10 +355,16 @@ const AGENT_PROFILES: Readonly<Record<string, AgentProfile>> = {
      *  repo, poisoning the host checkout. Isolate its git access. */
     isolateGit: true,
     buildSpawnCommand: (opts) => {
-      const args = ["exec", "--skip-git-repo-check", "--sandbox", "workspace-write"];
+      // US-DELTA-006: a read-only spawn (e.g. the Full Delta Designer) runs under
+      // codex's `read-only` sandbox so it CANNOT write product code; the explicit
+      // `--add-dir` roots below (its own artifact dir) stay writable. A normal
+      // Builder keeps `workspace-write`.
+      const sandboxMode = opts.readOnly === true ? "read-only" : "workspace-write";
+      const args = ["exec", "--skip-git-repo-check", "--sandbox", sandboxMode];
       // FIX-1065: sandboxed PR-heal agents need write access to the linked
       // worktree gitdir (and any other explicitly-granted roots) even though it
-      // lives outside the workspace. Pass each root as --add-dir.
+      // lives outside the workspace. Pass each root as --add-dir. For a read-only
+      // spawn these are the ONLY writable paths (e.g. the Designer's artifact dir).
       for (const root of writableRootsForSpawn(opts)) {
         args.push("--add-dir", root);
       }
@@ -540,6 +546,13 @@ export interface AgentSpawnOptions {
   /** Extra writable roots for agents with an explicit workspace sandbox. (No
    *  current pool agent declares one; retained for a future sandboxed engine.) */
   writableRoots?: string[];
+  /** US-DELTA-006: run the spawn READ-ONLY on its cwd. Sandbox-capable adapters
+   *  (codex → `--sandbox read-only`; reasonix/Seatbelt → writes limited to
+   *  `writableRoots`) then cannot write product code — only the explicitly
+   *  granted `writableRoots` (e.g. the Designer's own artifact dir) stay
+   *  writable. Used for the Full Delta Designer/Evaluator so only the Builder
+   *  gets product worktree write access. */
+  readOnly?: boolean;
   /** Routed model, consumed by agent profiles whose CLI accepts an explicit model. */
   model?: string;
   /** The resolved agent×model assignment; kept alongside legacy fields while call sites migrate. */

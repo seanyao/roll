@@ -81,12 +81,15 @@ export async function executeSpawnAgentCommand(
           ctxPatch: { builderSessionId },
         };
       }
-      // US-V4-006: for a `designed` cycle, run the Designer BEFORE the Builder in a
-      // fresh session and FAIL CLOSED on a missing/malformed design contract —
-      // the Builder never starts without a valid design. No-op for standard/verified.
+      // US-V4-006 / US-DELTA-006: for a `designed` cycle, cast the Designer
+      // INDEPENDENTLY (its own agent identity + session, resolved via the scoped
+      // `design` role — NEVER the Builder's agent) and run it BEFORE the Builder.
+      // FAIL CLOSED — the Builder never starts — when no valid `design` binding
+      // resolves OR the Designer publishes no valid contract. No-op for
+      // standard/verified.
       if (ctx.selectedProfile === "designed") {
-        const design = await runDesignerStage(ports, ctx, cmd.agent);
-        if (design.ran && !design.ok) {
+        const design = await runDesignerStage(ports, ctx);
+        if (!design.ok) {
           ports.events.appendAlert(
             ports.paths.alertsPath,
             `designer stage failed closed for ${ctx.storyId ?? "?"}: ${design.reasons.join("; ")} — Builder not started (cycle ${ctx.cycleId ?? "?"})`,

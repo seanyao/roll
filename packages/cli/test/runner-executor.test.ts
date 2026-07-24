@@ -198,6 +198,20 @@ describe("buildSpawnCommand — US-PORT-010 agent argv shapes", () => {
     ]);
   });
 
+  it("US-DELTA-006: codex readOnly spawn uses --sandbox read-only (product code not writable), keeps --add-dir for its artifact dir", () => {
+    const { args } = buildSpawnCommand("codex", {
+      cwd: "/wt",
+      skillBody: "DESIGN",
+      readOnly: true,
+      writableRoots: ["/wt/.roll/run/role-artifacts/designer"],
+    });
+    expect(args).toContain("read-only");
+    expect(args).not.toContain("workspace-write");
+    // its own artifact dir stays writable via --add-dir
+    expect(args).toContain("--add-dir");
+    expect(args).toContain("/wt/.roll/run/role-artifacts/designer");
+  });
+
   it("FIX-1065: codex ignores empty/duplicate writableRoots", () => {
     const { args } = buildSpawnCommand("codex", {
       cwd: "/wt",
@@ -6950,11 +6964,17 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     return { cycleId: "C-1", branch: "b", loop: "x", storyId: id, selectedProfile: "designed", evidenceRunDir: runDir };
   }
 
+  // US-DELTA-006: the Designer is cast INDEPENDENTLY via the scoped `design`
+  // role; inject a fixed resolution to "codex" so these tests are hermetic.
+  const DESIGNER_DEPS: Parameters<typeof runDesignerStage>[2] = {
+    resolveDesigner: () => ({ ok: true, agent: "codex", source: "availability-fallback", reasons: [] }),
+  };
+
   it("no-op for non-designed profiles", async () => {
     const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-v4-006-")));
     execDirs.push(repo);
     const { ports } = fakePorts({ repoCwd: repo });
-    const r = await runDesignerStage(ports, { ...designedCtx(repo, "US-P0"), selectedProfile: "verified" }, "codex");
+    const r = await runDesignerStage(ports, { ...designedCtx(repo, "US-P0"), selectedProfile: "verified" }, DESIGNER_DEPS);
     expect(r.ran).toBe(false);
     expect(r.ok).toBe(true);
   });
@@ -6971,7 +6991,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
         return { exitCode: 0, timedOut: false };
       }) as unknown as Ports["agentSpawn"],
     });
-    const r = await runDesignerStage(ports, ctx, "codex");
+    const r = await runDesignerStage(ports, ctx, DESIGNER_DEPS);
     expect(r.ran).toBe(true);
     expect(r.ok).toBe(true);
     const dir = join(ctx.evidenceRunDir as string, "role-artifacts", "designer");
@@ -6988,7 +7008,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       repoCwd: repo,
       agentSpawn: (async () => ({ exitCode: 0, timedOut: false })) as unknown as Ports["agentSpawn"], // writes nothing
     });
-    const r = await runDesignerStage(ports, ctx, "codex");
+    const r = await runDesignerStage(ports, ctx, DESIGNER_DEPS);
     expect(r.ran).toBe(true);
     expect(r.ok).toBe(false);
     expect(r.reasons.join(" ")).toContain("design-contract.md missing or malformed");
@@ -7010,6 +7030,200 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
     const report = readFileSync(join(runDir, "role-artifacts", "evaluator", "eval-report.md"), "utf8");
     expect(report).toContain("## Design contract vs delivered");
     expect(report).toContain("satisfied");
+  });
+});
+
+describe("US-DELTA-006 — Full Delta Designer routing + stage isolation", () => {
+  const VALID_CONTRACT = [
+    "# Designer contract",
+    "## Scope boundary",
+    "- picker only",
+    "## Acceptance contract",
+    "- picker prefers est_min",
+    "## Expected evidence",
+    "- unit test",
+    "## Risks",
+    "- legacy cards",
+    "## Out of scope",
+    "- spawn changes",
+    "",
+  ].join("\n");
+
+  function designedCtx(repo: string, id: string): Parameters<typeof runDesignerStage>[1] {
+    const runDir = join(repo, ".roll", "features", "uncategorized", id, "run-1");
+    mkdirSync(runDir, { recursive: true });
+    return { cycleId: "C-9", branch: "b", loop: "x", storyId: id, selectedProfile: "designed", evidenceRunDir: runDir };
+  }
+
+  function eventsOfType(calls: Record<string, unknown[]>, type: string): Record<string, unknown>[] {
+    return (calls["event"] ?? [])
+      .map((a) => (a as unknown[])[1] as Record<string, unknown>)
+      .filter((e) => e.type === type);
+  }
+
+  it("AC2/AC5: Designer is cast INDEPENDENTLY (own agent, distinct session, read-only)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D1");
+    const spawns: { agent: string; opts: AgentSpawnOptions }[] = [];
+    const { ports, calls } = fakePorts({
+      repoCwd: repo,
+      clock: () => 77,
+      agentSpawn: (async (agent: string, opts: AgentSpawnOptions) => {
+        spawns.push({ agent, opts });
+        writeFileSync(join(opts.runDir as string, "design-contract.md"), VALID_CONTRACT);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    // The Builder for this cycle is "pi"; the Designer must NOT be "pi".
+    const r = await runDesignerStage(ports, ctx, {
+      resolveDesigner: () => ({ ok: true, agent: "kimi", source: "availability-fallback", reasons: ["cast"] }),
+      hostId: "host-A",
+    });
+    expect(r.ok).toBe(true);
+    expect(r.designerAgent).toBe("kimi");
+    // The designer spawn ran as "kimi", not the builder "pi".
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0]!.agent).toBe("kimi");
+    // AC5: read-only — the designer spawn runs `readOnly` and its ONLY writable
+    // root is its own artifact dir, never the product worktree (execCwd).
+    expect(spawns[0]!.opts.readOnly).toBe(true);
+    const dRoots = spawns[0]!.opts.writableRoots ?? [];
+    expect(dRoots).not.toContain(ports.paths.worktreePath);
+    expect(dRoots.every((p) => p.includes("role-artifacts"))).toBe(true);
+    // The designer session is distinct from the builder's session shape.
+    expect(r.designerSessionId).toBe("C-9:design:kimi:77");
+    const builderSession = `${ctx.cycleId}:build:pi:77`;
+    expect(r.designerSessionId).not.toBe(builderSession);
+
+    // AC3: separate role_resolved + role_started facts, recorded BEFORE the stage.
+    const resolvedEv = eventsOfType(calls, "delta:role_resolved");
+    const startedEv = eventsOfType(calls, "delta:role_started");
+    expect(resolvedEv).toHaveLength(1);
+    expect(startedEv).toHaveLength(1);
+    expect(resolvedEv[0]!.role).toBe("designer");
+    expect(resolvedEv[0]!.modelId).toBe("kimi");
+    expect(startedEv[0]!.role).toBe("designer");
+    expect(startedEv[0]!.sessionId).toBe("C-9:design:kimi:77");
+    expect(startedEv[0]!.identityProvenance).toBe("adapter-observed");
+    expect(startedEv[0]!.worktreeAccess).toBe("read-only");
+  });
+
+  it("AC1/AC4: FAIL CLOSED when no scoped design binding exists (Builder never starts)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D2");
+    let spawned = false;
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => {
+        spawned = true;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    // resolveDesigner returns null → no scoped agents.yaml design binding.
+    const r = await runDesignerStage(ports, ctx, { resolveDesigner: () => null });
+    expect(r.ok).toBe(false);
+    expect(spawned).toBe(false);
+    expect(r.reasons.join(" ")).toContain("no scoped agents.yaml design binding");
+  });
+
+  it("AC1: FAIL CLOSED on an unresolved design binding — no quiet fallback to execute", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D3");
+    const { ports } = fakePorts({ repoCwd: repo });
+    const r = await runDesignerStage(ports, ctx, {
+      resolveDesigner: () => ({ ok: false, source: "availability-fallback", reasons: [], error: "story.design: no binding found" }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reasons.join(" ")).toContain("no binding found");
+  });
+
+  it("AC3: role facts are REQUIRED — a failure to record them FAILS CLOSED (Builder never starts)", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D3b");
+    let spawned = false;
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      agentSpawn: (async () => {
+        spawned = true;
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+    // The required audit facts cannot be written → the stage must fail closed.
+    ports.events.appendEvent = () => {
+      throw new Error("events volume full");
+    };
+    const r = await runDesignerStage(ports, ctx, {
+      resolveDesigner: () => ({ ok: true, agent: "kimi", source: "availability-fallback", reasons: [] }),
+    });
+    expect(r.ok).toBe(false);
+    expect(spawned).toBe(false); // Designer never spawned → Builder never starts
+    expect(r.reasons.join(" ")).toContain("role facts");
+  });
+
+  it("AC7: Designer / Builder / Evaluator are three independent spawns with DISTINCT sessions", async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), "roll-delta-006-")));
+    execDirs.push(repo);
+    const ctx = designedCtx(repo, "US-D4");
+    const cycleId = ctx.cycleId as string;
+    // One shared injected agentSpawn records EVERY role spawn.
+    const spawns: { agent: string; session: string; writable: boolean }[] = [];
+    const { ports } = fakePorts({
+      repoCwd: repo,
+      clock: () => 200,
+      agentSpawn: (async (agent: string, opts: AgentSpawnOptions) => {
+        // The designer spawn's session is derived by runDesignerStage; the
+        // builder/evaluator sessions are stamped by the caller (below).
+        const session =
+          agent === "kimi"
+            ? `${cycleId}:design:kimi:200`
+            : ((opts.env?.["ROLL_ROLE_SESSION"] as string | undefined) ?? "");
+        // "writable" = has PRODUCT write access: a read-only spawn (Designer /
+        // Evaluator) is sandboxed off product code even if it may write its own
+        // artifact dir. Only a non-readOnly spawn (the Builder) is product-writable.
+        spawns.push({ agent, session, writable: opts.readOnly !== true });
+        if (agent === "kimi") writeFileSync(join(opts.runDir as string, "design-contract.md"), VALID_CONTRACT);
+        return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      }) as unknown as Ports["agentSpawn"],
+    });
+
+    // Stage 1 — Designer (independent cast, read-only).
+    const design = await runDesignerStage(ports, ctx, {
+      resolveDesigner: () => ({ ok: true, agent: "kimi", source: "availability-fallback", reasons: [] }),
+    });
+    expect(design.ok).toBe(true);
+
+    // Stage 2 — Builder (execute; the ONLY role that receives write roots).
+    const builderSession = `${cycleId}:build:pi:200`;
+    await ports.agentSpawn("pi", {
+      cwd: repo,
+      skillBody: "build",
+      writableRoots: [join(repo, "wt")],
+      env: { ROLL_ROLE_SESSION: builderSession },
+    });
+
+    // Stage 3 — Evaluator (evaluate; read-only, independent session).
+    const evalSession = `${cycleId}:evaluate:reasonix:200`;
+    await ports.agentSpawn("reasonix", {
+      cwd: repo,
+      skillBody: "review",
+      bare: true,
+      readOnly: true, // AC5: the Evaluator is read-only — no product write access.
+      env: { ROLL_ROLE_SESSION: evalSession },
+    });
+
+    expect(spawns).toHaveLength(3);
+    const agents = spawns.map((s) => s.agent);
+    expect(new Set(agents).size).toBe(3); // three independent agents
+    expect(agents).toEqual(["kimi", "pi", "reasonix"]);
+    const sessions = spawns.map((s) => s.session);
+    expect(new Set(sessions).size).toBe(3); // three DISTINCT sessions
+    expect(sessions).toEqual([design.designerSessionId, builderSession, evalSession]);
+    // Only the Builder is write-enabled; Designer + Evaluator are read-only.
+    expect(spawns.map((s) => s.writable)).toEqual([false, true, false]);
   });
 });
 

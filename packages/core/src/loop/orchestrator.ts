@@ -115,6 +115,7 @@ import type {
   RepositoryCycleIdentity,
   RepositoryExecutionContext,
   TerminalOutcome,
+  WorkspaceExecutionContextV1,
 } from "@roll/spec";
 import { cycleCurrency } from "../cost/tracker.js";
 import type { RollEvent } from "@roll/spec";
@@ -999,6 +1000,10 @@ export interface CycleContext {
    * cardinality-one Workspace still has one map entry; no repoCwd/worktree
    * compatibility fields are mirrored onto CycleContext. */
   repositoryExecution?: CycleRepositoryExecutionContext;
+  /** US-WS-033: immutable Workspace/Issue authority snapshot resolved once at
+   * invocation start and carried through runner, recovery, watch and terminal
+   * handlers. Consumers must never rediscover authority from cwd. */
+  workspaceExecution?: WorkspaceExecutionContextV1;
 }
 
 export type RepositoryCommandOperation = "context" | "edit" | "test" | "tcr" | "publish";
@@ -1167,6 +1172,7 @@ export type CycleEvent =
       type: "story_picked";
       storyId: string;
       repositoryExecution?: CycleRepositoryExecutionContext;
+      workspaceExecution?: WorkspaceExecutionContextV1;
     }
   | { type: "repository_setup_failed"; storyId: string }
   | { type: "no_story" } // picker returned nothing → idle (bin/roll:9180-class).
@@ -1458,6 +1464,9 @@ export function cycleStep(state: CycleState, event: CycleEvent): StepResult {
             ...(event.repositoryExecution === undefined
               ? {}
               : { repositoryExecution: event.repositoryExecution }),
+            ...(event.workspaceExecution === undefined
+              ? {}
+              : { workspaceExecution: event.workspaceExecution }),
           },
         },
         commands: [

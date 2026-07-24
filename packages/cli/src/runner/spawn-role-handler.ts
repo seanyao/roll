@@ -39,7 +39,7 @@ import { applyMainCheckoutWriteProtection, releaseMainCheckoutWriteProtection } 
 import { appendWriteProtectionEvent, quarantineMainCheckoutForCycle, startMainCheckoutLeakWatchdog } from "./sandbox-boundary.js";
 import { readCycleTimeoutThresholds } from "./spawn-observers.js";
 import { eventTs, guardRuntimeDir } from "./runner-time.js";
-import { submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
+import { repositoryAgentWritableRoots, submoduleAgentWritableRoots } from "./worktree-bootstrap.js";
 import { resolveExecutionCwd, resolveExecutionRepoCwd } from "./submodule-worktree.js";
 import type { ExecuteResult, Ports } from "./ports.js";
 
@@ -115,16 +115,23 @@ export async function executeSpawnRoleCommand(
     // tests just like the builder, so a submodule cycle runs it in the submodule
     // cycle worktree (execCwd) with the submodule's git env + writable roots. No
     // targetSubmodule ⇒ ports.paths.worktreePath / ports.repoCwd, unchanged.
-    const execCwd = resolveExecutionCwd(ports, ctx);
-    const execRepoCwd = resolveExecutionRepoCwd(ports, ctx);
+    const execCwd = ctx.repositoryExecution?.issueRoot ?? resolveExecutionCwd(ports, ctx);
+    const writableRoots = ctx.repositoryExecution === undefined
+      ? submoduleAgentWritableRoots(
+          ports.repoCwd,
+          resolveExecutionRepoCwd(ports, ctx),
+          ports.paths.alertsPath,
+        )
+      : repositoryAgentWritableRoots(ctx.repositoryExecution);
     res = await ports.agentSpawn(cmd.agent, {
       purpose: cmd.role,
       cwd: execCwd,
       skillBody: `${rolePrompt}\n\n${ports.skillBody}`,
-      writableRoots: submoduleAgentWritableRoots(ports.repoCwd, execRepoCwd, ports.paths.alertsPath),
+      writableRoots,
       timeoutMs: wallSec * 1000,
       ...(ctx.model !== undefined && ctx.model !== "" ? { model: ctx.model } : {}),
       ...(ctx.storyId !== undefined && ctx.storyId !== "" ? { storyId: ctx.storyId } : {}),
+      ...(ctx.workspaceExecution === undefined ? {} : { workspaceExecution: ctx.workspaceExecution }),
       ...(ctx.evidenceRunDir !== undefined ? { runDir: ctx.evidenceRunDir } : {}),
       env: {
         ...process.env,

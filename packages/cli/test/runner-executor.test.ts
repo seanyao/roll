@@ -7169,6 +7169,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       contextStage: {
         refs: ["context://enterprise-wiki/wiki/systems/axis.md"],
         environmentIds: ["sit"],
+        revisionDecision: "adopt_new_snapshot",
       },
     }, "codex");
 
@@ -7183,6 +7184,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
         sourceStage: "design",
       },
     });
+    expect(r.contextStage).not.toHaveProperty("revisionDecision");
     expect(readForStage).toHaveBeenCalledOnce();
     expect(readForStage).toHaveBeenCalledWith({
       storyId: "US-P1C",
@@ -7190,6 +7192,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       refs: ["context://enterprise-wiki/wiki/systems/axis.md"],
       environmentIds: ["sit"],
       readMode: "fresh",
+      revisionDecision: "adopt_new_snapshot",
     });
     const artifact = JSON.parse(readFileSync(join(
       ctx.evidenceRunDir as string,
@@ -7198,6 +7201,7 @@ describe("US-V4-006 — designed execution: Designer contract before the Builder
       "context-stage-handoff.json",
     ), "utf8"));
     expect(artifact).toMatchObject({ handoff, refs: ["context://enterprise-wiki/wiki/systems/axis.md"] });
+    expect(artifact).not.toHaveProperty("revisionDecision");
   });
 
   it("FAIL-CLOSED: designer produces no contract -> ok=false (Builder must not start)", async () => {

@@ -19,6 +19,28 @@ import { renderState } from "../src/render.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** US-DELTA-004: a minimal, structurally-valid v2 role manifest. With empty
+ *  inputs/outputs the digest/path/format checks pass trivially, so it is enough
+ *  to exercise the "validate admits a valid v2 stage" path (a placeholder
+ *  `{ ok: true }` no longer satisfies the deep validator). */
+function v2Manifest(role: "designer" | "builder" | "evaluator" | "peer" = "designer"): unknown {
+  return {
+    schemaVersion: 2,
+    delegationId: "d",
+    storyId: "US-X",
+    role,
+    trigger: "manual",
+    topology: "delta-team",
+    qualityProfile: "verified",
+    executionIdentity: { kind: "roll-adapter", hostId: "h", roleInstanceId: `${role}-1`, modelId: "m" },
+    sessionId: `${role}-s`,
+    worktreeAccess: role === "builder" ? "builder-write" : "read-only",
+    inputs: [],
+    outputs: [],
+    createdAt: "2026-07-24T00:00:00Z",
+  };
+}
+
 /** Resolve the `tsx` CLI entry point from the CLI package's own devDependencies.
  *  Never shells out to `npx` — uses the locally installed binary, making tests
  *  deterministic on CI without network downloads. */
@@ -746,7 +768,7 @@ describe("US-DELTA-003 — validate plumbing", () => {
     const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-VAL4",
       `delta-${delegationId}`, "role-artifacts", "designer");
     mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
 
     // Count events before validate
     const eventsPath = join(dir, ".roll", "loop", "events.ndjson");
@@ -770,6 +792,36 @@ describe("US-DELTA-003 — validate plumbing", () => {
     expect(lastEvent.delegationId).toBe(delegationId);
     expect(lastEvent.role).toBe("designer");
     expect(lastEvent.identityProvenance).toBe("host-attested");
+  });
+
+  it("US-DELTA-004: deep validation blocks a role-write violation through the CLI", () => {
+    const dir = setupMinimalProject("US-DELTA-VAL4B", "delta-team");
+    const resPath = writeResolutionTemplate(dir, "US-DELTA-VAL4B", "local-preset");
+    const r1 = tsRunCwd([
+      "prepare", "US-DELTA-VAL4B",
+      "--trigger", "host-guided", "--topology", "delta-team",
+      "--profile", "standard", "--preset", "local-preset",
+      "--resolution", resPath, "--json",
+    ], dir);
+    expect(r1.code).toBe(0);
+    const delegationId = JSON.parse(r1.stdout).delegationId;
+    const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-VAL4B",
+      `delta-${delegationId}`, "role-artifacts", "designer");
+    mkdirSync(stageDir, { recursive: true });
+
+    // A designer manifest claiming builder-write is a role_write_violation — the
+    // deep validator (not the old shallow existence check) catches it.
+    const bad = v2Manifest("designer") as Record<string, unknown>;
+    bad["worktreeAccess"] = "builder-write";
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(bad), "utf8");
+    const r2 = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
+    expect(r2.code).toBe(1);
+    expect(JSON.parse(r2.stderr).error).toBe("role_write_violation");
+    // The block is recorded as an event, with the specific reason.
+    const events = readFileSync(join(dir, ".roll", "loop", "events.ndjson"), "utf8").trim().split("\n");
+    const last = JSON.parse(events[events.length - 1]!);
+    expect(last.type).toBe("delta:blocked");
+    expect(last.reason).toBe("role_write_violation");
   });
 
   it("validate invokes injected validator seam (BLOCK-3)", () => {
@@ -1576,7 +1628,7 @@ describe("US-DELTA-003 — status human output with provenance", () => {
     const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-HPROV2",
       `delta-${delegationId}`, "role-artifacts", "designer");
     mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
     const rVal = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
     expect(rVal.code).toBe(0);
 
@@ -2032,7 +2084,7 @@ describe("US-DELTA-003 — validate admission boundaries", () => {
     const frameDirAllow = join(dirAllow, ".roll", "features", "delta-team", "US-DELTA-VAL-ALLOWBLOCK-ALLOW", `delta-${delegationIdAllow}`);
     const evaluatorArtifactDir = join(frameDirAllow, "role-artifacts", "evaluator");
     mkdirSync(evaluatorArtifactDir, { recursive: true });
-    writeFileSync(join(evaluatorArtifactDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(evaluatorArtifactDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
 
     injectValidator((_input) => ({ ok: true }));
     try {
@@ -2232,7 +2284,7 @@ describe("US-DELTA-003 — status provenance and snapshot coverage", () => {
     const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-PROV",
       `delta-${delegationId}`, "role-artifacts", "designer");
     mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
     const rVal = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
     expect(rVal.code).toBe(0);
 
@@ -2599,7 +2651,7 @@ describe("US-DELTA-003 — forbidden import audit (fail-closed)", () => {
     const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-NOCYCLE",
       `delta-${delegationId}`, "role-artifacts", "designer");
     mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
     tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
 
     // Conclude
@@ -3666,7 +3718,7 @@ describe("US-DELTA-003 — validate admission blocks with 0 validator calls (BLO
     const stageDir = join(dir, ".roll", "features", "delta-team", "US-DELTA-ADM-PUB",
       `delta-${delegationId}`, "role-artifacts", "designer");
     mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify({ ok: true }), "utf8");
+    writeFileSync(join(stageDir, "evaluation-manifest.json"), JSON.stringify(v2Manifest()), "utf8");
     const rPub = tsRunCwd(["validate", "--delegation", delegationId, "--stage", "designer", "--json"], dir);
     expect(rPub.code).toBe(0);
 

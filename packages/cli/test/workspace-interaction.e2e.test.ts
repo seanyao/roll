@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { buildWorkspaceClarificationHandoff, type WorkspaceDiscoveryFactsV1 } from "@roll/core";
 import {
@@ -15,6 +18,8 @@ import {
   renderDirectWorkspaceClarificationPrompt,
   type WorkspaceInteractionCapabilities,
 } from "../src/lib/workspace-interaction.js";
+import { backlogCommand } from "../src/commands/backlog.js";
+import type { BacklogTargetDecision } from "../src/commands/backlog-target.js";
 
 const noCapability: WorkspaceInteractionCapabilities = {
   stdinTTY: false,
@@ -22,12 +27,12 @@ const noCapability: WorkspaceInteractionCapabilities = {
   agentQuestionCapable: false,
 };
 
-function intent(): WorkspaceIntentV1 {
+function intent(operation: "read" | "mutation" = "read"): WorkspaceIntentV1 {
   return {
     schema: WORKSPACE_INTENT_V1,
-    operation: "read",
+    operation,
     interaction: "interactive",
-    scope: "workspace_required_read",
+    scope: operation === "read" ? "workspace_required_read" : "workspace_required_mutation",
     cwd: "/tmp",
     requirement: {
       schema: REQUIREMENT_HINT_V1,
@@ -95,6 +100,25 @@ function handoff(): WorkspaceClarificationHandoffV1 {
     candidates: [candidate("fields"), candidate("roll")],
     diagnostics: [],
     facts: [facts("fields"), facts("roll")],
+    registryRevision: 7,
+    discoveryFactsSha256: "a".repeat(64),
+  });
+}
+
+function repairOnlyHandoff(): WorkspaceClarificationHandoffV1 {
+  const diagnostic = {
+    workspaceId: "fields",
+    root: "/workspaces/fields",
+    code: "invalid_issue_manifest" as const,
+    authorityPath: "/workspaces/fields/issues/US-1/manifest.json",
+    message: "Issue authority is invalid",
+  };
+  return buildWorkspaceClarificationHandoff({
+    intent: intent("mutation"),
+    reason: "workspace_discovery_incomplete",
+    candidates: [candidate("fields")],
+    diagnostics: [diagnostic],
+    facts: [facts("fields")],
     registryRevision: 7,
     discoveryFactsSha256: "a".repeat(64),
   });
@@ -216,5 +240,165 @@ describe("US-WS-030 direct Workspace clarification", () => {
       rerunResolver,
     })).toEqual({ kind: "invalid", code: "invalid_workspace_clarification", reload: true });
     expect(rerunResolver).not.toHaveBeenCalled();
+  });
+
+  it("shows mutation discovery candidates as non-selectable facts when only repair is allowed", () => {
+    const handoff = repairOnlyHandoff();
+    const prompt = renderDirectWorkspaceClarificationPrompt(handoff);
+    expect(handoff.allowedActions).toEqual(["repair_discovery"]);
+    expect(prompt).toContain("[not selectable]");
+    expect(prompt).toContain("repair) show canonical Workspace repair commands");
+    expect(prompt).not.toContain("1) fields delivery");
+    expect(prompt).not.toContain("Selection:");
+
+    for (const answer of ["1", "fields"]) {
+      const rerunResolver = vi.fn();
+      expect(answerDirectWorkspaceClarification({
+        handoff,
+        answer,
+        currentDiscovery: { registryRevision: 7, discoveryFactsSha256: "a".repeat(64) },
+        rerunResolver,
+      })).toEqual({ kind: "invalid", code: "invalid_workspace_clarification", reload: true });
+      expect(rerunResolver).not.toHaveBeenCalled();
+    }
+  });
+});
+
+function backlogTarget(root: string, workspaceId: string): BacklogTargetDecision {
+  return {
+    ok: true,
+    workspaceId,
+    workspaceRoot: root,
+    canonicalRoot: root,
+    backlogPath: join(root, "backlog", "index.md"),
+    storyRoot: join(root, "backlog"),
+    runtimeRoot: join(root, "runtime"),
+    configPath: join(root, "runtime", "backlog-sync.yaml"),
+  };
+}
+
+describe("US-WS-030 backlog text interaction", () => {
+  it("selects an existing Workspace through an in-process explicit selector rerun", () => {
+    const root = mkdtempSync(join(tmpdir(), "roll-ws030-backlog-"));
+    mkdirSync(join(root, "backlog"), { recursive: true });
+    writeFileSync(join(root, "backlog", "index.md"), "| Story | Description | Status |\n|---|---|---|\n| US-1 | fields story | 📋 Todo |\n");
+    const prompt: string[] = [];
+    const resolveTarget = vi.fn((args: readonly string[]): BacklogTargetDecision =>
+      args.includes("--workspace") ? backlogTarget(root, "fields") : {
+        ok: false,
+        code: "target_missing",
+        candidates: [],
+      }
+    );
+    let stdout = "";
+    let stderr = "";
+    const originalOut = process.stdout.write.bind(process.stdout);
+    const originalErr = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error deterministic command capture
+    process.stdout.write = (chunk: string | Uint8Array): boolean => ((stdout += String(chunk)), true);
+    // @ts-expect-error deterministic command capture
+    process.stderr.write = (chunk: string | Uint8Array): boolean => ((stderr += String(chunk)), true);
+    try {
+      expect(backlogCommand(["--interactive"], {
+        resolveTarget,
+        interaction: {
+          cwd: "/tmp",
+          capabilities: { stdinTTY: true, stderrTTY: true, agentQuestionCapable: false },
+          ask: (question) => (prompt.push(question), "1"),
+          loadDiscovery: () => ({
+            schema: "roll.workspace-discovery-load/v1",
+            registryRevision: 7,
+            discoveryFactsSha256: "a".repeat(64),
+            workspaces: [facts("fields"), facts("roll")],
+            diagnostics: [],
+          }),
+        },
+      })).toBe(0);
+    } finally {
+      process.stdout.write = originalOut;
+      process.stderr.write = originalErr;
+      rmSync(root, { recursive: true, force: true });
+    }
+    expect(prompt).toHaveLength(1);
+    expect(prompt[0]).toContain("fields delivery");
+    expect(stdout).toContain("fields story");
+    expect(stderr).toBe("");
+    expect(resolveTarget).toHaveBeenNthCalledWith(1, [], "read");
+    expect(resolveTarget).toHaveBeenNthCalledWith(2, ["--workspace", "fields"], "read");
+  });
+
+  it.each([
+    ["create", "create_required", "roll workspace create <ID> --config <path> --check"],
+    ["cancel", "workspace_clarification_cancelled", undefined],
+    [null, "workspace_clarification_cancelled", undefined],
+  ] as const)("stops without running backlog when the answer is %s", (answer, code, nextAction) => {
+    const resolveTarget = vi.fn((): BacklogTargetDecision => ({
+      ok: false,
+      code: "target_missing",
+      candidates: [],
+    }));
+    let stderr = "";
+    const originalErr = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error deterministic command capture
+    process.stderr.write = (chunk: string | Uint8Array): boolean => ((stderr += String(chunk)), true);
+    try {
+      expect(backlogCommand(["--interactive"], {
+        resolveTarget,
+        interaction: {
+          cwd: "/tmp",
+          capabilities: { stdinTTY: true, stderrTTY: true, agentQuestionCapable: false },
+          ask: () => answer,
+          loadDiscovery: () => ({
+            schema: "roll.workspace-discovery-load/v1",
+            registryRevision: 7,
+            discoveryFactsSha256: "a".repeat(64),
+            workspaces: [facts("fields"), facts("roll")],
+            diagnostics: [],
+          }),
+        },
+      })).toBe(1);
+    } finally {
+      process.stderr.write = originalErr;
+    }
+    expect(stderr).toContain(code);
+    if (nextAction !== undefined) expect(stderr).toContain(nextAction);
+    expect(resolveTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when discovery changes while the prompt is open", () => {
+    const resolveTarget = vi.fn((): BacklogTargetDecision => ({
+      ok: false,
+      code: "target_missing",
+      candidates: [],
+    }));
+    let loadCount = 0;
+    let stderr = "";
+    const originalErr = process.stderr.write.bind(process.stderr);
+    // @ts-expect-error deterministic command capture
+    process.stderr.write = (chunk: string | Uint8Array): boolean => ((stderr += String(chunk)), true);
+    try {
+      expect(backlogCommand(["--interactive"], {
+        resolveTarget,
+        interaction: {
+          cwd: "/tmp",
+          capabilities: { stdinTTY: true, stderrTTY: true, agentQuestionCapable: false },
+          ask: () => "fields",
+          loadDiscovery: () => {
+            loadCount += 1;
+            return {
+              schema: "roll.workspace-discovery-load/v1",
+              registryRevision: loadCount,
+              discoveryFactsSha256: String(loadCount).repeat(64),
+              workspaces: [facts("fields"), facts("roll")],
+              diagnostics: [],
+            };
+          },
+        },
+      })).toBe(1);
+    } finally {
+      process.stderr.write = originalErr;
+    }
+    expect(stderr).toContain("invalid_workspace_clarification");
+    expect(resolveTarget).toHaveBeenCalledTimes(1);
   });
 });

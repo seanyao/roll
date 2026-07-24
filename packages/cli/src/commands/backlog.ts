@@ -6,8 +6,15 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { validateStoryId } from "@roll/core";
+import { loadWorkspaceDiscovery } from "@roll/infra";
 import { classifyStatus, resolveLang, t, v3Catalog, type Lang } from "@roll/spec";
 import { c, pad, renderState, RESET_RAW, row, trunc } from "../render.js";
+import {
+  askDirectWorkspaceClarification,
+  parseWorkspaceInteractionArgs,
+  resolveWorkspaceTargetInteraction,
+  type WorkspaceInteractionHost,
+} from "../lib/workspace-interaction.js";
 import {
   emitBacklogTargetError,
   resolveBacklogCommandTarget,
@@ -17,6 +24,7 @@ import {
   type BacklogTargetDecision,
   type ResolvedBacklogTarget,
 } from "./backlog-target.js";
+import { workspaceRollHome } from "./workspace-target.js";
 
 export const BACKLOG_MGMT_SUBCOMMANDS = [
   "lint",
@@ -68,6 +76,7 @@ const BG_RUN = "\x1b[48;2;40;20;70m";
 
 export interface BacklogCommandDeps {
   readonly resolveTarget: (args: readonly string[], operation: BacklogOperation) => BacklogTargetDecision;
+  readonly interaction?: WorkspaceInteractionHost;
 }
 
 const realBacklogCommandDeps: BacklogCommandDeps = { resolveTarget: resolveBacklogCommandTarget };
@@ -87,7 +96,7 @@ function msg(key: string, ...args: ReadonlyArray<string | number>): string {
 function emitError(
   code: string,
   candidates: readonly BacklogAggregateEntry[] = [],
-  migrationCheckCommand?: string,
+  nextActions: readonly string[] = [],
 ): number {
   const key = code === "story_not_found" || code === "invalid_arguments"
     ? `backlog.error.${code}`
@@ -96,8 +105,23 @@ function emitError(
   if (candidates.length > 0) {
     process.stderr.write(`${msg("backlog.error.candidates", candidates.map((entry) => `${entry.workspaceId}=${entry.workspaceRoot}`).join(", "))}\n`);
   }
-  if (migrationCheckCommand !== undefined) process.stderr.write(`${msg("backlog.error.migration_command", migrationCheckCommand)}\n`);
+  for (const nextAction of nextActions) {
+    process.stderr.write(`${msg("backlog.error.migration_command", nextAction)}\n`);
+  }
   return 1;
+}
+
+function realInteractionHost(): WorkspaceInteractionHost {
+  return {
+    cwd: process.cwd(),
+    capabilities: {
+      stdinTTY: process.stdin.isTTY === true,
+      stderrTTY: process.stderr.isTTY === true,
+      agentQuestionCapable: false,
+    },
+    ask: askDirectWorkspaceClarification,
+    loadDiscovery: () => loadWorkspaceDiscovery({ rollHome: workspaceRollHome() }),
+  };
 }
 
 function positionalArgs(args: readonly string[]): string[] | undefined {
@@ -158,7 +182,10 @@ export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBa
     args.includes("--no-color") || !process.stdout.isTTY || (process.env["NO_COLOR"] ?? "") !== "";
   renderState.useColor = !noColor;
 
-  const positional = positionalArgs(args);
+  const interactionHost = deps.interaction ?? realInteractionHost();
+  const parsedInteraction = parseWorkspaceInteractionArgs(args, interactionHost.capabilities);
+  if (!parsedInteraction.ok) return emitError(parsedInteraction.code);
+  const positional = positionalArgs(parsedInteraction.args);
   if (positional === undefined) return emitError("invalid_arguments");
   const show = positional[0] === "show";
   if ((show && (positional.length !== 2 || args.includes("--all"))) || (!show && positional.length !== 0)) {
@@ -167,10 +194,25 @@ export function backlogCommand(args: string[], deps: BacklogCommandDeps = realBa
   const storyId = show ? positional[1] : undefined;
   if (storyId !== undefined && !validateStoryId(storyId).ok) return emitError("invalid_arguments");
 
-  const decision = deps.resolveTarget(args, "read");
-  if (!decision.ok) {
-    return emitBacklogTargetError(decision);
+  const target = resolveWorkspaceTargetInteraction({
+    args,
+    operation: "read",
+    resolveTarget: deps.resolveTarget,
+    host: interactionHost,
+  });
+  if (target.kind === "interaction_failure") {
+    return emitError(target.code, [], [
+      ...(target.nextAction === undefined ? [] : [target.nextAction]),
+      ...(target.commands ?? []),
+    ]);
   }
+  if (target.kind === "target_failure") {
+    const failure = target.result;
+    if (failure.ok) return emitError("invalid_target");
+    return emitBacklogTargetError(failure);
+  }
+  const decision = target.result;
+  if (!decision.ok) return emitBacklogTargetError(decision);
   if ("aggregate" in decision) return renderAggregate(decision.aggregate);
   if (!workspaceOwnsPath(decision.canonicalRoot, decision.backlogPath)) return emitError("invalid_target");
   if (storyId !== undefined) return showStory(decision, storyId);

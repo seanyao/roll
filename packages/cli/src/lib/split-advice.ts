@@ -104,6 +104,20 @@ export function writeSplitAdvice(cardDir: string, advice: SplitAdvice): { path: 
   return { path, written: true };
 }
 
+/**
+ * US-CYCLE-006 auto-trigger: analyze the card's journal and write advice if it is
+ * over the threshold. Idempotent (delegates to {@link writeSplitAdvice}). Returns
+ * the advice + whether the file changed, or null when no advice is warranted.
+ * Called from the round-journal write path so the signal is AUTOMATIC — a card
+ * that crosses the threshold produces advice with no manual command.
+ */
+export function maybeWriteSplitAdvice(cardDir: string, cardId: string): { advice: SplitAdvice; path: string; written: boolean } | null {
+  const advice = analyzeRepairRounds(cardDir, cardId);
+  if (advice === null) return null;
+  const { path, written } = writeSplitAdvice(cardDir, advice);
+  return { advice, path, written };
+}
+
 /** List every card that currently carries a pending `split-advice.md`. */
 export function listPendingSplitAdvice(repoCwd: string): { card: string; epic: string; path: string }[] {
   const featuresDir = join(repoCwd, ".roll", "features");

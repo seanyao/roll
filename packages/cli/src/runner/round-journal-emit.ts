@@ -4,9 +4,13 @@
  * manual step. NEVER throws and NEVER blocks the cycle's critical path — a
  * journal write is pure observability.
  */
-import { appendRoundEntryAsync } from "@roll/core";
+import { appendRoundEntryAsync, EVENTS_FILE, serializeEvent } from "@roll/core";
 import type { CycleContext } from "@roll/core";
+import type { RollEvent } from "@roll/spec";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { cardArchiveDir } from "../lib/archive.js";
+import { maybeWriteSplitAdvice } from "../lib/split-advice.js";
 import type { Ports } from "./ports.js";
 
 export interface RoundTurn {
@@ -69,8 +73,33 @@ export function recordSpawnRound(ports: Ports, ctx: CycleContext, turn: RoundTur
       ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
       era: resolveEra(),
       ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
-    }).catch(() => {
-      /* best-effort observability — never affect the cycle */
-    });
+    })
+      .then(() => {
+        // US-CYCLE-006 — AUTO-TRIGGER: after the round is persisted, if the card
+        // has now crossed the repair-round threshold, write split-advice.md
+        // (idempotent) and emit the signal event. Fully best-effort — a failure
+        // here never affects the cycle. The manual `roll loop cycle split-advice`
+        // command remains the readout / on-demand path.
+        try {
+          const res = maybeWriteSplitAdvice(cardDir, storyId);
+          if (res !== null && res.written) {
+            const loopDir = join(repoCwd, ".roll", "loop");
+            mkdirSync(loopDir, { recursive: true });
+            const ev: RollEvent = { type: "split:advice", card: storyId, rounds: res.advice.roundCount, path: res.path, ts: eventTsMs() };
+            appendFileSync(join(loopDir, EVENTS_FILE), serializeEvent(ev) + "\n");
+          }
+        } catch {
+          /* auto split-advice is best-effort observability */
+        }
+      })
+      .catch(() => {
+        /* best-effort observability — never affect the cycle */
+      });
   });
+}
+
+/** Epoch ms for the split:advice event. Isolated so the (test-injectable) clock
+ *  seam stays obvious; the journal itself carries no wall-clock dependency. */
+function eventTsMs(): number {
+  return Date.now();
 }

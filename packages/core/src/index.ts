@@ -25,6 +25,8 @@ export * from "./context/page-metadata.js";
 export * from "./context/llm-wiki-validator.js";
 export * from "./context/scope-policy.js";
 export * from "./context/read-service.js";
+export * from "./context/snapshot.js";
+export * from "./context/revision-comparator.js";
 export * from "./agent/session-reuse.js";
 export * from "./agent/router.js";
 export * from "./agent/pairing.js";

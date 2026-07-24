@@ -216,6 +216,30 @@ describe("US-TOOL-002 ToolRegistry", () => {
     expect(JSON.stringify(emitted)).not.toContain("output");
   });
 
+  it("redacts nested invocation input before emitting tool:invoke", async () => {
+    const events = sink();
+    const registry = new ToolRegistry({
+      deps: { ...deps(), redact: (value) => value.replaceAll("SECRET", "[REDACTED]") },
+      policyEngine: policyEngine(),
+      events,
+    });
+    registry.register(tool());
+
+    const input = {
+      command: "echo",
+      args: ["SECRET", { nested: "prefix-SECRET-suffix" }],
+      env: { TOKEN: "SECRET" },
+    };
+    const result = await registry.invoke(TOOL_ID, request(input));
+
+    expect(result).toMatchObject({ ok: true, output: input });
+    const emitted = events.events.find((event) => event.type === "tool:invoke");
+    expect(emitted).toBeDefined();
+    const serialized = JSON.stringify(emitted);
+    expect(serialized).not.toContain("SECRET");
+    expect(serialized).toContain("[REDACTED]");
+  });
+
   it("emits a sanitized failure result even when emitsEvents:false suppresses success events", async () => {
     const events = sink();
     const registry = new ToolRegistry({ deps: deps(), policyEngine: policyEngine(), events });

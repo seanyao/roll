@@ -1,7 +1,12 @@
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExecResult, ToolDeclaration, ToolDeps, ToolInvocation, ToolMeta, ToolResult } from "@roll/spec";
 import { bashInputSchema, bashOutputSchema } from "./schema-contracts.js";
-import { isCanonicalPathContained, resolveContainedExistingPath, resolveWorkspaceLocalRepository } from "./workspace-local-context.js";
+import {
+  isCanonicalPathContained,
+  resolveContainedExistingPath,
+  resolveContainedPath,
+  resolveWorkspaceLocalRepository,
+} from "./workspace-local-context.js";
 
 export interface BashInput {
   command: string;
@@ -67,6 +72,18 @@ export class BashTool {
         error: {
           code: "sandbox_denied",
           message: "bash cwd is outside allowedPaths",
+          retryable: false,
+        },
+        meta: meta(boundInvocation, startedAt, deps.now()),
+        warnings,
+      };
+    }
+    if (!argumentsContained(input.args ?? [], cwd, repository.canonicalWorktreePath)) {
+      return {
+        ok: false,
+        error: {
+          code: "sandbox_denied",
+          message: "bash argv path is outside the selected Issue repository",
           retryable: false,
         },
         meta: meta(boundInvocation, startedAt, deps.now()),
@@ -145,6 +162,26 @@ function allowed(cwd: string, repositoryRoot: string, allowedPaths: readonly str
     if (root !== undefined && isCanonicalPathContained(root, cwd)) return { ok: true };
   }
   return { ok: false };
+}
+
+const PATH_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--super-prefix"]);
+
+function argumentsContained(args: readonly string[], cwd: string, repositoryRoot: string): boolean {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? "";
+    const previous = index === 0 ? undefined : args[index - 1];
+    const equals = arg.startsWith("-") ? arg.indexOf("=") : -1;
+    const candidate = equals > 0 ? arg.slice(equals + 1) : arg;
+    const forcedPath = previous !== undefined && PATH_VALUE_FLAGS.has(previous);
+    if (!forcedPath && !looksLikePath(candidate)) continue;
+    const target = resolve(cwd, candidate);
+    if (resolveContainedPath(repositoryRoot, target, true) === undefined) return false;
+  }
+  return true;
+}
+
+function looksLikePath(value: string): boolean {
+  return isAbsolute(value) || value === ".." || value.startsWith("./") || value.startsWith("../") || value.includes("/");
 }
 
 function advisoryWarnings(command: string, blockedCommands: readonly string[] | undefined): string[] {

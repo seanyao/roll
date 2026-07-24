@@ -190,7 +190,7 @@ export class ToolRegistry {
       await this.emit({
         type: "tool:invoke",
         cycleId: request.caller.cycleId,
-        invocation,
+        invocation: sanitizeInvocation(invocation, this.options.deps.redact),
         declaration: state.tool.declaration,
         ts: startedAt,
       } as ToolEvent);
@@ -334,6 +334,24 @@ export class ToolRegistry {
 function sanitizeResult(result: ToolResult<unknown>): SanitizedToolResult {
   if (result.ok) return { ok: true, meta: result.meta };
   return { ok: false, errorCode: result.error.code, meta: result.meta };
+}
+
+function sanitizeInvocation<I>(invocation: ToolInvocation<I>, redact: ToolDeps["redact"]): ToolInvocation<I> {
+  return {
+    ...invocation,
+    input: sanitizeInvocationValue(invocation.input, redact, new WeakSet<object>()) as I,
+  };
+}
+
+function sanitizeInvocationValue(value: unknown, redact: ToolDeps["redact"], seen: WeakSet<object>): unknown {
+  if (typeof value === "string") return redact(value);
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "[Circular]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((entry) => sanitizeInvocationValue(entry, redact, seen));
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, sanitizeInvocationValue(entry, redact, seen)]),
+  );
 }
 
 function formatRequirement(requirement: ToolRequirement): string {

@@ -140,6 +140,33 @@ describe("US-TOOL-004 BashTool", () => {
     expect(deps.calls).toHaveLength(0);
   });
 
+  it.each([
+    { name: "absolute path", command: "cat", args: [join(outside, "secret.txt")] },
+    { name: "parent traversal", command: "cat", args: ["../outside/secret.txt"] },
+    { name: "git -C", command: "git", args: ["-C", outside, "status"] },
+    { name: "git --git-dir", command: "git", args: [`--git-dir=${join(outside, ".git")}`, "status"] },
+  ])("denies $name argv paths outside the selected repository", async ({ command, args }) => {
+    const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
+
+    const result = await new BashTool().execute(invocation({ command, args, cwd: repo }), deps);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("sandbox_denied");
+    expect(deps.calls).toHaveLength(0);
+  });
+
+  it("allows relative argv paths contained by the selected repository", async () => {
+    const deps = fakeDeps({ exitCode: 0, stdout: "", stderr: "", timedOut: false });
+
+    const result = await new BashTool().execute(
+      invocation({ command: "git", args: ["-C", ".", "status", "--", "src/file.ts"], cwd: repo }),
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(deps.calls).toHaveLength(1);
+  });
+
   it("caps stdout/stderr and dump content at maxOutputBytes", async () => {
     const deps = fakeDeps({ exitCode: 0, stdout: "abcdef", stderr: "uvwxyz", timedOut: false });
     const result = await new BashTool().execute(

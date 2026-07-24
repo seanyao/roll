@@ -397,9 +397,11 @@ describe("Context read integration", () => {
       providers: [],
       gaps: [expect.objectContaining({ code: "fetch_failed", severity: "blocking" })],
     });
+    const firstBytes = first.providers[0]?.files.reduce((sum, file) => sum + file.bytes, 0);
+    const secondBytes = second.providers[0]?.files.reduce((sum, file) => sum + file.bytes, 0);
     expect(audits).toMatchObject([
-      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: firstExpectedRevision },
-      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: secondRevision },
+      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: firstExpectedRevision, bytes: firstBytes },
+      { providerId: "enterprise-wiki", branch: "main", outcome: "completed", revision: secondRevision, bytes: secondBytes },
       { providerId: "enterprise-wiki", branch: "main", outcome: "failed", diagnosticCode: "fetch_failed" },
     ]);
     expect(JSON.stringify(audits)).not.toMatch(/secret-token|GIT_|credential/u);

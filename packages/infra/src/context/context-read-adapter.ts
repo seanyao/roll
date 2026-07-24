@@ -23,6 +23,7 @@ import {
 import {
   withFreshGitLlmWikiRead,
   type GitLlmWikiCommandRunner,
+  type GitLlmWikiReadAuditEventV1,
   type GitLlmWikiReadAuditSink,
   type GitProviderRevisionV1,
 } from "./git-llm-wiki-transport.js";
@@ -40,6 +41,18 @@ export type GitLlmWikiBinaryCommandRunner = (
   cwd: string | undefined,
   options: GitExecutionOptions,
 ) => Promise<GitBinaryResult>;
+
+async function emitAudit(
+  audit: GitLlmWikiReadAuditSink | undefined,
+  event: GitLlmWikiReadAuditEventV1 | undefined,
+): Promise<void> {
+  if (audit === undefined || event === undefined) return;
+  try {
+    await audit(event);
+  } catch {
+    // Audit sinks must not mask the primary Context read result.
+  }
+}
 
 interface GitObjectDescriptor {
   readonly path: string;
@@ -298,16 +311,25 @@ export function createContextReadAdapter(options: CreateContextReadAdapterOption
           "Context Provider planned page budget exceeded",
         );
       }
+      const transportAudit: GitLlmWikiReadAuditEventV1[] = [];
       try {
         const result = await withFreshGitLlmWikiRead({
           rollHome: options.rollHome,
           provider: input.plan.provider,
           runGit,
           ...(options.now === undefined ? {} : { now: options.now }),
-          ...(options.audit === undefined ? {} : { audit: options.audit }),
+          ...(options.audit === undefined ? {} : { audit: (event) => { transportAudit.push(event); } }),
         }, async (revision) => readAtFixedRevision(input, revision, runGit, runGitBinary));
+        const event = transportAudit.at(-1);
+        await emitAudit(options.audit, event === undefined ? undefined : {
+          ...event,
+          ...(result.value.ok
+            ? { bytes: result.value.files.reduce((sum, file) => sum + file.bytes, 0) }
+            : {}),
+        });
         return result.value;
       } catch (error) {
+        await emitAudit(options.audit, transportAudit.at(-1));
         if (error instanceof ContextTransportError) return { ok: false, diagnostic: error.diagnostic };
         return diagnostic(input.plan.provider.id, "fetch_failed", "Context Provider transport failed");
       }

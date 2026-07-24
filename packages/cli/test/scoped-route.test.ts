@@ -21,7 +21,6 @@ import {
   restorePersistedWorkspaceCycleContext,
   scopedExecuteRouteTrace,
   workspaceCycleContextPath,
-  type FrozenWorkspaceCycleContextResult,
 } from "../src/runner/scoped-route.js";
 import {
   REPOSITORY_BINDING_V1,
@@ -660,7 +659,9 @@ describe("US-WS-033 — frozen Workspace cycle route", () => {
     writeFileSync(barrierPath, "go", "utf8");
     const results = await Promise.all(children);
     expect(results.map((result) => result.code)).toEqual([0, 0]);
-    const persisted = results.map((result) => JSON.parse(result.stdout.trim()) as FrozenWorkspaceCycleContextResult);
+    const persisted = results.map((result) => JSON.parse(result.stdout.trim()) as
+      | { readonly ok: true; readonly resolutionSource: string; readonly evidenceSource: string | undefined }
+      | { readonly ok: false; readonly code: string });
     expect(persisted.filter((result) => result.ok)).toHaveLength(1);
     expect(persisted.find((result) => !result.ok)).toEqual({ ok: false, code: "execution_context_conflict" });
 
@@ -670,8 +671,8 @@ describe("US-WS-033 — frozen Workspace cycle route", () => {
     const winner = persisted.find((result) => result.ok);
     expect(winner?.ok).toBe(true);
     if (!winner?.ok) return;
-    expect(restored.context.resolution.source).toBe(winner.context.resolution.source);
-    expect(restored.context.resolution.evidence[0]?.source).toBe(winner.context.resolution.evidence[0]?.source);
+    expect(restored.context.resolution.source).toBe(winner.resolutionSource);
+    expect(restored.context.resolution.evidence[0]?.source).toBe(winner.evidenceSource);
   }, 30_000);
 
   it("requires an explicit repository for repository-required actions", () => {

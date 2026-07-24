@@ -14,4 +14,9 @@ while (!existsSync(barrierPath) || readFileSync(barrierPath, "utf8").trim() !== 
   // The parent releases both workers through one file barrier.
 }
 
-process.stdout.write(`${JSON.stringify(persistWorkspaceCycleContext(runtimeDir, cycleId, context))}\n`);
+const result = persistWorkspaceCycleContext(runtimeDir, cycleId, context);
+process.stdout.write(`${JSON.stringify(result.ok ? {
+  ok: true,
+  resolutionSource: result.context.resolution.source,
+  evidenceSource: result.context.resolution.evidence[0]?.source,
+} : result)}\n`);

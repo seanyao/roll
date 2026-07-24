@@ -23,6 +23,7 @@ import {
   requirementCaptureLockPath,
   resolveRequirementSourcesForStoryOnDisk,
 } from "../src/requirement-source-store.js";
+import { workspaceAuthorityLockPath } from "../src/workspace-authority-lock.js";
 
 const roots: string[] = [];
 
@@ -67,6 +68,7 @@ function fixture() {
 
 function request(f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}) {
   return {
+    rollHome: f.root,
     workspaceRoot: f.workspace,
     provider: "jira",
     ref: "SOT-15499",
@@ -88,8 +90,17 @@ describe("US-WS-007 RequirementSourceStore", () => {
   it("commits immutable revisions, keeps identical captures at zero writes and extends Story links separately", () => {
     const f = fixture();
     const renames: string[] = [];
-    const deps = { renameFile: (from: string, to: string) => { renames.push(to); renameSync(from, to); } };
+    let observedOrderedLocks = false;
+    const deps = {
+      renameFile: (from: string, to: string) => { renames.push(to); renameSync(from, to); },
+      beforeProjection: () => {
+        expect(existsSync(workspaceAuthorityLockPath(f.root, "ws-demo"))).toBe(true);
+        expect(existsSync(requirementCaptureLockPath(f.workspace, "req-c78ccf14ea21"))).toBe(true);
+        observedOrderedLocks = true;
+      },
+    };
     const first = captureRequirementSource(request(f), deps);
+    expect(observedOrderedLocks).toBe(true);
     expect(first).toMatchObject({
       outcome: "created",
       workspaceId: "ws-demo",
@@ -893,6 +904,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
       requirementId: captured.manifest.requirementId,
     }).state).toBe("drift");
     expect(repairRequirementProjection({
+      rollHome: f.root,
       workspaceRoot: f.workspace,
       provider: "jira",
       requirementId: captured.manifest.requirementId,
@@ -900,6 +912,7 @@ describe("US-WS-007 RequirementSourceStore", () => {
     expect(readFileSync(join(captured.requirementPath, "requirement.md"), "utf8")).toContain("Jira requirement");
     expect(createHash("sha256").update(readFileSync(join(revision, "requirement.md"))).digest("hex")).toBe(immutableBefore);
     expect(repairRequirementProjection({
+      rollHome: f.root,
       workspaceRoot: f.workspace,
       provider: "jira",
       requirementId: captured.manifest.requirementId,

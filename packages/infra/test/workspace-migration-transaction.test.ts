@@ -23,6 +23,7 @@ import {
   rollbackHistoricalWorkspaceMigration,
   releaseLock,
   workspaceRegistryPath,
+  workspaceAuthorityLockPath,
 } from "../src/index.js";
 
 const roots: string[] = [];
@@ -140,7 +141,10 @@ describe("US-WS-019a historical Workspace migration transaction", () => {
     const phases: string[] = [];
 
     const first = await applyHistoricalWorkspaceMigration({ sourceRoot: f.source, rollHome: f.rollHome, plan: saved }, {
-      afterPhase: (phase) => phases.push(phase),
+      afterPhase: (phase) => {
+        expect(existsSync(workspaceAuthorityLockPath(f.rollHome, "ws-demo"))).toBe(true);
+        phases.push(phase);
+      },
     });
 
     const workspace = join(f.rollHome, "workspaces", "ws-demo");

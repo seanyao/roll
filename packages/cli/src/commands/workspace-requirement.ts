@@ -194,6 +194,7 @@ export function workspaceRequirementCommand(args: string[], deps: RequirementCom
   if (decision.target.kind !== "workspace") return emitError("invalid_arguments", parsed.json);
   try {
     return emitResult(captureRequirementSource({
+      rollHome: workspaceRollHome(),
       workspaceRoot: decision.target.root,
       provider: parsed.provider,
       ref: parsed.ref,

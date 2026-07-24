@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmdirSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { acquireLock, releaseLock } from "./process.js";
 
@@ -38,10 +38,19 @@ export function workspaceAuthorityLockPath(rollHome: string, workspaceId: string
   return join(resolve(rollHome), "locks", "workspace-authority", `${workspaceId}.lock`);
 }
 
-function acquire(input: WorkspaceAuthorityLockInput): string {
+interface WorkspaceAuthorityLease {
+  readonly path: string;
+  readonly cleanupDirectories: readonly string[];
+}
+
+function acquire(input: WorkspaceAuthorityLockInput): WorkspaceAuthorityLease {
   validate(input);
   const path = workspaceAuthorityLockPath(input.rollHome, input.workspaceId);
-  mkdirSync(join(path, ".."), { recursive: true });
+  const rollHome = resolve(input.rollHome);
+  const locksRoot = join(rollHome, "locks");
+  const authorityRoot = join(locksRoot, "workspace-authority");
+  const cleanupDirectories = [authorityRoot, locksRoot, rollHome].filter((directory) => !existsSync(directory));
+  mkdirSync(authorityRoot, { recursive: true });
   const lock = acquireLock(path, process.pid, {
     cycleId: `workspace-authority:${input.workspaceId}:${input.operation}`,
     unparseableIsHeld: true,
@@ -49,18 +58,29 @@ function acquire(input: WorkspaceAuthorityLockInput): string {
   if (!lock.acquired) {
     throw new WorkspaceAuthorityLockError("authority_locked", `Workspace ${input.workspaceId} authority is locked by another writer`);
   }
-  return path;
+  return { path, cleanupDirectories };
+}
+
+function release(lease: WorkspaceAuthorityLease): void {
+  releaseLock(lease.path);
+  for (const directory of lease.cleanupDirectories) {
+    try {
+      rmdirSync(directory);
+    } catch (error) {
+      if (!["ENOENT", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    }
+  }
 }
 
 export function withWorkspaceAuthorityLockSync<T>(
   input: WorkspaceAuthorityLockInput,
   run: () => T,
 ): T {
-  const path = acquire(input);
+  const lease = acquire(input);
   try {
     return run();
   } finally {
-    releaseLock(path);
+    release(lease);
   }
 }
 
@@ -68,10 +88,10 @@ export async function withWorkspaceAuthorityLock<T>(
   input: WorkspaceAuthorityLockInput,
   run: () => Promise<T>,
 ): Promise<T> {
-  const path = acquire(input);
+  const lease = acquire(input);
   try {
     return await run();
   } finally {
-    releaseLock(path);
+    release(lease);
   }
 }

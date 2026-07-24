@@ -14,6 +14,7 @@ import {
 import { protectReadOnlyWorktree, unprotectReadOnlyWorktree } from "../src/issue-worktree-git.js";
 import { ensureRepositoryCache, resolveRepositoryCacheIdentity } from "../src/repository-cache.js";
 import { readLockOwner } from "../src/process.js";
+import { workspaceAuthorityLockPath } from "../src/workspace-authority-lock.js";
 
 const sandboxes: string[] = [];
 afterEach(() => {
@@ -39,8 +40,11 @@ function git(cwd: string, args: readonly string[]): string {
 function treeDigest(root: string): string {
   const hash = createHash("sha256");
   const visit = (path: string, relativePath: string): void => {
+    if (relativePath === "locks/workspace-authority" || relativePath.startsWith("locks/workspace-authority/")) return;
     const stat = lstatSync(path);
-    hash.update(`${relativePath}\0${stat.mode}\0${stat.size}\0${stat.mtimeMs}\0${stat.ctimeMs}\0`);
+    const normalizedSize = relativePath === "locks" ? 0 : stat.size;
+    const directoryMetadata = relativePath === "locks" ? "authority-child-normalized" : `${stat.mtimeMs}\0${stat.ctimeMs}`;
+    hash.update(`${relativePath}\0${stat.mode}\0${normalizedSize}\0${directoryMetadata}\0`);
     if (stat.isSymbolicLink()) {
       hash.update(`L\0${readlinkSync(path)}\0`);
       return;
@@ -363,6 +367,7 @@ describe("applyIssueInit", () => {
     };
     const observed: string[] = [];
     const assertOwned = (alias: string, phase: "add" | "rollback"): void => {
+      expect(existsSync(workspaceAuthorityLockPath(f.rollHome, "ws-demo"))).toBe(true);
       const repository = f.bindings.find((candidate) => candidate.alias === alias);
       if (repository === undefined) throw new Error(`fixture binding missing: ${alias}`);
       const identity = resolveRepositoryCacheIdentity({ rollHome: f.rollHome, binding: repository });

@@ -35,6 +35,10 @@ import {
 } from "@roll/spec";
 import { acquireLock, releaseLock } from "./process.js";
 import { auditRequirementArchive } from "./requirement-archive-audit.js";
+import {
+  withWorkspaceAuthorityLockSync,
+  WorkspaceAuthorityLockError,
+} from "./workspace-authority-lock.js";
 
 export type RequirementSourceStoreErrorCode =
   | "invalid_workspace"
@@ -56,6 +60,7 @@ export class RequirementSourceStoreError extends Error {
 }
 
 export interface RequirementSourceCaptureInput {
+  readonly rollHome: string;
   readonly workspaceRoot: string;
   readonly provider: string;
   readonly ref: string;
@@ -404,7 +409,7 @@ export function inspectRequirementProjection(input: {
  * revision after the archive auditor proves the full revision graph healthy.
  * The projection journal is written before any projection file changes and is
  * retained on interruption so the same operation can resume idempotently. */
-export function repairRequirementProjection(
+function repairRequirementProjectionUnlocked(
   input: {
     readonly workspaceRoot: string;
     readonly provider: string;
@@ -463,6 +468,30 @@ export function repairRequirementProjection(
     return { outcome: "repaired", requirementId: input.requirementId, requirementPath };
   } finally {
     releaseLock(lockPath);
+  }
+}
+
+export function repairRequirementProjection(
+  input: {
+    readonly rollHome: string;
+    readonly workspaceRoot: string;
+    readonly provider: string;
+    readonly requirementId: string;
+  },
+  deps: RequirementSourceStoreDeps = {},
+): RequirementProjectionRepairResult {
+  const workspace = readWorkspace(resolve(input.workspaceRoot));
+  try {
+    return withWorkspaceAuthorityLockSync({
+      rollHome: resolve(input.rollHome),
+      workspaceId: workspace.workspaceId,
+      operation: "requirement-repair",
+    }, () => repairRequirementProjectionUnlocked(input, deps));
+  } catch (error) {
+    if (error instanceof WorkspaceAuthorityLockError) {
+      return fail("concurrent_capture", "Workspace authority is locked by another metadata writer", error);
+    }
+    throw error;
   }
 }
 
@@ -779,7 +808,7 @@ export function resolveRequirementSourcesForStoryOnDisk(
   return resolveRequirementSourcesForStory(readAllRequirementManifests(canonicalRoot, workspace.requirements), storyId);
 }
 
-export function captureRequirementSource(
+function captureRequirementSourceUnlocked(
   input: RequirementSourceCaptureInput,
   deps: RequirementSourceStoreDeps = {},
 ): RequirementSourceCaptureResult {
@@ -882,5 +911,24 @@ export function captureRequirementSource(
     };
   } finally {
     releaseLock(lockPath);
+  }
+}
+
+export function captureRequirementSource(
+  input: RequirementSourceCaptureInput,
+  deps: RequirementSourceStoreDeps = {},
+): RequirementSourceCaptureResult {
+  const workspace = readWorkspace(resolve(input.workspaceRoot));
+  try {
+    return withWorkspaceAuthorityLockSync({
+      rollHome: resolve(input.rollHome),
+      workspaceId: workspace.workspaceId,
+      operation: "requirement-capture",
+    }, () => captureRequirementSourceUnlocked(input, deps));
+  } catch (error) {
+    if (error instanceof WorkspaceAuthorityLockError) {
+      return fail("concurrent_capture", "Workspace authority is locked by another metadata writer", error);
+    }
+    throw error;
   }
 }

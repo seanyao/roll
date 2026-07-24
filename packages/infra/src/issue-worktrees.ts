@@ -44,6 +44,10 @@ import {
   type ExpectedWorktreeFacts,
 } from "./issue-worktree-git.js";
 import { git, isImmutableGitObjectId } from "./git.js";
+import {
+  withWorkspaceAuthorityLock,
+  WorkspaceAuthorityLockError,
+} from "./workspace-authority-lock.js";
 
 const ISSUE_INIT_JOURNAL_V1 = "roll.issue-init-journal/v1" as const;
 
@@ -919,7 +923,7 @@ async function rollbackCreatedTargets(
  *  Home repository cache (~/.roll/repos via the existing repository-cache
  *  contract) — never a Workspace-relative cache. ALL targets/cache/base SHA
  *  are resolved before the Issue root is created or mutated. */
-export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssueInitDeps = {}): Promise<ApplyIssueInitResult> {
+async function applyIssueInitUnlocked(input: ApplyIssueInitInput, deps: ApplyIssueInitDeps = {}): Promise<ApplyIssueInitResult> {
   // Containment MUST be checked before any read/write below — a symlinked
   // Issue root (or a symlinked ancestor like `workspace/issues` itself)
   // escaping the Workspace would otherwise let every subsequent manifest,
@@ -1178,5 +1182,20 @@ export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssu
     writeJournal(input.issueRoot, journal);
     if (error instanceof IssueInitializationError) throw error;
     throw new IssueInitializationError("apply_failed", `Issue init failed: ${(error as Error).message}`, { cause: error });
+  }
+}
+
+export async function applyIssueInit(input: ApplyIssueInitInput, deps: ApplyIssueInitDeps = {}): Promise<ApplyIssueInitResult> {
+  try {
+    return await withWorkspaceAuthorityLock({
+      rollHome: input.rollHome,
+      workspaceId: input.workspaceId,
+      operation: "issue-init",
+    }, () => applyIssueInitUnlocked(input, deps));
+  } catch (error) {
+    if (error instanceof WorkspaceAuthorityLockError) {
+      throw new IssueInitializationError("apply_failed", "Workspace authority is locked by another metadata writer", { cause: error });
+    }
+    throw error;
   }
 }

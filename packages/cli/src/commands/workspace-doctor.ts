@@ -643,6 +643,7 @@ async function repairCache(
 }
 
 function repairProjection(
+  rollHome: string,
   workspaceRoot: string,
   workspace: WorkspaceManifest,
   action: WorkspaceDoctorRepairAction,
@@ -660,6 +661,7 @@ function repairProjection(
   if (inspection.state === "current") return "reused";
   if (!repairOffered(report, action)) throw new WorkspaceDoctorRepairError("projection_repair_not_offered");
   return repairRequirementProjection({
+    rollHome,
     workspaceRoot,
     provider: source.value.provider,
     requirementId: source.value.requirementId,
@@ -774,7 +776,7 @@ async function executeRepair(
   if (action.kind === "update_registry_path") return repairRegistryPath(rollHome, action, path, report);
   const workspace = readWorkspace(entry.root);
   if (action.kind === "rebuild_cache") return repairCache(rollHome, workspace, action, report);
-  if (action.kind === "repair_requirement_projection") return repairProjection(entry.root, workspace, action, report);
+  if (action.kind === "repair_requirement_projection") return repairProjection(rollHome, entry.root, workspace, action, report);
   if (action.kind === "recreate_clean_worktree") return repairIssue(rollHome, entry, workspace, action, report);
   if (action.kind === "cleanup_stale_capacity_broker_lock") return cleanupCapacityBrokerLock(rollHome, action, report);
   return cleanupLease(rollHome, action, report);

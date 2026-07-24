@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RollEvent } from "@roll/spec";
 import { formatSpawnKillLine } from "@roll/core";
-import { readRoleTimeouts, spawnWatched, watchdogRoleFor } from "../src/runner/spawn-watchdog.js";
+import { readRoleTimeouts, resetRoleTimeoutNotices, spawnWatched, watchdogRoleFor } from "../src/runner/spawn-watchdog.js";
 
 const POLL_ENV = "ROLL_TIMEOUT_POLL_MS";
 
@@ -123,6 +123,26 @@ describe("readRoleTimeouts — config-driven caps (FIX-1249)", () => {
     process.env["ROLL_ROLE_WALL_MIN_EVALUATOR"] = "7";
     const t = readRoleTimeouts(tmp);
     expect(t.evaluator.wallSec).toBe(7 * 60);
+  });
+
+  it("a PARTIAL config that omits the mandatory wall_min is LOUD, not a silent seed fallback (codex r1)", () => {
+    resetRoleTimeoutNotices();
+    mkdirSync(join(tmp, ".roll"), { recursive: true });
+    writeFileSync(
+      join(tmp, ".roll", "agents.yaml"),
+      // builder block present but wall_min OMITTED — only no_progress set.
+      ["watchdog:", "  role_timeouts:", "    builder:   { no_progress_min: 22 }", ""].join("\n"),
+    );
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    const t = readRoleTimeouts(tmp);
+    // wall falls back to the seed…
+    expect(t.builder.wallSec).toBe(120 * 60);
+    // …the configured no_progress is honored…
+    expect(t.builder.noProgressSec).toBe(22 * 60);
+    // …and the fallback was announced (loud), not silent.
+    const wrote = stderrSpy.mock.calls.map((c) => String(c[0])).join("");
+    expect(wrote).toContain('role "builder"');
+    expect(wrote).toContain("FIX-1249");
   });
 
   it("the missing-config guidance is loud and actionable (names FIX-1249 + the exact YAML)", () => {

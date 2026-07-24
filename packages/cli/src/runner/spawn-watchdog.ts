@@ -61,6 +61,12 @@ export function watchdogRoleFor(purpose: WatchdogSpawnPurpose): WatchdogRole {
 /** One-per-process guard so the loud FIX-1249 guidance is not repeated every spawn. */
 const notifiedMissingRoleTimeout = new Set<WatchdogRole>();
 
+/** Test-only: clear the one-shot notice guard so a test can re-observe the loud
+ *  fallback. Not used in production. */
+export function resetRoleTimeoutNotices(): void {
+  notifiedMissingRoleTimeout.clear();
+}
+
 /**
  * US-CYCLE-002 — resolve per-role watchdog thresholds (seconds). Resolution
  * order, per role and per field:
@@ -94,8 +100,12 @@ export function readRoleTimeouts(repoCwd: string): Record<WatchdogRole, RunWatch
     const seed = ROLE_TIMEOUT_SCAFFOLD[role];
     const cfg = configured[role];
     const roleUpper = role.toUpperCase();
+    // `wall_min` is the MANDATORY cap. It is loud whenever unresolved — including
+    // a PARTIAL config block that sets only no_progress/no_state_change but omits
+    // wall_min (codex r1: gating on `cfg === undefined` let that silently fall
+    // back to the seed, violating FIX-1249's loud fallback for the wall cap).
     const wallMin = envNum(`ROLL_ROLE_WALL_MIN_${roleUpper}`) ?? cfg?.wall_min;
-    if (wallMin === undefined && cfg === undefined && !notifiedMissingRoleTimeout.has(role)) {
+    if (wallMin === undefined && !notifiedMissingRoleTimeout.has(role)) {
       notifiedMissingRoleTimeout.add(role);
       process.stderr.write(roleTimeoutGuidance(role) + "\n");
     }

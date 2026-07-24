@@ -13,7 +13,9 @@ import {
   cycleActivitySignalsFromEvents,
   formatRoundReadout,
   projectCollabCycle,
+  readRoundEntries,
   renderCycleRolesForTerminal,
+  renderRoundJournalMd,
   type ActivitySignal,
   type CycleActivityAnalysis,
 } from "@roll/core";
@@ -631,6 +633,13 @@ export function cycleJournalCommand(args: string[], lang: "en" | "zh"): number {
     return 1;
   }
   const cardDir = cardArchiveDir(process.cwd(), cardId);
+  // Regenerate the derived human `.md` table on demand (append is kept O(1) on
+  // the hot path, so the .md is produced here from the jsonl source of truth).
+  try {
+    renderRoundJournalMd(cardDir, readRoundEntries(cardDir).entries);
+  } catch {
+    /* .md is derived; a render failure never blocks the readout */
+  }
   const agg = aggregateRounds(cardDir);
   if (json) {
     process.stdout.write(`${JSON.stringify(agg, null, 2)}\n`);

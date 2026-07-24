@@ -26,32 +26,49 @@ function proj(): string {
 function cardDirOf(project: string, id: string): string {
   return join(project, ".roll", "features", "uncategorized", id);
 }
+/** recordSpawnRound defers the write via setImmediate (non-blocking) — flush it. */
+function flush(): Promise<void> {
+  return new Promise((r) => setImmediate(() => setImmediate(() => r())));
+}
 
 describe("recordSpawnRound (US-CYCLE-004 auto-write)", () => {
-  it("writes a builder turn into the card's round-journal, numbering rounds by append order", () => {
+  it("writes a builder turn into the card's round-journal, numbering rounds by append order", async () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;
     const ctx = { storyId: "US-X-1", model: "glm-5.2", cycleId: "c1" } as unknown as CycleContext;
     recordSpawnRound(ports, ctx, { role: "builder", start: 1_000, durMs: 60_000, outcome: "delivered" });
+    await flush();
     recordSpawnRound(ports, ctx, { role: "builder", start: 70_000, durMs: 30_000, outcome: "failed", gateTimeMs: 5_000 });
+    await flush();
     const { entries } = readRoundEntries(cardDirOf(project, "US-X-1"));
     expect(entries.map((e) => e.round)).toEqual([1, 2]);
     expect(entries[0]).toMatchObject({ role: "builder", model: "glm-5.2", cycleId: "c1", outcome: "delivered" });
     expect(entries[1]).toMatchObject({ outcome: "failed", gateTimeMs: 5_000 });
   });
 
-  it("is a no-op for a story-less cycle (nothing to journal into)", () => {
+  it("returns synchronously (non-blocking) — the write is deferred off the hot path", () => {
+    const project = proj();
+    const ports = { repoCwd: project } as unknown as Ports;
+    const ctx = { storyId: "US-X-3", cycleId: "c1" } as unknown as CycleContext;
+    recordSpawnRound(ports, ctx, { role: "builder", start: 1, durMs: 1, outcome: "delivered" });
+    // Nothing written yet in the same tick — proves the caller isn't blocked on I/O.
+    expect(existsSync(join(cardDirOf(project, "US-X-3"), "round-journal.jsonl"))).toBe(false);
+  });
+
+  it("is a no-op for a story-less cycle (nothing to journal into)", async () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;
     const ctx = { storyId: "", cycleId: "c1" } as unknown as CycleContext;
     recordSpawnRound(ports, ctx, { role: "builder", start: 1, durMs: 1, outcome: "delivered" });
+    await flush();
     expect(existsSync(join(project, ".roll", "features"))).toBe(false);
   });
 
-  it("never throws even if the repo path is unusable (best-effort, non-blocking)", () => {
+  it("never throws even if the repo path is unusable (best-effort, non-blocking)", async () => {
     const ports = { repoCwd: "/nonexistent/\0bad" } as unknown as Ports;
     const ctx = { storyId: "US-X-9" } as unknown as CycleContext;
     expect(() => recordSpawnRound(ports, ctx, { role: "builder", start: 1, durMs: 1, outcome: "delivered" })).not.toThrow();
+    await flush();
   });
 });
 
@@ -77,11 +94,12 @@ describe("roll cycle journal (US-CYCLE-004 readout)", () => {
     return { code: code as number, out: out.join("") };
   }
 
-  it("prints the aggregate readout for a card with entries", () => {
+  it("prints the aggregate readout for a card with entries", async () => {
     const project = proj();
     const ports = { repoCwd: project } as unknown as Ports;
     const ctx = { storyId: "US-X-2", model: "glm", cycleId: "c1" } as unknown as CycleContext;
     recordSpawnRound(ports, ctx, { role: "builder", start: 1_000, durMs: 60_000, outcome: "delivered", gateTimeMs: 6_000 });
+    await flush();
     const r = runJournal(project, ["journal", "US-X-2"]);
     expect(r.code).toBe(0);
     expect(r.out).toContain("US-X-2 round-journal");

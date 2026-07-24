@@ -31,30 +31,40 @@ function resolveEra(): string {
 }
 
 /**
- * Append one turn to the card's round-journal. Resolves the card dir, the next
- * round index (append-order), and the era. Best-effort: any failure is swallowed
- * so the spawn/gate path is never affected.
+ * Append one turn to the card's round-journal. Best-effort AND non-blocking
+ * (AC2): the actual filesystem write is deferred to a later tick via
+ * `setImmediate`, so the caller's critical path (the builder spawn / delivery)
+ * returns immediately and is never delayed by disk I/O — even on a slow or
+ * stalled filesystem. Any failure inside the deferred task is swallowed.
+ *
+ * The single-line jsonl append is the source of truth; the derived `.md` is NOT
+ * written here (it is regenerated on demand by the readout). Round index is
+ * append-order (count + 1) computed inside the deferred task.
  */
 export function recordSpawnRound(ports: Ports, ctx: CycleContext, turn: RoundTurn): void {
-  try {
-    const storyId = ctx.storyId ?? "";
-    if (storyId === "") return; // story-less cycles have no card to journal into
-    const cardDir = cardArchiveDir(ports.repoCwd, storyId);
-    const round = readRoundEntries(cardDir).entries.length + 1;
-    const model = turn.model ?? (ctx.model !== undefined && ctx.model !== "" ? ctx.model : undefined);
-    appendRoundEntry(cardDir, {
-      card: storyId,
-      round,
-      role: turn.role,
-      ...(model !== undefined ? { model } : {}),
-      start: turn.start,
-      durMs: turn.durMs,
-      outcome: turn.outcome,
-      ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
-      era: resolveEra(),
-      ...(ctx.cycleId !== undefined && ctx.cycleId !== "" ? { cycleId: ctx.cycleId } : {}),
-    });
-  } catch {
-    /* round-journal is best-effort observability — never block the cycle */
-  }
+  const storyId = ctx.storyId ?? "";
+  if (storyId === "") return; // story-less cycles have no card to journal into
+  const repoCwd = ports.repoCwd;
+  const model = turn.model ?? (ctx.model !== undefined && ctx.model !== "" ? ctx.model : undefined);
+  const cycleId = ctx.cycleId;
+  setImmediate(() => {
+    try {
+      const cardDir = cardArchiveDir(repoCwd, storyId);
+      const round = readRoundEntries(cardDir).entries.length + 1;
+      appendRoundEntry(cardDir, {
+        card: storyId,
+        round,
+        role: turn.role,
+        ...(model !== undefined ? { model } : {}),
+        start: turn.start,
+        durMs: turn.durMs,
+        outcome: turn.outcome,
+        ...(turn.gateTimeMs !== undefined ? { gateTimeMs: turn.gateTimeMs } : {}),
+        era: resolveEra(),
+        ...(cycleId !== undefined && cycleId !== "" ? { cycleId } : {}),
+      });
+    } catch {
+      /* round-journal is best-effort observability — never affect the cycle */
+    }
+  });
 }

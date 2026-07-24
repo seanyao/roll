@@ -14,6 +14,7 @@ import {
   appendRoundEntry,
   formatRoundReadout,
   readRoundEntries,
+  renderRoundJournalMd,
   type RoundJournalInput,
 } from "../src/index.js";
 
@@ -84,14 +85,31 @@ describe("appendRoundEntry / readRoundEntries", () => {
     expect(appendRoundEntry(join(filePath, "nested"), entry())).toBe(false);
   });
 
-  it("renders a derived .md table from the jsonl", () => {
+  it("append does NOT re-render .md on the hot path (non-blocking); render is on-demand", () => {
     const dir = cardDir();
     appendRoundEntry(dir, entry({ role: "evaluator", outcome: "passed", era: "e2" }));
-    expect(existsSync(join(dir, "round-journal.md"))).toBe(true);
+    // Append keeps the hot path O(1): no .md rewrite.
+    expect(existsSync(join(dir, "round-journal.md"))).toBe(false);
+    // The readout regenerates it on demand from the jsonl source of truth.
+    renderRoundJournalMd(dir, readRoundEntries(dir).entries);
     const md = readFileSync(join(dir, "round-journal.md"), "utf8");
     expect(md).toContain("| round | role |");
     expect(md).toContain("evaluator");
     expect(md).toContain("passed");
+  });
+
+  it("normalizes a corrupt shared field (e.g. era:number) so aggregation never crashes", () => {
+    const dir = cardDir();
+    appendFileSync(
+      join(dir, "round-journal.jsonl"),
+      JSON.stringify({ schemaVersion: 1, card: "US-X-1", round: 1, role: "builder", start: 1, durMs: 42, outcome: "delivered", era: 1 }) + "\n",
+      "utf8",
+    );
+    const { entries } = readRoundEntries(dir);
+    expect(entries[0]?.era).toBeUndefined(); // non-string era dropped
+    // aggregate + readout must not throw on the corrupt row (era → "unknown" window).
+    expect(() => formatRoundReadout(aggregateRounds(dir))).not.toThrow();
+    expect(aggregateRounds(dir).byEra[0]?.era).toBe("unknown");
   });
 });
 

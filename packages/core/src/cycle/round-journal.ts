@@ -86,14 +86,11 @@ export function appendRoundEntry(cardDir: string, input: RoundJournalInput): boo
   } catch {
     return false; // best-effort — do not block delivery on a journal write
   }
-  // Re-render the human table from the full jsonl (best-effort; failure here
-  // leaves the authoritative jsonl intact).
-  try {
-    const { entries } = readRoundEntries(cardDir);
-    renderRoundJournalMd(cardDir, entries);
-  } catch {
-    /* .md is derived; jsonl is truth */
-  }
+  // NOTE: the derived `.md` is intentionally NOT re-rendered here. Rewriting the
+  // whole table on every append is O(n) work on a hot path; the jsonl is the
+  // source of truth, and the .md is regenerated on demand at read time
+  // (`aggregateRounds`/the readout command call `renderRoundJournalMd`). Keeping
+  // append to a single bounded line preserves the non-blocking contract (AC2).
   return true;
 }
 
@@ -123,9 +120,19 @@ export function readRoundEntries(cardDir: string): ReadResult {
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     try {
-      const obj = JSON.parse(line) as RoundJournalEntry;
-      if (obj !== null && typeof obj === "object" && typeof obj.role === "string" && typeof obj.durMs === "number") {
-        entries.push(obj);
+      const raw = JSON.parse(line) as Record<string, unknown>;
+      // Required shape: role (string) + finite durMs (number). Anything else is
+      // a malformed row (skipped + counted). Extra/unknown fields are preserved
+      // for forward-schema tolerance; but SHARED fields the readout relies on
+      // are normalized so a hand-corrupted value (e.g. `"era": 1`) can never
+      // crash aggregation (localeCompare) or rendering downstream.
+      if (raw !== null && typeof raw === "object" && typeof raw["role"] === "string" && typeof raw["durMs"] === "number" && Number.isFinite(raw["durMs"])) {
+        const norm = { ...raw } as unknown as RoundJournalEntry;
+        if (typeof raw["era"] !== "string") delete (norm as { era?: unknown }).era;
+        if (typeof raw["model"] !== "string") delete (norm as { model?: unknown }).model;
+        if (typeof raw["outcome"] !== "string") norm.outcome = String(raw["outcome"] ?? "");
+        if (typeof raw["round"] !== "number") norm.round = 0;
+        entries.push(norm);
       } else {
         skipped += 1;
       }

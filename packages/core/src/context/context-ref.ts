@@ -51,11 +51,8 @@ export function isSafeLlmWikiSourceReference(value: string): boolean {
 
 export function isOpaqueRestrictedReference(value: string): boolean {
   const candidate = value.startsWith("- ") ? value.slice(2).trim() : value;
-  if (!/^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/u.test(candidate)) return false;
-  if (/^(?:https?|file|data|javascript|ssh|git):/iu.test(candidate)) return false;
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/\s]*@/u.test(candidate)) return false;
-  if (/(?:password|passwd|token|secret|api[_-]?key)\s*=/iu.test(candidate)) return false;
-  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/u.test(candidate)) return false;
-  if (/\b(?:gh[opsu]_|sk_live_|AKIA)[A-Za-z0-9_-]{12,}\b/u.test(candidate)) return false;
-  return true;
+  if (/^(?:secret|vault):\/\/[^\s]+$/u.test(candidate)) {
+    return !/^(?:secret|vault):\/\/[^/\s]*@/u.test(candidate);
+  }
+  return /^(?:secret-ref|credential-ref):[^\s]+$/u.test(candidate);
 }

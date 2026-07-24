@@ -11,6 +11,7 @@ export * from "./agent/roster-gate.js";
 export * from "./projects/reachability.js";
 export * from "./workspace/target.js";
 export * from "./workspace/discovery.js";
+export * from "./workspace/clarification.js";
 export * from "./workspace/migration-detection.js";
 export * from "./workspace/lifecycle.js";
 export * from "./workspace/create-plan.js";

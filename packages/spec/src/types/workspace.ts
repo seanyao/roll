@@ -15,6 +15,7 @@ export const WORKSPACE_EDIT_CONFIG_V1 = "roll.workspace-edit/v1" as const;
 export const WORKSPACE_METADATA_REFERENCE_INDEX_V1 = "roll.workspace-metadata-reference-index/v1" as const;
 export const WORKSPACE_EDIT_PLAN_V1 = "roll.workspace-edit-plan/v1" as const;
 export const WORKSPACE_CREATE_APPLY_AUTHORIZATION_V1 = "roll.workspace-create-apply-authorization/v1" as const;
+export const WORKSPACE_CLARIFICATION_V1 = "roll.workspace-clarification/v1" as const;
 
 export const REQUIREMENT_HINT_PROVENANCES = [
   "explicit_user",
@@ -406,6 +407,58 @@ export type WorkspaceDiscoveryDecisionV1 = (
       readonly candidates: readonly WorkspaceMatchCandidateV1[];
     }
 ) & { readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[] };
+
+export type WorkspaceClarificationReason =
+  | "requirement_match_required"
+  | "ambiguous_requirement_match"
+  | "requirement_workspace_conflict"
+  | "workspace_activation_required"
+  | "create_required"
+  | "workspace_discovery_incomplete";
+
+export type WorkspaceClarificationAction =
+  | "select_existing"
+  | "create_new"
+  | "repair_discovery";
+
+export interface WorkspaceClarificationCandidateV1 {
+  readonly workspaceId: string;
+  readonly displayName: string;
+  readonly lifecycle: Exclude<WorkspaceLifecycle, "archived">;
+  readonly evidence: readonly WorkspaceMatchEvidence[];
+  readonly diagnostics: readonly WorkspaceDiscoveryDiagnosticV1[];
+  readonly canonicalSelector: string;
+}
+
+export interface WorkspaceClarificationHandoffV1 {
+  readonly schema: typeof WORKSPACE_CLARIFICATION_V1;
+  readonly registryRevision: number;
+  readonly discoveryFactsSha256: Sha256Digest;
+  readonly reason: WorkspaceClarificationReason;
+  readonly operation: "read" | "mutation";
+  readonly requirementSummary: {
+    readonly sources: readonly RequirementSourceKey[];
+    readonly storyIds: readonly string[];
+    readonly hasSemanticOnlyEvidence: boolean;
+  };
+  readonly candidates: readonly WorkspaceClarificationCandidateV1[];
+  readonly allowedActions: readonly WorkspaceClarificationAction[];
+  readonly canonicalCreateCommand: "roll workspace create";
+  readonly canonicalRepairCommands: readonly string[];
+}
+
+export type WorkspaceClarificationAnswerV1 =
+  | {
+      readonly action: "select_existing";
+      readonly workspaceId: string;
+    }
+  | {
+      readonly action: "create_new";
+      readonly workspaceId?: string;
+    }
+  | {
+      readonly action: "repair_discovery";
+    };
 
 export interface RequirementEvidenceDescriptor {
   readonly bytes: number;

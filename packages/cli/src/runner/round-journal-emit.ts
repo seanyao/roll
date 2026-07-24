@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { cardArchiveDir } from "../lib/archive.js";
 import { maybeWriteSplitAdvice } from "../lib/split-advice.js";
+import { maybeWriteCandidates } from "../lib/model-swap.js";
 import type { Ports } from "./ports.js";
 
 export interface RoundTurn {
@@ -90,6 +91,22 @@ export function recordSpawnRound(ports: Ports, ctx: CycleContext, turn: RoundTur
           }
         } catch {
           /* auto split-advice is best-effort observability */
+        }
+        // US-CYCLE-012 — AUTO-TRIGGER: surface a model-swap CANDIDATE when a
+        // (role × model) rig crossed the consecutive-failure threshold on this
+        // card. Candidate + event only — never an automatic swap. Best-effort.
+        try {
+          const swap = maybeWriteCandidates(cardDir, storyId);
+          if (swap !== null && swap.written) {
+            const loopDir = join(repoCwd, ".roll", "loop");
+            mkdirSync(loopDir, { recursive: true });
+            for (const cand of swap.candidates) {
+              const ev: RollEvent = { type: "model:swap_candidate", card: storyId, role: cand.role, model: cand.model, streak: cand.streak, path: swap.path, ts: eventTsMs() };
+              appendFileSync(join(loopDir, EVENTS_FILE), serializeEvent(ev) + "\n");
+            }
+          }
+        } catch {
+          /* auto swap-candidate is best-effort observability */
         }
       })
       .catch(() => {

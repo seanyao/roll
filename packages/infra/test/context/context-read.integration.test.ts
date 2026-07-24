@@ -12,8 +12,11 @@ import {
 } from "@roll/spec";
 import { createContextReadService, LLM_WIKI_MAX_PAGES } from "@roll/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createContextReadAdapter } from "../../src/context/context-read-adapter.js";
-import { rawGit, type GitResult } from "../../src/git.js";
+import {
+  createContextReadAdapter,
+  type GitLlmWikiBinaryCommandRunner,
+} from "../../src/context/context-read-adapter.js";
+import { rawGit, rawGitBinary, type GitResult } from "../../src/git.js";
 import type { GitLlmWikiCommandRunner } from "../../src/context/git-llm-wiki-transport.js";
 
 const sandboxes: string[] = [];
@@ -85,6 +88,19 @@ function advance(remote: ReturnType<typeof remoteFixture>, version: string): str
   writeWiki(remote.source, version);
   git(remote.source, ["add", "."]);
   git(remote.source, ["commit", "-q", "-m", version]);
+  git(remote.source, ["push", "-q", remote.bare, "HEAD:refs/heads/main"]);
+  remote.revision = git(remote.source, ["rev-parse", "HEAD"]);
+  return remote.revision;
+}
+
+function advanceWithInvalidUtf8(remote: ReturnType<typeof remoteFixture>): string {
+  const path = join(remote.source, "wiki", "systems", "invalid-utf8.md");
+  writeFileSync(path, Buffer.concat([
+    Buffer.from(page("Invalid UTF-8", "invalid-bytes"), "utf8"),
+    Buffer.from([0xc3, 0x28]),
+  ]));
+  git(remote.source, ["add", "."]);
+  git(remote.source, ["commit", "-q", "-m", "invalid utf8"]);
   git(remote.source, ["push", "-q", remote.bare, "HEAD:refs/heads/main"]);
   remote.revision = git(remote.source, ["rev-parse", "HEAD"]);
   return remote.revision;
@@ -225,6 +241,87 @@ describe("Context read integration", () => {
       .toContain("中文-v1");
     const unicodeTree = calls.find((args) => args.includes("wiki/systems/中文.md") && args.includes("ls-tree"));
     expect(unicodeTree?.slice(12, 15)).toEqual(["ls-tree", "-z", remote.revision]);
+  });
+
+  it("fails closed on invalid UTF-8 Git blob bytes before producing content digests", async () => {
+    const root = sandbox();
+    const remote = remoteFixture(root);
+    const invalidRevision = advanceWithInvalidUtf8(remote);
+    const runGit: GitLlmWikiCommandRunner = vi.fn(async (args, cwd, options): Promise<GitResult> => {
+      const operation = args.slice(12);
+      const executable = [...args];
+      if (operation[0] === "remote" && operation[1] === "add") {
+        executable[executable.length - 1] = `file://${remote.bare}`;
+      }
+      if (operation[0] === "fetch") {
+        executable[executable.length - 2] = `file://${remote.bare}`;
+      }
+      executable.splice(12, 0, "-c", "protocol.file.allow=always");
+      const result = await rawGit(executable, cwd, options);
+      if (operation[0] === "remote" && operation[1] === "get-url" && result.code === 0) {
+        return { ...result, stdout: `${PUBLIC_REMOTE}\n` };
+      }
+      return result;
+    });
+    const binaryCalls: Array<{ readonly args: readonly string[]; readonly timeoutMs?: number }> = [];
+    const runGitBinary: GitLlmWikiBinaryCommandRunner = vi.fn(async (args, cwd, options) => {
+      binaryCalls.push({ args: [...args], timeoutMs: options.timeoutMs });
+      return rawGitBinary(args, cwd, options);
+    });
+    const serviceFor = (binaryRunner: GitLlmWikiBinaryCommandRunner, suffix: string) => createContextReadService({
+      registry: {
+        schema: CONTEXT_PROVIDER_REGISTRY_V1,
+        enabled: true,
+        providers: [{
+          id: "enterprise-wiki",
+          type: "git_llm_wiki",
+          enabled: true,
+          remote: PUBLIC_REMOTE,
+          branch: "main",
+          fetch_timeout_seconds: 5,
+        }],
+      },
+      adapter: createContextReadAdapter({
+        rollHome: join(root, `roll-home-${suffix}`),
+        runGit,
+        runGitBinary: binaryRunner,
+      }),
+    });
+    const service = serviceFor(runGitBinary, "invalid");
+
+    const result = await service.read(request(["context://enterprise-wiki/wiki/systems/invalid-utf8.md"]));
+
+    expect(result).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({
+        code: "invalid_page_frontmatter",
+        severity: "blocking",
+        ref: "context://enterprise-wiki/wiki/systems/invalid-utf8.md",
+      })],
+    });
+    expect(JSON.stringify(result)).not.toContain("�(");
+    expect(binaryCalls.length).toBeGreaterThan(0);
+    expect(binaryCalls.every((call) => call.args.slice(12, 14).join(" ") === "cat-file blob")).toBe(true);
+    expect(new Set(binaryCalls.map((call) => call.timeoutMs))).toEqual(new Set([5_000]));
+    expect(invalidRevision).toBe(remote.revision);
+
+    const timedOutBinary: GitLlmWikiBinaryCommandRunner = vi.fn(async () => ({
+      code: 1,
+      stdout: new Uint8Array(),
+      stderr: "fatal: token=secret-token blob read failed",
+      timedOut: true,
+      signal: "SIGTERM",
+    }));
+    const timedOut = await serviceFor(timedOutBinary, "timeout").read(
+      request(["context://enterprise-wiki/wiki/systems/invalid-utf8.md"]),
+    );
+    expect(timedOut).toMatchObject({
+      outcome: "blocked",
+      providers: [],
+      gaps: [expect.objectContaining({ code: "context_file_missing", severity: "blocking" })],
+    });
+    expect(JSON.stringify(timedOut)).not.toMatch(/secret-token|blob read failed/u);
   });
 
   it("fetches every read, pins every file to that read SHA and never falls back after a later fetch failure", async () => {

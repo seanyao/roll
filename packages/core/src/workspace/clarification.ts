@@ -9,7 +9,7 @@ import type {
   WorkspaceIntentV1,
   WorkspaceMatchCandidateV1,
 } from "@roll/spec";
-import { WORKSPACE_CLARIFICATION_V1 } from "@roll/spec";
+import { REQUIREMENT_HINT_PROVENANCES, WORKSPACE_CLARIFICATION_V1 } from "@roll/spec";
 import type { WorkspaceDiscoveryFactsV1 } from "./discovery.js";
 
 function compareText(left: string, right: string): number {
@@ -28,6 +28,35 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 
 function safeWorkspaceId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(value);
+}
+
+const CLARIFICATION_REASONS = [
+  "requirement_match_required",
+  "ambiguous_requirement_match",
+  "requirement_workspace_conflict",
+  "workspace_activation_required",
+  "create_required",
+  "workspace_discovery_incomplete",
+] as const;
+const CLARIFICATION_ACTIONS = ["select_existing", "create_new", "repair_discovery"] as const;
+const EVIDENCE_KINDS = [
+  "issue_exact",
+  "requirement_source_exact",
+  "repository_exact",
+  "path_contained",
+  "semantic_supported",
+] as const;
+const DIAGNOSTIC_CODES = [
+  "stale_registry",
+  "identity_mismatch",
+  "invalid_workspace_manifest",
+  "invalid_issue_manifest",
+  "symlink_escape",
+  "discovery_io_failure",
+] as const;
+
+function isOneOf<const T extends readonly string[]>(value: unknown, values: T): value is T[number] {
+  return typeof value === "string" && values.some((candidate) => candidate === value);
 }
 
 function uniqueSorted(values: readonly string[]): readonly string[] {
@@ -200,23 +229,32 @@ function closedRequirementSummary(summary: WorkspaceClarificationHandoffV1["requ
   if (typeof summary.hasSemanticOnlyEvidence !== "boolean") return false;
   if (!Array.isArray(summary.sources) || !summary.sources.every((source) =>
     isRecord(source) && exactKeys(source, ["provider", "ref"]) &&
-    typeof source.provider === "string" && typeof source.ref === "string"
+    isOneOf(source.provider, ["jira", "github_issue", "local_file", "user_input"] as const) &&
+    typeof source.ref === "string"
   )) return false;
   return Array.isArray(summary.storyIds) && summary.storyIds.every((storyId) => typeof storyId === "string");
 }
 
 function closedEvidence(evidence: unknown): boolean {
-  return isRecord(evidence) && exactKeys(evidence, ["kind", "value", "hard", "score"]) &&
-    typeof evidence["kind"] === "string" && typeof evidence["value"] === "string" &&
+  return isRecord(evidence) && exactKeys(evidence, [
+    "kind",
+    "value",
+    "hard",
+    "score",
+    "source",
+    "provenance",
+    "detail",
+  ]) && isOneOf(evidence["kind"], EVIDENCE_KINDS) && typeof evidence["value"] === "string" &&
     typeof evidence["hard"] === "boolean" && typeof evidence["score"] === "number" &&
-    Number.isFinite(evidence["score"]);
+    Number.isFinite(evidence["score"]) && typeof evidence["source"] === "string" &&
+    isOneOf(evidence["provenance"], REQUIREMENT_HINT_PROVENANCES) && typeof evidence["detail"] === "string";
 }
 
 function closedDiagnostic(diagnostic: unknown): boolean {
   return isRecord(diagnostic) &&
     exactKeys(diagnostic, ["workspaceId", "root", "code", "authorityPath", "message"]) &&
     typeof diagnostic["workspaceId"] === "string" && typeof diagnostic["root"] === "string" &&
-    typeof diagnostic["code"] === "string" && typeof diagnostic["authorityPath"] === "string" &&
+    isOneOf(diagnostic["code"], DIAGNOSTIC_CODES) && typeof diagnostic["authorityPath"] === "string" &&
     typeof diagnostic["message"] === "string";
 }
 
@@ -239,11 +277,14 @@ function trustedHandoff(handoff: WorkspaceClarificationHandoffV1): boolean {
     handoff.schema !== WORKSPACE_CLARIFICATION_V1 ||
     !Number.isSafeInteger(handoff.registryRevision) || handoff.registryRevision < 0 ||
     !/^[0-9a-f]{64}$/u.test(handoff.discoveryFactsSha256) ||
+    !isOneOf(handoff.reason, CLARIFICATION_REASONS) ||
+    !isOneOf(handoff.operation, ["read", "mutation"] as const) ||
     handoff.canonicalCreateCommand !== "roll workspace create" ||
     !closedRequirementSummary(handoff.requirementSummary) ||
     !Array.isArray(handoff.candidates) || !Array.isArray(handoff.allowedActions) ||
     !Array.isArray(handoff.canonicalRepairCommands)
   ) return false;
+  if (!handoff.allowedActions.every((action) => isOneOf(action, CLARIFICATION_ACTIONS))) return false;
   const expectedActions = workspaceClarificationAllowedActions({
     reason: handoff.reason,
     operation: handoff.operation,

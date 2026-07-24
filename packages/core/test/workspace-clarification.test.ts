@@ -75,7 +75,15 @@ function candidate(workspaceId: string, lifecycle: WorkspaceLifecycle): Workspac
     hardMatch: workspaceId === "fields",
     score: workspaceId === "fields" ? 100 : 0,
     evidence: workspaceId === "fields"
-      ? [{ kind: "requirement_source_exact", value: "jira:APE-234", hard: true, score: 100 }]
+      ? [{
+          kind: "requirement_source_exact",
+          value: "jira:APE-234",
+          hard: true,
+          score: 100,
+          source: "jira:APE-234",
+          provenance: "deterministic_extraction",
+          detail: "exact requirement source",
+        }]
       : [],
   };
 }
@@ -308,6 +316,54 @@ describe("US-WS-029 Workspace clarification answer", () => {
     })).toEqual({ ok: false, code: "invalid_workspace_clarification", reload: true });
 
     const malformed = { ...handoff(), candidates: { fields: true } };
+    expect(resolveWorkspaceClarificationAnswer({
+      handoff: malformed as never,
+      answer: { action: "select_existing", workspaceId: "fields" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).toEqual({ ok: false, code: "invalid_workspace_clarification", reload: true });
+  });
+
+  it.each([
+    { field: "reason", value: "unknown_reason" },
+    { field: "operation", value: "delete" },
+    { field: "allowedActions", value: ["activate"] },
+    { field: "candidateLifecycle", value: "archived" },
+    { field: "diagnosticCode", value: "unknown_diagnostic" },
+    { field: "evidenceKind", value: "fuzzy_guess" },
+    { field: "evidenceProvenance", value: "magic" },
+  ])("rejects malformed $field enum without throwing", ({ field, value }) => {
+    const original = handoff();
+    const candidate = original.candidates[0]!;
+    const evidence = candidate.evidence[0]!;
+    const diagnostic = {
+      workspaceId: "fields",
+      root: "/workspaces/fields",
+      code: "invalid_workspace_manifest",
+      authorityPath: "/workspaces/fields/workspace.yaml",
+      message: "invalid",
+    };
+    const malformed: Record<string, unknown> = structuredClone(original) as unknown as Record<string, unknown>;
+    if (field === "reason" || field === "operation" || field === "allowedActions") malformed[field] = value;
+    if (field === "candidateLifecycle") {
+      malformed["candidates"] = [{ ...candidate, lifecycle: value }];
+    }
+    if (field === "diagnosticCode") {
+      malformed["candidates"] = [{ ...candidate, diagnostics: [{ ...diagnostic, code: value }] }];
+    }
+    if (field === "evidenceKind") {
+      malformed["candidates"] = [{ ...candidate, evidence: [{ ...evidence, kind: value }] }];
+    }
+    if (field === "evidenceProvenance") {
+      malformed["candidates"] = [{ ...candidate, evidence: [{ ...evidence, provenance: value }] }];
+    }
+
+    expect(() => resolveWorkspaceClarificationAnswer({
+      handoff: malformed as never,
+      answer: { action: "select_existing", workspaceId: "fields" },
+      currentRegistryRevision: 7,
+      currentDiscoveryFactsSha256: SHA,
+    })).not.toThrow();
     expect(resolveWorkspaceClarificationAnswer({
       handoff: malformed as never,
       answer: { action: "select_existing", workspaceId: "fields" },

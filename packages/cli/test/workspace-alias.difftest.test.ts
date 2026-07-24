@@ -69,6 +69,26 @@ async function captureDispatch(argv: string[]): Promise<{
 }
 
 describe("US-WS-022 workspace command alias", () => {
+  it("does not treat case, suffix or assignment lookalikes as the exact top-level alias", async () => {
+    let handlerRuns = 0;
+    registerPorted("workspace", () => {
+      handlerRuns += 1;
+      return 0;
+    });
+
+    for (const token of ["WS", "wss", "ws=demo"]) {
+      const result = await captureDispatch([token, "list"]);
+      const commandList = result.stderr.split("\n").find((line) => line.startsWith("Commands:")) ?? "";
+
+      expect(result.status, token).toBe(1);
+      expect(result.stdout, token).toBe("");
+      expect(result.stderr, token).toContain(`unknown command '${token}'`);
+      expect(commandList, token).toContain("workspace");
+      expect(commandList, token).not.toMatch(/\bws\b/u);
+    }
+    expect(handlerRuns).toBe(0);
+  });
+
   it("canonicalizes every representative workspace subtree through one handler", async () => {
     for (const testCase of WORKSPACE_SUBTREE_CASES) {
       const calls: string[][] = [];

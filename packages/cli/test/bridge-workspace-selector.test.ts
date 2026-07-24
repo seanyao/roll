@@ -14,6 +14,7 @@ import {
   validateWorkspaceSelectorOperations,
   workspaceSelectorOperation,
 } from "../src/lib/command-surface.js";
+import { registerAll } from "../src/commands/index.js";
 
 async function captureDispatch(argv: string[]): Promise<{
   readonly status: number;
@@ -43,18 +44,24 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
   let savedRollHome: string | undefined;
   let savedRollLang: string | undefined;
   let savedRollWs: string | undefined;
+  let savedRollWorkspace: string | undefined;
+  let savedNoColor: string | undefined;
 
   beforeEach(() => {
     savedRollHome = process.env["ROLL_HOME"];
     savedRollLang = process.env["ROLL_LANG"];
     savedRollWs = process.env["ROLL_WS"];
+    savedRollWorkspace = process.env["ROLL_WORKSPACE"];
+    savedNoColor = process.env["NO_COLOR"];
     englishHome = mkdtempSync(join(tmpdir(), "roll-workspace-selector-en-"));
     const rollHome = join(englishHome, ".roll");
     mkdirSync(rollHome, { recursive: true });
     writeFileSync(join(rollHome, "config.yaml"), "lang: en\n");
     process.env["ROLL_HOME"] = rollHome;
     process.env["ROLL_LANG"] = "en";
+    process.env["NO_COLOR"] = "1";
     delete process.env["ROLL_WS"];
+    delete process.env["ROLL_WORKSPACE"];
     calls = [];
     registerPorted("backlog", (args) => {
       calls.push(args);
@@ -69,6 +76,10 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     else process.env["ROLL_LANG"] = savedRollLang;
     if (savedRollWs === undefined) delete process.env["ROLL_WS"];
     else process.env["ROLL_WS"] = savedRollWs;
+    if (savedRollWorkspace === undefined) delete process.env["ROLL_WORKSPACE"];
+    else process.env["ROLL_WORKSPACE"] = savedRollWorkspace;
+    if (savedNoColor === undefined) delete process.env["NO_COLOR"];
+    else process.env["NO_COLOR"] = savedNoColor;
     rmSync(englishHome, { recursive: true, force: true });
   });
 
@@ -146,13 +157,35 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(unsupportedCalls).toEqual([["--workspace"]]);
   });
 
+  it("surfaces a canonical unknown --workspace error from a real unsupported public handler", async () => {
+    registerAll();
+
+    const result = await captureDispatch(["config", "--ws"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("unknown key '--workspace'");
+    expect(result.stderr).not.toMatch(/--ws(?=['"\s]|$)/u);
+  });
+
   it("does not rewrite lookalike options or introduce a ROLL_WS environment alias", async () => {
+    const observations: Array<{
+      readonly args: readonly string[];
+      readonly rollWs?: string;
+      readonly rollWorkspace?: string;
+    }> = [];
     registerPorted("backlog", (args) => {
+      observations.push({
+        args: [...args],
+        ...(process.env["ROLL_WS"] === undefined ? {} : { rollWs: process.env["ROLL_WS"] }),
+        ...(process.env["ROLL_WORKSPACE"] === undefined ? {} : { rollWorkspace: process.env["ROLL_WORKSPACE"] }),
+      });
       process.stdout.write(`${JSON.stringify(args)}\n`);
       return 0;
     });
 
     const lookalikes = await captureDispatch(["backlog", "--ws=roll", "--wsx", "--json"]);
+    process.env["ROLL_WORKSPACE"] = "canonical-workspace";
     const withoutEnvAlias = await captureDispatch(["backlog", "--json"]);
     process.env["ROLL_WS"] = "must-not-select-anything";
     const withEnvAlias = await captureDispatch(["backlog", "--json"]);
@@ -160,6 +193,11 @@ describe("US-WS-022 bridge Workspace selector normalization", () => {
     expect(JSON.parse(lookalikes.stdout)).toEqual(["--ws=roll", "--wsx", "--json"]);
     expect(withEnvAlias).toEqual(withoutEnvAlias);
     expect(JSON.parse(withEnvAlias.stdout)).toEqual(["--json"]);
+    expect(observations).toEqual([
+      { args: ["--ws=roll", "--wsx", "--json"] },
+      { args: ["--json"], rollWorkspace: "canonical-workspace" },
+      { args: ["--json"], rollWs: "must-not-select-anything", rollWorkspace: "canonical-workspace" },
+    ]);
   });
 
   it("parses one canonical selector without treating post-sentinel literals as flags", () => {
